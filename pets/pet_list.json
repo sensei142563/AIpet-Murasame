@@ -1,0 +1,19 @@
+{
+  "pets": [
+    {
+      "id": "murasame",
+      "name": "丛雨",
+      "display_name": "丛雨ムラサメ",
+      "intro": "寄宿在神刀丛雨丸中的少女刀魂，活了五百多年",
+      "avatar": "avatar.png"
+    },
+    {
+      "id": "noir",
+      "name": "诺瓦",
+      "display_name": "诺瓦",
+      "intro": "黑色系的 Live2D 角色",
+      "avatar": "诺瓦.jpg"
+    }
+  ],
+  "active": "murasame"
+}
