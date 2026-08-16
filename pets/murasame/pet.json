@@ -1,0 +1,103 @@
+{
+  "id": "murasame",
+  "name": "丛雨",
+  "display_name": "丛雨ムラサメ",
+  "intro": "寄宿在神刀丛雨丸中的少女刀魂，活了五百多年",
+  "avatar": "avatar.png",
+  "prompt": {
+    "short": "prompt.txt",
+    "long": "longtext_prompt.txt"
+  },
+  "translate_rules": "你是一个翻译助手，负责将用户输入的中文翻译成日文。要求：要将中文的\"本座\"翻译为\"吾輩（わがはい）\"；将\"主人\"翻译为\"ご主人（ごしゅじん）\"；将\"丛雨\"翻译为\"ムラサメ\"；\"小雨\"则是丛雨的昵称，翻译为\"ムラサメちゃん\"。且日文要有强烈的古日语风格。你只需要返回翻译即可，不需要对其中的日文汉字进行注音。给你提供的格式是[\"句子1\", \"句子2\", \"句子3\", .....]，必须严格按照原格式，输出一个json列表，逐句翻译。",
+  "model": {
+    "default": "2d",
+    "has_live2d": true,
+    "has_fgimages": true,
+    "fgimages_prefix": "ムラサメ",
+    "fgimages_sets": [
+      "a",
+      "b"
+    ],
+    "live2d_dir": "live2d/",
+    "live2d_scale": 1.0,
+    "live2d_offset_x": 0.0,
+    "live2d_offset_y": 0.0,
+    "live2d_window_ratio": 0.42,
+    "live2d_font_scale": 0.35,
+    "live2d_window_height_ratio": 0.85,
+    "default_expression": "",
+    "emotions": {
+      "高兴": ["exp6.exp3.json"],
+      "微笑": ["exp1.exp3.json"],
+      "好奇": [],
+      "平静": [],
+      "难过": ["exp2.exp3.json"],
+      "伤心": ["exp2.exp3.json"],
+      "委屈": ["exp2.exp3.json"],
+      "生气": ["exp5.exp3.json"],
+      "吐槽": ["exp5.exp3.json"],
+      "阴沉": ["exp3.exp3.json"],
+      "威胁": ["exp4.exp3.json"],
+      "害羞": ["exp6.exp3.json"],
+      "脸红": ["exp6.exp3.json"],
+      "可爱": ["exp6.exp3.json"],
+      "睡觉": ["exp7.exp3.json"]
+    },
+    "motions": {
+      "高兴": ["motion02.motion3.json"],
+      "害羞": ["motion04.motion3.json"],
+      "可爱": ["motion07.motion3.json"],
+      "生气": ["motion10.motion3.json"],
+      "吐槽": ["motion10.motion3.json"],
+      "难过": ["motion09.motion3.json"],
+      "伤心": ["motion09.motion3.json"],
+      "委屈": ["motion09.motion3.json"],
+      "认真": ["motion05.motion3.json"],
+      "说教": ["motion08.motion3.json"],
+      "得意": ["motion12.motion3.json"],
+      "调侃": ["motion11.motion3.json"],
+      "疑惑": ["motion06.motion3.json"],
+      "好奇": ["motion06.motion3.json"],
+      "惊讶": ["motion06.motion3.json"],
+      "平静": ["motion03.motion3.json"]
+    }
+  },
+  "languages": {
+    "primary": "ja",
+    "secondary": "zh",
+    "dialog_language": "zh"
+  },
+  "voices": {
+    "short_emotions": [
+      "高兴",
+      "害羞",
+      "惊讶",
+      "平静",
+      "生气",
+      "着急"
+    ],
+    "short_ref_dir": "voices/short/",
+    "long_ref_audio": "voices/long/953244.wav",
+    "long_ref_text": "能和老师在一起，我真的，好高兴！"
+  },
+  "sticker": {
+    "dir": "biaoqingbao/"
+  },
+  "memory": {
+    "isolated": true,
+    "dir": "memory/"
+  },
+  "capabilities": {
+    "chat": true,
+    "short_tts": true,
+    "long_tts": true,
+    "screen_vision": true,
+    "camera_vision": true,
+    "face_recognition": true,
+    "qq": true
+  },
+  "interaction": {
+    "text_offset_x": -40,
+    "text_offset_y": 60
+  }
+}

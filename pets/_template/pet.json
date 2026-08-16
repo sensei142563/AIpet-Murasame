@@ -1,0 +1,53 @@
+{
+  "id": "__TEMPLATE__",
+  "name": "新桌宠",
+  "display_name": "新桌宠",
+  "intro": "",
+  "avatar": "",
+
+  "prompt": {
+    "short": "prompt.txt",
+    "long": "prompt.txt"
+  },
+
+  "model": {
+    "default": "2d",
+    "has_live2d": false,
+    "has_fgimages": false,
+    "fgimages_prefix": "",
+    "fgimages_sets": [],
+    "live2d_dir": "live2d/"
+  },
+
+  "languages": {
+    "primary": "ja",
+    "secondary": "zh",
+    "dialog_language": "zh"
+  },
+
+  "voices": {
+    "short_emotions": [],
+    "short_ref_dir": "voices/short/",
+    "long_ref_audio": "",
+    "long_ref_text": ""
+  },
+
+  "sticker": {
+    "dir": "biaoqingbao/"
+  },
+
+  "memory": {
+    "isolated": true,
+    "dir": "memory/"
+  },
+
+  "capabilities": {
+    "chat": true,
+    "short_tts": false,
+    "long_tts": false,
+    "screen_vision": true,
+    "camera_vision": true,
+    "face_recognition": true,
+    "qq": true
+  }
+}

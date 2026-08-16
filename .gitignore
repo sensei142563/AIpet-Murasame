@@ -1,0 +1,47 @@
+# --- Private / secrets (NEVER commit) ---
+config.json
+.ssh/
+.idea/
+.vscode/
+
+# --- Chat memory + face photos (privacy) ---
+data/
+face_shibie/
+pets/*/memory/
+
+# --- 本地自用角色包（第三方模型，版权原因不随仓库/绿色版分发） ---
+pets/arona/
+pets/hiyori/
+
+# --- QQ bot environment ---
+NapCat.Shell.Windows.OneKey/
+
+# --- Large models (distribute separately) ---
+F5-TTS_Models/
+GPT-SoVITS/
+models/
+
+# --- Python cache / temp ---
+__pycache__/
+*.pyc
+.venv/
+runtime/
+tmp/
+*.wav
+*.mp3
+
+# --- Build artifacts (green-version & PyInstaller cache) ---
+dist/
+build/
+*.spec
+
+# --- 备用资源（参考素材，他人项目代码/模型，不提交） ---
+备用资源/
+
+# --- 临时导入区（素材归集，用完移出项目） ---
+_import_tmp/
+
+# --- System files ---
+.DS_Store
+Thumbs.db
+desktop.ini

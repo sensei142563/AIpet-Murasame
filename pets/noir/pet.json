@@ -1,0 +1,89 @@
+{
+  "id": "noir",
+  "name": "诺瓦",
+  "display_name": "诺瓦",
+  "intro": "黑色系的 Live2D 角色",
+  "avatar": "诺瓦.jpg",
+  "prompt": {
+    "short": "prompt.txt",
+    "long": "longtext_prompt.txt"
+  },
+  "translate_rules": "你是一个翻译助手，负责将用户输入的中文翻译成日文。要求：翻译自然、口语化、符合可爱少女说话习惯，不要古日语风格，不要添加任何说明，不需要注音。给你提供的格式是[\"句子1\", \"句子2\", \"句子3\", .....]，必须严格按照原格式，输出一个json列表，逐句翻译，只输出纯JSON文本。",
+  "model": {
+    "default": "live2d",
+    "has_live2d": true,
+    "has_fgimages": false,
+    "fgimages_prefix": "",
+    "fgimages_sets": [],
+    "live2d_dir": "live2d/",
+    "live2d_window_ratio": 1.0,
+    "live2d_scale": 1.53,
+    "live2d_offset_x": 0.0,
+    "live2d_offset_y": 0.0,
+    "live2d_font_scale": 0.6,
+    "emotions": {
+      "高兴": ["eyeclose.exp3.json"],
+      "可爱": ["eyeclose.exp3.json"],
+      "害羞": ["eyeclose.exp3.json"],
+      "惊讶": ["quanquan.exp3.json"],
+      "好奇": ["quanquan.exp3.json"],
+      "懵圈": ["quanquan.exp3.json"],
+      "疑惑": ["quanquan.exp3.json"],
+      "生气": ["quanquan.exp3.json"],
+      "着急": ["quanquan.exp3.json"],
+      "伤心": ["tears.exp3.json"],
+      "难过": ["tears.exp3.json"],
+      "委屈": ["tears.exp3.json"],
+      "认真": [],
+      "平静": [],
+      "白": ["white.exp3.json"]
+    },
+    "motions": {},
+    "default_expression": "",
+    "live2d_window_height_ratio": 0.4
+  },
+  "interaction": {
+    "head_top": 0.0,
+    "head_bottom": 0.22,
+    "talk_top": 0.45,
+    "talk_bottom": 1.0,
+    "edge_margin_x": 0.12,
+    "text_area": "bottom",
+    "text_offset_x": -40,
+    "text_offset_y": -100
+  },
+  "languages": {
+    "primary": "ja",
+    "secondary": "zh",
+    "dialog_language": "zh"
+  },
+  "voices": {
+    "short_emotions": [
+      "高兴",
+      "害羞",
+      "惊讶",
+      "平静",
+      "生气",
+      "着急"
+    ],
+    "short_ref_dir": "voices/short/",
+    "long_ref_audio": "voices/long/ch0242.wav",
+    "long_ref_text": "老师，您喜欢这样的半熟蛋呢？还是太阳蛋，或者说玉子烧？"
+  },
+  "sticker": {
+    "dir": "biaoqingbao/"
+  },
+  "memory": {
+    "isolated": true,
+    "dir": "memory/"
+  },
+  "capabilities": {
+    "chat": true,
+    "short_tts": false,
+    "long_tts": false,
+    "screen_vision": true,
+    "camera_vision": true,
+    "face_recognition": true,
+    "qq": true
+  }
+}
