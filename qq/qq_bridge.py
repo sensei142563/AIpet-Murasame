@@ -12,7 +12,7 @@ NapCat WebSocket 桥 — 连接 OneBot11 协议，收发 QQ 消息。
 - 收到私聊消息 → chat_once → 发文字 + 可选表情包 + 可选语音
   - 私聊：按标点切句逐条发送（模拟真人打字节奏）
   - 群聊：一次性发送完整回复
-- 收到图片消息（私聊）→ qwen3-vl-plus 识别 → 注入对话回复
+- 收到图片消息（私聊）→ 视觉模型识别（vision_model_name 配置）→ 注入对话回复
 """
 
 import json

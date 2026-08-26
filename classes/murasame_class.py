@@ -389,9 +389,17 @@ class Murasame(QLabel):
     def _ensure_longtext_components(self):
         """延迟创建长文本组件（只创建一次）"""
         if self._longtext_manager is None:
-            cfg = get_config("./config.json")
-            api_key = cfg.get("APIKEY", {}).get("qwen", "")
-            self._longtext_manager = LongTextManager(api_key=api_key, chat_model="qwen-plus")
+            # 模型名/API Key 统一走 longtext.model_config（longtext_model + longtext_model_name）
+            from longtext.model_config import get_longtext_model_config
+            mcfg = get_longtext_model_config()
+            if mcfg:
+                api_key = mcfg["api_key"]
+                chat_model = mcfg["model"]
+            else:
+                cfg = get_config("./config.json")
+                api_key = cfg.get("APIKEY", {}).get("qwen", "")
+                chat_model = "qwen-plus"
+            self._longtext_manager = LongTextManager(api_key=api_key, chat_model=chat_model)
             # 连接播放完毕信号 → 显示下一句文字
             self._longtext_manager.player.sentence_done.connect(self._on_stream_sentence_done)
 
@@ -796,7 +804,11 @@ class Murasame(QLabel):
                 import requests
                 import base64 as b64
                 cfg = get_config("./config.json")
-                api_key = cfg.get("APIKEY", {}).get("qwen", "")
+                # 视觉模型统一走 longtext.model_config（vision_model_name + 对应 API Key）
+                from longtext.model_config import get_vision_model_config
+                vcfg = get_vision_model_config()
+                if not vcfg:
+                    return
 
                 # AI 视觉描述
                 payload = {
@@ -807,14 +819,14 @@ class Murasame(QLabel):
                             {"type": "text", "text": "请用简短的中文描述这张照片中的场景、人物和主要活动，不超过50个字。"},
                         ]
                     }],
-                    "model": "qwen-vl-plus",
+                    "model": vcfg["model"],
                     "max_tokens": 256,
                     "stream": False,
                 }
                 headers = {
                     "Accept": "application/json",
                     "Content-Type": "application/json",
-                    "Authorization": f"Bearer {api_key}",
+                    "Authorization": f"Bearer {vcfg['api_key']}",
                 }
                 cloud_api_url = cfg["local_api"]["cloud_api"]
                 resp = requests.post(cloud_api_url,

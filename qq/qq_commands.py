@@ -101,10 +101,13 @@ def handle_qq_command(text: str, session_key: str, user_id) -> str:
     # /status — 查看当前模型/服务状态（所有人可用）
     if cmd == "/status":
         try:
-            from longtext.model_config import get_longtext_model_name
+            from longtext.model_config import get_longtext_model_config, get_vision_model_config
             from qq.qq_config import get_qq_config, check_port_open, F5TTS_PORT
             cfg = get_qq_config()
-            model = get_longtext_model_name()
+            mcfg = get_longtext_model_config()
+            model = mcfg["model"] if mcfg else "未配置"
+            vcfg = get_vision_model_config()
+            vision_model = vcfg["model"] if vcfg else "未配置"
             f5tts = "✅ 就绪" if check_port_open(F5TTS_PORT) else "❌ 未运行"
             vision = "✅ 开启" if cfg["vision_enabled"] else "❌ 关闭"
             voice = "✅ 开启" if cfg["send_voice"] else "❌ 关闭"
@@ -113,6 +116,7 @@ def handle_qq_command(text: str, session_key: str, user_id) -> str:
             return (
                 f"🍃 {pet_name}状态\n"
                 f"🤖 长文本模型：{model}\n"
+                f"👁 视觉模型：{vision_model}\n"
                 f"🎙 语音输出：{voice}\n"
                 f"🎙 F5-TTS：{f5tts}\n"
                 f"👁 图片识别：{vision}\n"
@@ -156,13 +160,16 @@ def handle_qq_command(text: str, session_key: str, user_id) -> str:
             return "只支持 qwen 或 deepseek"
         try:
             import json as _json
+            from longtext.model_config import FAMILY_DEFAULT_MODEL
             cfg_path = os.path.join(BASE_DIR, "config.json")
             with open(cfg_path, "r", encoding="utf-8") as f:
                 cfg = _json.load(f)
             cfg["longtext_model"] = target
+            # 切换族时同步把模型名切到该族默认（自定义模型名请用 PCL 设置页）
+            cfg["longtext_model_name"] = FAMILY_DEFAULT_MODEL[target]
             with open(cfg_path, "w", encoding="utf-8") as f:
                 _json.dump(cfg, f, ensure_ascii=False, indent=2)
-            return f"✅ 长文本模型已切换为：{target}"
+            return f"✅ 长文本模型已切换为：{target}（{cfg['longtext_model_name']}）"
         except Exception as e:
             return f"切换失败：{e}"
 

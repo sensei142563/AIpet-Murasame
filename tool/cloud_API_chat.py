@@ -10,19 +10,13 @@ from tool.time_utils import build_time_context
 from pets.pet_registry import get_prompt_path, get_short_emotion_dirs
 
 url = get_config("./config.json")["local_api"]["cloud_api"]
-model_type = get_config("./config.json")["model_type"]
-if model_type != "local":
-    API_key = get_config("./config.json")["APIKEY"][model_type]
-if model_type == "deepseek":
-    chat_model="deepseek-chat"
-elif model_type == "qwen":
-    chat_model="qwen-plus"
+
 
 def now_time():
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     return now
 
-def post(name: str, payload):
+def post(name: str, payload, api_key: str = ""):
     payload_str = str(payload)
     if len(payload_str) > 200:
         payload_str = payload_str[:180] + "...(truncated)"
@@ -30,7 +24,7 @@ def post(name: str, payload):
     headers = {
         'Accept': 'application/json',
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + API_key
+        'Authorization': 'Bearer ' + api_key
     }
     resp = requests.post(url, json={"payload": payload, "headers": headers})
     resp = resp.json()
@@ -41,6 +35,11 @@ def post(name: str, payload):
         print(resp)
     print(f"[{now_time()}] [{name}] Reply:{reply}")
     return reply
+
+def _short_model_cfg():
+    """短文本链路模型配置（model_type=local 时返回 None）"""
+    from longtext.model_config import get_short_model_config
+    return get_short_model_config()
 
 def _prepare_priority_messages(history: list):
     """
@@ -75,6 +74,10 @@ def _prepare_priority_messages(history: list):
 
 
 def cloud_talk(history: list, user_input: str, role: str):
+    cfg = _short_model_cfg()
+    if not cfg:
+        return "（未配置对话模型 API Key）", history
+
     prompt_path = get_prompt_path("short")
     try:
         with open(prompt_path, "r", encoding="utf-8") as f:
@@ -118,11 +121,12 @@ def cloud_talk(history: list, user_input: str, role: str):
 
     payload = {
         "messages": messages,
-        "model": chat_model,
+        "model": cfg["model"],
         "max_tokens": 4096,
         "stream": False,
     }
-    reply = post(name=f"{model_type}-talk", payload=payload)
+    payload.update(cfg["reasoning"])  # 推理等级附加参数（off 时可能为空 dict）
+    reply = post(name=f"{cfg['name']}-talk", payload=payload, api_key=cfg["api_key"])
     history.append({"role": "assistant", "content": reply})  # 加入历史
     return reply, history
 
@@ -134,6 +138,10 @@ def cloud_portrait(sentence: str, history: list, type: str):
     # 现改为：只提炼「上次基础人物 ID」作衣服连贯参考，绝不把历史 ID 塞给 AI。
     # =====================================================
     import re as _re
+
+    cfg = _short_model_cfg()
+    if not cfg:
+        return "（未配置对话模型 API Key）", history
 
     # ===== 从角色包读取立绘映射（无则回退默认提示）=====
     from pets.pet_registry import get_portrait_prompts
@@ -167,17 +175,22 @@ def cloud_portrait(sentence: str, history: list, type: str):
     payload = {
         "messages": [{"role": "system", "content": identity},
                      {"role": "user", "content": sentence}],
-        "model": chat_model,
+        "model": cfg["model"],
         "max_tokens": 4096,
         "stream": False,
     }
-    reply = post(name=f"{model_type}-portrait", payload=payload)
+    payload.update(cfg["reasoning"])
+    reply = post(name=f"{cfg['name']}-portrait", payload=payload, api_key=cfg["api_key"])
     history.append((sentence, reply))
     return reply, history
 
 def cloud_translate(sentence: str):
     # 翻译规则按角色从 pet.json 的 translate_rules 读取（单一人设来源）；
     # 旧版硬编码保留为兜底（角色未配置时使用）。
+    cfg = _short_model_cfg()
+    if not cfg:
+        return "（未配置对话模型 API Key）"
+
     from pets.pet_registry import get_pet_config, get_active_pet_id
     identity = ""
     try:
@@ -193,15 +206,20 @@ def cloud_translate(sentence: str):
     payload = {
             "messages": [{"role": "system", "content": identity},
                          {"role": "user", "content": sentence}],
-            "model": chat_model,
+            "model": cfg["model"],
             "max_tokens": 4096,
             "stream": False,
         }
-    reply = post(name=f"{model_type}-translate", payload=payload)
+    payload.update(cfg["reasoning"])
+    reply = post(name=f"{cfg['name']}-translate", payload=payload, api_key=cfg["api_key"])
     return reply
 
 def cloud_emotion(history: list):
     # 只列出包含 asr.txt 的情感目录（过滤 long_chinese 等非情感参考）
+    cfg = _short_model_cfg()
+    if not cfg:
+        return "（未配置对话模型 API Key）"
+
     emotion_dirs = get_short_emotion_dirs()
     from pets.pet_registry import get_pet_config
     pet_cfg = get_pet_config()
@@ -216,14 +234,20 @@ def cloud_emotion(history: list):
     payload = {
         "messages": [{"role": "system", "content": identity},
                      {"role": "user", "content": f"历史： {history_l}"}],
-        "model": chat_model,
+        "model": cfg["model"],
         "max_tokens": 4096,
         "stream": False,
     }
-    reply = post(name=f"{model_type}-emotion", payload=payload)
+    payload.update(cfg["reasoning"])
+    reply = post(name=f"{cfg['name']}-emotion", payload=payload, api_key=cfg["api_key"])
     return reply
+
 def cloud_vl(image_path: str):
-    API_key = get_config("./config.json")["APIKEY"]["qwen"]
+    # 视觉模型统一走 longtext.model_config（vision_model_name + 对应 API Key）
+    from longtext.model_config import get_vision_model_config
+    vcfg = get_vision_model_config()
+    if not vcfg:
+        return "（未配置视觉模型 API Key）"
     identity = "你是一个AI桌宠的助手，你应该可以在屏幕上看到这个桌宠角色，是一个绿色头发的动漫人物。你需要简要描述用户正在做的事与使用的软件。我会将你的描述以system消息提供给另外一个处理语言的AI模型。只输出描述内容，且不要描述桌宠。"
     with open(image_path, "rb") as f:
         img_b64 = base64.b64encode(f.read()).decode()
@@ -231,7 +255,7 @@ def cloud_vl(image_path: str):
     payload = {
         "messages": [{"role": "user", "content": [{"type": "image_url","image_url": {"url": f"data:image/png;base64,{img_b64}"}},
                      {"type": "text", "text": identity}]}],
-        "model": "qwen3-vl-plus",
+        "model": vcfg["model"],
         "max_tokens": 4096,
         "stream": False,
     }
@@ -239,7 +263,7 @@ def cloud_vl(image_path: str):
     headers = {
         'Accept': 'application/json',
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + API_key
+        'Authorization': 'Bearer ' + vcfg["api_key"]
     }
     resp = requests.post(url, json={"payload": payload, "headers": headers})
     resp = resp.json()
@@ -250,4 +274,3 @@ def cloud_vl(image_path: str):
         print(resp)
     print(f"[{now_time()}] [qwen-vl] Reply:{reply}")
     return reply
-

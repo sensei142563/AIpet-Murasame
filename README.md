@@ -27,8 +27,8 @@
 - 短文本语音合成：[GPT-SoVITS](https://github.com/RVC-Boss/GPT-SoVITS)（日语，音色克隆）
 - 长文本语音合成：[F5-TTS](https://github.com/SWivid/F5-TTS)（中文，流式逐句）
 - 语音识别：[faster-whisper](https://github.com/SYSTRAN/faster-whisper)
-- 对话模型：Qwen（云端）/ DeepSeek（云端）/ 本地 Ollama
-- 视觉识别：Qwen-VL / qwen3-vl-plus（屏幕、摄像头）
+- 对话模型：Qwen（云端）/ DeepSeek（云端）/ 本地 Ollama（模型名与推理等级可配置）
+- 视觉识别：qwen3-vl-plus（默认，可换 deepseek-v4-flash-vision-exp 等；屏幕、摄像头）
 - 人脸识别：ArcFace ONNX（insightface）
 - GUI：PyQt5 + Live2D（live2d-py）
 
@@ -197,6 +197,15 @@ python debug_live2d.py --pet noir      # 或 murasame / arona / hiyori
 ---
 
 ## 🆕 最新版本
+
+**V1.14** — 模型可配置化 + 推理等级
+
+### V1.14 变更
+
+- **🎛 模型可配置化**：短文本 / 长文本 / 视觉识别三条链路的模型名独立可配（PCL 设置页可编辑下拉框，或直接改 `config.json` 的 `short_model_name` / `longtext_model_name` / `vision_model_name`）；默认值已迁移到当前主线模型——长文本默认 `deepseek-v4-flash`（`deepseek-chat` 已停用）、短文本 `qwen-plus`、视觉 `qwen3-vl-plus`，并支持 `deepseek-v4-pro` / `qwen3.7-plus` / `deepseek-v4-flash-vision-exp` 等同族切换
+- **🧠 推理等级**：新增全局 `reasoning_level`（`off` / `low` / `high` / `max`，默认 `off` 最省 token）。DeepSeek 完整支持四档（off=关思考，其余映射官方 `reasoning_effort`）；Qwen3 系支持开关两档（off=关思考）；不支持的模型（如 qwen-plus、视觉模型）自动不传参数，避免报错
+- **🔧 顺手修复**：常开摄像头/摄像头识别不再使用已停服的 `qwen-vl-plus`（统一走 `vision_model_name`）；桌面长文本模型的 API Key 跟随配置（之前固定用千问 Key）；`/status` 显示实际模型名，`/switch` 切换族时同步切换模型名
+- **⚠️ 迁移提醒**：`deepseek-chat` / `deepseek-reasoner` 官方已于 2026-07-24 停用，请勿再手动填这两个旧模型名
 
 **V1.13** — 微信 ClawBot 接入 + 一批体验修复
 
@@ -490,7 +499,7 @@ python run_launcher.py
 
 | 特性 | 短文本模式（默认） | 长文本模式（Alt 切换） |
 |------|-------------------|----------------------|
-| 对话模型 | qwen-plus / deepseek-chat | qwen-plus / deepseek-chat（流式，`longtext_model` 控制） |
+| 对话模型 | qwen-plus / deepseek-v4-flash（模型名可配，`short_model_name`） | 流式（模型名可配，`longtext_model` + `longtext_model_name`） |
 | TTS 引擎 | GPT-SoVITS（日语，音色克隆） | F5-TTS（中文，流式逐句） |
 | TTS 服务端口 | 9880 | 9881 |
 | 输出特点 | 短（≤3句），立绘/情感/翻译并行 | 长（不限字数），标点切句逐句合成播放 |
@@ -720,24 +729,28 @@ main.py (PyQt5 主窗口 + FastAPI 28565 + 快捷键监听 + 托盘)
 
 ### 关键配置项详解
 
-> 💡 **对话模型推荐用 `qwen`**：项目的全部 prompt（立绘/情感/翻译/切句）均为 **Qwen 调优**，输出格式稳定。`deepseek` 亦可用，但**偶发格式不兼容**（如：立绘缺脸/表情层丢失、短文本切句失败整段显示、摄像头识别走错 key 分支），遇到此类异常请切回 `qwen`。
+> 💡 **对话模型推荐用 `qwen` 族**：项目的全部 prompt（立绘/情感/翻译/切句）均为 **Qwen 调优**，输出格式稳定。`deepseek` 族亦可用，但**偶发格式不兼容**（如：立绘缺脸/表情层丢失、短文本切句失败整段显示），遇到此类异常请切回 `qwen`。**只建议在这两族内换模型名**——跨厂商模型会因为提示词不兼容而输出失稳。
 
 | 配置项 | 说明 |
 |--------|------|
-| `model_type` | `qwen`（推荐）/ `deepseek` / `local`（本地 Ollama） |
+| `model_type` | 短文本对话族：`qwen`（推荐）/ `deepseek` / `local`（本地 Ollama） |
+| `short_model_name` | 短文本模型名（默认 `qwen-plus`；`deepseek` 族默认 `deepseek-v4-flash`） |
+| `longtext_model` | 长文本对话族：`qwen` / `deepseek`（默认） |
+| `longtext_model_name` | 长文本模型名（默认 `deepseek-v4-flash`；`qwen` 族默认 `qwen-plus`） |
+| `vision_model_name` | 视觉识别模型名（默认 `qwen3-vl-plus`，QQ识图/摄像头/微信识图统一使用） |
+| `reasoning_level` | 推理等级：`off`（默认，最省 token）/ `low` / `high` / `max`。DeepSeek 四档完整支持；Qwen3 系仅开关两档；不支持的模型自动忽略 |
 | `tts_type` | `local`（GPT-SoVITS）/ `cloud`（云端 TTS） |
 | `longtext_enabled` | 长文本模式总开关（`"true"` 启用） |
 | `longtext_tts_type` | 长文本 TTS 引擎（当前仅 `f5tts`） |
 | `longtext_ref_voice` | F5-TTS 参考音频（音色克隆，3-5 秒最佳） |
 | `longtext_ref_text` | 参考音频对应文本 |
-| `longtext_model` | 长文本对话模型：`qwen`（Qwen-plus）/ `deepseek`（DeepSeek-chat，默认，更聪明） |
 | `qq_owner_id` | 主人 QQ 号（大号私聊共享记忆，且 `/clear` 指令仅大号可用） |
 | `qq_enabled` | QQ 功能总开关（PCL 显示「启动 QQ AIpet」按钮） |
 | `qq_napcat_ws` | NapCat WebSocket 地址（默认 `ws://127.0.0.1:3001`） |
 | `qq_napcat_http` | NapCat HTTP API 地址（默认 `http://127.0.0.1:6099`） |
 | `qq_send_sticker` | QQ 回复是否附带表情包 gif |
 | `qq_send_voice` | QQ 回复是否附带 F5-TTS 语音（需 9881 服务运行） |
-| `qq_vision_enabled` | QQ 私聊图片识别（收到图片用 qwen3-vl-plus 识别并回应） |
+| `qq_vision_enabled` | QQ 私聊图片识别（收到图片用视觉模型识别并回应，模型见 `vision_model_name`） |
 | `qq_allow_groups` | QQ 群聊开关（仅 @丛雨 时回复） |
 | `wechat_enabled` | 微信 ClawBot 总开关（`"true"` 启用） |
 | `wechat_owner_id` | 微信白名单（填日志显示的 `xxx@im.wechat`，空=回复所有人） |

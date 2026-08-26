@@ -85,12 +85,12 @@ def _encode_frame(frame) -> str:
 
 
 def _qwen_vision(image_b64_url: str, prompt: str) -> str:
-    """通过云端 Qwen VL 模型分析图像"""
+    """通过云端视觉模型分析图像（模型由 vision_model_name 配置）"""
     import requests
-    cfg = get_config("./config.json")
-    api_key = cfg.get("APIKEY", {}).get("qwen", "")
-    if not api_key:
-        return "错误：未配置 Qwen API Key"
+    from longtext.model_config import get_vision_model_config
+    vcfg = get_vision_model_config()
+    if not vcfg:
+        return "错误：未配置视觉模型 API Key"
 
     payload = {
         "messages": [{
@@ -100,14 +100,14 @@ def _qwen_vision(image_b64_url: str, prompt: str) -> str:
                 {"type": "text", "text": prompt},
             ]
         }],
-        "model": "qwen-vl-plus",
+        "model": vcfg["model"],
         "max_tokens": 512,
         "stream": False,
     }
     headers = {
         "Accept": "application/json",
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {api_key}",
+        "Authorization": f"Bearer {vcfg['api_key']}",
     }
 
     try:

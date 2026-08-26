@@ -94,7 +94,7 @@ class WeChatBridge:
         items = msg.get("item_list") or []
         text = parse_text_from_items(items)
 
-        # 图片消息 → 下载解密 → 识图（复用 QQ 的 qwen3-vl 视觉）
+        # 图片消息 → 下载解密 → 识图（复用 QQ 的视觉链路，模型由 vision_model_name 配置）
         vision_desc = None
         if not text:
             image_media = self._find_image_media(items)

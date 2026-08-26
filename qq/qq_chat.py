@@ -181,7 +181,7 @@ def chat_once(user_text: str, use_sticker: bool = True, vision_desc: str = None,
     单轮对话（QQ 使用）：
     1. 读取会话记忆（最近 12 轮，大号共享 / 其他人分仓）
     2. 追加用户消息
-    3. 调用长文本模型（qwen-plus / deepseek-chat，由 config 控制）生成完整回复
+    3. 调用长文本模型（模型由 config 的 longtext_model / longtext_model_name 控制）生成完整回复
     4. 保存到对应记忆仓
     5. 返回 (回复文本, 表情包名 or None)
 
@@ -248,6 +248,8 @@ def chat_once(user_text: str, use_sticker: bool = True, vision_desc: str = None,
         "max_tokens": 512,  # QQ 场景短回复更自然
         "stream": True,
     }
+    # 推理等级附加参数（off 时可能为空 dict）
+    payload.update(mcfg.get("reasoning", {}) or {})
 
     # 3. 流式收集完整回复
     full_reply = ""

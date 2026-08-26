@@ -164,14 +164,14 @@ class cloudAPIRequest(BaseModel):
 
 @app.post("/cloudAPI")
 async def cloudAPI(req: cloudAPIRequest):
+    # URL 路由按模型名前缀决定（deepseek* → deepseek，其余 → dashscope），
+    # 不依赖 model_type 配置，兼容视觉模型 / 自定义模型名的自由切换。
     url_deepseek = "https://api.deepseek.com/chat/completions"
     url_qwen = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
-    model_type = get_config("./config.json")["model_type"]
-    if model_type == "deepseek":
+    model = str(req.payload.get("model", "")).strip().lower()
+    if model.startswith("deepseek"):
         url = url_deepseek
-    elif model_type == "qwen":
-        url = url_qwen
-    if req.payload["model"] == "qwen3-vl-plus":
+    else:
         url = url_qwen
     async with aiohttp.ClientSession() as session:
         async with session.post(
@@ -360,19 +360,21 @@ class LongTextChatRequest(BaseModel):
 async def longtext_chat(req: LongTextChatRequest):
     """
     QQ 机器人预留接口（SSE 流式返回）。
-    入参: text + history → 直接调用 qwen-plus 流式回复。
+    入参: text + history → 直接调用长文本模型流式回复（模型由 config 的
+    longtext_model / longtext_model_name / reasoning_level 控制）。
     未来 QQ 接入时，直接调用此接口即可获得与桌宠一致的对话。
     """
     import json as _json
     import requests as _req
+    from longtext.model_config import get_longtext_model_config
 
     try:
-        cfg = get_config("./config.json")
-        api_key = cfg.get("APIKEY", {}).get("qwen", "")
-        if not api_key:
-            return {"error": "未配置 Qwen API Key"}
+        mcfg = get_longtext_model_config()
+        if not mcfg:
+            return {"error": "未配置对话模型 API Key"}
 
-        url = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+        api_key = mcfg["api_key"]
+        url = mcfg["url"]
 
         # 读取长文本 prompt（按当前角色动态解析）
         prompt_path = get_prompt_path("long")
@@ -393,11 +395,13 @@ async def longtext_chat(req: LongTextChatRequest):
             "Content-Type": "application/json",
         }
         payload = {
-            "model": "qwen-plus",
+            "model": mcfg["model"],
             "messages": messages,
             "max_tokens": req.max_tokens,
             "stream": True,
         }
+        # 推理等级附加参数（off 时可能为空 dict）
+        payload.update(mcfg.get("reasoning", {}) or {})
 
         async def sse_stream():
             with _req.post(url, json=payload, headers=headers, stream=True, timeout=(15, 300)) as resp:

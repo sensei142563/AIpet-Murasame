@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-QQ 图片识别 — 收到图片消息时用 qwen3-vl-plus 识别内容。
+QQ 图片识别 — 收到图片消息时调用视觉模型识别内容（模型由 vision_model_name 配置）。
 
 流程：
 1. 从 QQ 消息段提取图片（本地路径 或 URL）
 2. 本地路径直接读取；URL 先下载到临时文件
-3. 调用 qwen3-vl-plus 视觉模型识别
+3. 调用视觉模型识别（默认 qwen3-vl-plus，可在 PCL 设置/config.json 更改）
 4. 返回图片内容描述文本
 
 由 config.json 的 "qq_vision_enabled" 控制开关。
@@ -158,7 +158,7 @@ def napcat_get_image(ws, file_id, timeout=10):
 
 def describe_image(image_path: str) -> str:
     """
-    调用 qwen3-vl-plus 识别图片内容。
+    调用视觉模型（vision_model_name 配置）识别图片内容。
     返回: 图片内容描述文本；失败返回空字符串。
     """
     try:
@@ -169,7 +169,7 @@ def describe_image(image_path: str) -> str:
 
     cfg = get_vision_model_config()
     if not cfg:
-        print("[QQVision] ⚠ 未配置 qwen API Key，无法识别图片")
+        print("[QQVision] ⚠ 未配置视觉模型 API Key，无法识别图片")
         return ""
 
     if not image_path or not os.path.exists(image_path):

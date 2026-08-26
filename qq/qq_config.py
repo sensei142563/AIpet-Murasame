@@ -52,7 +52,7 @@ def get_qq_config():
         "send_sticker": str(cfg.get("qq_send_sticker", "true")).lower() == "true",
         # 是否在回复时附带 F5-TTS 语音
         "send_voice": str(cfg.get("qq_send_voice", "false")).lower() == "true",
-        # 是否启用图片识别（收到图片时用 qwen3-vl-plus 识别）
+        # 是否启用图片识别（收到图片时调用视觉模型识别，模型由 vision_model_name 配置）
         "vision_enabled": str(cfg.get("qq_vision_enabled", "true")).lower() == "true",
         # 是否启用语音识别（收到语音消息时用 faster-whisper 转文字）
         "stt_enabled": str(cfg.get("qq_stt_enabled", "false")).lower() == "true",

@@ -64,13 +64,14 @@ class LongTextStreamThread(QThread):
     ai_error = pyqtSignal(str)
 
     def __init__(self, history, user_input, api_key, chat_model="qwen-plus",
-                 api_url=None, parent=None):
+                 api_url=None, reasoning=None, parent=None):
         super().__init__(parent)
         self.history = history or []
         self.user_input = user_input
         self.api_key = api_key
         self.chat_model = chat_model
         self.api_url = api_url or "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+        self.reasoning = reasoning or {}
 
         # 加载长文本专属 prompt（文件读取失败则用默认）
         self.system_prompt = self._load_system_prompt()
@@ -204,7 +205,7 @@ class LongTextStreamThread(QThread):
 
     def _chat_stream(self):
         """
-        流式调用对话模型（qwen-plus / deepseek-chat），逐 token yield。
+        流式调用对话模型（模型由 config 的 longtext_model / longtext_model_name 控制），逐 token yield。
         URL / Key / 模型名均由 model_config 在构造时传入。
 
         优先级记忆处理：
@@ -258,6 +259,8 @@ class LongTextStreamThread(QThread):
             "max_tokens": 4096,
             "stream": True,
         }
+        # 推理等级附加参数（off 时可能为空 dict）
+        payload.update(self.reasoning or {})
 
         try:
             with req.post(url, json=payload, headers=headers, stream=True, timeout=(15, 300)) as resp:
@@ -395,7 +398,7 @@ class LongTextManager:
 
     def __init__(self, api_key=None, chat_model=None, api_url=None):
         # 兼容旧调用：未传参时自动从 config 读取
-        from longtext.model_config import get_longtext_model_config
+        from longtext.model_config import get_longtext_model_config, build_reasoning_params, get_reasoning_level
         if api_key is None or chat_model is None or api_url is None:
             cfg = get_longtext_model_config()
             if cfg:
@@ -410,6 +413,8 @@ class LongTextManager:
         self.api_key = api_key
         self.chat_model = chat_model
         self.api_url = api_url
+        # 推理等级附加参数（按实际模型名 + 全局 reasoning_level 生成）
+        self.reasoning = build_reasoning_params(chat_model, get_reasoning_level())
         self.player = LongTextPlayer(sample_rate=24000)  # 只创建一次
         self.tts_queue = None  # 由 murasame_class 注入
         self.stream_thread = None
@@ -423,6 +428,7 @@ class LongTextManager:
             api_key=self.api_key,
             chat_model=self.chat_model,
             api_url=self.api_url,
+            reasoning=self.reasoning,
         )
         return self.stream_thread
 

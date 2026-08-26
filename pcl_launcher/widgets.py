@@ -273,6 +273,13 @@ class PCLSettingsPanel(QScrollArea):
         self._add_text_input("qwen_api_key", "Qwen API Key", "", placeholder="sk-...")
 
         self._add_slider("model_type", "对话模型", ["local", "deepseek", "qwen"], "qwen")
+        self._add_model_combo(
+            "short_model_name", "短文本模型名",
+            ["qwen-plus", "qwen3.7-plus", "qwen3.7-flash", "qwen3.6-flash", "qwen3.5-flash",
+             "deepseek-v4-flash", "deepseek-v4-pro", "deepseek-chat"],
+            "qwen-plus",
+            hint="可编辑：仅限 deepseek/qwen 两族模型名"
+        )
         self._add_slider("tts_type", "TTS 语音合成", ["local", "cloud"], "local")
         self._add_slider("portrait", "立绘类型", ["a", "b"], "b")
         self._add_slider("screen_type", "屏幕识别", ["false", "true"], "false")
@@ -282,7 +289,22 @@ class PCLSettingsPanel(QScrollArea):
         self._add_slider("face_recognition_enabled", "人脸识别", ["false", "true"], "true")
         self._add_slider("force_gpu_check", "强制 GPU 检查", ["false", "true"], "false")
         self._add_slider("longtext_enabled", "长文本输出模式", ["false", "true"], "true")
-        self._add_slider("longtext_model", "长文本对话模型", ["qwen", "deepseek"], "qwen")
+        self._add_slider("longtext_model", "长文本对话模型", ["qwen", "deepseek"], "deepseek")
+        self._add_model_combo(
+            "longtext_model_name", "长文本模型名",
+            ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-chat",
+             "qwen-plus", "qwen3.7-plus", "qwen3.7-flash", "qwen3.6-flash"],
+            "deepseek-v4-flash",
+            hint="可编辑：仅限 deepseek/qwen 两族模型名"
+        )
+        self._add_model_combo(
+            "vision_model_name", "视觉识别模型名",
+            ["qwen3-vl-plus", "qwen3-vl-flash", "deepseek-v4-flash-vision-exp",
+             "qwen-vl-max", "qwen-vl-plus"],
+            "qwen3-vl-plus",
+            hint="可编辑：QQ识图/摄像头/微信识图统一使用"
+        )
+        self._add_slider("reasoning_level", "推理等级", ["off", "low", "high", "max"], "off")
 
         # ===== QQ 配置分组 =====
         qq_title = QLabel("  💬 QQ 聊天配置")
@@ -438,6 +460,32 @@ class PCLSettingsPanel(QScrollArea):
         self._layout.addLayout(row)
         self._widgets[key] = spin
 
+    def _add_model_combo(self, key, label, options, default, hint=""):
+        """可编辑模型名下选框（预设 + 自由输入）"""
+        row = QHBoxLayout()
+        lbl = QLabel(f"{label}")
+        lbl.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(14*S)}px; min-width: 120px;")
+        row.addWidget(lbl)
+        combo = QComboBox()
+        combo.setEditable(True)
+        combo.addItems(options)
+        combo.setCurrentText(str(default))
+        combo.setFixedWidth(int(200 * S))
+        combo.setStyleSheet(f"""
+            QComboBox {{ border: 1px solid {Gray5.name()}; padding: {int(4*S)}px;
+                font-size: {int(12*S)}px; border-radius: {int(4*S)}px;
+                background: white; font-family: 'Microsoft YaHei'; }}
+            QComboBox:focus {{ border: 1px solid {Color3.name()}; }}
+            QComboBox QAbstractItemView {{ background: white; selection-background-color: {Color3.name()}; }}
+        """)
+        self._block_wheel(combo)
+        if hint:
+            combo.setToolTip(hint)
+        row.addWidget(combo)
+        row.addStretch()
+        self._layout.addLayout(row)
+        self._widgets[key] = combo
+
     def _load_current_config(self):
         try:
             path = self._config_path_resolve()
@@ -447,6 +495,7 @@ class PCLSettingsPanel(QScrollArea):
             self._set_if("deepseek_api_key", cfg.get("APIKEY", {}).get("deepseek", ""))
             self._set_if("qwen_api_key", cfg.get("APIKEY", {}).get("qwen", ""))
             self._set_slider("model_type", cfg.get("model_type", "qwen"))
+            self._set_if("short_model_name", cfg.get("short_model_name", "qwen-plus"))
             self._set_slider("tts_type", cfg.get("tts_type", "local"))
             self._set_slider("portrait", cfg.get("portrait", "b"))
             self._set_slider("screen_type", cfg.get("screen_type", "false"))
@@ -456,7 +505,10 @@ class PCLSettingsPanel(QScrollArea):
             self._set_slider("face_recognition_enabled", cfg.get("face_recognition_enabled", "true"))
             self._set_slider("force_gpu_check", cfg.get("force_gpu_check", "false"))
             self._set_slider("longtext_enabled", cfg.get("longtext_enabled", "true"))
-            self._set_slider("longtext_model", cfg.get("longtext_model", "qwen"))
+            self._set_slider("longtext_model", cfg.get("longtext_model", "deepseek"))
+            self._set_if("longtext_model_name", cfg.get("longtext_model_name", "deepseek-v4-flash"))
+            self._set_if("vision_model_name", cfg.get("vision_model_name", "qwen3-vl-plus"))
+            self._set_slider("reasoning_level", cfg.get("reasoning_level", "off"))
             self._set_if("qq_owner_id", cfg.get("qq_owner_id", ""))
             self._set_slider("qq_enabled", cfg.get("qq_enabled", "false"))
             self._set_slider("qq_send_sticker", cfg.get("qq_send_sticker", "true"))
@@ -475,6 +527,7 @@ class PCLSettingsPanel(QScrollArea):
     def _set_if(self, key, val):
         w = self._widgets.get(key)
         if isinstance(w, QLineEdit): w.setText(str(val))
+        elif isinstance(w, QComboBox): w.setCurrentText(str(val))
         elif isinstance(w, (QSpinBox, QDoubleSpinBox)): w.setValue(val)
 
     def _set_slider(self, key, val):
@@ -497,6 +550,7 @@ class PCLSettingsPanel(QScrollArea):
             cfg["APIKEY"]["qwen"] = self._get_text("qwen_api_key")
 
             cfg["model_type"] = self._get_slider("model_type")
+            cfg["short_model_name"] = self._get_combo("short_model_name")
             cfg["tts_type"] = self._get_slider("tts_type")
             cfg["portrait"] = self._get_slider("portrait")
             cfg["screen_type"] = self._get_slider("screen_type")
@@ -507,6 +561,9 @@ class PCLSettingsPanel(QScrollArea):
             cfg["force_gpu_check"] = self._get_slider("force_gpu_check")
             cfg["longtext_enabled"] = self._get_slider("longtext_enabled")
             cfg["longtext_model"] = self._get_slider("longtext_model")
+            cfg["longtext_model_name"] = self._get_combo("longtext_model_name")
+            cfg["vision_model_name"] = self._get_combo("vision_model_name")
+            cfg["reasoning_level"] = self._get_slider("reasoning_level")
             cfg["qq_owner_id"] = self._get_text("qq_owner_id")
             cfg["qq_enabled"] = self._get_slider("qq_enabled")
             cfg["qq_send_sticker"] = self._get_slider("qq_send_sticker")
@@ -534,6 +591,10 @@ class PCLSettingsPanel(QScrollArea):
     def _get_text(self, key):
         w = self._widgets.get(key)
         return w.text().strip() if isinstance(w, QLineEdit) else ""
+
+    def _get_combo(self, key):
+        w = self._widgets.get(key)
+        return w.currentText().strip() if isinstance(w, QComboBox) else ""
 
     def _get_slider(self, key):
         entry = self._widgets.get(key)
