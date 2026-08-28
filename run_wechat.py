@@ -197,7 +197,7 @@ def main():
 
     bridge = WeChatBridge(
         owner_id=str(cfg.get("wechat_owner_id", "") or "").strip(),
-        bot_agent=str(cfg.get("wechat_bot_agent", "") or "AIpet/1.12").strip(),
+        bot_agent=str(cfg.get("wechat_bot_agent", "") or "AIpet/1.14").strip(),
         send_voice=send_voice,
     )
     print("[WeChatBot] 提示：对方发来第一条消息后，日志会显示 from_user_id（xxx@im.wechat），"
