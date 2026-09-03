@@ -58,6 +58,9 @@ def get_qq_config():
         "stt_enabled": str(cfg.get("qq_stt_enabled", "false")).lower() == "true",
         # 是否允许群聊（只 @ 时回复）
         "allow_groups": str(cfg.get("qq_allow_groups", "true")).lower() == "true",
+        # 离线消息补拉（默认开：启动时补回离线期间消息；NapCat 不支持时可在 PCL 设置关闭。
+        # 即便开启，任何请求失败/超时也已做极短超时 + 不拖断主 WS）
+        "offline_enabled": str(cfg.get("qq_offline_enable", "true")).lower() == "true",
         # F5-TTS 服务是否就绪（端口 9881）
         "f5tts_ready": f5tts_ready,
     }

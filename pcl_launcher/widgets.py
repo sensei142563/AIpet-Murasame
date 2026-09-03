@@ -318,6 +318,9 @@ class PCLSettingsPanel(QScrollArea):
         self._add_slider("qq_send_voice", "QQ 语音消息 (F5-TTS)", ["false", "true"], "false")
         self._add_slider("qq_vision_enabled", "QQ 图片识别", ["false", "true"], "true")
         self._add_slider("qq_allow_groups", "QQ 群聊 (需@)", ["false", "true"], "true")
+        self._add_slider("qq_offline_enable", "QQ 离线补拉", ["true", "false"], "true",
+                         hint="启动时补回离线期间的消息。依赖 NapCat 支持 get_friend_msg_history；"
+                              "若你的 NapCat 不支持导致启动慢/连接异常，可在此关闭")
 
         # ===== 微信 ClawBot 配置分组 =====
         wx_title = QLabel("  💬 微信 ClawBot 配置")
@@ -411,7 +414,7 @@ class PCLSettingsPanel(QScrollArea):
         obj.setFocusPolicy(Qt.StrongFocus)
         obj.wheelEvent = lambda e: e.ignore()
 
-    def _add_slider(self, key, label, options, default):
+    def _add_slider(self, key, label, options, default, hint=None):
         row = QHBoxLayout()
         lbl = QLabel(f"{label}：{default}")
         lbl.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(14*S)}px; min-width: 120px;")
@@ -426,6 +429,9 @@ class PCLSettingsPanel(QScrollArea):
                 background: {Color3.name()}; border-radius: 6px; }}
         """)
         self._block_wheel(slider)
+        if hint:
+            slider.setToolTip(hint)
+            lbl.setToolTip(hint)
         slider.valueChanged.connect(lambda v: lbl.setText(f"{label}：{options[v]}"))
         row.addWidget(slider)
         row.addStretch()
@@ -515,6 +521,7 @@ class PCLSettingsPanel(QScrollArea):
             self._set_slider("qq_send_voice", cfg.get("qq_send_voice", "false"))
             self._set_slider("qq_vision_enabled", cfg.get("qq_vision_enabled", "true"))
             self._set_slider("qq_allow_groups", cfg.get("qq_allow_groups", "true"))
+            self._set_slider("qq_offline_enable", cfg.get("qq_offline_enable", "true"))
             self._set_slider("wechat_enabled", cfg.get("wechat_enabled", "false"))
             self._set_slider("wechat_send_voice", cfg.get("wechat_send_voice", "false"))
             self._set_if("wechat_owner_id", cfg.get("wechat_owner_id", ""))
@@ -570,6 +577,7 @@ class PCLSettingsPanel(QScrollArea):
             cfg["qq_send_voice"] = self._get_slider("qq_send_voice")
             cfg["qq_vision_enabled"] = self._get_slider("qq_vision_enabled")
             cfg["qq_allow_groups"] = self._get_slider("qq_allow_groups")
+            cfg["qq_offline_enable"] = self._get_slider("qq_offline_enable")
             cfg["wechat_enabled"] = self._get_slider("wechat_enabled")
             cfg["wechat_send_voice"] = self._get_slider("wechat_send_voice")
             cfg["wechat_owner_id"] = self._get_text("wechat_owner_id")
@@ -842,7 +850,10 @@ class PCLFaceManager(QScrollArea):
 # ==================== 记忆管理面板 ====================
 
 class PCLMemoryManager(QScrollArea):
-    """多角色记忆管理：查看/预览/清除/备份各角色记忆 + QQ 离线补拉状态"""
+    """多角色记忆管理：查看/预览/清除/备份各角色记忆 + QQ 离线补拉状态 + 微信登录入口"""
+
+    # 微信「重新扫码登录」请求（主窗口统一执行：停进程→清凭据→重启弹码）
+    wechat_relogin_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -937,8 +948,107 @@ class PCLMemoryManager(QScrollArea):
         btn_off.clicked.connect(self._clear_processed_ids)
         self._layout.addWidget(btn_off)
 
+        # ===== 微信 ClawBot 登录卡片 =====
+        self._build_wechat_card()
+
         self._layout.addStretch()
         self._refresh()
+
+    # ===== 微信登录卡片（换绑/登录异常时在这里重新扫码）=====
+    def _build_wechat_card(self):
+        card = QWidget()
+        card.setStyleSheet(f"""
+            QWidget#wxCard {{ background: {Color8.name()};
+                border: 1px solid {Color5.name()}; border-radius: {int(10*S)}px; }}
+        """)
+        card.setObjectName("wxCard")
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(int(16 * S), int(12 * S), int(16 * S), int(14 * S))
+        lay.setSpacing(int(8 * S))
+
+        head = QHBoxLayout()
+        head_title = QLabel("💬 微信 ClawBot")
+        head_title.setFont(QFont("Microsoft YaHei", int(14 * S), QFont.Bold))
+        head_title.setStyleSheet(f"color: {Color1.name()}; border: none; background: transparent;")
+        head.addWidget(head_title)
+        head.addStretch()
+        # 状态徽标
+        self._wx_status = QLabel("")
+        self._wx_status.setStyleSheet(
+            f"color: {Gray2.name()}; font-size: {int(12*S)}px; border: none; background: transparent;")
+        head.addWidget(self._wx_status)
+        lay.addLayout(head)
+
+        tip = QLabel("机器人以你的微信身份收发消息。换绑微信号 / 登录异常 / token 失效时，"
+                     "点击下方按钮清除本地登录态并重新扫码。")
+        tip.setWordWrap(True)
+        tip.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(12*S)}px; border: none; background: transparent;")
+        lay.addWidget(tip)
+
+        row = QHBoxLayout()
+        self._wx_detail = QLabel("")
+        self._wx_detail.setStyleSheet(f"color: {Color1.name()}; font-size: {int(12*S)}px; border: none; background: transparent;")
+        row.addWidget(self._wx_detail, 1)
+        btn_relogin = QPushButton("  🔄 重新扫码登录")
+        btn_relogin.setStyleSheet(self._btn_style("#2f6fbf"))
+        btn_relogin.setToolTip("清除本地登录凭据并重新扫码（换绑/换手机/登录异常时使用）")
+        btn_relogin.clicked.connect(lambda: self.wechat_relogin_requested.emit())
+        row.addWidget(btn_relogin, 0, Qt.AlignBottom)
+        lay.addLayout(row)
+
+        self._layout.addWidget(card)
+        self._refresh_wx_card()
+
+    def _wx_cred_state(self):
+        """返回 (是否已登录, bot_id/user_id 详情, 是否启用)"""
+        enabled = False
+        try:
+            from tool.config import get_config
+            cfg = get_config("./config.json")
+            enabled = str(cfg.get("wechat_enabled", "false")).lower() == "true"
+        except Exception:
+            pass
+        creds = None
+        try:
+            from wechat.ilink_client import load_credentials
+            creds = load_credentials()
+        except Exception:
+            creds = None
+        return enabled, creds
+
+    def _refresh_wx_card(self):
+        try:
+            enabled, creds = self._wx_cred_state()
+            if not enabled:
+                self._wx_status.setText("未启用")
+                self._wx_detail.setText("config.json 中 wechat_enabled=false，微信功能未开启。")
+                return
+            if creds:
+                bot = creds.get("bot_id") or ""
+                user = creds.get("user_id") or ""
+                self._wx_status.setText("● 已登录")
+                self._wx_status.setStyleSheet(
+                    f"color: {THEME_COLORS['green']['btn_start']}; font-size: {int(12*S)}px;"
+                    f" border: none; background: transparent;")
+                detail = f"bot: {bot}" if bot else ""
+                if user:
+                    detail = (detail + "  ·  " if detail else "") + f"微信: {user}"
+                self._wx_detail.setText(detail or "本地已保存登录凭据")
+            else:
+                self._wx_status.setText("○ 未登录")
+                self._wx_status.setStyleSheet(
+                    f"color: {Gray2.name()}; font-size: {int(12*S)}px; border: none; background: transparent;")
+                self._wx_detail.setText("未找到登录凭据——点击右侧按钮开始扫码登录。")
+        except Exception:
+            pass
+
+    def showEvent(self, event):
+        """每次切到记忆页刷新微信登录状态"""
+        try:
+            self._refresh_wx_card()
+        except Exception:
+            pass
+        super().showEvent(event)
 
     @staticmethod
     def _btn_style(bg):

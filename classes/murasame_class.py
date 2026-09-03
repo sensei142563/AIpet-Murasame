@@ -672,7 +672,14 @@ class Murasame(QLabel):
             if self._saved_portrait_info:
                 saved = self._saved_portrait_info[1]
                 if isinstance(saved, str):
-                    saved = eval(saved)
+                    # 安全解析：记忆/历史文件可能被改坏或被注入，绝不能用 eval（任意代码执行）
+                    import ast
+                    try:
+                        saved = ast.literal_eval(saved)
+                    except Exception:
+                        saved = None
+                if saved is None:
+                    saved = self.first_portrait
                 self.update_portrait(self.portrait_target, saved)
             else:
                 self.update_portrait(self.portrait_target, self.first_portrait)

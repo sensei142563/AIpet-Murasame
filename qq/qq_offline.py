@@ -68,27 +68,99 @@ def _parse_time(msg_time):
         return None
 
 
+# 已处理消息 ID 文件读写锁（调度线程 mark_processed 与 WS 线程离线补拉并发，须串行）
+_IDS_LOCK = threading.Lock()
+
+
 def _load_processed_ids():
-    """读取已处理过的消息 ID 集合（防重复回复）"""
-    try:
-        if os.path.exists(PROCESSED_IDS_FILE):
-            with open(PROCESSED_IDS_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            return set(data.get("ids", []))
-    except Exception:
-        pass
-    return set()
+    """读取已处理过的消息 ID（保持插入序的有序列表，尾部=最新）。"""
+    with _IDS_LOCK:
+        try:
+            if os.path.exists(PROCESSED_IDS_FILE):
+                with open(PROCESSED_IDS_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                items = data.get("ids", [])
+                # 兼容旧格式（可能存成 set/list 混合）→ 归一化去重保序
+                seen = set()
+                ordered = []
+                for i in items:
+                    s = str(i)
+                    if s not in seen:
+                        seen.add(s)
+                        ordered.append(s)
+                return ordered
+        except Exception:
+            pass
+        return []
 
 
-def _save_processed_ids(ids: set):
-    """保存已处理的消息 ID（限量，防文件膨胀）"""
+def _save_processed_ids(ordered_ids):
+    """保存已处理的消息 ID（有序，保留尾部最新 PROCESSED_IDS_MAX 条）"""
+    with _IDS_LOCK:
+        try:
+            tail = ordered_ids[-PROCESSED_IDS_MAX:]
+            os.makedirs(os.path.dirname(PROCESSED_IDS_FILE), exist_ok=True)
+            tmp = PROCESSED_IDS_FILE + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"ids": tail}, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, PROCESSED_IDS_FILE)  # 原子写
+        except Exception as e:
+            print(f"[QQOffline] ⚠ 保存已处理 ID 失败: {e}")
+
+
+def _append_processed_ids(new_ids) -> bool:
+    """把新 ID 追加到已处理列表尾部（保持插入序；重复的跳过）。加锁防并发。"""
+    if not new_ids:
+        return False
+    new_clean = []
+    seen_new = set()
+    for i in new_ids:
+        s = str(i)
+        if i is not None and s not in seen_new:
+            seen_new.add(s)
+            new_clean.append(s)
+    if not new_clean:
+        return False
+    with _IDS_LOCK:
+        try:
+            ordered = []
+            try:
+                if os.path.exists(PROCESSED_IDS_FILE):
+                    with open(PROCESSED_IDS_FILE, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    ordered = [str(i) for i in data.get("ids", [])]
+            except Exception:
+                ordered = []
+            existing = set(ordered)
+            added = False
+            for s in new_clean:
+                if s not in existing:
+                    ordered.append(s)
+                    existing.add(s)
+                    added = True
+            if added:
+                tail = ordered[-PROCESSED_IDS_MAX:]
+                os.makedirs(os.path.dirname(PROCESSED_IDS_FILE), exist_ok=True)
+                tmp = PROCESSED_IDS_FILE + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump({"ids": tail}, f, ensure_ascii=False, indent=2)
+                os.replace(tmp, PROCESSED_IDS_FILE)
+            return True
+        except Exception as e:
+            print(f"[QQOffline] ⚠ 追加已处理 ID 失败: {e}")
+            return False
+
+
+def mark_processed(message_ids):
+    """公开入口：实时回复成功后调用，记录该消息 ID（防下次离线补拉重复回复）。
+
+    关键：实时路径回复的消息若不记录，下次启动离线补拉会把它当"离线期间消息"
+    再补回复一次 → 主人被重复回复（用户实测 bug）。锁内追加，保持插入序。
+    """
     try:
-        ids_list = list(ids)[-PROCESSED_IDS_MAX:]
-        os.makedirs(os.path.dirname(PROCESSED_IDS_FILE), exist_ok=True)
-        with open(PROCESSED_IDS_FILE, "w", encoding="utf-8") as f:
-            json.dump({"ids": ids_list}, f, ensure_ascii=False, indent=2)
+        _append_processed_ids(message_ids)
     except Exception as e:
-        print(f"[QQOffline] ⚠ 保存已处理 ID 失败: {e}")
+        print(f"[QQOffline] ⚠ 记录已处理 ID 失败: {e}")
 
 
 def _fetch_login_info(ws, timeout=3):
@@ -103,8 +175,13 @@ def _fetch_login_info(ws, timeout=3):
         ws.send(json.dumps({"action": "get_login_info", "echo": echo}))
         import websocket
         deadline = time.time() + timeout
-        while time.time() < deadline:
+        while True:
+            remain = deadline - time.time()
+            if remain <= 0:
+                break
             try:
+                # 单次 recv 阻塞受 socket 超时支配 → 临时收紧到剩余时间
+                ws.settimeout(min(remain + 0.2, timeout + 0.2))
                 raw = ws.recv()
                 if not raw:
                     continue
@@ -120,6 +197,11 @@ def _fetch_login_info(ws, timeout=3):
                 break
     except Exception:
         pass
+    finally:
+        try:
+            ws.settimeout(30)
+        except Exception:
+            pass
     return None, stray_events
 
 
@@ -132,11 +214,16 @@ def _normalize_messages(data):
     return []
 
 
-def _request_and_wait(ws, action, params=None, timeout=8, label=""):
+def _request_and_wait(ws, action, params=None, timeout=2, label=""):
     """
     发送 NapCat API 请求并等待 echo 响应。
     期间收到的非 echo 消息（实时事件）收集返回，不能丢弃。
     返回 (data, stray_events)；超时返回 (None, stray_events)。
+
+    超时语义（关键）：deadline 之外必须真正限制单次 recv 的阻塞。websocket 的 socket
+    超时由 create_connection(timeout=30) 决定，若 NapCat 对某 API 完全不响应，裸
+    ws.recv() 会阻塞约 30s 才抛超时——名义上的"2 秒"根本不会生效。这里在每次 recv 前
+    临时 settimeout(剩余时间)，保证单次调用总阻塞 ≈ timeout 级，不拖垮启动/主 WS。
     """
     import websocket
     echo = f"{label}_{uuid.uuid4().hex[:8]}"
@@ -147,8 +234,13 @@ def _request_and_wait(ws, action, params=None, timeout=8, label=""):
     try:
         ws.send(json.dumps(payload, ensure_ascii=False))
         deadline = time.time() + timeout
-        while time.time() < deadline:
+        while True:
+            remain = deadline - time.time()
+            if remain <= 0:
+                break
             try:
+                # 单次 recv 阻塞上限 = 剩余时间（含少量余量防抖动）
+                ws.settimeout(min(remain + 0.2, timeout + 0.2))
                 raw = ws.recv()
                 if not raw:
                     continue
@@ -164,6 +256,12 @@ def _request_and_wait(ws, action, params=None, timeout=8, label=""):
                 break
     except Exception as e:
         print(f"[QQOffline] ⚠ 请求 {action} 失败: {e}")
+    finally:
+        # 恢复 socket 超时（离线拉取是启动期一次性操作；主循环心跳依赖 30s 超时）
+        try:
+            ws.settimeout(30)
+        except Exception:
+            pass
     return None, stray_events
 
 
@@ -201,7 +299,12 @@ def _extract_vision_desc(message, ws=None, stray_out=None):
 def _process_history(messages, owner_id, self_id, last_exit_time,
                      prev_processed, processed_this_run, out_msgs, default_sender=None,
                      ws=None, stray_out=None):
-    """处理一批历史消息（三层防护 + 按真实发送者构造条目）"""
+    """处理一批历史消息（三层防护 + 按真实发送者构造条目）
+
+    顺序优化（防浪费）：先做所有无 IO 过滤（自己发的消息 / 窗口外 / 已处理），
+    只有真正需要回复的消息才走识图——旧实现先识图再过滤，
+    导致 bot 自己发的历史图片也被下载+识图，纯浪费 token（实测日志可见）。
+    """
     for m in messages:
         if not isinstance(m, dict):
             continue
@@ -212,11 +315,9 @@ def _process_history(messages, owner_id, self_id, last_exit_time,
         msg_user_id = m.get("user_id")
         message = m.get("message")
         text_raw = _extract_msg_text(message)
-        # 离线消息同样走识图（纯图片消息此前被当空文本跳过 → 修复）
-        vision_desc = _extract_vision_desc(message, ws=ws, stray_out=stray_out)
-        print(f"[QQOffline]   # time={msg_time} user_id={msg_user_id} mid={msg_id} text='{text_raw[:30]}' vision={'Y' if vision_desc else '-'}")
 
         # ===== 防护 A：跳过 bot 自己发的消息（防自我对话机枪）=====
+        # 必须在任何 IO（识图/下载）之前——自己发的图片无需识别
         if self_id is not None and msg_user_id is not None:
             if str(msg_user_id) == str(self_id):
                 print(f"[QQOffline]     ↘ 跳过自己发的消息（self_id={self_id}）")
@@ -236,7 +337,11 @@ def _process_history(messages, owner_id, self_id, last_exit_time,
             print(f"[QQOffline]     ↘ 跳过已处理消息 mid={msg_id}")
             continue
 
+        # 真正要回复的消息才识图（此时已排除自己发的 + 窗口外 + 已处理）
+        vision_desc = _extract_vision_desc(message, ws=ws, stray_out=stray_out)
         text = text_raw.strip()
+        print(f"[QQOffline]   # time={msg_time} user_id={msg_user_id} mid={msg_id} text='{text[:30]}' vision={'Y' if vision_desc else '-'}")
+
         if not text and not vision_desc:
             continue
         # 实际发送者：消息自带的 user_id 优先；保底用该聊天对象/大号
@@ -269,7 +374,7 @@ def fetch_offline_messages(ws, owner_id, last_exit_time, self_id=None):
     if not ws or not owner_id:
         return [], [], set()
 
-    prev_processed = _load_processed_ids()
+    prev_processed = set(_load_processed_ids())  # list → set，供 O(1) 归属/去重查询
     processed_this_run = set()
     msgs = []
     stray_events = []
@@ -299,12 +404,12 @@ def fetch_offline_messages(ws, owner_id, last_exit_time, self_id=None):
                          prev_processed, processed_this_run, msgs, default_sender=owner_id,
                          ws=ws, stray_out=stray_events)
     else:
-        print("[QQOffline] ⚠ 8 秒内未等到 get_friend_msg_history 响应")
+        print("[QQOffline] ⚠ 未等到 get_friend_msg_history 响应（NapCat 可能不支持该 API，跳过）")
 
     # ===== 2. 其他好友的离线消息 =====
     # NapCat OneBot11 WS 不支持 get_recent_contacts（报"不支持的API"），
     # 改用 get_friend_list 拿全量好友列表，对每个好友拉历史，靠时间窗口过滤。
-    data2, stray2 = _request_and_wait(ws, "get_friend_list", None, timeout=6, label="friends")
+    data2, stray2 = _request_and_wait(ws, "get_friend_list", None, timeout=2, label="friends")
     stray_events.extend(stray2)
     friends = _normalize_messages(data2)
     print(f"[QQOffline] 🔎 好友列表 {len(friends)} 人")
@@ -323,8 +428,11 @@ def fetch_offline_messages(ws, owner_id, last_exit_time, self_id=None):
             print("[QQOffline] 🔍 好友补拉达到时长预算，停止")
             break
         friend_pulls += 1
+        # 拉取条数：好友会话常被 bot 自己的长回复占满（一条回复可能切成 10+ 条历史），
+        # count=20 会把好友离线期间的消息挤出拉取窗口 → 好友消息永远补不回来。
+        # 提高到 50（NapCat 上限内），且只保留离线窗口内的，多拉不影响。
         data3, stray3 = _request_and_wait(ws, "get_friend_msg_history",
-                                          {"user_id": int(peer), "count": 20}, timeout=5, label="history_f")
+                                          {"user_id": int(peer), "count": 50}, timeout=2, label="history_f")
         stray_events.extend(stray3)
         if data3 is None:
             print(f"[QQOffline] ⚠ 好友 {peer} 历史拉取超时，跳过")
@@ -344,10 +452,11 @@ def fetch_offline_messages(ws, owner_id, last_exit_time, self_id=None):
         msgs = msgs[-FIRST_RUN_MAX:]
 
     # 把本次看到的消息 ID 全部记录（含旧消息）→ 下次启动跳过所有历史
+    # 用保序追加（_append_processed_ids 内部去重 + 锁 + 截断尾部最新）
     if processed_this_run:
-        new_set = prev_processed | processed_this_run
-        _save_processed_ids(new_set)
-        print(f"[QQOffline] 📝 已记录 {len(new_set)} 个已处理消息 ID（防下次重复）")
+        _append_processed_ids(list(processed_this_run))
+        total = len(set(_load_processed_ids()))
+        print(f"[QQOffline] 📝 已记录已处理消息 ID（当前共 {total} 条，防下次重复）")
 
     # 返回本次历史里见过的 message_id（bridge 补处理实时事件时据此去重，
     # 防止同一消息既走离线回复又被实时补处理导致重复回复）
@@ -378,7 +487,21 @@ def fetch_before_loop(ws, owner_id, scheduler, self_id=None):
     - owner_id: 大号 QQ 号
     - scheduler: MessageScheduler 实例（消息入队）
     - self_id: 丛雨自己的 QQ 号（可选；若未传则主动请求 get_login_info 获取）
+
+    默认开启（qq_offline_enable=true）；NapCat 不支持 get_friend_msg_history 时可在
+    PCL 设置关闭。即便开启，任何请求失败/超时也绝不上抛、极短超时，
+    避免拖断主 WebSocket（否则表现成"连上就断、QQ 不回复"）。
     """
+    # 开关（默认开）：未开启时跳过整个离线补拉
+    try:
+        from qq.qq_config import get_qq_config
+        if not get_qq_config().get("offline_enabled"):
+            print("[QQOffline] ℹ️ 离线补拉已关闭（qq_offline_enable=false，可在 PCL 设置开启）。")
+            save_last_exit_time()  # 仍记录基线，避免下次误判"首次运行"
+            return [], set()
+    except Exception:
+        pass
+
     last = load_last_exit_time()
     print(f"[QQOffline] 上次退出时间: {last or '首次运行'}")
     # 立刻记录本次启动时间作为下次离线窗口的基线：
@@ -406,6 +529,6 @@ def fetch_before_loop(ws, owner_id, scheduler, self_id=None):
         else:
             print(f"[QQOffline] 📭 无离线消息（或 get_friend_msg_history 不可用）")
     except Exception as e:
-        print(f"[QQOffline] ⚠ 离线补拉异常: {e}")
+        print(f"[QQOffline] ⚠ 离线补拉异常（不影响主连接）: {e}")
     # 返回 (拉取期间收到的实时事件, 历史里见过的 message_id) 由 bridge 补处理/去重
     return stray_events, seen_ids

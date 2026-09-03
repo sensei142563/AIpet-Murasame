@@ -110,6 +110,13 @@ def main():
 
     def _on_signal(sig, frame):
         print("\n[QQ] 正在关闭...")
+        try:
+            # 正常退出时写准基线（否则离线补拉窗口=上次启动时间，
+            # 会把上次在线期间已实时回复的消息重复补拉回复 → 主人被重复回复）
+            from qq.qq_offline import save_last_exit_time
+            save_last_exit_time()
+        except Exception:
+            pass
         bridge.stop()
         _cleanup_f5tts()
         sys.exit(0)
@@ -117,19 +124,24 @@ def main():
     signal.signal(signal.SIGINT, _on_signal)
     signal.signal(signal.SIGTERM, _on_signal)
 
-    for attempt in range(1, 4):
-        try:
-            print(f"[QQ] 第 {attempt} 次尝试连接...")
-            bridge.connect()
-            break
-        except Exception as e:
-            print(f"[QQ] ⚠ 连接失败: {e}")
-            if attempt < 3:
-                print("[QQ] 5 秒后重试...")
-                time.sleep(5)
-            else:
-                print("[QQ] ❌ 连接失败超过 3 次，请确认 NapCat 已启动")
-                print("     运行: NapCat.Shell.Windows.OneKey\\start_napcat.bat")
+    # NapCat WS 就绪检测（带清晰提示，避免"目标计算机积极拒绝"）
+    # 首次使用必须先进 NapCat 扫码登录一次，否则 WS 3001 不会真正监听。
+    # host 从 ws_url 解析（支持局域网 NapCat），不写死 127.0.0.1
+    try:
+        import urllib.parse as _up
+        _u = _up.urlparse(cfg['ws_url'])
+        ws_host = _u.hostname or "127.0.0.1"
+        ws_port = _u.port or 3001
+    except Exception:
+        ws_host, ws_port = "127.0.0.1", 3001
+    if not check_port_open(ws_port, host=ws_host):
+        print(f"[QQ] ⏳ 检测到 NapCat 尚未就绪（{ws_host}:{ws_port} 未监听），等待中...")
+        print("[QQ]   首次使用请先运行:  NapCat.Shell.Windows.OneKey\\start_napcat.bat 并扫码登录。")
+        print("[QQ]   若已启动但此处仍等不到，请确认已登录、且 NapCat 的 onebot 正向 WS 端口 = 3001。")
+        print("[QQ]   （本程序会自动重试；NapCat 就绪后无需重启本窗口）")
+        # 交给 bridge 的重连循环去等，这里不额外阻塞
+    print(f"[QQ] 第 1 次尝试连接（NapCat 未就绪也会自动重试）...")
+    bridge.connect()  # 内部已包含连接前等待 + 断开自动重连
 
 
 if __name__ == "__main__":

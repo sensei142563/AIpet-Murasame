@@ -442,4 +442,4 @@ if __name__ == "__main__":
     cfg = get_config("./config.json")
     if cfg.get("model_type", "deepseek").lower() == "local":
         model, tokenizer = load_model_and_tokenizer()
-    uvicorn.run(app, host="0.0.0.0", port=28565)
+    uvicorn.run(app, host="127.0.0.1", port=28565)  # 仅本机：PCL/桌宠都用 localhost 访问；绑 0.0.0.0 会暴露无鉴权 API 到局域网

@@ -53,10 +53,13 @@ def _load_json(path):
 
 
 def _save_json(path, data):
+    """原子写：临时文件 + os.replace，防止进程被杀时 JSON 写半截损坏（Android Store.atomicWrite 移植）"""
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
     except Exception as e:
         print(f"[QQMemory] 写入 {os.path.basename(path)} 失败: {e}")
 

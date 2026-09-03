@@ -47,8 +47,9 @@
   "qq_vision_enabled": "true",
   "qq_stt_enabled": "true",
   "qq_allow_groups": "true",
+  "qq_offline_enable": "true",
   "wechat_enabled": "false",
   "wechat_owner_id": "",
-  "wechat_bot_agent": "AIpet/1.14",
+  "wechat_bot_agent": "AIpet/1.15",
   "wechat_send_voice": "false"
 }

@@ -74,7 +74,7 @@ if __name__ == "__main__":
 
     # 后台启动本地 API 服务（FastAPI + Uvicorn）
     def _run_api_server():
-        config = uvicorn.Config(api_app, host="0.0.0.0", port=28565, log_level="info")
+        config = uvicorn.Config(api_app, host="127.0.0.1", port=28565, log_level="info")
         server = uvicorn.Server(config)
         server.run()
 

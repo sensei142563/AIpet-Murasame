@@ -16,6 +16,7 @@
 """
 
 import json
+import os
 import time
 from pathlib import Path
 
@@ -85,10 +86,13 @@ def _load_json(path, default=None):
 
 
 def _save_json(path, data):
+    """原子写：临时文件 + os.replace，防止进程被杀时记忆 JSON 写半截损坏"""
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
     except Exception as e:
         print(f"[LongHistory] 写入 {path.name} 失败: {e}")
 

@@ -197,17 +197,93 @@ class QQBotBridge:
         self.running = False
         self.self_id = None  # 登录的 QQ 号（识别是否自己发的消息）
         self._lock = threading.Lock()
+        self._send_fail_count = 0  # 断线窗口内发送失败计数（重连成功后清零）
 
         # 消息调度器：FIFO 队列 + 串行处理 + 会话合并
         self.scheduler = MessageScheduler(handler=self._handle_queued_message)
 
     def connect(self):
-        """建立 WebSocket 连接并进入事件循环（阻塞）"""
-        print(f"[QQBridge] 连接 NapCat: {self.ws_url}")
-        self.ws = websocket.create_connection(
-            self.ws_url, timeout=30, enable_multithread=True
-        )
+        """建立 WebSocket 连接并进入事件循环（阻塞）。
+
+        关键健壮性（面向 A 卡/NapCat 未熟配置的用户）：
+        - 连接前先等待 NapCat WS 端口就绪（不 ready 则提示并重试，而非直接 Connection refused）
+        - 主循环因任何原因断开后自动重连（不再一断就静默退出）
+        """
+        self.running = True  # 先置 running，_reconnect_loop 的 while 才会进入
+        host, port = self._ws_url_parts()
+        if port and not self._napcat_ready(port, host=host):
+            print(f"[QQBridge] ⏳ 等待 NapCat 就绪（{host}:{port}）..."
+                  "若一直卡在这里，说明 NapCat 未正常启动/扫码，请运行 start_napcat.bat 并扫码登录。")
+        self._reconnect_loop()
+
+    @staticmethod
+    def _ws_url_parts():
+        """从 ws_url 解析 (host, port)（默认 127.0.0.1:3001）"""
+        try:
+            import urllib.parse as up
+            u = up.urlparse(get_qq_config()["ws_url"])
+            return (u.hostname or "127.0.0.1"), (u.port or 3001)
+        except Exception:
+            return "127.0.0.1", 3001
+
+    @staticmethod
+    def _ws_port():
+        """从 ws_url 提取端口（默认 3001）"""
+        return QQBotBridge._ws_url_parts()[1]
+
+    @staticmethod
+    def _napcat_ready(port, host="127.0.0.1", timeout=2, max_wait=30):
+        """等待 NapCat WS 端口可连接（最多 max_wait 秒；host 跟随 ws_url，支持局域网部署）"""
+        import socket as _sock
+        import time as _t
+        t0 = _t.time()
+        while _t.time() - t0 < max_wait:
+            try:
+                with _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM) as s:
+                    s.settimeout(timeout)
+                    return s.connect_ex((host, port)) == 0
+            except Exception:
+                pass
+            _t.sleep(1)
+        return False
+
+    def _reconnect_loop(self):
+        """断开后自动重连（不退出），给用户 NapCat 就绪时间窗口"""
+        delay = 5
+        while self.running:
+            try:
+                print(f"[QQBridge] 连接 NapCat: {self.ws_url}")
+                self.ws = websocket.create_connection(
+                    self.ws_url, timeout=30, enable_multithread=True
+                )
+                self._on_connected()   # 内部处理 login_info + 离线补拉 + 进入事件循环（阻塞）
+                # 正常走到这里说明事件循环因断开退出 → 重置 delay 后重连
+                if not self.running:
+                    break
+                print("[QQBridge] 连接断开，5 秒后自动重连...")
+                delay = 5
+                time.sleep(delay)
+            except Exception as e:
+                print(f"[QQBridge] ⚠ 连接失败: {e}")
+                if not self._sleep(delay):
+                    break
+                # 指数退避，最多 30 秒
+                delay = min(30, delay * 2)
+
+    def _sleep(self, secs):
+        import time as _t
+        t0 = _t.time()
+        while self.running and _t.time() - t0 < secs:
+            _t.sleep(0.5)
+        return self.running
+
+    def _on_connected(self):
+        """连接建立后的初始化 + 事件循环（原 connect 主体，改为可被重连循环调用）"""
         self.running = True
+        # 重连成功：若此前有发送失败，提示一次并清零计数
+        if self._send_fail_count > 0:
+            print(f"[QQBridge] 🔗 已重新连接（此前断线期间 {self._send_fail_count} 次回复未送达，请对方重发）")
+            self._send_fail_count = 0
 
         # 获取登录信息（确认 self_id）—— 与离线拉取同一线程串行 recv，避免竞争
         try:
@@ -283,8 +359,13 @@ class QQBotBridge:
             except Exception as e:
                 print(f"[QQBridge] ⚠ 接收异常: {e}")
                 break
-        self.running = False
-        print("[QQBridge] 连接已关闭")
+        # 断开后不置 running=False——由 _reconnect_loop 判断并自动重连。
+        # 仅当外部调用 stop()（running=False）时才真正退出。
+        try:
+            self.ws.close()
+        except Exception:
+            pass
+        print("[QQBridge] 连接已断开（将由重连循环自动恢复）")
 
     def _warm_stt(self):
         """后台预热 faster-whisper 模型（进程级单例，只加载一次）"""
@@ -318,6 +399,7 @@ class QQBotBridge:
         message_type = data.get("message_type")
         self_id = data.get("self_id")
         user_id = data.get("user_id")
+        message_id = data.get("message_id")
         sender = data.get("sender", {})
         nickname = sender.get("nickname", "未知")
         group_id = data.get("group_id")
@@ -360,6 +442,7 @@ class QQBotBridge:
                 "nickname": nickname,
                 "group_id": None,
                 "vision_desc": vision_desc,
+                "message_id": message_id,  # 回复成功后记录，防离线补拉重复回复
             })
         elif message_type == "group":
             # 群聊：仅 @丛雨 时回复
@@ -381,6 +464,7 @@ class QQBotBridge:
                 "nickname": nickname,
                 "group_id": group_id,
                 "vision_desc": None,
+                "message_id": message_id,  # 回复成功后记录，防离线补拉重复回复
             })
 
     def _extract_text(self, message, raw_message):
@@ -440,12 +524,13 @@ class QQBotBridge:
                 print(f"[QQBridge] ⚠ 补处理实时事件失败: {e}")
 
     def _is_at_me(self, message, self_id):
-        """检查消息中是否 @ 了丛雨"""
+        """检查消息中是否 @ 了丛雨（只认 @自己的 QQ 号，@all 不触发回复）"""
         if isinstance(message, list):
             for seg in message:
                 if isinstance(seg, dict) and seg.get("type") == "at":
                     qq = seg.get("data", {}).get("qq", "")
-                    if qq and (str(qq) == str(self_id) or str(qq) == "all"):
+                    # 仅当 @ 的是本 bot 时才命中；@all/@everyone 不算（否则全群消息都会触发回复）
+                    if qq and str(qq) == str(self_id):
                         return True
         # 兜底：raw_message 里包含 CQ:at 且 qq=self_id
         return False
@@ -493,7 +578,12 @@ class QQBotBridge:
                 )
                 if not reply:
                     return
-                self._send_private_reply(reply, stickers, user_id)
+                sent_ok = self._send_private_reply(reply, stickers, user_id)
+                # 仅整条回复发送成功后，才把本组全部 message_id 记为已处理：
+                # - 发送失败若标记 → 重连补拉不再回答（漏回）
+                # - 只记 first 而漏掉合并的第 2/3 条 → 重连补拉对它们重复回答（重复回）
+                if sent_ok:
+                    self._mark_replied_msgs(msg)
             elif session_key.startswith("group_"):
                 user_id = msg["user_id"]
                 reply, stickers = chat_once(
@@ -503,9 +593,31 @@ class QQBotBridge:
                 )
                 if not reply:
                     return
-                self._send_group_reply(reply, stickers, user_id, group_id)
+                sent_ok = self._send_group_reply(reply, stickers, user_id, group_id)
+                if sent_ok:
+                    self._mark_replied_msgs(msg)
         except Exception as e:
             print(f"[QQBridge] ⚠ 处理消息异常: {e}")
+
+    def _mark_replied_msgs(self, msg):
+        """把本条（含合并子消息）的全部 message_id 记为已回复（去重用）。
+
+        合并会话：scheduler 把同一会话连发的消息合并成一组（merged_msgs 含全部），
+        必须收集全部 id——只记 first 会导致第 2/3 条被重连后的离线补拉重复回复。
+        """
+        mids = []
+        merged = msg.get("merged_msgs") or [msg]
+        for sub in merged:
+            mid = (sub or {}).get("message_id")
+            if mid is not None and mid not in mids:
+                mids.append(mid)
+        if not mids:
+            return
+        try:
+            from qq.qq_offline import mark_processed
+            mark_processed(mids)
+        except Exception as e:
+            print(f"[QQBridge] ⚠ 记录已回复 ID 失败: {e}")
 
     def _send_command_reply(self, text, user_id):
         """指令回复：一次性整条发送（不分条、不语音）"""
@@ -542,59 +654,100 @@ class QQBotBridge:
         except Exception as e:
             print(f"[QQBridge] ⚠ 群指令回复失败: {e}")
 
+    # ===== 断线安全的发送 =====
+    def _safe_send(self, payload: dict, label: str = "") -> bool:
+        """
+        向 NapCat 发送一条 API 调用。断线/重连窗口内 self.ws 可能已关闭或为 None：
+        发送失败不抛异常冒泡（会被调度线程吞掉造成丢消息），而是提示并计数返回 False。
+        """
+        if self.ws is None:
+            self._send_fail_count += 1
+            print(f"[QQBridge] ⚠ {label}发送失败：连接尚未建立（累计 {self._send_fail_count} 次发送失败）")
+            return False
+        try:
+            with self._lock:
+                self.ws.send(json.dumps(payload, ensure_ascii=False))
+            return True
+        except Exception as e:
+            self._send_fail_count += 1
+            print(f"[QQBridge] ⚠ {label}发送失败（连接可能已断开）: {e}"
+                  f"（累计 {self._send_fail_count} 次发送失败，重连后请对方重发）")
+            return False
+
     def _send_private_reply(self, reply, stickers, user_id):
-        """私聊回复：按标点切句逐条发送 + 可选表情包(0~2个)/语音"""
+        """私聊回复：按标点切句逐条发送 + 可选表情包(0~2个)/语音。
+        返回 True = 文字部分完整发送成功（分句全部送达）；
+        False = 断线/失败（调用方不应标记为已回复，避免重连补拉漏回）。"""
         clauses = split_private_reply(reply)
         if not clauses:
-            return
+            return True
 
         for idx, clause in enumerate(clauses):
-            with self._lock:
-                self.ws.send(json.dumps({
-                    "action": "send_msg",
-                    "params": {
-                        "message_type": "private",
-                        "user_id": user_id,
-                        "message": clause,
-                    },
-                    "echo": f"reply_{uuid.uuid4().hex[:8]}",
-                }, ensure_ascii=False))
+            ok = self._safe_send({
+                "action": "send_msg",
+                "params": {
+                    "message_type": "private",
+                    "user_id": user_id,
+                    "message": clause,
+                },
+                "echo": f"reply_{uuid.uuid4().hex[:8]}",
+            }, label=f"私聊{user_id} ")
+            if not ok:
+                return False  # 断线：文字未完整送达，不标记已回复
+            if idx < len(clauses) - 1:
+                print(f"[QQBridge] → 私聊 {user_id} 第{idx+1}/{len(clauses)}句: {clause[:30]}...")
+                time.sleep(_PRIVATE_SEND_INTERVAL[0] + (_PRIVATE_SEND_INTERVAL[1] - _PRIVATE_SEND_INTERVAL[0]) * 0.3)
+            else:
                 print(f"[QQBridge] → 私聊 {user_id} 第{idx+1}/{len(clauses)}句: {clause[:30]}...")
 
-            # 句间间隔（模拟打字，最后一句后不需要等待）
-            if idx < len(clauses) - 1:
-                time.sleep(_PRIVATE_SEND_INTERVAL[0] + (_PRIVATE_SEND_INTERVAL[1] - _PRIVATE_SEND_INTERVAL[0]) * 0.3)
-
-        # 表情包（最后一条文字后发送，0~2 个）
+        # 表情包（最后一条文字后发送，0~2 个；失败不影响"已回复"判定）
         for sticker in (stickers or []):
             path = get_sticker_path(sticker)
             if path:
-                send_image(self.ws, path, "private", user_id, self.self_id)
+                try:
+                    send_image(self.ws, path, "private", user_id, self.self_id)
+                except Exception:
+                    pass
 
         # 语音（可选）
         if self.cfg["send_voice"]:
-            self._send_voice(reply, "private", user_id)
+            try:
+                self._send_voice(reply, "private", user_id)
+            except Exception:
+                pass
+        return True
 
     def _send_group_reply(self, reply, stickers, user_id, group_id):
-        """群聊回复：一次性发送完整回复 + 可选表情包(0~2个)/语音"""
+        """群聊回复：一次性发送完整回复 + 可选表情包(0~2个)/语音。
+        返回 True = 发送成功；False = 断线/失败。"""
         # 群聊回复时加 @ 提问者（一次性发送）
         at_msg = f"[CQ:at,qq={user_id}] {reply}"
-        with self._lock:
-            self.ws.send(json.dumps({
-                "action": "send_msg",
-                "params": {
-                    "message_type": "group",
-                    "group_id": group_id,
-                    "message": at_msg,
-                },
-                "echo": f"reply_{uuid.uuid4().hex[:8]}",
-            }, ensure_ascii=False))
+        ok = self._safe_send({
+            "action": "send_msg",
+            "params": {
+                "message_type": "group",
+                "group_id": group_id,
+                "message": at_msg,
+            },
+            "echo": f"reply_{uuid.uuid4().hex[:8]}",
+        }, label=f"群{group_id} ")
+        if ok:
+            print(f"[QQBridge] → 群 {group_id} 回复: {reply[:40]}...")
+        else:
+            return False
         for sticker in (stickers or []):
             path = get_sticker_path(sticker)
             if path:
-                send_image(self.ws, path, "group", group_id, self.self_id)
+                try:
+                    send_image(self.ws, path, "group", group_id, self.self_id)
+                except Exception:
+                    pass
         if self.cfg["send_voice"]:
-            self._send_voice(reply, "group", group_id)
+            try:
+                self._send_voice(reply, "group", group_id)
+            except Exception:
+                pass
+        return True
 
     def _send_voice(self, text, message_type, target_id):
         """合成语音并发送（F5-TTS；服务未就绪自动跳过）"""

@@ -32,8 +32,14 @@ def ollama_post(name: str, prompt: dict):
         if len(prompt_str) > 120:
             prompt_str = prompt_str[:100] + "...(truncated)"
         print(f"[{now_time()}] [{name}] Prompt:{prompt_str}")
-    reply = requests.post(ollama_url, json={"prompt": prompt, "headers": headers})
-    reply = reply.json()
+    try:
+        # 显式超时：本地 Ollama 生成可能较慢，但绝不能无限挂起
+        reply = requests.post(ollama_url, json={"prompt": prompt, "headers": headers},
+                              timeout=(15, 300))
+        reply = reply.json()
+    except Exception as e:
+        print(f"[{now_time()}] [{name}] ⚠ 请求失败: {e}")
+        return ""
     reply = reply.get("response", "")
     if "<think>" in reply:
         reply = reply.split("</think>")[-1].strip()
@@ -118,8 +124,21 @@ def qwen3_lora(history, user_input, role):
     else:
         messages.append({"role": role, "content": user_input})
     print(f"[{now_time()}] [qwen3-lora] Prompt:{messages}")
-    reply = requests.post(qwen3_lora_url, json={"history": messages})
-    reply = reply.json()
+    try:
+        # 首次加载 LoRA 模型可能很慢（分钟级），给足超时但避免无限挂起
+        reply = requests.post(qwen3_lora_url, json={"history": messages},
+                              timeout=(15, 600))
+        data = reply.json()
+    except Exception as e:
+        print(f"[{now_time()}] [qwen3-lora] ⚠ 请求失败: {e}")
+        data = None
+    # 兼容返回结构：接口直接回文本时 FastAPI 会包成 JSON 字符串/对象，防御处理
+    if data is None:
+        reply = ""
+    elif isinstance(data, dict):
+        reply = str(data.get("response") or data.get("content") or data.get("reply") or "")
+    else:
+        reply = str(data)
     if "<think>" in reply:
         reply = reply.split("</think>")[-1].strip()  # 取思考之后的部分
     history.append({"role": "assistant", "content": reply})  # 加入历史
@@ -329,7 +348,13 @@ def gpt_sovits_tts(sentence: str, emotion: str, aux_ref_audio_paths: list = []):
         "super_sampling": False
     }
 
-    reply = requests.post(gpt_sovits_tts_url, json={"params": params})
+    try:
+        # 显式超时：TTS 合成可能较慢（音频生成），但绝不能无限挂起阻塞线程
+        reply = requests.post(gpt_sovits_tts_url, json={"params": params},
+                              timeout=(15, 300))
+    except Exception as e:
+        print(f"[{now_time()}] [gpt-sovits-tts] ⚠ 请求失败（跳过语音）: {e}")
+        return None
 
     # 判定返回是否为音频，否则打印错误与详细信息并跳过写入
     content_type = reply.headers.get("Content-Type", "")

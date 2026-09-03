@@ -23,6 +23,7 @@ import hashlib
 import json
 import os
 import random
+import time
 import uuid
 
 import requests
@@ -36,7 +37,7 @@ CHANNEL_VERSION = "2.4.6"
 # uint32: major<<16 | minor<<8 | patch → 2.4.6 = 0x00020406 = 132102
 ILINK_APP_CLIENT_VERSION = str((2 << 16) | (4 << 8) | 6)
 FIXED_BASE_URL = "https://ilinkai.weixin.qq.com"
-DEFAULT_BOT_AGENT = "AIpet/1.14"
+DEFAULT_BOT_AGENT = "AIpet/1.15"
 
 # 消息项类型（官方 types.js）
 ITEM_TEXT = 1
@@ -86,10 +87,13 @@ def _load_json(path, default):
 
 
 def _save_json(path, data):
+    """原子写：临时文件 + os.replace，防止进程被杀时凭据/游标 JSON 写半截损坏"""
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
     except Exception:
         pass
 
@@ -123,10 +127,13 @@ def load_sync_buf():
 
 
 def save_sync_buf(buf):
+    """原子写游标：临时文件 + os.replace（游标损坏 = 消息重复拉取，比丢失好但要避免半截）"""
     try:
         os.makedirs(os.path.dirname(SYNC_BUF_FILE), exist_ok=True)
-        with open(SYNC_BUF_FILE, "w", encoding="utf-8") as f:
+        tmp = SYNC_BUF_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
             f.write(buf or "")
+        os.replace(tmp, SYNC_BUF_FILE)
     except Exception:
         pass
 
@@ -170,11 +177,30 @@ def _post_headers(token=""):
     return h
 
 
+def _sanitize_ilink_host(url):
+    """域名白名单：只允许 weixin.qq.com 及其子域，否则回退官方默认。
+
+    防 SSRF/防乱连：base_url 可能来自服务器登录下发（redirect），若凭据文件被改或
+    响应异常 → 长轮询与发送会连到任意主机（token 也就发过去了）。Android
+    WeixinSender.sanitizeIlinkHost 同款做法。
+    """
+    host = (url or "").strip().rstrip("/")
+    try:
+        import urllib.parse as up
+        h = (up.urlparse(host).hostname or "").lower()
+    except Exception:
+        h = ""
+    if h == "weixin.qq.com" or h.endswith(".weixin.qq.com"):
+        return host
+    return FIXED_BASE_URL
+
+
 class ILinkClient:
     """iLink 已登录客户端：长轮询 + 发消息"""
 
     def __init__(self, base_url, token, bot_agent=DEFAULT_BOT_AGENT):
-        self.base_url = (base_url or FIXED_BASE_URL).rstrip("/")
+        # base_url 过域名白名单（登录 redirect 下发的服务器也必须是 weixin.qq.com 系）
+        self.base_url = _sanitize_ilink_host(base_url or FIXED_BASE_URL)
         self.token = token or ""
         self.bot_agent = bot_agent
 
@@ -384,6 +410,42 @@ def poll_qrcode_status(qrcode, base_url=FIXED_BASE_URL, verify_code="", timeout=
         url += f"&verify_code={verify_code}"
     r = requests.get(url, headers=_common_headers(), timeout=timeout)
     return r.json()
+
+
+def try_token_reuse(creds, attempts=2):
+    """带旧 token 免扫续期：成功返回新凭据 dict，失败返回 None（约 10s 内定性）。
+
+    原理（官方 login-qr.js / Android NativeEngine.tryTokenReuse 同款）：
+    -14（token 过期）后，用旧 token 调 get_bot_qrcode 的 local_token_list 通道
+    （官方语义：已有凭据可免扫直接复用），再轮询 qrcode_status：
+    confirmed → 服务端直接下发新 token（无感续期）；否则续期不可行。
+    """
+    if not creds or not creds.get("token"):
+        return None
+    qr = fetch_qrcode(local_tokens=[creds.get("token")])
+    qrcode = (qr or {}).get("qrcode")
+    if not qrcode:
+        return None
+    base = (creds.get("baseurl") or FIXED_BASE_URL)
+    # 域名白名单：续期轮询目标同样只允许 weixin.qq.com 系
+    base = _sanitize_ilink_host(base)
+    for _ in range(max(1, int(attempts))):
+        try:
+            st = poll_qrcode_status(qrcode, base_url=base, timeout=10)
+        except Exception:
+            continue
+        s = (st or {}).get("status", "")
+        if s == "confirmed" and st.get("bot_token"):
+            return {
+                "token": st["bot_token"],
+                "bot_id": st.get("ilink_bot_id") or creds.get("bot_id", ""),
+                "user_id": st.get("ilink_user_id") or creds.get("user_id", ""),
+                "baseurl": st.get("baseurl") or base,
+            }
+        if s not in ("wait", "scaned"):  # expired/need_verifycode/... → 免扫不可行
+            return None
+        time.sleep(1)
+    return None
 
 
 def parse_text_from_items(item_list):

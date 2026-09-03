@@ -176,11 +176,51 @@ def _login_flow():
         time.sleep(2)
 
 
+def _cleanup_tmp_images():
+    """启动时清理 tmp/ 残留（保留当天）：微信图片用完即删，但异常退出会残留；
+    同时清理原子写遗留的 *.tmp（wechat_*.json.tmp 等）。"""
+    try:
+        import glob
+        removed = 0
+        # 1) 微信图片残留（tmp/wechat_img_*.jpg）
+        tmp_dir = data_path("tmp")
+        if os.path.isdir(tmp_dir):
+            import datetime
+            today = datetime.date.today()
+            for fn in os.listdir(tmp_dir):
+                if not fn.startswith("wechat_img_"):
+                    continue
+                p = os.path.join(tmp_dir, fn)
+                try:
+                    mtime = datetime.date.fromtimestamp(os.path.getmtime(p))
+                except Exception:
+                    mtime = None
+                if mtime is None or mtime < today:
+                    os.remove(p)
+                    removed += 1
+        # 2) 原子写遗留 *.tmp（正常流程 os.replace 会清掉，崩溃/断电可能残留）
+        data_dir = data_path("data")
+        if os.path.isdir(data_dir):
+            for p in glob.glob(os.path.join(data_dir, "wechat_*.json.tmp")) + \
+                     glob.glob(os.path.join(data_dir, "wechat_*.txt.tmp")):
+                try:
+                    os.remove(p)
+                    removed += 1
+                except Exception:
+                    pass
+        if removed:
+            print(f"[WeChatBot] 🧹 已清理 {removed} 个残留文件（tmp/ 图片 + 原子写 .tmp）")
+    except Exception as e:
+        print(f"[WeChatBot] ⚠ tmp 清理失败: {e}")
+
+
 def main():
     cfg = get_config("./config.json")
     if str(cfg.get("wechat_enabled", "false")).lower() != "true":
         print("[WeChatBot] wechat_enabled=false，微信桌宠未启用。可在 config.json 中开启。")
         return
+
+    _cleanup_tmp_images()
 
     from wechat.ilink_client import load_credentials
     creds = load_credentials()
@@ -197,7 +237,7 @@ def main():
 
     bridge = WeChatBridge(
         owner_id=str(cfg.get("wechat_owner_id", "") or "").strip(),
-        bot_agent=str(cfg.get("wechat_bot_agent", "") or "AIpet/1.14").strip(),
+        bot_agent=str(cfg.get("wechat_bot_agent", "") or "AIpet/1.15").strip(),
         send_voice=send_voice,
     )
     print("[WeChatBot] 提示：对方发来第一条消息后，日志会显示 from_user_id（xxx@im.wechat），"

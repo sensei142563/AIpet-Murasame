@@ -496,8 +496,13 @@ class PCLMainWindow(QWidget):
         self.face_page = PCLFaceManager()
         self.stack.addWidget(self.face_page)
 
-        # 记忆管理页（分仓记忆 + 共享记忆清理）
+        # 记忆管理页（分仓记忆 + 共享记忆清理 + 微信登录入口）
         self.memory_page = PCLMemoryManager()
+        # 记忆页「微信登录」入口 → 主窗口统一执行清凭据+重启扫码
+        try:
+            self.memory_page.wechat_relogin_requested.connect(self._on_wechat_relogin_clicked)
+        except Exception:
+            pass
         self.stack.addWidget(self.memory_page)
 
         # 桌宠管理页（多桌宠：设为活动/添加/删除/打开文件夹）
@@ -869,6 +874,51 @@ class PCLMainWindow(QWidget):
             return
         self._kill_process(self._wechat_process)
         self._wechat_process = None
+
+    def _on_wechat_relogin_clicked(self):
+        """手动重新登录微信：停进程 → 清本地凭据/游标/待处理收件箱 → 重启 run_wechat 走扫码。
+
+        适用：手机端换绑/登出后电脑版仍显示已连接（旧凭据作废）；
+        或 token 失效需重新扫码时，不必手动去删 data/wechat_credentials.json。
+        """
+        base = _app_base_dir()
+        py = _find_python(base)
+        if not py:
+            self._show_config_dialog("未找到 Python 解释器")
+            return
+        # 1. 关闭正在运行的微信进程（若在跑）
+        if self._wechat_process is not None:
+            self._kill_wechat_process()
+            self._wechat_pet_id = None
+            self._wechat_btn_styled(False)
+            print("[PCL] 已关闭微信 AIpet，准备重新登录")
+        # 2. 清除本地登录态（凭据 / 游标 / context_token / 待处理收件箱 / 旧二维码）
+        from tool.paths import data_path
+        cleared = []
+        for rel in ("wechat_credentials.json", "wechat_sync_buf.txt",
+                    "wechat_context_tokens.json", "wechat_pending.json",
+                    "wechat_qrcode.png"):
+            p = data_path("data", rel)
+            try:
+                if os.path.exists(p):
+                    os.remove(p)
+                    cleared.append(rel)
+            except Exception as e:
+                print(f"[PCL] 清除 {rel} 失败: {e}")
+        print(f"[PCL] 已清除微信登录态：{', '.join(cleared) if cleared else '无残留'}")
+        # 3. 重启 → run_wechat 检测无凭据 → 自动弹二维码扫码登录
+        try:
+            from pets.pet_registry import get_active_pet_id
+            self._wechat_pet_id = get_active_pet_id()
+        except Exception:
+            self._wechat_pet_id = None
+        self._wechat_process = subprocess.Popen(
+            [py, os.path.join(base, "run_wechat.py")],
+            cwd=base,
+            creationflags=subprocess.CREATE_NEW_CONSOLE
+        )
+        self._wechat_btn_styled(True)
+        print("[PCL] 微信 AIpet 已重启（新控制台将弹出二维码，请用手机扫码登录）")
 
     def _wechat_btn_styled(self, running):
         """微信按钮样式切换（启动绿 / 关闭红）"""

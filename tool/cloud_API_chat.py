@@ -26,8 +26,18 @@ def post(name: str, payload, api_key: str = ""):
         'Content-Type': 'application/json',
         'Authorization': 'Bearer ' + api_key
     }
-    resp = requests.post(url, json={"payload": payload, "headers": headers})
-    resp = resp.json()
+    try:
+        # 显式超时：防止云端/代理挂起导致线程永不结束（桌面端非守护线程会卡住退出）
+        resp = requests.post(url, json={"payload": payload, "headers": headers},
+                             timeout=(15, 180))
+    except Exception as e:
+        print(f"[{now_time()}] [{name}] ⚠ 请求失败: {e}")
+        return ""
+    try:
+        resp = resp.json()
+    except Exception as e:
+        print(f"[{now_time()}] [{name}] ⚠ 响应解析失败: {e}")
+        return ""
     reply = ""
     if "choices" in resp:
         reply = resp['choices'][0]['message']['content']
@@ -265,8 +275,17 @@ def cloud_vl(image_path: str):
         'Content-Type': 'application/json',
         'Authorization': 'Bearer ' + vcfg["api_key"]
     }
-    resp = requests.post(url, json={"payload": payload, "headers": headers})
-    resp = resp.json()
+    try:
+        resp = requests.post(url, json={"payload": payload, "headers": headers},
+                             timeout=(15, 180))
+    except Exception as e:
+        print(f"[{now_time()}] [qwen-vl] ⚠ 请求失败: {e}")
+        return ""
+    try:
+        resp = resp.json()
+    except Exception as e:
+        print(f"[{now_time()}] [qwen-vl] ⚠ 响应解析失败: {e}")
+        return ""
     reply = ""
     if "choices" in resp:
         reply = resp['choices'][0]['message']['content']

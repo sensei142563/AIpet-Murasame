@@ -34,6 +34,279 @@
 
 ---
 
+## 🚀 精简易用教程（新手从这里开始）
+
+> 三步把「丛雨 / 诺瓦」桌宠跑起来。绿色版最省事，开源版完全一致，只是要自己装环境。
+
+### 1️⃣ 下载并解压
+| 版本 | 怎么拿 |
+|---|---|
+| **绿色版（推荐）** | GitHub **Releases** 页下载分卷（`.zip`+`.z01`+`.z02`，用 WinRAR/7-Zip 打开 `.zip` 自动合并解压）→ 得到 `AIpet-Murasame/` 完整目录（已含 F5-TTS + NapCat） |
+| 开源版 | 仓库 **Code → Download ZIP**，或 `git clone https://github.com/sensei142563/AIpet-Murasame.git` |
+
+⚠️ 解压/放置路径**不要有中文、括号、感叹号**等特殊符号（否则可能闪退）。
+
+### 2️⃣ 装环境 + 填 API Key
+- 双击 **`install.bat`**（自动建 venv + 装依赖）。
+- 打开 **`config.json`**，把三个关键项填好（用记事本即可）：
+  - `APIKEY.qwen` 或 `APIKEY.deepseek` —— 对话模型 Key（[Qwen 新用户有百万 token 免费额度](https://bailian.console.aliyun.com/)，[DeepSeek](https://platform.deepseek.com/usage)）
+  - `model_type` —— `"qwen"`（推荐）或 `"deepseek"`
+  - `qq_owner_id` —— 你的大号 QQ 号（QQ 共享记忆 + `/clear` 权限用）
+
+### 3️⃣ 启动
+| 想要 | 双击 | 说明 |
+|---|---|---|
+| 🐾 桌面桌宠 | `启动桌宠.bat` | 即本机上的 AI 少女（对话/立绘/Live2D/摸头） |
+| 💬 QQ 聊天 | `启动QQ.bat` | 用 QQ 小号聊天，**桌宠不开也能用** |
+| 💬 微信聊天 | `启动微信.bat` | 用微信 ClawBot 通道聊天 |
+
+> 绿色版首次启动会自动生成空白 `config.json`（隐私考虑），填好你的 API Key 再用。
+
+### 🎙 想要语音？先放下面的模型（重要）
+- **长文本中文语音（F5-TTS）**：绿色版已内置，无需放。
+- **短文本日语语音（GPT-SoVITS）**：需**自行下载整合包** → 解压到**项目根目录**（即和 `run.py`、`run_launcher.py` 同一层，得到一层 `GPT-SoVITS/` 文件夹）。
+  - 下载地址：https://www.yuque.com/baicaigongchang1145haoyuangong/ib3g1e/dkxgpiy9zb96hob4
+  - ⚠️ **放错位置的基本都是没放对**：整合包要放在项目根，不是 `pets/` 里，也不是某个子目录下。`tts_type="local"` 才会走它，否则静默降级。
+  - A 卡/N 卡都行，**别把整合包重复放多层**（`GPT-SoVITS/GPT-SoVITS/` 就是放错了）。放完双击 `启动桌宠.bat` 即生效。
+
+### 💬 QQ 聊天：NapCat 就先配好（最易踩坑）
+1. 运行 `NapCat.Shell.Windows.OneKey\start_napcat.bat` → 用**小号**手机 QQ 扫码。
+2. 等控制台出现 **`WebSocket服务: 127.0.0.1:3001 已启动`**（没看到这行就别开 QQ，会 `Connection refused`）。
+3. 再双击 `启动QQ.bat`。程序会**自动等待 NapCat 就绪 + 自动重连**，补启动后不用重启。
+
+> 📱 **安卓版**：如果想在手机上用，看 [chatter 安卓发行版](https://github.com/GaiusMinerviusSolmortis/chatter/releases/tag/v1.1)（纯 Kotlin 移植，Android 经验已回灌到本桌面版）。
+
+---
+## 🚀 快速开始
+
+> 详细安装教程见视频：[AIpet 多角色桌宠安装教程](https://www.bilibili.com/video/BV1Aybe6GEHP/?vd_source=c2cadbf819021ce34cdfc6948ac18d63)
+
+### 方式一：一键安装（推荐，Windows）
+
+1. **下载项目文件**：Code > Download ZIP，解压后放到需要的位置（路径不要有特殊符号）。
+2. **双击 `install.bat`**：自动完成以下所有步骤：
+   - 检测 Python 版本（需 ≥ 3.10）
+   - 创建项目本地虚拟环境 `runtime/venv`
+   - 安装全部依赖（含 CPU 版 PyTorch，云端对话必需）
+   - 自动生成 `config.json`（从 `config.example.json` 复制）
+3. **编辑 `config.json`**：填入 API Key（见下方第 4 步）。
+4. **双击 `启动桌宠.bat`** 开始使用；QQ 功能双击 `启动QQ.bat`。
+
+> 之后日常使用只需双击 `启动桌宠.bat` 或 `启动QQ.bat`，无需每次重装。
+
+> ⚠️ **绿色版首次启动**：为保护隐私，绿色版**不带你的 config.json**（含 API Key）。首次打开 PCL 会自动从 `config.example.json` 生成一份空白的 `config.json`（在绿色版目录内），请用记事本打开填入**你自己的** API Key 后再使用。`data/` 与 `face_shibie/`（人脸）同样会在绿色版目录内独立生成，与源码版各自独立，互不影响。
+
+> 🐾 **绿色版随附角色**：丛雨 + 诺瓦 2 个示范角色；你自己放到 `pets/` 的角色包同样生效。
+
+> 🗜️ **GitHub Releases 分卷下载说明**：
+> 完整绿色版在 GitHub Releases 以**分卷压缩**发布（`.zip` + `.z01` + `.z02`，因单文件超 2GB 上限）。
+> - **必须下载全部 3 个分卷**到同一文件夹（缺任何一个都无法解压）
+> - 用 **WinRAR** 或 **7-Zip** 打开 `.zip` 分卷，会自动合并后续 `.z01/.z02` 解压
+> - 解压后得到 `AIpet-Murasame/` 完整目录（含 F5-TTS 模型 + NapCat）
+> - 也可选择网盘单文件版（一个 zip 解压即用，无需合并）
+
+---
+
+### 方式二：手动安装（高级）
+
+#### 1. 下载项目文件
+Code > Download ZIP，解压后放到需要的位置（路径不要有特殊符号）。
+
+#### 2. 安装依赖
+```bash
+pip install -r requirements.txt
+```
+
+> 额外需要安装 ArcFace 依赖 + onnxruntime-gpu（GPU 加速）：
+```bash
+pip install insightface
+pip install onnxruntime-gpu==1.23.2
+```
+> 首次使用需下载 ArcFace ONNX 模型（约 100MB），脚本会自动下载到 `~/.insightface/models/buffalo_l/`
+
+#### 3. 初始化配置（复制模板）
+
+首次使用，先把脱敏模板复制成真实配置：
+```bash
+# Windows
+copy config.example.json config.json
+
+# 或 Linux/macOS
+cp config.example.json config.json
+```
+`config.json` 已被 `.gitignore` 忽略（不会上传泄露），请在其中填入你自己的信息。
+
+#### 4. 获取 API Key
+
+| 服务 | 链接 | 说明 |
+|------|------|------|
+| DeepSeek | https://platform.deepseek.com/usage | 注册后充值创建 Key |
+| Qwen（推荐） | https://bailian.console.aliyun.com/ | 新用户有 100 万 tokens 免费额度，支持图像识别 |
+
+填入 `config.json` 中的 `APIKEY` 字段。
+
+#### 5. 本地 TTS（可选）
+
+- **GPT-SoVITS**（短文本日语）：下载整合包 https://www.yuque.com/baicaigongchang1145haoyuangong/ib3g1e/dkxgpiy9zb96hob4 ，放入项目根目录。
+- **F5-TTS**（长文本中文）：模型已内置在 `F5-TTS_Models/`，含 `F5TTS_v1_Base` 权重 + `vocos-mel-24khz` 声码器。
+
+#### 6. 一键启动
+```bash
+python run_launcher.py
+```
+
+---
+## 📥 下载与使用：绿色版 vs 开源版
+
+| | 绿色版（新手推荐） | 开源版（GitHub 源码） |
+|---|---|---|
+| 是什么 | 打包好的完整目录：启动器 EXE + 桌宠源码 + 语音模型，解压即用 | 完整源代码，环境自己装 |
+| 去哪下 | 仓库 **Releases** 页下载（分卷压缩，合并解压，见下方说明） | 仓库首页 **Code → Download ZIP**，或 `git clone https://github.com/sensei142563/AIpet-Murasame.git` |
+| 首次使用 | 解压 → 双击 `install.bat` → 填 `config.json` 的 API Key | 解压 → 双击 `install.bat` → 填 `config.json` 的 API Key |
+| 日常使用 | 双击 `启动桌宠.bat`（桌宠）/ `启动QQ.bat`（QQ） | 同左，或 `python run_launcher.py` |
+| 适合谁 | 想直接玩、不想折腾环境的人 | 想改代码、做新角色包、二次开发的人 |
+
+两个版本功能完全一致，差别只在「环境是否已打包」。绿色版**不含你的 config.json**（API Key 隐私），首次运行会自动生成空白配置，自己填好即可。
+
+---
+## 💬 QQ 聊天
+
+让丛雨通过 QQ 小号与你聊天，**桌宠不开也能用**。
+
+### 准备 NapCat
+
+1. 下载 NapCat Releases 的 **`NapCat.Shell.Windows.OneKey.zip`**：https://github.com/NapNeko/NapCatQQ/releases
+2. 解压后放置到项目根目录 `NapCat.Shell.Windows.OneKey/`
+3. **下载 `NapCat.Shell.zip`**（运行时本体），解压后放入 `NapCat.Shell.Windows.OneKey/NapCat/`
+4. **下载 QQ Windows 版安装程序**（如 `QQ_9.9.33_x64.exe`），放入 `NapCat.Shell.Windows.OneKey/`
+5. 运行 `NapCat.Shell.Windows.OneKey/bootmain/napcat.bat` 首次自动解压（若 404 则手动用 7z 解压 QQ 安装包到 `bootmain/`，QQ.exe 需在 `bootmain/QQ.exe`）
+6. 运行 **`NapCat.Shell.Windows.OneKey/start_napcat.bat`**（专用启动脚本，无需注册表）→ 弹出二维码 → 手机 QQ 扫码登录小号
+7. 确认控制台出现 `WebSocket服务: 127.0.0.1:3001 已启动`
+
+### 启动 QQ 聊天
+
+- **方式一（PCL）**：`config.json` 中 `qq_enabled="true"` → 启动器出现「💬 启动 QQ AIpet」按钮
+- **方式二（命令行）**：
+  ```bash
+  python run_qq.py
+  ```
+
+### 使用说明
+
+| 场景 | 行为 |
+|------|------|
+| 私聊 | 直接回复（AI 人设 = 长文本 prompt） |
+| 群聊 | 仅 **@丛雨** 时回复 |
+| 表情包 | AI 根据语境从 `biaoqingbao/` 选 gif 发出 |
+| 语音消息 | `qq_send_voice="true"` 时 F5-TTS 合成语音（需 F5-TTS 服务 9881 运行） |
+| 记忆 | 大号私聊与桌宠共享当前角色长文本记忆；其他私聊/群聊按会话分仓（见下） |
+
+**多角色**：QQ 服务的是 PCL 里选中的**活动角色**——人设、表情包、语音、记忆都来自该角色包；切换角色后需重启 QQ 生效。
+
+> ### 🔧 QQ 连不上 / 连上就断？先查这 3 步（新手高频）
+> 1. **NapCat 必须先启动并扫码**：运行 `NapCat.Shell.Windows.OneKey\start_napcat.bat`，用**小号**手机 QQ 扫弹窗二维码，等控制台出现 `WebSocket服务: 127.0.0.1:3001 已启动`。**没看到这行就别启动 QQ**，否则必然 `Connection refused` / `积极拒绝`。
+> 2. **端口必须 3001**：`config.json` 的 `qq_napcat_ws` 默认 `ws://127.0.0.1:3001`，**不要改**。NapCat 的 onebot 正向 WS 服务默认就在这里；改了要同时改 NapCat 的 `NapCat\config\onebot11_<QQ号>.json`。
+> 3. **本程序会自动重试 + 自动重连**：即便启动时 NapCat 还没就绪，`run_qq.py` 也会**等待就绪再连**，且断开后**每 5~30 秒自动重连**（不再一断就退出）。如果你把 NapCat 补启动起来，QQ 窗口会自动恢复连接，无需重启。
+
+> ### 🔇 语音没声音？
+> 语音消息走 **F5-TTS**（端口 9881）。若日志出现 `F5-TTS 服务未运行...将自动跳过`，说明服务没起来：
+> - 确认项目里 `F5-TTS_Models/F5TTS_v1_Base` 与 `vocos-mel-24khz` 都存在（绿色版已内置，源码版需自备）
+> - `qq_send_voice="true"` 才会触发语音；服务就绪时会自动拉起
+> - 首次合成模型加载约 10-45 秒，静音属正常；一直无声可就运行 `restart_longtext.bat`（或删掉 `data/qq_f5tts.pid` 后重启）
+
+**离线消息补拉（默认开启）**：`qq_offline_enable` 默认 `"true"`，启动时自动补回离线期间的消息：
+- 窗口 = 上次启动时间往前推 **24 小时**（隔一天再开也能补回；首次运行只补最近 10 分钟防刷历史）
+- 每条消息按 message_id 去重，**一生只回一次**
+- 状态存于 `data/qq_offline_state.json`（时间基线）与 `data/qq_processed_ids.json`（已处理 ID）
+- ⚠️ 该功能依赖 NapCat 的 `get_friend_msg_history` 接口（多数 NapCat 默认支持）。若你的 NapCat 不支持
+  导致启动变慢/日志出现 `get_friend_msg_history` 超时——**到 PCL 设置 → QQ 配置 →「QQ 离线补拉」关掉即可**，
+  不影响正常收发消息。
+
+### 表情包
+- 放入当前活动角色的 `pets/<id>/biaoqingbao/` 目录（**gif/png/jpg**，avif 不支持发送），文件名即情感标签
+- AI 会从文件名列表中选最贴合语境的 1 张随回复发出
+- 丛雨内置 20 张：抱抱/鄙视/鞭尸/馋/嘲笑/吃薯片/否定/尴尬/喝奶茶/肯定/哭哭/你认真的？/千恋万花启动/求收养/撒娇/思考/听不懂/偷看你/威胁/无语
+
+---
+## 💬 微信 ClawBot 聊天（官方 iLink 协议，无 hook 无封号）
+
+通过微信官方的 **ClawBot 插件通道**（腾讯 iLink 协议，`ilinkai.weixin.qq.com`）让桌宠在微信里聊天——与 QQ 一样跟随**活动角色**（人设 / 记忆分仓）。协议实现为官方插件 `@tencent-weixin/openclaw-weixin`（MIT）的 Python 移植，只依赖 `requests` + `qrcode`。
+
+### 准备（一次性）
+1. 微信更新到支持 ClawBot 的版本（8.0.70+），在「我 → 设置 → 插件」里开启 **ClawBot**
+2. `config.json` 里 `wechat_enabled="true"`
+3. 双击 **`启动微信.bat`**（或 `python run_wechat.py`）→ 自动弹出二维码 → 手机微信扫码授权
+4. 凭据（bot_token）保存在本地 `data/wechat_credentials.json`，**重启免扫码**；token 约 24 小时过期，过期后删除该文件重新扫码即可
+
+### 使用
+- 在微信里给「**微信 ClawBot**」联系人发消息 → 桌宠按活动角色人设回复
+- **发图片 → 识图回复**（复用 qwen3-vl-plus）；**AI 选了表情包 → 回表情图**（复用角色 `biaoqingbao/`）
+- 收到**语音** → 使用微信官方的语音转文字（`voice_item.text`）直接回复
+- ❌ **发语音暂不支持**：官方与社区插件均未实现「发送语音」（协议无参考实现），`wechat_send_voice` 开启时会明确跳过
+- 白名单：把日志里显示的 `from_user_id`（形如 `xxx@im.wechat`）填进 `config.json` 的 `wechat_owner_id`，只回主人
+- ⚠️ 已知限制：表情包 **GIF 会变成静态图**（ClawBot 通道对动图的平台限制，官方插件同样如此）
+
+### 协议边界（官方约束）
+- 只支持**私聊**，无历史消息 API；同一时刻只能一个进程轮询
+- 反刷限制：长回复自动**合并为单条**发送（34 秒 18 条会触发限流）
+- 腾讯保留随时调整/终止该功能的权利；请勿群发、勿做营销用途
+
+---
+## 🖱️ 交互方式
+
+### 桌宠窗口
+| 操作 | 效果 |
+|------|------|
+| 点击下半身 | 进入输入模式，键盘输入文字后按回车发送 |
+| 按住头部左右晃动 | 摸头互动 |
+| 鼠标中键拖动 | 移动桌宠位置 |
+| 长按 **Shift 2秒** | 切换 2D 立绘 / Live2D 模式 |
+| 长按 **Ctrl 2秒** | 摄像头拍照 + 人脸识别 + AI 搭话 |
+| 长按 **Alt 2秒** | 切换长文本输出模式（流式中文 TTS） |
+| 长按 **CapsLock 2秒** | 语音输入（需在 config 中开启） |
+
+### 系统托盘
+右键托盘图标可快速切换：
+- **Do Not Disturb** — 勿扰模式（停止自动搭话）
+- **Screenshot** — 屏幕识别开关
+- **Clear History** — 清除对话记忆
+- **Exit** — 退出
+
+### PCL 启动器
+运行 `python run_launcher.py` 打开图形化启动器。功能与多角色操作见上方教程**第 4 节**；启动桌宠后底部会出现功能按钮：按住说话、屏幕识别、摄像头识别、Live2D 切换、长文本模式。
+
+---
+## 💬 常见问题（安装/环境类）
+
+### 人脸识别不工作 / 回退三哈希
+> **解决**：确保 `insightface`、`onnxruntime-gpu`、`onnx` 已装到**运行桌宠所用的 Python 环境**。验证：
+> ```bash
+> python -c "import onnxruntime; print(onnxruntime.get_available_providers())"
+> ```
+> 期望输出包含 `CUDAExecutionProvider`。
+
+### GPU 不可用
+> 有显卡但提示 `Warning: CUDA is not available, set device to CPU.`
+> **解决**：更新显卡驱动，确保 CUDA 与 PyTorch 匹配。
+
+### F5-TTS 长文本不发声
+> **解决**：确认 `longtext_enabled="true"`，F5-TTS 服务在 9881 端口运行（`restart_longtext.bat` 可一键重启）。模型首次加载约 10-30 秒。
+
+### SoVITS 响应慢
+> **解决**：下载与显卡对应的版本——50 系列用专用版，40 系及以下用通用版。
+
+### Conda 激活错误
+> **解决**：建议使用 Miniconda 而非完整版，或运行 `conda init`。
+
+### API Key 报错
+> **解决**：检查 API Key 是否有效、余额是否充足；若编码问题，重新保存为 ANSI 编码。
+
+### 路径含特殊符号导致闪退
+> **解决**：确保项目路径中没有中文名、括号、感叹号等特殊符号。
+
+---
+
+### ⭐ 如果觉得有用，请点个 Star！
 ## 🐾 多桌宠架构新手教程
 
 > 一个引擎 + N 个角色包。跟着本教程做，不需要懂代码。
@@ -196,302 +469,9 @@ python debug_live2d.py --pet noir      # 或 murasame / arona / hiyori
 
 ---
 
-## 🆕 最新版本
+## 📦 进阶：功能实现 · 配置 · 版本历史
 
-**V1.14** — 模型可配置化 + 推理等级
-
-### V1.14 变更
-
-- **🎛 模型可配置化**：短文本 / 长文本 / 视觉识别三条链路的模型名独立可配（PCL 设置页可编辑下拉框，或直接改 `config.json` 的 `short_model_name` / `longtext_model_name` / `vision_model_name`）；默认值已迁移到当前主线模型——长文本默认 `deepseek-v4-flash`（`deepseek-chat` 已停用）、短文本 `qwen-plus`、视觉 `qwen3-vl-plus`，并支持 `deepseek-v4-pro` / `qwen3.7-plus` / `deepseek-v4-flash-vision-exp` 等同族切换
-- **🧠 推理等级**：新增全局 `reasoning_level`（`off` / `low` / `high` / `max`，默认 `off` 最省 token）。DeepSeek 完整支持四档（off=关思考，其余映射官方 `reasoning_effort`）；Qwen3 系支持开关两档（off=关思考）；不支持的模型（如 qwen-plus、视觉模型）自动不传参数，避免报错
-- **🔧 顺手修复**：常开摄像头/摄像头识别不再使用已停服的 `qwen-vl-plus`（统一走 `vision_model_name`）；桌面长文本模型的 API Key 跟随配置（之前固定用千问 Key）；`/status` 显示实际模型名，`/switch` 切换族时同步切换模型名
-- **⚠️ 迁移提醒**：`deepseek-chat` / `deepseek-reasoner` 官方已于 2026-07-24 停用，请勿再手动填这两个旧模型名
-
-**V1.13** — 微信 ClawBot 接入 + 一批体验修复
-
-### V1.13 变更
-
-- **💬 微信 ClawBot 接入（官方 iLink 协议）**：零 hook、零封号风险——扫码登录/重启免扫码、私聊文字回复（活动角色人设+分仓记忆）、收图识图（qwen3-vl）、表情包回图、收语音用官方转文字、白名单、连发消息合并（与 QQ 同款调度器）、PCL 启动按钮与设置页
-- **🐛 PCL 记忆清空格式修复**：清除记忆后文件格式错误导致微信/QQ/桌宠全部报错——已修并给读取端加防御
-- **🎭 Live2D 情绪动作**：动作句内定格保持（前倾不点头循环）、句间同情绪不重启、换情绪平滑过渡；四角色表情/动作映射配好（调试器 `debug_live2d.py` 可随时核对）
-- **📝 提示词升级**：丛雨补全个人线/共通线设定（绫/刀魂/人形之身/上学/恋人）并去堆砌；四角色提示词与翻译规则归一（`translate_rules` 按角色配置）
-- **🔒 隐私加固**：PCL 设置页示例 QQ 号/真名/本机路径清除；打包自动排除 NapCat 本机登录数据
-- **⚠️ 平台限制说明**：微信发语音、GIF 动图表情包为 ClawBot 通道不支持（官方/社区插件均未实现），已明确标注
-
-**V1.12.1** — 隐私修复与文档完善
-
-### V1.12.1 变更
-
-- **🔒 隐私修复**：移除设置页示例 QQ 号与使用者名称默认值、启动脚本内硬编码的本机路径
-- **🐛 PCL 桌宠列表修复**：绿色版 exe 内角色列表/提示词/Live2D 下拉为空、源码版多显示本地角色的问题已修复
-- **📖 文档**：新增「绿色版 vs 开源版」下载使用指南；措辞更友好
-
-**V1.12** — 开源发布（GPL-3.0）：仓库与绿色版随附「丛雨 + 诺瓦」两个示范角色
-
-### V1.12 变更
-
-- **📦 开源**：项目以 GPL-3.0 发布；公开仓库为全新单次提交，不含任何隐私数据（config / data / 人脸 / 记忆均已 .gitignore 且从未进入历史）
-- **🐾 示范角色**：仓库/绿色版随附丛雨 + 诺瓦两个示范角色
-- **🙏 致谢**：补充各角色模型与语音素材来源（见「特别感谢」）
-
-**V1.11** — 多桌宠架构（一个引擎 + N 个角色包），详见上方「🐾 多桌宠架构新手教程」
-
-### V1.11 新功能
-
-- **🐾 多桌宠**：一个引擎 + N 个角色包，PCL 选角色即启动对应桌宠与 QQ（随仓库分发丛雨 / 诺瓦 2 个示范角色）
-- **🎭 Live2D 按角色适配**：窗口比例/模型缩放/字号/摸头区域按角色配置；纯 Live2D 角色自动进入 Live2D；文字层点击穿透、对话文字常显
-- **🎨 情绪 → 表情/动作**：回复中的【情绪】标签自动切换 Live2D 表情与动作（含 vtube.json 参数范围提取，修复眨眼/口型幅度）
-- **🎛 双调参方式**：PCL 设置页图形化滑块（点保存生效）+ 桌宠热键（F1 帮助 / F5 保存 / F9 参考线）
-- **📝 PCL 提示词编辑器**：按角色直接编辑短/长文本人设
-- **🛡 丛雨保护与进程互斥**：丛雨不可删除；同时最多一个 AI 桌宠 + 一个 QQ 桌宠
-- **💬 角色包脚手架**：noir 的表情包/短语音(6情绪)/长语音目录已建好，放文件即用（详见教程第 3 节）
-
-**V1.10.2** — 立绘历史污染根治、数据路径统一
-
-### V1.10.x 修复与增强
-
-- **🎨 立绘历史污染根治**：`cloud_portrait` / `ollama_qwen3_portrait` 不再把完整立绘历史（含历史返回的图层 ID）塞进 prompt，改为**只提炼「上次基础人物 ID」**作衣服连贯参考，并加硬约束「严禁使用历史之外/其他服装的 ID」——彻底解决 AI 偶发跨服装返回 ID 后**滚雪球复读**（如 A 立绘反复输出 B 套 `1475`）导致的僵脸/崩溃
-- **🛡 图层文件存在性兜底**：`tool/generate.py` 绘制前对每个图层 ID 检查文件是否存在，缺失则跳过+警告，全缺失返回空画布——未来任何 AI 越界都不会再崩溃
-- **📁 数据路径统一（`tool/paths.py`）**：新增公共基准（exe 模式→exe 旁、源码→项目根），统一 `face_shibie/`、`config.json`、`data/qq_memory/` 路径——**根治 PCL 壳（exe）写入 `_internal/` 导致人脸识别不到主人**的问题
-- **🔓 资源打包修复**：绿色版重新打包，移除 `_internal/` 内错误残留，桌面/QQ 双端稳定运行
-
-### V1.8.0 新功能
-
-- **📋 消息调度器**：离线消息按序补回 + 多人聊天串行不乱 + 私聊消息合并等待（1.5~5 秒随机）
-- **🗂️ 记忆分仓**：大号私聊共享记忆；其他私聊/群聊按会话独立记忆仓（`data/qq_memory/`）
-- **🎙 F5-TTS 自动启动**：单独启动 QQ AIpet 时自动拉起语音服务（9881）
-- **🎭 表情包自主**：AI 根据语境决定发 0~2 个表情包（无需每次强发）
-- **🧹 /clear 指令**：大号私聊发 `/clear` 可清空当前会话记忆
-- **💾 PCL 记忆管理页**：可视化查看/清理各分仓记忆 + 共享记忆
-- **🔧 设置面板增强**：新增"主人 QQ 号（共享记忆）"配置项，统一记忆轮数
-
-**V1.6.0** — QQ 聊天接入（NapCat）、PCL 双启动按钮
-
-### V1.6.0 新功能
-
-- **💬 QQ 聊天**：通过 NapCat（OneBot11）接入 QQ，小号「丛雨」在私聊/群聊 @ 时用 AI 回复（复用长文本人设 + 共享记忆）
-- **🖼️ 表情包**：AI 根据语境从 `biaoqingbao/` 选择 gif 表情随回复发出
-- **🔘 PCL 双启动按钮**：启动器可分别启动「桌宠」和「QQ AIpet」，互不干扰，关闭时一键截断进程
-- **🧠 共享记忆**：QQ 对话与桌宠共用 `long_history.json`（12 轮），同一个"丛雨"两个入口
-- **🤖 长文本模型切换**：长文本对话可在 Qwen 与 DeepSeek 之间切换（`longtext_model`），默认 DeepSeek（更聪明）
-- **👁 QQ 图片识别**：私聊发图 → 丛雨自动识别图片内容并回应（`qq_vision_enabled`，使用 qwen3-vl-plus）
-- **📝 私聊切句**：QQ 私聊回复按标点逐句发送（模拟真人打字节奏），群聊保持一次性发送
-- **▶️ 自动启动 NapCat**：点击「启动 QQ AIpet」自动检测并启动 NapCat（首次需扫码登录）
-- **🎛 PCL 设置面板 QQ 配置**：图形化管理 QQ 开关/表情包/语音/图片识别/群聊
-
-### V1.5.0 新功能
-
-- **📝 长文本输出模式（核心）**：长按 **Alt 2秒** 切换。AI 流式输出 → 标点切句 → F5-TTS 中文语音逐句合成播放 → 打字机文字同步显示。输出内容更丰富、更有情感深度（不限定字数）。
-- **🖥️ 屏幕识别 → 长文本**：长文本模式下定时截图识别。空闲时截图结果走长文本流式回复；输出中自动跳过不打断。
-- **📷 摄像头识别 → 长文本**：长文本模式下摄像头+人脸识别同样接入长文本流式，输出中自动跳过。
-- **🧠 优先级记忆机制**：识别（截图/摄像头/空闲）内容写入记忆带 `priority=high`，仅在**下一轮对话有高权重**强注入（system 级"最近的观察"）；该轮结束后自动降为 `low`，权重≈0。
-- **🎭 Live2D 长文本文字修复**：长文本输出时文字层正确显示在 Live2D 模型上方（与短文本一致）。
-- **⚡ ArcFace GPU 加速**：onnxruntime-gpu 安装到运行环境，人脸识别恢复 CUDA GPU 推理（不再回退三哈希）。
-
-### 历史版本
-- **V1.4.0** — ArcFace 人脸识别、对话人称自适应、PCL 导航页切换修复
-- **V1.3.0** — 摄像头拍照识别（Ctrl 长按）、Live2D 切换（Shift 长按）
-- **V1.2.x** — 屏幕识别、空闲检测、PCL 风格启动器
-
-### 项目指路
-- **安装教程（最新）**: [AIpet 多角色桌宠安装教程](https://www.bilibili.com/video/BV1Aybe6GEHP/?vd_source=c2cadbf819021ce34cdfc6948ac18d63)
-- **演示视频（最新）**: [AIpet 多角色桌宠演示](https://www.bilibili.com/video/BV1Q1bY6QE5M/?vd_source=c2cadbf819021ce34cdfc6948ac18d63)
-- **历史教程视频**:
-  - [丛雨AI桌宠V1.2.0部署教程](https://www.bilibili.com/video/BV1F6ykBwEDu)
-  - [丛雨AI桌宠V1.2.2部署教程](https://www.bilibili.com/video/BV1ghCMBjEKK)
-  - [丛雨AI桌宠V1.3.0部署教程](https://www.bilibili.com/video/BV1iw2XBREpd)
-
----
-
-## 📥 下载与使用：绿色版 vs 开源版
-
-| | 绿色版（新手推荐） | 开源版（GitHub 源码） |
-|---|---|---|
-| 是什么 | 打包好的完整目录：启动器 EXE + 桌宠源码 + 语音模型，解压即用 | 完整源代码，环境自己装 |
-| 去哪下 | 仓库 **Releases** 页下载（分卷压缩，合并解压，见下方说明） | 仓库首页 **Code → Download ZIP**，或 `git clone https://github.com/sensei142563/AIpet-Murasame.git` |
-| 首次使用 | 解压 → 双击 `install.bat` → 填 `config.json` 的 API Key | 解压 → 双击 `install.bat` → 填 `config.json` 的 API Key |
-| 日常使用 | 双击 `启动桌宠.bat`（桌宠）/ `启动QQ.bat`（QQ） | 同左，或 `python run_launcher.py` |
-| 适合谁 | 想直接玩、不想折腾环境的人 | 想改代码、做新角色包、二次开发的人 |
-
-两个版本功能完全一致，差别只在「环境是否已打包」。绿色版**不含你的 config.json**（API Key 隐私），首次运行会自动生成空白配置，自己填好即可。
-
----
-
-## 🚀 快速开始
-
-> 详细安装教程见视频：[AIpet 多角色桌宠安装教程](https://www.bilibili.com/video/BV1Aybe6GEHP/?vd_source=c2cadbf819021ce34cdfc6948ac18d63)
-
-### 方式一：一键安装（推荐，Windows）
-
-1. **下载项目文件**：Code > Download ZIP，解压后放到需要的位置（路径不要有特殊符号）。
-2. **双击 `install.bat`**：自动完成以下所有步骤：
-   - 检测 Python 版本（需 ≥ 3.10）
-   - 创建项目本地虚拟环境 `runtime/venv`
-   - 安装全部依赖（含 CPU 版 PyTorch，云端对话必需）
-   - 自动生成 `config.json`（从 `config.example.json` 复制）
-3. **编辑 `config.json`**：填入 API Key（见下方第 4 步）。
-4. **双击 `启动桌宠.bat`** 开始使用；QQ 功能双击 `启动QQ.bat`。
-
-> 之后日常使用只需双击 `启动桌宠.bat` 或 `启动QQ.bat`，无需每次重装。
-
-> ⚠️ **绿色版首次启动**：为保护隐私，绿色版**不带你的 config.json**（含 API Key）。首次打开 PCL 会自动从 `config.example.json` 生成一份空白的 `config.json`（在绿色版目录内），请用记事本打开填入**你自己的** API Key 后再使用。`data/` 与 `face_shibie/`（人脸）同样会在绿色版目录内独立生成，与源码版各自独立，互不影响。
-
-> 🐾 **绿色版随附角色**：丛雨 + 诺瓦 2 个示范角色；你自己放到 `pets/` 的角色包同样生效。
-
-> 🗜️ **GitHub Releases 分卷下载说明**：
-> 完整绿色版在 GitHub Releases 以**分卷压缩**发布（`.zip` + `.z01` + `.z02`，因单文件超 2GB 上限）。
-> - **必须下载全部 3 个分卷**到同一文件夹（缺任何一个都无法解压）
-> - 用 **WinRAR** 或 **7-Zip** 打开 `.zip` 分卷，会自动合并后续 `.z01/.z02` 解压
-> - 解压后得到 `AIpet-Murasame/` 完整目录（含 F5-TTS 模型 + NapCat）
-> - 也可选择网盘单文件版（一个 zip 解压即用，无需合并）
-
----
-
-### 方式二：手动安装（高级）
-
-#### 1. 下载项目文件
-Code > Download ZIP，解压后放到需要的位置（路径不要有特殊符号）。
-
-#### 2. 安装依赖
-```bash
-pip install -r requirements.txt
-```
-
-> 额外需要安装 ArcFace 依赖 + onnxruntime-gpu（GPU 加速）：
-```bash
-pip install insightface
-pip install onnxruntime-gpu==1.23.2
-```
-> 首次使用需下载 ArcFace ONNX 模型（约 100MB），脚本会自动下载到 `~/.insightface/models/buffalo_l/`
-
-#### 3. 初始化配置（复制模板）
-
-首次使用，先把脱敏模板复制成真实配置：
-```bash
-# Windows
-copy config.example.json config.json
-
-# 或 Linux/macOS
-cp config.example.json config.json
-```
-`config.json` 已被 `.gitignore` 忽略（不会上传泄露），请在其中填入你自己的信息。
-
-#### 4. 获取 API Key
-
-| 服务 | 链接 | 说明 |
-|------|------|------|
-| DeepSeek | https://platform.deepseek.com/usage | 注册后充值创建 Key |
-| Qwen（推荐） | https://bailian.console.aliyun.com/ | 新用户有 100 万 tokens 免费额度，支持图像识别 |
-
-填入 `config.json` 中的 `APIKEY` 字段。
-
-#### 5. 本地 TTS（可选）
-
-- **GPT-SoVITS**（短文本日语）：下载整合包 https://www.yuque.com/baicaigongchang1145haoyuangong/ib3g1e/dkxgpiy9zb96hob4 ，放入项目根目录。
-- **F5-TTS**（长文本中文）：模型已内置在 `F5-TTS_Models/`，含 `F5TTS_v1_Base` 权重 + `vocos-mel-24khz` 声码器。
-
-#### 6. 一键启动
-```bash
-python run_launcher.py
-```
-
----
-
-## 🖱️ 交互方式
-
-### 桌宠窗口
-| 操作 | 效果 |
-|------|------|
-| 点击下半身 | 进入输入模式，键盘输入文字后按回车发送 |
-| 按住头部左右晃动 | 摸头互动 |
-| 鼠标中键拖动 | 移动桌宠位置 |
-| 长按 **Shift 2秒** | 切换 2D 立绘 / Live2D 模式 |
-| 长按 **Ctrl 2秒** | 摄像头拍照 + 人脸识别 + AI 搭话 |
-| 长按 **Alt 2秒** | 切换长文本输出模式（流式中文 TTS） |
-| 长按 **CapsLock 2秒** | 语音输入（需在 config 中开启） |
-
-### 系统托盘
-右键托盘图标可快速切换：
-- **Do Not Disturb** — 勿扰模式（停止自动搭话）
-- **Screenshot** — 屏幕识别开关
-- **Clear History** — 清除对话记忆
-- **Exit** — 退出
-
-### PCL 启动器
-运行 `python run_launcher.py` 打开图形化启动器。功能与多角色操作见上方教程**第 4 节**；启动桌宠后底部会出现功能按钮：按住说话、屏幕识别、摄像头识别、Live2D 切换、长文本模式。
-
----
-
-## 💬 QQ 聊天
-
-让丛雨通过 QQ 小号与你聊天，**桌宠不开也能用**。
-
-### 准备 NapCat
-
-1. 下载 NapCat Releases 的 **`NapCat.Shell.Windows.OneKey.zip`**：https://github.com/NapNeko/NapCatQQ/releases
-2. 解压后放置到项目根目录 `NapCat.Shell.Windows.OneKey/`
-3. **下载 `NapCat.Shell.zip`**（运行时本体），解压后放入 `NapCat.Shell.Windows.OneKey/NapCat/`
-4. **下载 QQ Windows 版安装程序**（如 `QQ_9.9.33_x64.exe`），放入 `NapCat.Shell.Windows.OneKey/`
-5. 运行 `NapCat.Shell.Windows.OneKey/bootmain/napcat.bat` 首次自动解压（若 404 则手动用 7z 解压 QQ 安装包到 `bootmain/`，QQ.exe 需在 `bootmain/QQ.exe`）
-6. 运行 **`NapCat.Shell.Windows.OneKey/start_napcat.bat`**（专用启动脚本，无需注册表）→ 弹出二维码 → 手机 QQ 扫码登录小号
-7. 确认控制台出现 `WebSocket服务: 127.0.0.1:3001 已启动`
-
-### 启动 QQ 聊天
-
-- **方式一（PCL）**：`config.json` 中 `qq_enabled="true"` → 启动器出现「💬 启动 QQ AIpet」按钮
-- **方式二（命令行）**：
-  ```bash
-  python run_qq.py
-  ```
-
-### 使用说明
-
-| 场景 | 行为 |
-|------|------|
-| 私聊 | 直接回复（AI 人设 = 长文本 prompt） |
-| 群聊 | 仅 **@丛雨** 时回复 |
-| 表情包 | AI 根据语境从 `biaoqingbao/` 选 gif 发出 |
-| 语音消息 | `qq_send_voice="true"` 时 F5-TTS 合成语音（需 F5-TTS 服务 9881 运行） |
-| 记忆 | 大号私聊与桌宠共享当前角色长文本记忆；其他私聊/群聊按会话分仓（见下） |
-
-**多角色**：QQ 服务的是 PCL 里选中的**活动角色**——人设、表情包、语音、记忆都来自该角色包；切换角色后需重启 QQ 生效。
-
-**离线消息补拉**：启动时自动补回离线期间的消息（大号 + 其他好友）：
-- 窗口 = 上次启动时间往前推 **24 小时**（隔一天再开也能补回；首次运行只补最近 10 分钟防刷历史）
-- 每条消息按 message_id 去重，**一生只回一次**
-- 状态存于 `data/qq_offline_state.json`（时间基线）与 `data/qq_processed_ids.json`（已处理 ID）
-
-### 表情包
-- 放入当前活动角色的 `pets/<id>/biaoqingbao/` 目录（**gif/png/jpg**，avif 不支持发送），文件名即情感标签
-- AI 会从文件名列表中选最贴合语境的 1 张随回复发出
-- 丛雨内置 20 张：抱抱/鄙视/鞭尸/馋/嘲笑/吃薯片/否定/尴尬/喝奶茶/肯定/哭哭/你认真的？/千恋万花启动/求收养/撒娇/思考/听不懂/偷看你/威胁/无语
-
----
-
-## 💬 微信 ClawBot 聊天（官方 iLink 协议，无 hook 无封号）
-
-通过微信官方的 **ClawBot 插件通道**（腾讯 iLink 协议，`ilinkai.weixin.qq.com`）让桌宠在微信里聊天——与 QQ 一样跟随**活动角色**（人设 / 记忆分仓）。协议实现为官方插件 `@tencent-weixin/openclaw-weixin`（MIT）的 Python 移植，只依赖 `requests` + `qrcode`。
-
-### 准备（一次性）
-1. 微信更新到支持 ClawBot 的版本（8.0.70+），在「我 → 设置 → 插件」里开启 **ClawBot**
-2. `config.json` 里 `wechat_enabled="true"`
-3. 双击 **`启动微信.bat`**（或 `python run_wechat.py`）→ 自动弹出二维码 → 手机微信扫码授权
-4. 凭据（bot_token）保存在本地 `data/wechat_credentials.json`，**重启免扫码**；token 约 24 小时过期，过期后删除该文件重新扫码即可
-
-### 使用
-- 在微信里给「**微信 ClawBot**」联系人发消息 → 桌宠按活动角色人设回复
-- **发图片 → 识图回复**（复用 qwen3-vl-plus）；**AI 选了表情包 → 回表情图**（复用角色 `biaoqingbao/`）
-- 收到**语音** → 使用微信官方的语音转文字（`voice_item.text`）直接回复
-- ❌ **发语音暂不支持**：官方与社区插件均未实现「发送语音」（协议无参考实现），`wechat_send_voice` 开启时会明确跳过
-- 白名单：把日志里显示的 `from_user_id`（形如 `xxx@im.wechat`）填进 `config.json` 的 `wechat_owner_id`，只回主人
-- ⚠️ 已知限制：表情包 **GIF 会变成静态图**（ClawBot 通道对动图的平台限制，官方插件同样如此）
-
-### 协议边界（官方约束）
-- 只支持**私聊**，无历史消息 API；同一时刻只能一个进程轮询
-- 反刷限制：长回复自动**合并为单条**发送（34 秒 18 条会触发限流）
-- 腾讯保留随时调整/终止该功能的权利；请勿群发、勿做营销用途
-
----
+> 以下是技术细节、配置文件说明与历史更新记录，仅在你需要折腾或了解原理时看。
 
 ## 🔧 完整项目功能与实现
 
@@ -653,7 +633,6 @@ main.py (PyQt5 主窗口 + FastAPI 28565 + 快捷键监听 + 托盘)
 ```
 
 ---
-
 ## 👤 人脸识别使用指南
 
 ### 注册人脸
@@ -674,7 +653,6 @@ main.py (PyQt5 主窗口 + FastAPI 28565 + 快捷键监听 + 托盘)
 - 未注册的人 → 返回 unknown，不会随意匹配
 
 ---
-
 ## ⚙️ 配置文件说明 (config.json)
 
 所有配置项存储在项目根目录的 `config.json` 中，可通过 PCL 启动器的设置页面图形化修改，也可手动编辑。
@@ -752,6 +730,7 @@ main.py (PyQt5 主窗口 + FastAPI 28565 + 快捷键监听 + 托盘)
 | `qq_send_voice` | QQ 回复是否附带 F5-TTS 语音（需 9881 服务运行） |
 | `qq_vision_enabled` | QQ 私聊图片识别（收到图片用视觉模型识别并回应，模型见 `vision_model_name`） |
 | `qq_allow_groups` | QQ 群聊开关（仅 @丛雨 时回复） |
+| `qq_offline_enable` | 离线消息补拉开关（`"true"` 默认开；NapCat 不支持时可到 PCL 设置关闭） |
 | `wechat_enabled` | 微信 ClawBot 总开关（`"true"` 启用） |
 | `wechat_owner_id` | 微信白名单（填日志显示的 `xxx@im.wechat`，空=回复所有人） |
 | `screen_type` | 常开屏幕截图识别开关 |
@@ -762,7 +741,6 @@ main.py (PyQt5 主窗口 + FastAPI 28565 + 快捷键监听 + 托盘)
 > 关闭人脸识别后注册信息不会清除，重新开启即可恢复。
 
 ---
-
 ## 📁 文件与数据位置（重要）
 
 知道文件放哪儿，才能顺利解锁功能、管理数据：
@@ -792,7 +770,6 @@ main.py (PyQt5 主窗口 + FastAPI 28565 + 快捷键监听 + 托盘)
 | `restart_longtext.bat` | 一键重启 F5-TTS 语音服务（改了音色/词典后用它） |
 
 ---
-
 ## 🌟 解锁全部功能清单
 
 | 功能 | 需要做什么 | 配置文件开关 |
@@ -812,21 +789,6 @@ main.py (PyQt5 主窗口 + FastAPI 28565 + 快捷键监听 + 托盘)
 | 💬 微信聊天 | 微信开启 ClawBot 插件 + 扫码登录 | `wechat_enabled="true"` |
 
 ---
-
-## 🔓 开源说明
-
-### 开源协议
-本项目采用 **GPL-3.0** 许可证，参考了 [LemonQu-GIT/MurasamePet](https://github.com/LemonQu-GIT/MurasamePet)。
-仓库随附角色：丛雨（版权归 **YuzuSoft**）与诺瓦（模型/语音来源见「特别感谢」）；各角色素材版权归其原始权利人所有，仅限学习交流，**禁止商业用途**。
-
-### 使用前提
-- 需自备 **DeepSeek / Qwen API Key**（填入本地 `config.json`，无需提交）
-- 本地 TTS 模型（GPT-SoVITS / F5-TTS）体积较大，建议 `.gitignore` 排除后单独分发或引导下载
-- QQ 功能需自行准备 NapCat 环境
-- 微信接入：另行**单开项目**（OpenClaw Clawbot），不随本仓库维护；丛雨人格提示词参考见 `提示词.md`（含未来蒸馏为 skill 的要点）
-
----
-
 ## 🤖 本地模型（可选）
 
 如需要使用本地 AI 对话（model_type = "local"），需安装 Ollama 并拉取模型：
@@ -837,34 +799,140 @@ ollama pull qwen2.5vl:7b  # 如需本地屏幕识别
 ```
 
 ---
+## 🔓 开源说明
 
-## 💬 常见问题（安装/环境类）
+### 开源协议
+本项目采用 **GPL-3.0** 许可证，参考了 [LemonQu-GIT/MurasamePet](https://github.com/LemonQu-GIT/MurasamePet)。
+仓库随附角色：丛雨（版权归 **YuzuSoft**）与诺瓦（模型/语音来源见「特别感谢」）；各角色素材版权归其原始权利人所有，仅限学习交流，**禁止商业用途**。
 
-### 人脸识别不工作 / 回退三哈希
-> **解决**：确保 `insightface`、`onnxruntime-gpu`、`onnx` 已装到**运行桌宠所用的 Python 环境**。验证：
-> ```bash
-> python -c "import onnxruntime; print(onnxruntime.get_available_providers())"
-> ```
-> 期望输出包含 `CUDAExecutionProvider`。
+### 使用前提
+- 需自备 **DeepSeek / Qwen API Key**（填入本地 `config.json`，无需提交）
+- 本地 TTS 模型（GPT-SoVITS / F5-TTS）体积较大，建议 `.gitignore` 排除后单独分发或引导下载
+- QQ 功能需自行准备 NapCat 环境
+- 微信接入已内置（ClawBot 官方 iLink 协议，见上方「💬 微信 ClawBot 聊天」）
 
-### GPU 不可用
-> 有显卡但提示 `Warning: CUDA is not available, set device to CPU.`
-> **解决**：更新显卡驱动，确保 CUDA 与 PyTorch 匹配。
+### ⚠️ 风险披露
+- **QQ（NapCat/OneBot）与微信（ClawBot/iLink）均为平台非官方自动化通道**，账号存在被平台限制/封禁的风险（代码内已内置反刷限流与 token 过期处理，但平台策略随时可能调整）。请使用小号，勿用于营销/群发等违规用途。
+- 本项目仅供学习交流，**禁止商业用途**；因使用本项目导致的任何账号风险与损失由使用者自行承担。
 
-### F5-TTS 长文本不发声
-> **解决**：确认 `longtext_enabled="true"`，F5-TTS 服务在 9881 端口运行（`restart_longtext.bat` 可一键重启）。模型首次加载约 10-30 秒。
+---
+## 🆕 最新版本
 
-### SoVITS 响应慢
-> **解决**：下载与显卡对应的版本——50 系列用专用版，40 系及以下用通用版。
+**V1.15** — 双通道可靠性加固 + 安全修复 + 文档重构
 
-### Conda 激活错误
-> **解决**：建议使用 Miniconda 而非完整版，或运行 `conda init`。
+### V1.15 变更
 
-### API Key 报错
-> **解决**：检查 API Key 是否有效、余额是否充足；若编码问题，重新保存为 ANSI 编码。
+- **📬 微信防丢消息（at-least-once）**：新增待处理收件箱——收包先落盘 → 再推游标 → 后分发，回复成功才删，重启自动补处理（宁可重复不可丢）；凭据/游标/记忆全部改原子写（tmp+`os.replace`）
+- **🔑 微信免扫续期**：token 过期（-14）自动带旧 token 走官方续期通道，成功无感续期；配域名白名单防 SSRF
+- **🛡 安全修复**：本地 API 从 `0.0.0.0` 收紧到 `127.0.0.1`；记忆文件 `eval()` 改 `ast.literal_eval()`（防注入）；云端/Ollama/TTS 全部 HTTP 请求补超时（防挂起卡退出）；`.gitignore` 排除 `.mimosa/.zcode`
+- **🔌 QQ 断线自愈**：NapCat 未就绪自动等待、WS 断开每 5~30s 指数退避自动重连（不再"连上就断、窗口消失"）
+- **🐛 QQ 离线补拉修复**：识别延后到过滤后（不再对自己发的图片识图浪费 token）；好友历史 20→50 条（防活跃会话挤掉好友消息）；实时回复记录 message_id 防重复回复；退出时写准基线；已处理 ID 保序去重 + 跨线程加锁
+- **⚙️ QQ 离线补拉开关**：默认开启，PCL 设置 → QQ 配置可关闭（NapCat 不支持时用）
+- **🎛 PCL 记忆页微信卡片**：实时显示登录状态（●已登录/○未登录），一键重新扫码登录
+- **📖 README 重构**：精简使用教程置顶（下载/装环境/启动 QQ 与微信/GPT-SoVITS 放置/NapCat 扫码），功能实现·配置·版本历史移入「进阶」区
 
-### 路径含特殊符号导致闪退
-> **解决**：确保项目路径中没有中文名、括号、感叹号等特殊符号。
+**V1.14** — 模型可配置化 + 推理等级
+
+### V1.14 变更
+
+- **🎛 模型可配置化**：短文本 / 长文本 / 视觉识别三条链路的模型名独立可配（PCL 设置页可编辑下拉框，或直接改 `config.json` 的 `short_model_name` / `longtext_model_name` / `vision_model_name`）；默认值已迁移到当前主线模型——长文本默认 `deepseek-v4-flash`（`deepseek-chat` 已停用）、短文本 `qwen-plus`、视觉 `qwen3-vl-plus`，并支持 `deepseek-v4-pro` / `qwen3.7-plus` / `deepseek-v4-flash-vision-exp` 等同族切换
+- **🧠 推理等级**：新增全局 `reasoning_level`（`off` / `low` / `high` / `max`，默认 `off` 最省 token）。DeepSeek 完整支持四档（off=关思考，其余映射官方 `reasoning_effort`）；Qwen3 系支持开关两档（off=关思考）；不支持的模型（如 qwen-plus、视觉模型）自动不传参数，避免报错
+- **🔧 顺手修复**：常开摄像头/摄像头识别不再使用已停服的 `qwen-vl-plus`（统一走 `vision_model_name`）；桌面长文本模型的 API Key 跟随配置（之前固定用千问 Key）；`/status` 显示实际模型名，`/switch` 切换族时同步切换模型名
+- **⚠️ 迁移提醒**：`deepseek-chat` / `deepseek-reasoner` 官方已于 2026-07-24 停用，请勿再手动填这两个旧模型名
+
+**V1.13** — 微信 ClawBot 接入 + 一批体验修复
+
+### V1.13 变更
+
+- **💬 微信 ClawBot 接入（官方 iLink 协议）**：零 hook、零封号风险——扫码登录/重启免扫码、私聊文字回复（活动角色人设+分仓记忆）、收图识图（qwen3-vl）、表情包回图、收语音用官方转文字、白名单、连发消息合并（与 QQ 同款调度器）、PCL 启动按钮与设置页
+- **🐛 PCL 记忆清空格式修复**：清除记忆后文件格式错误导致微信/QQ/桌宠全部报错——已修并给读取端加防御
+- **🎭 Live2D 情绪动作**：动作句内定格保持（前倾不点头循环）、句间同情绪不重启、换情绪平滑过渡；四角色表情/动作映射配好（调试器 `debug_live2d.py` 可随时核对）
+- **📝 提示词升级**：丛雨补全个人线/共通线设定（绫/刀魂/人形之身/上学/恋人）并去堆砌；四角色提示词与翻译规则归一（`translate_rules` 按角色配置）
+- **🔒 隐私加固**：PCL 设置页示例 QQ 号/真名/本机路径清除；打包自动排除 NapCat 本机登录数据
+- **⚠️ 平台限制说明**：微信发语音、GIF 动图表情包为 ClawBot 通道不支持（官方/社区插件均未实现），已明确标注
+
+**V1.12.1** — 隐私修复与文档完善
+
+### V1.12.1 变更
+
+- **🔒 隐私修复**：移除设置页示例 QQ 号与使用者名称默认值、启动脚本内硬编码的本机路径
+- **🐛 PCL 桌宠列表修复**：绿色版 exe 内角色列表/提示词/Live2D 下拉为空、源码版多显示本地角色的问题已修复
+- **📖 文档**：新增「绿色版 vs 开源版」下载使用指南；措辞更友好
+
+**V1.12** — 开源发布（GPL-3.0）：仓库与绿色版随附「丛雨 + 诺瓦」两个示范角色
+
+### V1.12 变更
+
+- **📦 开源**：项目以 GPL-3.0 发布；公开仓库为全新单次提交，不含任何隐私数据（config / data / 人脸 / 记忆均已 .gitignore 且从未进入历史）
+- **🐾 示范角色**：仓库/绿色版随附丛雨 + 诺瓦两个示范角色
+- **🙏 致谢**：补充各角色模型与语音素材来源（见「特别感谢」）
+
+**V1.11** — 多桌宠架构（一个引擎 + N 个角色包），详见上方「🐾 多桌宠架构新手教程」
+
+### V1.11 新功能
+
+- **🐾 多桌宠**：一个引擎 + N 个角色包，PCL 选角色即启动对应桌宠与 QQ（随仓库分发丛雨 / 诺瓦 2 个示范角色）
+- **🎭 Live2D 按角色适配**：窗口比例/模型缩放/字号/摸头区域按角色配置；纯 Live2D 角色自动进入 Live2D；文字层点击穿透、对话文字常显
+- **🎨 情绪 → 表情/动作**：回复中的【情绪】标签自动切换 Live2D 表情与动作（含 vtube.json 参数范围提取，修复眨眼/口型幅度）
+- **🎛 双调参方式**：PCL 设置页图形化滑块（点保存生效）+ 桌宠热键（F1 帮助 / F5 保存 / F9 参考线）
+- **📝 PCL 提示词编辑器**：按角色直接编辑短/长文本人设
+- **🛡 丛雨保护与进程互斥**：丛雨不可删除；同时最多一个 AI 桌宠 + 一个 QQ 桌宠
+- **💬 角色包脚手架**：noir 的表情包/短语音(6情绪)/长语音目录已建好，放文件即用（详见教程第 3 节）
+
+**V1.10.2** — 立绘历史污染根治、数据路径统一
+
+### V1.10.x 修复与增强
+
+- **🎨 立绘历史污染根治**：`cloud_portrait` / `ollama_qwen3_portrait` 不再把完整立绘历史（含历史返回的图层 ID）塞进 prompt，改为**只提炼「上次基础人物 ID」**作衣服连贯参考，并加硬约束「严禁使用历史之外/其他服装的 ID」——彻底解决 AI 偶发跨服装返回 ID 后**滚雪球复读**（如 A 立绘反复输出 B 套 `1475`）导致的僵脸/崩溃
+- **🛡 图层文件存在性兜底**：`tool/generate.py` 绘制前对每个图层 ID 检查文件是否存在，缺失则跳过+警告，全缺失返回空画布——未来任何 AI 越界都不会再崩溃
+- **📁 数据路径统一（`tool/paths.py`）**：新增公共基准（exe 模式→exe 旁、源码→项目根），统一 `face_shibie/`、`config.json`、`data/qq_memory/` 路径——**根治 PCL 壳（exe）写入 `_internal/` 导致人脸识别不到主人**的问题
+- **🔓 资源打包修复**：绿色版重新打包，移除 `_internal/` 内错误残留，桌面/QQ 双端稳定运行
+
+### V1.8.0 新功能
+
+- **📋 消息调度器**：离线消息按序补回 + 多人聊天串行不乱 + 私聊消息合并等待（1.5~5 秒随机）
+- **🗂️ 记忆分仓**：大号私聊共享记忆；其他私聊/群聊按会话独立记忆仓（`data/qq_memory/`）
+- **🎙 F5-TTS 自动启动**：单独启动 QQ AIpet 时自动拉起语音服务（9881）
+- **🎭 表情包自主**：AI 根据语境决定发 0~2 个表情包（无需每次强发）
+- **🧹 /clear 指令**：大号私聊发 `/clear` 可清空当前会话记忆
+- **💾 PCL 记忆管理页**：可视化查看/清理各分仓记忆 + 共享记忆
+- **🔧 设置面板增强**：新增"主人 QQ 号（共享记忆）"配置项，统一记忆轮数
+
+**V1.6.0** — QQ 聊天接入（NapCat）、PCL 双启动按钮
+
+### V1.6.0 新功能
+
+- **💬 QQ 聊天**：通过 NapCat（OneBot11）接入 QQ，小号「丛雨」在私聊/群聊 @ 时用 AI 回复（复用长文本人设 + 共享记忆）
+- **🖼️ 表情包**：AI 根据语境从 `biaoqingbao/` 选择 gif 表情随回复发出
+- **🔘 PCL 双启动按钮**：启动器可分别启动「桌宠」和「QQ AIpet」，互不干扰，关闭时一键截断进程
+- **🧠 共享记忆**：QQ 对话与桌宠共用 `long_history.json`（12 轮），同一个"丛雨"两个入口
+- **🤖 长文本模型切换**：长文本对话可在 Qwen 与 DeepSeek 之间切换（`longtext_model`），默认 DeepSeek（更聪明）
+- **👁 QQ 图片识别**：私聊发图 → 丛雨自动识别图片内容并回应（`qq_vision_enabled`，使用 qwen3-vl-plus）
+- **📝 私聊切句**：QQ 私聊回复按标点逐句发送（模拟真人打字节奏），群聊保持一次性发送
+- **▶️ 自动启动 NapCat**：点击「启动 QQ AIpet」自动检测并启动 NapCat（首次需扫码登录）
+- **🎛 PCL 设置面板 QQ 配置**：图形化管理 QQ 开关/表情包/语音/图片识别/群聊
+
+### V1.5.0 新功能
+
+- **📝 长文本输出模式（核心）**：长按 **Alt 2秒** 切换。AI 流式输出 → 标点切句 → F5-TTS 中文语音逐句合成播放 → 打字机文字同步显示。输出内容更丰富、更有情感深度（不限定字数）。
+- **🖥️ 屏幕识别 → 长文本**：长文本模式下定时截图识别。空闲时截图结果走长文本流式回复；输出中自动跳过不打断。
+- **📷 摄像头识别 → 长文本**：长文本模式下摄像头+人脸识别同样接入长文本流式，输出中自动跳过。
+- **🧠 优先级记忆机制**：识别（截图/摄像头/空闲）内容写入记忆带 `priority=high`，仅在**下一轮对话有高权重**强注入（system 级"最近的观察"）；该轮结束后自动降为 `low`，权重≈0。
+- **🎭 Live2D 长文本文字修复**：长文本输出时文字层正确显示在 Live2D 模型上方（与短文本一致）。
+- **⚡ ArcFace GPU 加速**：onnxruntime-gpu 安装到运行环境，人脸识别恢复 CUDA GPU 推理（不再回退三哈希）。
+
+### 历史版本
+- **V1.4.0** — ArcFace 人脸识别、对话人称自适应、PCL 导航页切换修复
+- **V1.3.0** — 摄像头拍照识别（Ctrl 长按）、Live2D 切换（Shift 长按）
+- **V1.2.x** — 屏幕识别、空闲检测、PCL 风格启动器
+
+### 项目指路
+- **安装教程（最新）**: [AIpet 多角色桌宠安装教程](https://www.bilibili.com/video/BV1Aybe6GEHP/?vd_source=c2cadbf819021ce34cdfc6948ac18d63)
+- **演示视频（最新）**: [AIpet 多角色桌宠演示](https://www.bilibili.com/video/BV1Q1bY6QE5M/?vd_source=c2cadbf819021ce34cdfc6948ac18d63)
+- **历史教程视频**:
+  - [丛雨AI桌宠V1.2.0部署教程](https://www.bilibili.com/video/BV1F6ykBwEDu)
+  - [丛雨AI桌宠V1.2.2部署教程](https://www.bilibili.com/video/BV1ghCMBjEKK)
+  - [丛雨AI桌宠V1.3.0部署教程](https://www.bilibili.com/video/BV1iw2XBREpd)
 
 ---
 

@@ -36,6 +36,9 @@ GROUP_MERGE_SECONDS = 1.5
 # 私聊合并窗口范围（秒）——真人发消息是断断续续的，等一小段时间收集后续消息
 PRIVATE_MERGE_RANGE = (1.5, 5.0)
 
+# 合并窗口硬上限（秒）——防止话痨会话无限顺延合并，饿死其他会话（Android MAX_MERGE_WINDOW_MS 移植）
+MAX_MERGE_WINDOW_SECONDS = 30.0
+
 
 class MessageScheduler:
     """全局消息调度器：FIFO 队列 + 串行处理 + 会话合并"""
@@ -60,9 +63,12 @@ class MessageScheduler:
         """
         根据会话类型返回合并等待窗口（秒）：
         - 私聊（private_*）：随机 1.5~5 秒，给真人留出继续打字的时间
+        - 微信（wechat_*）：微信协议只支持私聊，等同真人私聊 → 同样 1.5~5 秒随机窗
+          （旧实现落到 else 走 1.5s 群聊窗，连发两句就被拆成两次回复）
         - 群聊（group_*）：  固定 1.5 秒，群里 @ 需较快回复
         """
-        if str(session_key).startswith("private_"):
+        key = str(session_key)
+        if key.startswith("private_") or key.startswith("wechat_"):
             return random.uniform(*PRIVATE_MERGE_RANGE)
         return GROUP_MERGE_SECONDS
 
@@ -107,12 +113,15 @@ class MessageScheduler:
             first["merged_msgs"] = [first]
 
         # 3. 合并窗口：等待同会话新消息
-        #    - 私聊：随机 1.5~5 秒（给人留出继续打字的时间）
+        #    - 私聊/微信：随机 1.5~5 秒（给人留出继续打字的时间）
         #    - 群聊：固定 1.5 秒（群里 @ 需较快回复）
+        #    随机窗之外再加硬上限 30s（从首条到达起算）：同会话来一条只重置软窗口，
+        #    硬上限保证话痨/连发不会无限顺延合并 → 饿死其他会话。
         #    用轮询检查，避免持有锁等待（保证其他线程能入队）
         merge_window = self._get_merge_window(first["session_key"])
-        deadline = time.time() + merge_window
-        while time.time() < deadline:
+        soft_deadline = time.time() + merge_window
+        hard_deadline = first.get("arrive_time", time.time()) + MAX_MERGE_WINDOW_SECONDS
+        while time.time() < min(soft_deadline, hard_deadline):
             with self._cv:
                 # 找队列中同 session 的消息
                 same = None
@@ -129,8 +138,8 @@ class MessageScheduler:
                         extra = items.pop(same_idx)
                         self._queue = deque(items)
                         first["merged_msgs"].append(extra)
-                        # 重置合并窗口（有连续对话就继续等）
-                        deadline = time.time() + merge_window
+                        # 收到同会话消息只重置软窗口（硬上限不变，防止无限顺延）
+                        soft_deadline = time.time() + merge_window
             time.sleep(0.2)
 
         # 4. 合并后的文本（多条消息用换行拼接）
