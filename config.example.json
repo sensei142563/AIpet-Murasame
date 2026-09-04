@@ -42,6 +42,7 @@
   "qq_enabled": "false",
   "qq_napcat_ws": "ws://127.0.0.1:3001",
   "qq_napcat_http": "http://127.0.0.1:6099",
+  "qq_napcat_token": "",
   "qq_send_sticker": "true",
   "qq_send_voice": "false",
   "qq_vision_enabled": "true",
@@ -50,6 +51,6 @@
   "qq_offline_enable": "true",
   "wechat_enabled": "false",
   "wechat_owner_id": "",
-  "wechat_bot_agent": "AIpet/1.15",
+  "wechat_bot_agent": "AIpet/1.16",
   "wechat_send_voice": "false"
 }

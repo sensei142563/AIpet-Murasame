@@ -193,6 +193,7 @@ class QQBotBridge:
     def __init__(self):
         self.cfg = get_qq_config()
         self.ws_url = self.cfg["ws_url"]
+        self.napcat_token = self.cfg.get("napcat_token", "")
         self.ws = None
         self.running = False
         self.self_id = None  # 登录的 QQ 号（识别是否自己发的消息）
@@ -201,6 +202,14 @@ class QQBotBridge:
 
         # 消息调度器：FIFO 队列 + 串行处理 + 会话合并
         self.scheduler = MessageScheduler(handler=self._handle_queued_message)
+
+    @staticmethod
+    def _ws_auth_headers(token=""):
+        """NapCat OneBot11 WS 鉴权头；token 为空返回 None（不鉴权，兼容旧 NapCat）"""
+        token = (token or "").strip()
+        if not token:
+            return None
+        return [f"Authorization: Bearer {token}"]
 
     def connect(self):
         """建立 WebSocket 连接并进入事件循环（阻塞）。
@@ -253,9 +262,15 @@ class QQBotBridge:
         while self.running:
             try:
                 print(f"[QQBridge] 连接 NapCat: {self.ws_url}")
-                self.ws = websocket.create_connection(
-                    self.ws_url, timeout=30, enable_multithread=True
-                )
+                _header = self._ws_auth_headers(self.napcat_token)
+                if _header:
+                    self.ws = websocket.create_connection(
+                        self.ws_url, timeout=30, enable_multithread=True, header=_header
+                    )
+                else:
+                    self.ws = websocket.create_connection(
+                        self.ws_url, timeout=30, enable_multithread=True
+                    )
                 self._on_connected()   # 内部处理 login_info + 离线补拉 + 进入事件循环（阻塞）
                 # 正常走到这里说明事件循环因断开退出 → 重置 delay 后重连
                 if not self.running:
@@ -368,12 +383,22 @@ class QQBotBridge:
         print("[QQBridge] 连接已断开（将由重连循环自动恢复）")
 
     def _warm_stt(self):
-        """后台预热 faster-whisper 模型（进程级单例，只加载一次）"""
+        """后台预热 faster-whisper 模型。
+
+        重连循环每次进入 _on_connected 都会调到这里；为避免"下载失败机器每次重连都刷
+        一次注定失败的联网下载"，成功才置完成标志；失败最多重试 3 次（warmup 返回 bool）。
+        """
+        if getattr(self, "_stt_warm_done", False):
+            return
+        self._stt_warm_tries = getattr(self, "_stt_warm_tries", 0) + 1
+        if self._stt_warm_tries > 3:
+            return
         try:
             from tool.stt import warmup
-            warmup()
+            if warmup():
+                self._stt_warm_done = True
         except Exception as e:
-            print(f"[QQBridge] ⚠ 语音识别模型预热失败: {e}")
+            print(f"[QQBridge] ⚠ 语音识别模型预热异常（第 {self._stt_warm_tries} 次）: {e}")
 
     def _handle(self, raw: str):
         """处理一条 WS 消息（JSON）"""

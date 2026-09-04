@@ -15,7 +15,11 @@ def extract_voice_path(message):
     return None
 
 def _napcat_get_record(ws, file_id):
-    """NapCat get_record: silk -> wav"""
+    """NapCat get_record: silk -> wav
+
+    recv 用 settimeout 收紧单次阻塞（ws 底层 socket 默认 30s 超时，NapCat 不响应时
+    会把收包线程卡 30s——真超时修复，与 qq_offline 一致）。
+    """
     try:
         import websocket
         echo = f"getr_{uuid.uuid4().hex[:8]}"
@@ -23,6 +27,8 @@ def _napcat_get_record(ws, file_id):
         deadline = time.time() + 5
         while time.time() < deadline:
             try:
+                # 单次 recv 阻塞上限 = 剩余时间（不裸等 30s socket 超时）
+                ws.settimeout(min(deadline - time.time() + 0.2, 5.2))
                 raw = ws.recv()
                 if not raw: continue
                 d = json.loads(raw)
@@ -35,6 +41,11 @@ def _napcat_get_record(ws, file_id):
             except Exception: break
     except Exception as e:
         print(f"[QQStt] ⚠ get_record 失败: {e}")
+    finally:
+        try:
+            ws.settimeout(30)  # 恢复（主循环心跳依赖 30s）
+        except Exception:
+            pass
     return None
 
 def _decrypt_voice(voice_data, ws):

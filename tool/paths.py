@@ -29,3 +29,35 @@ def app_base_dir() -> str:
 def data_path(*rel: str) -> str:
     """从程序根目录解析数据文件/目录的绝对路径（可传多段子路径）。"""
     return os.path.join(app_base_dir(), *rel)
+
+
+def ensure_qt_plugin_path() -> None:
+    """Qt 平台插件路径修复（中文/非 ASCII 安装路径，A 卡调试 §6）。
+
+    PyQt5 5.15 在含中文等非 ASCII 的路径下按 Qt5Core.dll 推导插件目录时做 8 位转换，
+    把路径算错（"下载"→"??"）导致找不到 platforms/qwindows.dll → 启动即崩溃。
+    显式指定插件目录走宽字符 API；setdefault 不覆盖用户已有设置。
+    必须放在任何 PyQt5 import / QApplication 构造之前调用（入口文件最顶部）。
+    """
+    try:
+        import PyQt5 as _PyQt5
+        _plugins = os.path.join(os.path.dirname(_PyQt5.__file__), "Qt5", "plugins")
+        if os.path.isdir(_plugins):
+            os.environ.setdefault("QT_QPA_PLATFORM_PLUGIN_PATH", _plugins)
+    except Exception:
+        pass
+
+
+def venv_python() -> str:
+    """项目 runtime\\venv 的解释器（若存在），否则回落 sys.executable。
+
+    子进程拉起 Python 服务（如 F5-TTS）时统一用本函数选解释器——避免系统 Python
+    拉出缺库的"残缺实例"（A 卡调试 §9）。三入口 run.py / run_qq.py / run_wechat.py 共用。
+    """
+    try:
+        p = os.path.join(app_base_dir(), "runtime", "venv", "Scripts", "python.exe")
+        if os.path.exists(p):
+            return p
+    except Exception:
+        pass
+    return sys.executable

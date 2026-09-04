@@ -19,6 +19,14 @@ import os
 import sys
 import argparse
 
+# ==== Qt 平台插件路径修复（中文/非 ASCII 路径，A 卡调试 §6）====
+# 必须在任何 PyQt5 / Live2d（内部 import PyQt5）之前
+try:
+    from tool.paths import ensure_qt_plugin_path
+    ensure_qt_plugin_path()
+except Exception:
+    pass
+
 # ==== Live2D DLL 路径（复用 Live2d 模块顶部的设置）====
 import Live2d.live2d_ui as _lui  # noqa: E402  （顶部已设置 PATH / add_dll_directory）
 

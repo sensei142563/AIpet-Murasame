@@ -1,5 +1,6 @@
 import io
 import os
+import sys
 import threading
 from datetime import datetime
 from typing import List, Dict, Optional, TYPE_CHECKING
@@ -439,6 +440,16 @@ async def longtext_chat(req: LongTextChatRequest):
 
 # ============== Entrypoint ==============
 if __name__ == "__main__":
+    # Windows Proactor 事件循环下，客户端主动断开连接会产生无害的
+    # "ConnectionResetError WinError 10054" 噪音 traceback（PCL/HTTP 短连接常见）。
+    # 切 Selector 事件循环消除该噪音（标准解法，功能无影响）。
+    try:
+        import asyncio
+        if sys.platform == "win32":
+            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    except Exception:
+        pass
+
     cfg = get_config("./config.json")
     if cfg.get("model_type", "deepseek").lower() == "local":
         model, tokenizer = load_model_and_tokenizer()

@@ -30,7 +30,7 @@ from wechat import pending_inbox
 
 
 class WeChatBridge:
-    def __init__(self, owner_id="", bot_agent="AIpet/1.15", send_voice=False):
+    def __init__(self, owner_id="", bot_agent="AIpet/1.16", send_voice=False):
         creds = load_credentials()
         if not creds:
             raise RuntimeError("未登录：请先运行 run_wechat.py 完成扫码登录")

@@ -45,6 +45,16 @@ def _cleanup_f5tts():
         print(f"[QQ] ⚠ 关闭 F5-TTS 失败: {e}")
 
 
+def _f5tts_python():
+    """F5-TTS 子进程解释器：优先项目 runtime\\venv，否则回落 sys.executable
+    （公共实现 tool.paths.venv_python，三入口共用，A 卡调试 §9）。"""
+    try:
+        from tool.paths import venv_python
+        return venv_python()
+    except Exception:
+        return sys.executable
+
+
 def ensure_f5tts(cfg):
     if not cfg.get("send_voice", False):
         return
@@ -55,7 +65,7 @@ def ensure_f5tts(cfg):
     print(f"[QQ] 正在自动启动 F5-TTS 服务（新控制台，模型加载约 10-45 秒）...")
     try:
         proc = subprocess.Popen(
-            [sys.executable, "-m", "longtext.f5tts_server"],
+            [_f5tts_python(), "-m", "longtext.f5tts_server"],
             cwd=BASE_DIR,
             creationflags=(0x00000010 if os.name == "nt" else 0)
         )
@@ -93,7 +103,10 @@ def main():
         import websocket  # noqa: F401
     except ImportError:
         print("[✗] 缺少依赖 websocket-client")
-        return
+        print("    请先运行 install.bat，或手动执行：")
+        print("    pip install websocket-client requests")
+        print("    然后重新运行 启动QQ.bat")
+        sys.exit(1)  # 非 0 退出：让 bat 的 errorlevel 分支 pause，窗口不会无声消失（A 卡调试 §2）
 
     from qq.qq_config import get_qq_config
     cfg = get_qq_config()

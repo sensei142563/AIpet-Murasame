@@ -7,8 +7,16 @@ if os.path.exists(torch_path):
     os.add_dll_directory(torch_path)
     os.environ['PATH'] = torch_path + os.pathsep + os.environ.get('PATH', '')
 
-import torch          # ← 必须在这里，任何第三方库之前
+import torch          # ← 必须在这里，任何第三方库之前（PyQt5 等 DLL 先加载会干扰 torch/c10.dll）
 print("Torch loaded OK:", torch.__version__)
+
+# ===== Qt 平台插件路径修复（中文/非 ASCII 安装路径）=====
+# 必须放在 QApplication 构造之前；放 torch import 之后（避免 PyQt5 DLL 先于 torch 加载）
+try:
+    from tool.paths import ensure_qt_plugin_path
+    ensure_qt_plugin_path()
+except Exception:
+    pass
 
 import sys
 import threading
@@ -74,6 +82,14 @@ if __name__ == "__main__":
 
     # 后台启动本地 API 服务（FastAPI + Uvicorn）
     def _run_api_server():
+        # Windows Proactor 下客户端断开会产生无害的 "WinError 10054" 噪音 traceback
+        # （HTTP 短连接常见）。切 Selector 事件循环消除（标准解法，功能无影响）。
+        try:
+            import asyncio
+            if sys.platform == "win32":
+                asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        except Exception:
+            pass
         config = uvicorn.Config(api_app, host="127.0.0.1", port=28565, log_level="info")
         server = uvicorn.Server(config)
         server.run()

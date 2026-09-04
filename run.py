@@ -105,11 +105,12 @@ def check_hardware():
     # Step 3️⃣ 判断显卡类型
     gpu_lower = gpu_name.lower()
     if "nvidia" not in gpu_lower:
-        # 如果未找到NVIDIA显卡，允许使用CPU模式
+        # A 卡/核显（AMD/Intel）：本机无 CUDA，本地 GPU 推理不可用，
+        # 但对话/QQ/微信走云端 API、F5-TTS 走 CPU，均不受影响 → 提示后走 CPU，不退出
         if any(bad in gpu_lower for bad in ("amd", "radeon", "intel", "iris", "arc")):
-            log("当前显卡不受支持：仅支持 NVIDIA 显卡。", "ERROR")
-            log("请使用带 NVIDIA GPU 的电脑，或切换到云端模式。", "INFO")
-            sys.exit(1)
+            log("检测到 AMD/Intel 显卡（无 NVIDIA/CUDA），本地 GPU 推理不可用。", "WARN")
+            log("已自动切换 CPU 模式：对话/QQ/微信走云端不受影响；本地语音/TTS 合成较慢属正常。", "INFO")
+            return "cpu"
         else:
             log("未检测到 NVIDIA 显卡，系统将运行在 CPU 模式。", "INFO")
             # 继续执行，允许使用CPU
@@ -356,6 +357,16 @@ def run_download():
     elif tts_type == "cloud":
         log("检测到 tts_type = cloud, 跳过模型下载", "INFO")
 
+def _f5tts_python():
+    """F5-TTS 子进程解释器：优先项目 runtime\\venv，否则回落 sys.executable
+    （公共实现 tool.paths.venv_python，三入口共用，A 卡调试 §9）。"""
+    try:
+        from tool.paths import venv_python
+        return venv_python()
+    except Exception:
+        return sys.executable
+
+
 def start_f5tts_api():
     """启动 F5-TTS HTTP 服务（端口 9881，长文本模式中文语音合成）"""
     cfg = get_config("./config.json")
@@ -363,18 +374,26 @@ def start_f5tts_api():
         log("长文本模式已关闭，跳过 F5-TTS 服务启动。", "INFO")
         return None
 
-    # F5-TTS 为可选语音库，缺失时仅提示，不阻塞程序
+    # F5-TTS 为可选语音库，缺失时仅提示，不阻塞程序。
+    # 注意：必须用 _f5tts_python()（可能拉起 runtime\venv）去探测——若只探测当前解释器，
+    # 系统 Python 启动而 venv 完好的场景会误判"不可用"而跳过（审计 P2）。
     try:
-        import f5_tts  # noqa: F401
-    except ImportError:
-        log("未检测到 f5_tts 库，长文本语音不可用。", "WARN")
-        log("如需语音功能，请参考 README 安装 F5-TTS。", "INFO")
+        _probe = subprocess.run(
+            [_f5tts_python(), "-c", "import f5_tts"],
+            capture_output=True, timeout=30,
+        )
+        if _probe.returncode != 0:
+            log("未检测到 f5_tts 库（venv 环境），长文本语音不可用。", "WARN")
+            log("如需语音功能，请参考 README 安装 F5-TTS。", "INFO")
+            return None
+    except Exception as e:
+        log(f"f5_tts 探测失败: {e}", "WARN")
         return None
 
     log("检测到长文本模式已开启，启动 F5-TTS 服务（新控制台）...", "INFO")
     try:
         proc = subprocess.Popen(
-            [sys.executable, "-m", "longtext.f5tts_server"],
+            [_f5tts_python(), "-m", "longtext.f5tts_server"],
             cwd=os.path.dirname(os.path.abspath(__file__)),
             creationflags=(0x00000010 if os.name == "nt" else 0)
         )

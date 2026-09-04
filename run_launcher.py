@@ -33,6 +33,13 @@ if _os.path.exists(dll_dir):
     except Exception:
         pass
 
+# Qt 平台插件路径修复（中文/非 ASCII 路径，A 卡调试 §6）——必须在 PyQt5 import 前
+try:
+    from tool.paths import ensure_qt_plugin_path
+    ensure_qt_plugin_path()
+except Exception:
+    pass
+
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtGui import QSurfaceFormat
 from pcl_launcher.main_window import PCLMainWindow

@@ -51,6 +51,16 @@ def _cleanup_f5tts():
         print(f"[WeChatBot] ⚠ 关闭 F5-TTS 失败: {e}")
 
 
+def _f5tts_python():
+    """F5-TTS 子进程解释器：优先项目 runtime\\venv，否则回落 sys.executable
+    （公共实现 tool.paths.venv_python，三入口共用，A 卡调试 §9）。"""
+    try:
+        from tool.paths import venv_python
+        return venv_python()
+    except Exception:
+        return sys.executable
+
+
 def ensure_f5tts(send_voice):
     """语音回复开启时自动拉起 F5-TTS（与 QQ 入口一致）"""
     if not send_voice:
@@ -62,7 +72,7 @@ def ensure_f5tts(send_voice):
     print("[WeChatBot] 正在自动启动 F5-TTS 服务（新控制台，模型加载约 10-45 秒）...")
     try:
         proc = subprocess.Popen(
-            [sys.executable, "-m", "longtext.f5tts_server"],
+            [_f5tts_python(), "-m", "longtext.f5tts_server"],
             cwd=BASE_DIR,
             creationflags=(0x00000010 if os.name == "nt" else 0)
         )
@@ -237,7 +247,7 @@ def main():
 
     bridge = WeChatBridge(
         owner_id=str(cfg.get("wechat_owner_id", "") or "").strip(),
-        bot_agent=str(cfg.get("wechat_bot_agent", "") or "AIpet/1.15").strip(),
+        bot_agent=str(cfg.get("wechat_bot_agent", "") or "AIpet/1.16").strip(),
         send_voice=send_voice,
     )
     print("[WeChatBot] 提示：对方发来第一条消息后，日志会显示 from_user_id（xxx@im.wechat），"

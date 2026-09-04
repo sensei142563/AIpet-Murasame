@@ -48,6 +48,8 @@ def get_qq_config():
         "ws_url": cfg.get("qq_napcat_ws", "ws://127.0.0.1:3001"),
         # NapCat WebUI (HTTP API，主要用于发送消息等)
         "http_url": cfg.get("qq_napcat_http", "http://127.0.0.1:6099"),
+        # NapCat OneBot11 正向 WS 鉴权 token（为空 = 不鉴权，兼容未开启 token 的 NapCat）
+        "napcat_token": str(cfg.get("qq_napcat_token", "") or "").strip(),
         # 是否在回复时携带表情包 gif
         "send_sticker": str(cfg.get("qq_send_sticker", "true")).lower() == "true",
         # 是否在回复时附带 F5-TTS 语音

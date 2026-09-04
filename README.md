@@ -818,6 +818,18 @@ ollama pull qwen2.5vl:7b  # 如需本地屏幕识别
 ---
 ## 🆕 最新版本
 
+**V1.16** — A 卡兼容 + 启动崩溃修复
+
+### V1.16 变更
+
+- **🖥 A 卡/AMD 兼容**：显卡检测对 AMD/Intel 不再 `sys.exit`（改为提示后自动 CPU 模式，对话/QQ/微信走云端不受影响）；F5-TTS 支持 `F5TTS_DEVICE=cpu|cuda|auto` 强制指定、CUDA 实测防误报、构造失败自动降级 CPU
+- **🔧 F5-TTS torchaudio 回退**：torchaudio 2.11 强制走 torchcodec（Windows 需系统 FFmpeg，缺则 `torchaudio.load` 崩溃）——自动探测原生可用性，不可用则切 soundfile 实现（纯 wav 等价，CPU 部署不再踩坑）
+- **🔑 QQ NapCat token 鉴权**：OneBot11 正向 WS 支持 `Authorization: Bearer` 头（`qq_napcat_token` 配置，空则不鉴权，兼容旧 NapCat）；开启 token 的 NapCat 不再"握手即断"
+- **🔌 Qt 插件路径修复**：中文/非 ASCII 安装路径下 PyQt5 找不到 qwindows.dll 崩溃（0xC0000409）——入口统一修复（main / run_launcher / debug_live2d），兼容 ASCII 路径
+- **🎙 F5-TTS 子进程用 venv 解释器**：三入口统一优先 `runtime\venv`（避免系统 Python 拉出残缺实例抢 9881）
+- **🗣 语音识别离线化**：模型已缓存时自动 `HF_HUB_OFFLINE`（防每次启动联网探测失败）；预热成功才置位、失败限次重试
+- **🐛 修复**：摄像头识图 `cfg` 未定义崩溃；uvicorn Windows Proactor 下 `WinError 10054` 无害噪音消除（切 Selector 事件循环）；`run_qq` 缺依赖 `exit(1)` 防窗口无声消失
+
 **V1.15** — 双通道可靠性加固 + 安全修复 + 文档重构
 
 ### V1.15 变更
