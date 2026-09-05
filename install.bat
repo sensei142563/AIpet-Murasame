@@ -40,10 +40,18 @@ echo [3/5] 安装基础依赖（首次约 10-20 分钟，请耐心等待）...
 if errorlevel 1 goto :install_fail
 echo        基础依赖安装完成
 
-echo [4/5] 安装 CPU 版 PyTorch（云端对话也必需）...
-"%VENV_PYTHON%" -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-if errorlevel 1 goto :install_fail
-echo        PyTorch 安装完成
+echo [4/5] 检查 PyTorch（云端对话也必需）...
+rem 重跑本脚本时绝不能把用户手动装的 GPU(cu) 版 torch 静默盖回 CPU 版（A 卡/N 卡调试教训）：
+rem venv 里 torch 已可导入就直接跳过，无论 CPU 版还是 GPU 版都保留。
+"%VENV_PYTHON%" -c "import torch" >nul 2>&1
+if errorlevel 1 (
+    echo        venv 未检测到 torch，安装 CPU 版兜底（首次约 2-5 分钟）...
+    "%VENV_PYTHON%" -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+    if errorlevel 1 goto :install_fail
+    echo        PyTorch 安装完成（CPU 版；如需 GPU 加速见 README「显卡」一节）
+) else (
+    echo        检测到 venv 已安装 torch，跳过（保留现有版本，避免覆盖 GPU 版）
+)
 
 rem ---------- 5. 生成 config.json ----------
 if exist "config.json" (

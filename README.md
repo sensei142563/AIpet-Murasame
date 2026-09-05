@@ -59,6 +59,7 @@
 | 🐾 桌面桌宠 | `启动桌宠.bat` | 即本机上的 AI 少女（对话/立绘/Live2D/摸头） |
 | 💬 QQ 聊天 | `启动QQ.bat` | 用 QQ 小号聊天，**桌宠不开也能用** |
 | 💬 微信聊天 | `启动微信.bat` | 用微信 ClawBot 通道聊天 |
+| 🖥 图形启动器（PCL） | `AIpet-Murasame.exe`（绿色版） | 多角色切换 / 设置 / 记忆 / 人脸管理，绿色版自带 |
 
 > 绿色版首次启动会自动生成空白 `config.json`（隐私考虑），填好你的 API Key 再用。
 
@@ -151,6 +152,8 @@ cp config.example.json config.json
 - **F5-TTS**（长文本中文）：模型已内置在 `F5-TTS_Models/`，含 `F5TTS_v1_Base` 权重 + `vocos-mel-24khz` 声码器。
 
 #### 6. 一键启动
+- **绿色版**：双击 `AIpet-Murasame.exe`（图形启动器），或双击 `启动桌宠.bat` 直接开桌宠。
+- **源码版**：
 ```bash
 python run_launcher.py
 ```
@@ -163,7 +166,7 @@ python run_launcher.py
 | 是什么 | 打包好的完整目录：启动器 EXE + 桌宠源码 + 语音模型，解压即用 | 完整源代码，环境自己装 |
 | 去哪下 | 仓库 **Releases** 页下载（分卷压缩，合并解压，见下方说明） | 仓库首页 **Code → Download ZIP**，或 `git clone https://github.com/sensei142563/AIpet-Murasame.git` |
 | 首次使用 | 解压 → 双击 `install.bat` → 填 `config.json` 的 API Key | 解压 → 双击 `install.bat` → 填 `config.json` 的 API Key |
-| 日常使用 | 双击 `启动桌宠.bat`（桌宠）/ `启动QQ.bat`（QQ） | 同左，或 `python run_launcher.py` |
+| 日常使用 | 双击 `AIpet-Murasame.exe` 启动器，或双击 `启动桌宠.bat`（桌宠）/ `启动QQ.bat`（QQ）/ `启动微信.bat`（微信） | 同左（bat 双击即可）；想改代码/调试可 `python run_launcher.py` |
 | 适合谁 | 想直接玩、不想折腾环境的人 | 想改代码、做新角色包、二次开发的人 |
 
 两个版本功能完全一致，差别只在「环境是否已打包」。绿色版**不含你的 config.json**（API Key 隐私），首次运行会自动生成空白配置，自己填好即可。
@@ -185,8 +188,9 @@ python run_launcher.py
 
 ### 启动 QQ 聊天
 
-- **方式一（PCL）**：`config.json` 中 `qq_enabled="true"` → 启动器出现「💬 启动 QQ AIpet」按钮
-- **方式二（命令行）**：
+- **方式一（推荐）**：双击 **`启动QQ.bat`**（绿色版/源码版都行）。
+- **方式二（PCL）**：`config.json` 中 `qq_enabled="true"` → 双击 `AIpet-Murasame.exe` 启动器 → 点「💬 启动 QQ AIpet」按钮。
+- **方式三（命令行，源码调试用）**：
   ```bash
   python run_qq.py
   ```
@@ -203,10 +207,11 @@ python run_launcher.py
 
 **多角色**：QQ 服务的是 PCL 里选中的**活动角色**——人设、表情包、语音、记忆都来自该角色包；切换角色后需重启 QQ 生效。
 
-> ### 🔧 QQ 连不上 / 连上就断？先查这 3 步（新手高频）
+> ### 🔧 QQ 连不上 / 连上就断？先查这 4 步（新手高频）
 > 1. **NapCat 必须先启动并扫码**：运行 `NapCat.Shell.Windows.OneKey\start_napcat.bat`，用**小号**手机 QQ 扫弹窗二维码，等控制台出现 `WebSocket服务: 127.0.0.1:3001 已启动`。**没看到这行就别启动 QQ**，否则必然 `Connection refused` / `积极拒绝`。
 > 2. **端口必须 3001**：`config.json` 的 `qq_napcat_ws` 默认 `ws://127.0.0.1:3001`，**不要改**。NapCat 的 onebot 正向 WS 服务默认就在这里；改了要同时改 NapCat 的 `NapCat\config\onebot11_<QQ号>.json`。
 > 3. **本程序会自动重试 + 自动重连**：即便启动时 NapCat 还没就绪，`run_qq.py` 也会**等待就绪再连**，且断开后**每 5~30 秒自动重连**（不再一断就退出）。如果你把 NapCat 补启动起来，QQ 窗口会自动恢复连接，无需重启。
+> 4. **NapCat 在线但 bot 连不上？（onebot 配置被重置）**：如果 NapCat 自己能收 QQ 消息、但 QQ bot 窗口一直报连不上 3001——极可能是 NapCat 的 `NapCat\config\onebot11_<QQ号>.json` 被重置，`network.websocketServers` 变成空数组（NapCat 异常退出或 WebUI 操作可能重置此文件）。NapCat 虽在线却不提供 WS 端口。解决：打开该 json，确认 `websocketServers` 里有正向 WS 段（`enable:true, host:"127.0.0.1", port:3001`），没有就补回（可对照 `.bak` 备份），然后重启 NapCat。程序日志此时也会给出这条指引。
 
 > ### 🔇 语音没声音？
 > 语音消息走 **F5-TTS**（端口 9881）。若日志出现 `F5-TTS 服务未运行...将自动跳过`，说明服务没起来：
@@ -273,7 +278,7 @@ python run_launcher.py
 - **Exit** — 退出
 
 ### PCL 启动器
-运行 `python run_launcher.py` 打开图形化启动器。功能与多角色操作见上方教程**第 4 节**；启动桌宠后底部会出现功能按钮：按住说话、屏幕识别、摄像头识别、Live2D 切换、长文本模式。
+双击 **`AIpet-Murasame.exe`**（绿色版自带；源码版运行 `python run_launcher.py`）打开图形化启动器。功能与多角色操作见上方教程**第 4 节**；启动桌宠后底部会出现功能按钮：按住说话、屏幕识别、摄像头识别、Live2D 切换、长文本模式。
 
 ---
 ## 💬 常见问题（安装/环境类）
@@ -636,7 +641,7 @@ main.py (PyQt5 主窗口 + FastAPI 28565 + 快捷键监听 + 托盘)
 ## 👤 人脸识别使用指南
 
 ### 注册人脸
-1. 运行 `python run_launcher.py` 打开 PCL 启动器
+1. 双击 **`AIpet-Murasame.exe`** 打开 PCL 启动器（绿色版自带；源码版运行 `python run_launcher.py`）
 2. 点击导航栏 **"人脸"** 标签
 3. 点击 **"+ 添加主人照片"**，选择你的正脸照片（推荐多角度：正面/侧面/低头/仰头）
 4. 点击 **"+ 添加其他人"**，输入姓名和关系，选择对方的正脸照片
@@ -817,6 +822,17 @@ ollama pull qwen2.5vl:7b  # 如需本地屏幕识别
 
 ---
 ## 🆕 最新版本
+
+**V1.16.1** — 环境加固 + N卡实机修复
+
+### V1.16.1 变更
+
+- **🔧 install.bat 不再覆盖 GPU 版 torch**：重跑安装时若 venv 已能 `import torch` 则跳过 CPU 版重装——手动装的 cu 版不会被静默打回 CPU（A卡/N卡用户补漏重跑安全）
+- **🛡 启动 bat venv 完整性探针**：`启动桌宠 / 启动QQ / 启动微信 / restart_longtext` 启动前先校验 venv 是否真的可用（桌宠查 PyQt5+torch、QQ 查 websocket+requests、微信查 requests+Crypto+qrcode，毫秒级只查不加载）——装到一半/装错位置的 venv 会打印「重跑 install.bat 或删除 runtime\venv」并回退系统 Python，不再静默跑挂
+- **🔊 语音播放 winsound 优先**：部分机器 QSound 播不出声/报 null output device——桌面语音改 winsound 播放、QSound 兜底（N卡实机无声修复）
+- **🎙 F5-TTS 解释器多候选探测**：`runtime\venv` → 系统 Python 逐个试 `import f5_tts`，谁装了就派谁，不再因「venv 目录存在但缺可选库」架空装好库的 Python；NVIDIA 机器误用 CPU torch 时打印安装 cu128 版提示
+- **🔌 NapCat 配置重置诊断**：NapCat 在线但 bot 连不上 3001 时，程序日志与 README 会提示检查 `onebot11_<QQ号>.json` 的 `websocketServers` 是否被清空（NapCat 异常退出/WebUI 操作会重置该文件），附修复指引
+- **🔑 版本号同步**：`wechat_bot_agent` → `AIpet/1.16.1`
 
 **V1.16** — A 卡兼容 + 启动崩溃修复
 

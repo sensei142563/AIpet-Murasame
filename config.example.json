@@ -51,6 +51,6 @@
   "qq_offline_enable": "true",
   "wechat_enabled": "false",
   "wechat_owner_id": "",
-  "wechat_bot_agent": "AIpet/1.16",
+  "wechat_bot_agent": "AIpet/1.16.1",
   "wechat_send_voice": "false"
 }

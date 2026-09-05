@@ -37,7 +37,7 @@ CHANNEL_VERSION = "2.4.6"
 # uint32: major<<16 | minor<<8 | patch → 2.4.6 = 0x00020406 = 132102
 ILINK_APP_CLIENT_VERSION = str((2 << 16) | (4 << 8) | 6)
 FIXED_BASE_URL = "https://ilinkai.weixin.qq.com"
-DEFAULT_BOT_AGENT = "AIpet/1.16"
+DEFAULT_BOT_AGENT = "AIpet/1.16.1"
 
 # 消息项类型（官方 types.js）
 ITEM_TEXT = 1

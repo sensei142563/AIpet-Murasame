@@ -221,9 +221,53 @@ class QQBotBridge:
         self.running = True  # 先置 running，_reconnect_loop 的 while 才会进入
         host, port = self._ws_url_parts()
         if port and not self._napcat_ready(port, host=host):
-            print(f"[QQBridge] ⏳ 等待 NapCat 就绪（{host}:{port}）..."
-                  "若一直卡在这里，说明 NapCat 未正常启动/扫码，请运行 start_napcat.bat 并扫码登录。")
+            print(f"[QQBridge] ⏳ 等待 NapCat 就绪（{host}:{port}）...")
+            self._diagnose_napcat(host, port)
         self._reconnect_loop()
+
+    @staticmethod
+    def _napcat_process_running() -> bool:
+        """NapCat 相关进程是否在运行（QQ.exe / NapCat 注入进程，tasklist 探测）。"""
+        try:
+            import subprocess as _sp
+            out = _sp.run(["tasklist", "/FO", "CSV", "/NH"],
+                          capture_output=True, text=True, timeout=10,
+                          encoding="utf-8", errors="replace").stdout.lower()
+            return any(k in out for k in ("qq.exe", "napcatwinbootmain"))
+        except Exception:
+            return False  # 探测失败不误报
+
+    @staticmethod
+    def _diagnose_napcat(host, port):
+        """NapCat 端口就绪超时后的环境诊断（纯提示，不阻塞、不改配置）。
+
+        区分三种情况（A 卡真机实测，onebot 配置被重置属高频坑）：
+        1. NapCat 进程都没跑 → 提示启动 start_napcat.bat 扫码
+        2. 进程在跑但 3001 不通 → 极可能 onebot11_<uin>.json 的 websocketServers
+           被重置/清空（NapCat 在线收消息但 bot 连不上的"割裂"正是此因）
+        3. 其他 → 通用提示
+        """
+        import socket as _sock
+        # 再快速确认一次端口
+        try:
+            with _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM) as s:
+                s.settimeout(2)
+                if s.connect_ex((host, port)) == 0:
+                    return  # 已就绪，无需提示
+        except Exception:
+            pass
+
+        if QQBotBridge._napcat_process_running():
+            print(f"[QQBridge] 🔍 检测到 NapCat 进程在运行，但 {host}:{port} 未监听。")
+            print("[QQBridge]   这通常是 NapCat 的 onebot 配置文件被重置/清空所致：")
+            print("[QQBridge]   请检查 NapCat 目录下 NapCat\\config\\onebot11_<QQ号>.json")
+            print("[QQBridge]   的 network.websocketServers 是否含正向 WS（host=127.0.0.1, port=3001）。")
+            print("[QQBridge]   为空则 NapCat 虽在线却不提供 WS 端口 → 需要补回该段并重启 NapCat。")
+            print("[QQBridge]   （NapCat WebUI 或异常退出可能重置此文件）")
+        else:
+            print("[QQBridge] ⚠ 未检测到 NapCat 进程，或启动异常。")
+            print("[QQBridge]   请运行 NapCat.Shell.Windows.OneKey\\start_napcat.bat 并扫码登录，")
+            print("[QQBridge]   确认控制台出现 WebSocket服务: 127.0.0.1:3001 已启动。")
 
     @staticmethod
     def _ws_url_parts():
@@ -259,6 +303,8 @@ class QQBotBridge:
     def _reconnect_loop(self):
         """断开后自动重连（不退出），给用户 NapCat 就绪时间窗口"""
         delay = 5
+        fail_count = 0
+        diagnosed = False
         while self.running:
             try:
                 print(f"[QQBridge] 连接 NapCat: {self.ws_url}")
@@ -271,6 +317,7 @@ class QQBotBridge:
                     self.ws = websocket.create_connection(
                         self.ws_url, timeout=30, enable_multithread=True
                     )
+                fail_count = 0  # 连上即清零
                 self._on_connected()   # 内部处理 login_info + 离线补拉 + 进入事件循环（阻塞）
                 # 正常走到这里说明事件循环因断开退出 → 重置 delay 后重连
                 if not self.running:
@@ -279,7 +326,13 @@ class QQBotBridge:
                 delay = 5
                 time.sleep(delay)
             except Exception as e:
+                fail_count += 1
                 print(f"[QQBridge] ⚠ 连接失败: {e}")
+                # 持续失败（可能 NapCat 中途退出/配置被重置）→ 提示一次环境诊断，不刷屏
+                if fail_count == 3 and not diagnosed:
+                    diagnosed = True
+                    host, port = self._ws_url_parts()
+                    self._diagnose_napcat(host, port)
                 if not self._sleep(delay):
                     break
                 # 指数退避，最多 30 秒

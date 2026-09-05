@@ -12,11 +12,44 @@ from PyQt5.QtCore import QTimer, pyqtSignal
 from PyQt5.QtCore import Qt, QRect
 from PyQt5.QtGui import QGuiApplication, QImage
 from PyQt5.QtGui import QPainter, QColor, QFont, QPixmap, QFontMetrics
-from PyQt5.QtMultimedia import QSound
 from PyQt5.QtWidgets import QLabel
 
 from classes.Worker_class import ScreenWorker
 from classes.Worker_class import qwen3_lora_Worker, cloud_API_Worker, CameraWorker
+
+
+def play_voice_wav(path: str) -> None:
+    """播放短句 wav：优先 winsound（Windows 原生 MME，绕开 Qt 多媒体），失败回退 QSound。
+
+    背景（N 卡真机调试）：QtMultimedia(QSound) 在部分机器取不到默认输出设备，
+    直接崩溃或 "using null output device" 无声。winsound 走系统 MME 更稳，零额外依赖。
+    """
+    try:
+        import winsound
+        winsound.PlaySound(
+            str(path),
+            winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_NODEFAULT,
+        )
+        return
+    except Exception:
+        pass
+    try:
+        QSound.play(str(path))
+    except Exception:
+        pass
+
+
+def stop_voice_wav() -> None:
+    """停止当前短句 wav 播放（winsound 与 QSound 双保险）"""
+    try:
+        import winsound
+        winsound.PlaySound(None, winsound.SND_PURGE)
+    except Exception:
+        pass
+    try:
+        QSound.stop()
+    except Exception:
+        pass
 from tool.config import get_config
 from tool.chat import ollama_qwen25vl
 from tool.cloud_API_chat import cloud_vl
@@ -993,7 +1026,7 @@ class Murasame(QLabel):
         # 不再中断 worker — 对话让它自然播完
         # 用户主动输入会通过 start_thread(t=False) 正常打断
         try:
-            QSound.stop()
+            stop_voice_wav()
         except Exception:
             pass
 
@@ -1150,7 +1183,7 @@ class Murasame(QLabel):
             if voice_path and os.path.exists(voice_path):
                 voice_length = get_audio_length_wave(os.path.abspath(voice_path))
                 if voice_length > 0:
-                    QSound.play(voice_path)
+                    play_voice_wav(os.path.abspath(voice_path))
 
             self.show_text(sentence, typing=True)
             # 计算打字机需要的时间（40ms * 每个字）

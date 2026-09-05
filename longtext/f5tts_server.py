@@ -97,8 +97,25 @@ def _detect_device() -> str:
             return "cuda"
     except Exception as e:
         print(f"[F5TTS] torch 不可用: {e}")
-    print("[F5TTS] 使用 CPU 模式（A 卡/无 CUDA 机器合成较慢属正常）")
+    # 走 CPU 前诊断：若本机有 NVIDIA GPU 但 torch 是 CPU 构建（或 CUDA 不可用），
+    # 明确提示可装 cu 版 torch 提速（N 卡真机调试 §5：有 5060 却只能 CPU 的典型原因）。
+    if _nvidia_present_but_cpu():
+        print("[F5TTS] ⚠ 检测到 NVIDIA 显卡，但当前 torch 为 CPU 构建/CUDA 不可用。")
+        print("[F5TTS]   如需 GPU 加速，请在项目 runtime\\venv 内安装 cu 版 torch，例如：")
+        print("[F5TTS]     pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128")
+    print("[F5TTS] 使用 CPU 模式（无可用 GPU 时合成较慢属正常）")
     return "cpu"
+
+
+def _nvidia_present_but_cpu() -> bool:
+    """本机是否有 NVIDIA GPU（nvidia-smi 探测，不依赖 torch）。"""
+    try:
+        import subprocess as _sp
+        _r = _sp.run(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+                     capture_output=True, timeout=5, text=True, errors="replace")
+        return _r.returncode == 0 and bool(_r.stdout.strip())
+    except Exception:
+        return False
 
 
 # 模块级标志：回退只执行一次（幂等，避免二次调用时把已替换的 soundfile 误判为"原生可用"）

@@ -357,14 +357,38 @@ def run_download():
     elif tts_type == "cloud":
         log("检测到 tts_type = cloud, 跳过模型下载", "INFO")
 
-def _f5tts_python():
-    """F5-TTS 子进程解释器：优先项目 runtime\\venv，否则回落 sys.executable
-    （公共实现 tool.paths.venv_python，三入口共用，A 卡调试 §9）。"""
+def _f5tts_python_candidates():
+    """F5-TTS 解释器候选列表（按优先级）：runtime\\venv → 当前解释器。"""
+    cands = []
     try:
         from tool.paths import venv_python
-        return venv_python()
+        p = venv_python()
+        if p and p not in cands:
+            cands.append(p)
     except Exception:
-        return sys.executable
+        pass
+    if sys.executable not in cands:
+        cands.append(sys.executable)
+    return cands
+
+
+def _find_f5tts_python():
+    """多候选探测：谁装了 f5_tts 用谁（N 卡调试 §3.5）。
+
+    只按"venv 目录存在"选解释器，会在 venv 缺可选库时架空已装好库的系统 Python。
+    这里逐个候选跑 `import f5_tts`，返回第一个可用的解释器；都没有返回 None。
+    """
+    for cand in _f5tts_python_candidates():
+        try:
+            _probe = subprocess.run(
+                [cand, "-c", "import f5_tts"],
+                capture_output=True, timeout=30,
+            )
+            if _probe.returncode == 0:
+                return cand
+        except Exception:
+            continue
+    return None
 
 
 def start_f5tts_api():
@@ -374,26 +398,17 @@ def start_f5tts_api():
         log("长文本模式已关闭，跳过 F5-TTS 服务启动。", "INFO")
         return None
 
-    # F5-TTS 为可选语音库，缺失时仅提示，不阻塞程序。
-    # 注意：必须用 _f5tts_python()（可能拉起 runtime\venv）去探测——若只探测当前解释器，
-    # 系统 Python 启动而 venv 完好的场景会误判"不可用"而跳过（审计 P2）。
-    try:
-        _probe = subprocess.run(
-            [_f5tts_python(), "-c", "import f5_tts"],
-            capture_output=True, timeout=30,
-        )
-        if _probe.returncode != 0:
-            log("未检测到 f5_tts 库（venv 环境），长文本语音不可用。", "WARN")
-            log("如需语音功能，请参考 README 安装 F5-TTS。", "INFO")
-            return None
-    except Exception as e:
-        log(f"f5_tts 探测失败: {e}", "WARN")
+    # F5-TTS 为可选语音库：多候选探测（runtime\venv → 系统 Python），谁有 f5_tts 用谁。
+    f5_py = _find_f5tts_python()
+    if f5_py is None:
+        log("未检测到 f5_tts 库（venv 与系统 Python 均未安装），长文本语音不可用。", "WARN")
+        log("如需语音功能：安装 f5-tts 后重试（推荐在 runtime\\venv 内安装）。", "INFO")
         return None
 
     log("检测到长文本模式已开启，启动 F5-TTS 服务（新控制台）...", "INFO")
     try:
         proc = subprocess.Popen(
-            [_f5tts_python(), "-m", "longtext.f5tts_server"],
+            [f5_py, "-m", "longtext.f5tts_server"],
             cwd=os.path.dirname(os.path.abspath(__file__)),
             creationflags=(0x00000010 if os.name == "nt" else 0)
         )
