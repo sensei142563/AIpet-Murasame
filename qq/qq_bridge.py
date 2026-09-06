@@ -199,6 +199,7 @@ class QQBotBridge:
         self.self_id = None  # 登录的 QQ 号（识别是否自己发的消息）
         self._lock = threading.Lock()
         self._send_fail_count = 0  # 断线窗口内发送失败计数（重连成功后清零）
+        self._napcat_diagnosed = False  # NapCat 环境诊断只提示一次（connect/重连共用）
 
         # 消息调度器：FIFO 队列 + 串行处理 + 会话合并
         self.scheduler = MessageScheduler(handler=self._handle_queued_message)
@@ -222,6 +223,7 @@ class QQBotBridge:
         host, port = self._ws_url_parts()
         if port and not self._napcat_ready(port, host=host):
             print(f"[QQBridge] ⏳ 等待 NapCat 就绪（{host}:{port}）...")
+            self._napcat_diagnosed = True  # connect 已诊断 → 重连循环不再重复打印
             self._diagnose_napcat(host, port)
         self._reconnect_loop()
 
@@ -304,7 +306,6 @@ class QQBotBridge:
         """断开后自动重连（不退出），给用户 NapCat 就绪时间窗口"""
         delay = 5
         fail_count = 0
-        diagnosed = False
         while self.running:
             try:
                 print(f"[QQBridge] 连接 NapCat: {self.ws_url}")
@@ -329,8 +330,9 @@ class QQBotBridge:
                 fail_count += 1
                 print(f"[QQBridge] ⚠ 连接失败: {e}")
                 # 持续失败（可能 NapCat 中途退出/配置被重置）→ 提示一次环境诊断，不刷屏
-                if fail_count == 3 and not diagnosed:
-                    diagnosed = True
+                # 注意：connect() 若已因初始未就绪诊断过（_napcat_diagnosed=True），此处不再重复
+                if fail_count == 3 and not getattr(self, "_napcat_diagnosed", False):
+                    self._napcat_diagnosed = True
                     host, port = self._ws_url_parts()
                     self._diagnose_napcat(host, port)
                 if not self._sleep(delay):

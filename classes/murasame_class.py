@@ -34,9 +34,21 @@ def play_voice_wav(path: str) -> None:
     except Exception:
         pass
     try:
-        QSound.play(str(path))
+        _qs = _qsound()
+        if _qs is not None:
+            _qs.play(str(path))
     except Exception:
         pass
+
+
+def _qsound():
+    """QSound 延迟导入：模块顶部不 import QtMultimedia（避免拖慢/报错），
+    仅当 winsound 不可用时才加载做兜底。"""
+    try:
+        from PyQt5.QtMultimedia import QSound
+        return QSound
+    except Exception:
+        return None
 
 
 def stop_voice_wav() -> None:
@@ -47,7 +59,9 @@ def stop_voice_wav() -> None:
     except Exception:
         pass
     try:
-        QSound.stop()
+        _qs = _qsound()
+        if _qs is not None:
+            _qs.stop()
     except Exception:
         pass
 from tool.config import get_config
