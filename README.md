@@ -5,7 +5,9 @@
 
 ## 📖 项目简介
 
-一个基于 AI 的多角色桌面宠物引擎（一个引擎 + N 个角色包），随附丛雨（《千恋＊万花》）与诺瓦（《星空列车与白的旅行》）两个示范角色。本项目参考了原项目 [LemonQu-GIT/MurasamePet](https://github.com/LemonQu-GIT/MurasamePet?tab=readme-ov-file)，进行部分重写和新加功能，并根据 GPL-3.0 许可证要求进行开源。
+一个基于 AI 的多角色桌面宠物引擎（一个引擎 + N 个角色包），随附丛雨（《千恋＊万花》）与诺瓦（《星空列车与白的旅行》）两个示范角色。
+
+> **本仓库是 [kuxiaowo/AIpet-Murasame](https://github.com/kuxiaowo/AIpet-Murasame) 的修改版本**（该项目的更早上游为 [LemonQu-GIT/MurasamePet](https://github.com/LemonQu-GIT/MurasamePet)）。本项目在其基础上进行部分重写并新增功能，按 **GNU Affero General Public License v3.0（AGPL-3.0）** 分发——许可证全文见 [`LICENSE`](LICENSE)，来源、修改者与修改日期见 [`COPYRIGHT.md`](COPYRIGHT.md)。
 
 ### 🙏 特别感谢
 
@@ -13,6 +15,7 @@
 - **原项目地址**：
   - GitHub：[LemonQu-GIT/MurasamePet](https://github.com/LemonQu-GIT/MurasamePet)
   - ModelScope：[Murasame](https://modelscope.cn/models/LemonQu/Murasame) / [Murasame_SoVITS](https://modelscope.cn/models/LemonQu/Murasame_SoVITS)
+- **直接上游**：[kuxiaowo/AIpet-Murasame](https://github.com/kuxiaowo/AIpet-Murasame) — **本仓库基于该项目修改**（`download.py`、`tool/stt.py` 等文件沿用其历史版本；修改者、修改日期与主要修改内容见 [`COPYRIGHT.md`](COPYRIGHT.md)）
 - **@吴基岩BedrockWu** — 设备与训练支持（device & training support）
 
 角色素材来源：
@@ -807,7 +810,10 @@ ollama pull qwen2.5vl:7b  # 如需本地屏幕识别
 ## 🔓 开源说明
 
 ### 开源协议
-本项目采用 **GPL-3.0** 许可证，参考了 [LemonQu-GIT/MurasamePet](https://github.com/LemonQu-GIT/MurasamePet)。
+本项目采用 **GNU Affero General Public License v3.0（AGPL-3.0）** 许可证（全文见 [`LICENSE`](LICENSE)）。
+
+本仓库是 [kuxiaowo/AIpet-Murasame](https://github.com/kuxiaowo/AIpet-Murasame) 的**修改版本**，其更早上游为 [LemonQu-GIT/MurasamePet](https://github.com/LemonQu-GIT/MurasamePet)。依据 AGPL-3.0 第 5 条，修改情况（修改者、修改日期、主要修改内容与所基于的上游版本）已在 [`COPYRIGHT.md`](COPYRIGHT.md) 中醒目声明，上游版权与许可证声明一并保留。
+
 仓库随附角色：丛雨（版权归 **YuzuSoft**）与诺瓦（模型/语音来源见「特别感谢」）；各角色素材版权归其原始权利人所有，仅限学习交流，**禁止商业用途**。
 
 ### 使用前提
@@ -887,11 +893,11 @@ ollama pull qwen2.5vl:7b  # 如需本地屏幕识别
 - **🐛 PCL 桌宠列表修复**：绿色版 exe 内角色列表/提示词/Live2D 下拉为空、源码版多显示本地角色的问题已修复
 - **📖 文档**：新增「绿色版 vs 开源版」下载使用指南；措辞更友好
 
-**V1.12** — 开源发布（GPL-3.0）：仓库与绿色版随附「丛雨 + 诺瓦」两个示范角色
+**V1.12** — 开源发布（AGPL-3.0）：仓库与绿色版随附「丛雨 + 诺瓦」两个示范角色
 
 ### V1.12 变更
 
-- **📦 开源**：项目以 GPL-3.0 发布；公开仓库为全新单次提交，不含任何隐私数据（config / data / 人脸 / 记忆均已 .gitignore 且从未进入历史）
+- **📦 开源**：项目以 AGPL-3.0 发布；公开仓库为全新单次提交，不含任何隐私数据（config / data / 人脸 / 记忆均已 .gitignore 且从未进入历史）
 - **🐾 示范角色**：仓库/绿色版随附丛雨 + 诺瓦两个示范角色
 - **🙏 致谢**：补充各角色模型与语音素材来源（见「特别感谢」）
 
