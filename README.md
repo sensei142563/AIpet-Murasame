@@ -961,12 +961,8 @@ ollama pull qwen2.5vl:7b  # 如需本地屏幕识别
 - **V1.2.x** — 屏幕识别、空闲检测、PCL 风格启动器
 
 ### 项目指路
-- **安装教程（最新）**: [AIpet 多角色桌宠安装教程](https://www.bilibili.com/video/BV1Aybe6GEHP/?vd_source=c2cadbf819021ce34cdfc6948ac18d63)
-- **演示视频（最新）**: [AIpet 多角色桌宠演示](https://www.bilibili.com/video/BV1Q1bY6QE5M/?vd_source=c2cadbf819021ce34cdfc6948ac18d63)
-- **历史教程视频**:
-  - [丛雨AI桌宠V1.2.0部署教程](https://www.bilibili.com/video/BV1F6ykBwEDu)
-  - [丛雨AI桌宠V1.2.2部署教程](https://www.bilibili.com/video/BV1ghCMBjEKK)
-  - [丛雨AI桌宠V1.3.0部署教程](https://www.bilibili.com/video/BV1iw2XBREpd)
+- **安装教程**: [AIpet 多角色桌宠安装教程](https://www.bilibili.com/video/BV1Aybe6GEHP/?vd_source=c2cadbf819021ce34cdfc6948ac18d63)
+- **演示视频**: [AIpet 多角色桌宠演示](https://www.bilibili.com/video/BV1Q1bY6QE5M/?vd_source=c2cadbf819021ce34cdfc6948ac18d63)
 
 ---
 
