@@ -550,6 +550,13 @@ class PortraitPreviewWidget(QLabel):
             from pets.pet_registry import get_portrait_prompts
             pp = get_portrait_prompts()
             first = pp.get("sets", {}).get(self._portrait_type, {}).get("first_portrait", [1715, 1306, 1719])
+            # 穿该套当前保存的服装（a/b 两套素材各自独立，跨套图层自动换算）
+            try:
+                from tool.portrait_outfit import normalize_layers, apply_outfit
+                first = apply_outfit(normalize_layers(first, self._portrait_type),
+                                     self._portrait_type)
+            except Exception:
+                pass
             cv_img = generate_fgimage(target, first)
             if cv_img.shape[2] == 4:
                 cv_img = cv2.cvtColor(cv_img, cv2.COLOR_RGBA2BGRA)
@@ -780,6 +787,12 @@ class PCLMainWindow(QWidget):
 
     def showEvent(self, event):
         super().showEvent(event)
+        try:
+            if not getattr(self, "_silicon_applied", False):
+                self._silicon_applied = True
+                self._apply_silicon_ui()
+        except Exception as _e:
+            print(f"[PCL] ⚠ Silicon 界面应用异常: {_e}")
         self._apply_round_mask()
         if self._model_queue and self._preview_widget is None:
             pet_id, path = self._model_queue.pop(0)
@@ -916,6 +929,36 @@ class PCLMainWindow(QWidget):
         content_layout = QHBoxLayout(content)
         content_layout.setContentsMargins(0, 0, 0, 0); content_layout.setSpacing(0)
 
+        # ===== SiliconUI 布局：左侧竖向导航栏（新主题启用；旧主题仍用顶部横排）=====
+        self.nav_rail = None
+        try:
+            from .colors import current_theme_id
+            if current_theme_id() == "silicon":
+                from .silicon_ui import PCLNavRail
+                from .colors import block_icon
+                _items = [
+                    ("模型", block_icon("GoldBlock"), 0),
+                    ("设置", block_icon("RedstoneBlock"), 1),
+                    ("记忆", block_icon("DiamondBlock"), 3),
+                    ("桌宠", block_icon("Grass"), 4),
+                    ("提示词", block_icon("CommandBlock"), 5),
+                    ("插件", block_icon("Anvil"), 6),
+                    ("主题", block_icon("DiamondBlock"), 7),
+                ]
+                self.nav_rail = PCLNavRail(_items)
+                self.nav_rail.nav_changed.connect(self._switch_page)
+                content_layout.addWidget(self.nav_rail)
+                # 顶部横排导航让位给左侧竖栏（保留控件对象，仅隐藏）
+                for _b in (self.titlebar.btn_model, self.titlebar.btn_settings,
+                           self.titlebar.btn_memory, self.titlebar.btn_pets,
+                           self.titlebar.btn_prompt, self.titlebar.btn_plugins,
+                           self.titlebar.btn_themes):
+                    _b.setVisible(False)
+                print("[PCL] SiliconUI 布局：左侧竖向导航栏已启用")
+        except Exception as _e:
+            print(f"[PCL] ⚠ 竖向导航栏创建失败（回退顶部导航）: {_e}")
+            self.nav_rail = None
+
         self.sidebar = PCLSidebar()
         # 阶段 B：点卡片 → 设为活动角色 + 预览对应模型
         self.sidebar.model_selected.connect(self._on_model_selected)
@@ -1014,6 +1057,7 @@ class PCLMainWindow(QWidget):
         self.preview_layout.addWidget(self.qq_token_row)
         self.preview_layout.addWidget(self.qq_tools_row)
         self.preview_layout.addLayout(btn_row)
+        # 立绘相关入口在「🐾 桌宠管理」页的角色卡片上（🎨 立绘工坊 / 📂 打开文件夹）
         self._qq_btn_visible = qq_enabled
         # 恢复逻辑在按钮事件 connect 之后注册一次(在 __init__ 后段或事件处)
         self.napcat_relogin_done.connect(self._on_napcat_relogin_done)
@@ -1148,6 +1192,29 @@ class PCLMainWindow(QWidget):
         except Exception:
             pass
         self._update_background()
+
+    def _apply_silicon_ui(self):
+        """新主题 silicon：亚克力模糊 + Win11 圆角 + 深色标题栏"""
+        try:
+            from .colors import current_theme_id
+            if current_theme_id() != "silicon":
+                return
+            from . import silicon_ui
+            ok = silicon_ui.apply_acrylic(self)
+            print(f"[PCL] 亚克力窗口效果: {'已启用' if ok else '不可用（回退纯色）'}")
+            # 顶部导航胶囊化
+            try:
+                from .colors import ACCENT_ID, THEME_COLORS
+                acc = THEME_COLORS.get(str(ACCENT_ID), {}).get("title_start", "#4c8dff")
+                for b in (self.titlebar.btn_model, self.titlebar.btn_settings,
+                          self.titlebar.btn_memory, self.titlebar.btn_pets,
+                          self.titlebar.btn_prompt, self.titlebar.btn_plugins,
+                          self.titlebar.btn_themes):
+                    b.setStyleSheet(silicon_ui.nav_pill_qss(accent=acc))
+            except Exception as _e:
+                print(f"[PCL] 导航胶囊化失败: {_e}")
+        except Exception as e:
+            print(f"[PCL] ⚠ Silicon 界面应用失败: {e}")
 
     def _place_corner_decor(self):
         """角落装饰贴右下（内容层之上）"""
@@ -1412,6 +1479,9 @@ class PCLMainWindow(QWidget):
         except Exception as e:
             print(f"[PCL] 打开 NapCat 配置失败: {e}")
 
+
+
+
     def _on_napcat_relogin(self):
         """强制重启 NapCat：杀进程→重新启动→等待自动登录→未登录则弹二维码+提示"""
         if getattr(self, "_napcat_relogin_busy", False):
@@ -1433,13 +1503,16 @@ class PCLMainWindow(QWidget):
 
 
     def _napcat_relogin_worker(self):
-        """后台线程：杀 NapCat → 重启 → 探测恢复(3001就绪≈已登录) → 未登录则弹码等待。
+        """后台线程：杀 NapCat → 重启 → 高频探测(3001就绪≈自动登录成功；
+        cache/qrcode.png 更新≈QQ 已出码需扫码 → 立即弹码，不再干等)。
         全流程打印日志；无论成功失败都通过信号恢复按钮。"""
         import subprocess as _sp
         import socket as _sock
         import time as _time
         base = _app_base_dir()
         _done = [False]
+        qr_path = os.path.join(base, "NapCat.Shell.Windows.OneKey",
+                               "NapCat", "cache", "qrcode.png")
 
         def _finish(ok):
             if _done[0]:
@@ -1449,6 +1522,12 @@ class PCLMainWindow(QWidget):
                 self.napcat_relogin_done.emit(bool(ok))
             except Exception:
                 pass
+
+        def _qr_mtime():
+            try:
+                return os.path.getmtime(qr_path)
+            except Exception:
+                return 0.0
 
         try:
             print("[PCL] 🔄 重新扫码登录：停止旧 NapCat...")
@@ -1466,7 +1545,7 @@ class PCLMainWindow(QWidget):
             _sp.Popen(["cmd.exe", "/c", "launcher-user.bat"], cwd=nc_dir,
                       creationflags=getattr(_sp, "CREATE_NO_WINDOW", 0),
                       stdout=open(logf, "wb"), stderr=_sp.STDOUT)
-            print("[PCL] 🔄 NapCat 已重新启动，等待登录(3001就绪)...")
+            print("[PCL] 🔄 NapCat 已重新启动，等待登录(3001就绪 / 出码即弹)...")
         except Exception as e:
             print(f"[PCL] ⚠ NapCat 启动失败: {e}")
             _finish(False)
@@ -1480,7 +1559,9 @@ class PCLMainWindow(QWidget):
             except Exception:
                 return False
 
-        # 阶段1：最多 70 秒等自动登录(每 3s 探测)
+        # 出码基准：启动前的码文件时间（旧码不算数）
+        qr_base = _qr_mtime()
+        # 阶段1：最多 70s，每 1.2s 探测；一旦检测到新码立刻弹，不等自动登录超时
         dl = _time.time() + 70
         waited = 0
         while _time.time() < dl:
@@ -1488,19 +1569,32 @@ class PCLMainWindow(QWidget):
                 print(f"[PCL] ✅ NapCat 已恢复(自动登录成功，耗时约 {waited}s)")
                 _finish(True)
                 return
-            _time.sleep(3)
-            waited += 3
-        # 阶段2：未自动登录 → 弹二维码+弹窗提示，最多等 5 分钟扫码
-        print("[PCL] 🔄 自动登录未成功，弹出二维码等待扫码...")
-        self._prompt_scan_ui()
+            if _qr_mtime() != qr_base and _qr_mtime() > 0:
+                # QQ 已出新码 → 立即弹码，进入扫码等待阶段
+                print(f"[PCL] 🔄 检测到新二维码(约 {waited}s)，弹出提示...")
+                self._prompt_scan_ui(force=True)
+                break
+            _time.sleep(1.2)
+            waited += 1.2
+        else:
+            # 70s 内既没自动登录也没出码：异常，弹一次码提示兜底
+            print("[PCL] 🔄 70s 内未见新码，弹出提示（兜底）...")
+            self._prompt_scan_ui(force=True)
+        # 阶段2：扫码等待，最多 5 分钟。码文件更新→重开新图；弹窗由 _prompt_scan_ui 45s 节流
+        print("[PCL] 🔄 等待扫码(5分钟上限)...")
+        last_qr = _qr_mtime()
         dl2 = _time.time() + 300
         while _time.time() < dl2:
-            _time.sleep(10)
+            _time.sleep(4)
             if _port_ready():
                 print("[PCL] ✅ 扫码登录成功，NapCat 已恢复")
                 _finish(True)
                 return
-            self._prompt_scan_ui()
+            m = _qr_mtime()
+            if m > 0 and m != last_qr:
+                last_qr = m
+                print("[PCL] 🔄 二维码已刷新，重开新图...")
+                self._prompt_scan_ui()
         print("[PCL] ⚠ 等待扫码超时(5分钟)，NapCat 仍未登录")
         _finish(False)
 
@@ -1514,31 +1608,37 @@ class PCLMainWindow(QWidget):
         except Exception:
             return ""
 
-    def _prompt_scan_ui(self):
-        """打开二维码图片 + 系统弹窗提示扫码（线程内可调用，防刷屏节流）"""
+    def _prompt_scan_ui(self, force=False):
+        """打开二维码图片 + 系统弹窗提示扫码（线程内可调用）。
+        force=True 时立即提示（不限节流）；否则 MessageBox 弹窗节流 45 秒。"""
         try:
             import subprocess as _sp
             import time as _time
             now = _time.time()
-            if now - getattr(self, "_last_scan_prompt_ts", 0.0) < 90:
-                return
-            self._last_scan_prompt_ts = now
+            last = getattr(self, "_last_scan_prompt_ts", 0.0)
             qr = os.path.join(_app_base_dir(), "NapCat.Shell.Windows.OneKey",
                               "NapCat", "cache", "qrcode.png")
-            if os.path.exists(qr):
-                _sp.Popen(["cmd.exe", "/c", "start", "", qr],
-                          creationflags=getattr(_sp, "CREATE_NO_WINDOW", 0))
-            _sp.run(
-                ["powershell", "-NoProfile", "-Command",
-                 "Add-Type -AssemblyName System.Windows.Forms;"
-                 "[System.Windows.Forms.MessageBox]::Show("
-                 "'NapCat 登录失效，已重启并打开二维码图片，请用手机QQ扫码授权。',"
-                 "'QQ 需重新扫码')"],
-                capture_output=True, timeout=15,
-                creationflags=getattr(_sp, "CREATE_NO_WINDOW", 0))
-            print("[PCL] 已提示扫码")
+            if not os.path.exists(qr):
+                return False
+            # 图片每次调用都重新打开（跟随码刷新）；弹窗 45s 节流防刷屏
+            _sp.Popen(["cmd.exe", "/c", "start", "", qr],
+                      creationflags=getattr(_sp, "CREATE_NO_WINDOW", 0))
+            if force or now - last >= 45:
+                self._last_scan_prompt_ts = now
+                _sp.run(
+                    ["powershell", "-NoProfile", "-Command",
+                     "Add-Type -AssemblyName System.Windows.Forms;"
+                     "[System.Windows.Forms.MessageBox]::Show("
+                     "'QQ 需要重新扫码授权：已打开最新二维码图片，请用手机QQ扫码。"
+                     "若图片过期，等待提示再次弹出即可获得更新后的二维码。',"
+                     "'QQ 需重新扫码')"],
+                    capture_output=True, timeout=15,
+                    creationflags=getattr(_sp, "CREATE_NO_WINDOW", 0))
+                print("[PCL] 已提示扫码")
+            return True
         except Exception as e:
             print(f"[PCL] 扫码提示失败: {e}")
+            return False
 
     def _kill_qq_process(self):
         """关闭 QQ AIpet 进程。
@@ -1669,6 +1769,12 @@ class PCLMainWindow(QWidget):
         if not py:
             self._show_config_dialog("未找到 Python 解释器")
             return
+        # ⚠ 先清理残留的旧 run_qq.py 实例：旧实例可能还带着过期的 WS token 在空转重连，
+        #   不清掉会出现「同时跑好几个实例」「同一条消息被回复多次」（用户反馈过）。
+        try:
+            self._kill_stray_run_qq(base)
+        except Exception as _e:
+            print(f"[PCL] ⚠ 清理残留 QQ 实例失败（继续启动）: {_e}")
         # 记录 QQ 服务的角色（切角色时用于提示）
         try:
             from pets.pet_registry import get_active_pet_id
@@ -1993,6 +2099,11 @@ class PCLMainWindow(QWidget):
         # 如果正在动画中，直接切页面，跳过动画
         if self._animating:
             self.stack.setCurrentIndex(index)
+            try:
+                if getattr(self, "nav_rail", None) is not None:
+                    self.nav_rail.set_active(index)
+            except Exception:
+                pass
             return
         self._fade_page_out(lambda: self._do_switch(index))
 

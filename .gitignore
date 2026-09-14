@@ -44,3 +44,13 @@ __pycache__/
 *.db
 *.sqlite3
 *.log
+
+# 不进公开仓库：内部开发文档 / 成人模式 / 私有配置（融合交付要求）
+_repo_excluded/
+config.json
+data/
+face_shibie/
+QQData/
+credentials*
+*.db
+nul

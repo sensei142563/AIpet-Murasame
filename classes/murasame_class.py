@@ -91,8 +91,22 @@ class Murasame(QLabel):
         _pet_cfg = get_pet_config()
         self.pet_name = _pet_cfg.get("name", "丛雨")  # 宠物名称（从角色包读取）
         self._pet_display_name = _pet_cfg.get("display_name", self.pet_name)
-        self._fgimages_prefix = _pet_cfg.get("model", {}).get("fgimages_prefix", "")
+        # 立绘前缀：model.fgimages_prefix → portrait.prefix → 角色ID（绝不为空）
+        # ⚠ 老版本新建向导可能把前缀写成空串 → 这里会退回「ムラサメ」→ 找不到索引 →
+        #   桌宠启动时合成立绘抛异常 → 窗口根本不出现。改为统一解析。
+        try:
+            from pets.pet_registry import get_fgimages_prefix
+            self._fgimages_prefix = get_fgimages_prefix()
+        except Exception:
+            self._fgimages_prefix = _pet_cfg.get("model", {}).get("fgimages_prefix", "")
         self._fgimages_sets = _pet_cfg.get("model", {}).get("fgimages_sets", [])
+        # 立绘类型：single（每个表情一张整图）/ layers（多图层合成，如丛雨）
+        try:
+            from pets.pet_registry import get_portrait_mode, get_portrait_default_layers
+            self._portrait_mode = get_portrait_mode()
+            self._single_default_layers = get_portrait_default_layers()
+        except Exception:
+            self._portrait_mode, self._single_default_layers = "layers", []
         # 默认显示方式（pet.json model.default：2d / live2d）
         self._default_display = str(_pet_cfg.get("model", {}).get("default", "2d") or "2d").lower()
         # 是否有 2D 立绘图层面板（纯 Live2D 角色没有 fgimages → 跳过 2D 立绘生成）
@@ -111,6 +125,32 @@ class Murasame(QLabel):
         except (TypeError, ValueError):
             self._text_offset_x = 0
             self._text_offset_y = 0
+        # 对话框区域（归一化 0~1：x, y, w, h，相对窗口）——新建向导 / 桌宠设置里可视化调节；
+        # 2D 与 Live2D 各自独立：text_box_2d / text_box_live2d（旧键 text_box 兼容）
+        try:
+            _inter = _pet_cfg.get("interaction", {}) or {}
+            self._text_box_2d = _inter.get("text_box_2d") or _inter.get("text_box") or None
+            self._text_box_lv = _inter.get("text_box_live2d") or _inter.get("text_box") or None
+            _tb = (self._text_box_lv if getattr(self, "_default_display", "2d") == "live2d"
+                   else self._text_box_2d)
+            self._text_box = [float(v) for v in _tb] if (_tb and len(_tb) == 4) else None
+        except Exception:
+            self._text_box, self._text_box_2d, self._text_box_lv = None, None, None
+        # 字号缩放（2D / Live2D 各自独立；旧的 text_font_scale 兼容）
+        try:
+            _inter = _pet_cfg.get("interaction", {}) or {}
+            _fs2 = _inter.get("text_font_scale_2d", _inter.get("text_font_scale", 1.0))
+            _fsl = _inter.get("text_font_scale_live2d", _inter.get("text_font_scale", 1.0))
+            self._font_scale_2d = float(_fs2 or 1.0)
+            self._font_scale_lv = float(_fsl or 1.0)
+            self._text_font_scale_cfg = (self._font_scale_lv
+                                         if getattr(self, "_default_display", "2d") == "live2d"
+                                         else self._font_scale_2d)
+        except Exception:
+            self._text_font_scale_cfg = 1.0
+        # 字体 = 文字区宽度 × 该比例（0.0295 ≈ 丛雨原值 12px/406px）→ 换角色不跑偏
+        self._font_ratio = 0.0295
+
         self.user_name = CONFIG["user_name"]  # 用户名字
         self.display_text = ""  # 将要展示的文字
         self._font_family = "思源黑体Bold.otf"
@@ -135,9 +175,35 @@ class Murasame(QLabel):
         self.setAttribute(Qt.WA_InputMethodEnabled, True)  # 开启输入法支持
         self.setFocus()
         # 鼠标事件
-        self.touch_head = False  # 是否正在摸头（左键点头部后进入判定）
+        self.touch_head = False  # 兼容旧字段（头部区域 = 触摸区域之一）
         self.head_press_x = None  # 按下头部时的横坐标，用来判断是否“晃动”
         self.offset = None  # 中键拖动时记录的偏移量
+        # ── 触摸互动（头 / 胸口 / 小腹 / 下体 / 大腿 / 小腿 / 脚 / 胳膊 / 手掌）──
+        # 区域是归一化矩形（0~1，相对桌宠窗口），可在「立绘工坊 / 新建向导 → 触摸互动」里
+        # 自由拖动缩放；这里按同一套坐标做命中判定。
+        try:
+            from tool.touch_areas import get_pet_areas, touch_enabled
+            from pets.pet_registry import get_active_pet_id as _act_pid
+            _pid = _act_pid()
+            self._touch_pid = _pid
+            # 2D 与 Live2D 两套区域各自独立
+            self._touch_sets = {"2d": get_pet_areas(_pid, "2d"),
+                                "live2d": get_pet_areas(_pid, "live2d")}
+            self._touch_disabled = {}
+            from tool.touch_areas import get_disabled as _gd
+            self._touch_disabled = {"2d": set(_gd(_pid, "2d")),
+                                    "live2d": set(_gd(_pid, "live2d"))}
+            self._touch_areas = self._touch_sets[self._touch_mode_key()]
+            self._touch_enabled = touch_enabled(_pid)
+        except Exception as _e:
+            print(f"[桌宠] ⚠ 读取触摸区域失败（用默认）: {_e}")
+            self._touch_sets = {"2d": {}, "live2d": {}}
+            self._touch_disabled = {"2d": set(), "live2d": set()}
+            self._touch_areas = {}
+            self._touch_enabled = True
+        self._touch_hit = ""          # 本次按下命中的区域
+        self._touch_press = None      # 按下坐标（用来区分轻点 / 抚摸）
+        self._touch_fired = False     # 本次按下是否已经触发过（每次按压只触发一次反应）
 
         # AI 对话
         self.history = []
@@ -156,9 +222,41 @@ class Murasame(QLabel):
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)  # Live2D 文字层显示时不抢键盘焦点
         from pets.pet_registry import get_portrait_prompts
         _pp = get_portrait_prompts()
-        _set_pp = _pp.get("sets", {}).get(portrait_type, {})
+        self._portrait_sets = _pp.get("sets", {}) or {}
+        # 启动用哪套立绘：以「立绘工坊 / 右键菜单」保存的 active 套为准（与 QQ 立绘一致）
+        _disp = portrait_type
+        try:
+            from tool.portrait_outfit import active_set
+            _disp = active_set() or portrait_type
+        except Exception:
+            pass
+        # active 是全局设置（可能停在丛雨的 b 套）→ 角色没这成套素材时回落到自己有的一套，
+        # 否则会去找 {prefix}b.txt（不存在）→ 立绘一直空白
+        try:
+            _avail = [str(s) for s in (self._fgimages_sets or [])]
+            if not _avail and self._has_fgimages:
+                _dir = get_fgimages_dir()
+                _avail = sorted({f[len(self._fgimages_prefix):-4]
+                                 for f in os.listdir(_dir)
+                                 if f.startswith(self._fgimages_prefix) and f.endswith(".txt")})
+            if _avail and _disp not in _avail:
+                print(f"[桌宠] ℹ 角色没有 {_disp} 套立绘（可用: {_avail}）→ 改用 {_avail[0]}")
+                _disp = _avail[0]
+        except Exception:
+            pass
+        if _disp != portrait_type:
+            self._sync_config_portrait(_disp)
+        _set_pp = self._portrait_sets.get(_disp, {})
         self.first_portrait = _set_pp.get("first_portrait", [1715, 1306, 1719])
-        self.portrait_target = f"{self._fgimages_prefix}{portrait_type}" if self._fgimages_prefix else f"ムラサメ{portrait_type}"
+        if self._portrait_mode == "single" and self._single_default_layers:
+            # 单图模式（每个表情一张整图）：启动就显示角色的默认表情整图，
+            # 不能用丛雨的 first_portrait（那些图层 ID 在新角色包里不存在 → 空白）
+            self.first_portrait = list(self._single_default_layers)
+        self.portrait_target = f"{self._fgimages_prefix}{_disp}"
+        # 当前显示的立绘体系（a/b）—— 回复时可能按概率临时切换（灵动效果，不写配置）
+        self._display_set = _disp
+        self._fade_id = 0
+        self._fade_state = None
         # 纯 Live2D 角色（无 fgimages 立绘图层面板）跳过 2D 立绘生成，避免空画布
         if self._has_fgimages:
             self.update_portrait(self.portrait_target, self.first_portrait)
@@ -258,8 +356,23 @@ class Murasame(QLabel):
         return self._live2d_mode
 
     def should_default_live2d(self) -> bool:
-        """pet.json model.default == "live2d" → 启动后自动进入 Live2D 模式"""
-        return self._default_display == "live2d"
+        """启动后是否自动进入 Live2D 模式。
+
+        ① 角色 pet.json 写了 model.default=live2d → 是
+        ② 设置里「启用 Live2D」(config.live2d_enabled=true) 且角色有模型 → 是
+           （用户打开总开关就是希望桌宠用 Live2D，不该被 pet.json 的 default=2d 挡住）
+        """
+        if self._default_display == "live2d":
+            return True
+        try:
+            if str(CONFIG.get("live2d_enabled", "false")).lower() == "true":
+                from pets.pet_registry import get_live2d_model_json
+                if get_live2d_model_json():
+                    print("[Live2D] 设置里已启用 Live2D 且角色有模型 → 启动即进入 Live2D")
+                    return True
+        except Exception:
+            pass
+        return False
 
     # =========================================================
     # Live2D 文字层（透明覆盖层，行为对齐 2D：文字常显、不挡模型交互）
@@ -302,7 +415,11 @@ class Murasame(QLabel):
         try:
             base_h = 900.0
             self._current_scale = max(0.15, min(2.0, (w.height() / base_h) * self._live2d_font_scale))
+            # F9 调参改的是 _live2d_font_scale → 同步成实时字号，文字层跟着变（且不会被重算回去）
+            if getattr(self, "_font_scale_live", None) is None:
+                self._font_scale_live = float(self._live2d_font_scale or 1.0)
             self._update_text_scaling()
+            self._rewrap_current_text()
         except Exception:
             pass
         self.show()
@@ -636,6 +753,15 @@ class Murasame(QLabel):
 
     def _toggle_live2d_mode(self):
         """切换到 Live2D 模式（由 main.py 的 Shift 长按触发）"""
+        # 配置里关掉 Live2D 时，任何入口（快捷键/AI 指令/启动器按钮）都不许打开：
+        # ⚠ 个别机器上 Live2D 的 GL 初始化会直接把进程干掉（表现为「桌宠突然消失」）
+        try:
+            if str(get_config("./config.json").get("live2d_enabled", "false")).lower() != "true":
+                self.show_text(f"Live2D 已在设置里关闭（想用请到启动器「设置 → 桌宠配置」打开）", typing=False)
+                print("[Live2D] 配置 live2d_enabled=false → 拒绝切换（避免个别机器上 GL 初始化崩溃）")
+                return
+        except Exception:
+            pass
         if not self._live2d_widget or not self._live2d_initialized:
             self.show_text(f"{self.pet_name}的Live2D召唤失败...", typing=True)
             return
@@ -1095,7 +1221,30 @@ class Murasame(QLabel):
         # Live2D 模式下显示透明文字层（点击穿透，不抢焦点）
         self._ensure_live2d_overlay()
 
+        # ⚠ 云端请求失败时 worker 拿到的是空串 → 切句后是 [""] → 以前会一路跳过，
+        #   对话框什么都不显示（用户反馈"摸了没反应 / 聊天没回复"）。这里明确提示。
+        try:
+            if not any(str(_x).strip() for _x in (reply or [])):
+                print("[桌宠] ⚠ 本轮回复为空（云端请求失败/超时？）→ 显示兜底提示")
+                self.show_text("唔……信号好像不太好，等下再说一次好不好？", typing=True)
+                self._talking = False
+                return
+        except Exception as _e:
+            print(f"[桌宠] ⚠ 空回复判定失败: {_e}")
+
+        # ⚠ 每轮回复一个「代号」：新回复一出现，旧回复剩下的句子链立刻作废。
+        #   以前旧链里的 QTimer 回调会继续 show_text，把新回复（比如第二次摸头/摸身体
+        #   触发的回复）的文字盖掉 → 看起来像"只有第一次有反应，后面就不回复了"。
+        try:
+            self._reply_gen = int(getattr(self, "_reply_gen", 0)) + 1
+        except Exception:
+            self._reply_gen = 1
+        _gen = self._reply_gen
+
         def show_next_sentence(index=0):
+            if _gen != getattr(self, "_reply_gen", _gen):
+                print(f"[桌宠] 旧回复链已作废（第 {_gen} 轮，当前第 {getattr(self, '_reply_gen', 0)} 轮）→ 停止")
+                return
             def get_audio_length_wave(audio_file_path):
                 try:
                     with wave.open(audio_file_path, "rb") as wave_file:
@@ -1173,6 +1322,9 @@ class Murasame(QLabel):
         show_next_sentence(index=0)
         self.worker = None  # 线程结束后清空引用
 
+        # 说话/回复时的灵动效果：按概率在两套立绘之间切换（透明渐变过渡）
+        self._maybe_crossfade_set()
+
         # 本轮结束：若本轮强注入了 high 观察，将其降为 low（识别观察仅在下一轮高权重）
         if self._has_high_this_round:
             self._demote_all_high()
@@ -1243,7 +1395,20 @@ class Murasame(QLabel):
     # 鼠标按下事件
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
-            # 判断点在哪里
+            # ① 先做「触摸区域」命中判定（头 / 胸口 / 小腹 / 下体 / 腿 / 脚 / 胳膊 / 手掌）
+            _area = self._touch_area_at(event.x(), event.y())
+            if _area:
+                self._touch_hit = _area
+                self._touch_press = (event.x(), event.y())
+                self._touch_fired = False
+                if _area == "head":
+                    self.touch_head = True          # 兼容旧逻辑
+                    self.head_press_x = event.x()
+                self.setCursor(Qt.OpenHandCursor)
+                return
+            self._touch_hit = ""
+            self._touch_press = None
+            # ② 没命中触摸区域：维持原有行为（上方=可摸头区域/下方=键盘输入）
             if event.y() < 150:  # 头部区域
                 self.touch_head = True
                 self.head_press_x = event.x()
@@ -1265,12 +1430,318 @@ class Murasame(QLabel):
             self.offset = event.pos()
             self.setCursor(Qt.SizeAllCursor)
 
+        elif event.button() == Qt.RightButton:
+            # 右键：快速换装菜单（同步 QQ 立绘与下次启动）
+            self._show_outfit_menu(event.globalPos())
+
+    def _show_outfit_menu(self, global_pos):
+        """右键菜单：切换服装（写共享配置 → QQ 立绘与桌宠同时生效并持久化）。
+        a / b 两套立绘素材各自独立，菜单里改的是【当前显示那套】的衣服。
+
+        ⚠ 没有服装素材的角色（例如新建的「每个表情一张整图」角色）不显示换装项。"""
+        try:
+            from PyQt5.QtWidgets import QMenu
+            from tool.portrait_outfit import SETS, clothes_of, load_outfit
+            cur_set = self._current_set()
+            cur = load_outfit(cur_set)
+            cur_name = cur.get("cloth") or "制服"
+            try:
+                cloths = list(clothes_of(cur_set))
+            except Exception:
+                cloths = []
+            menu = QMenu(self)
+            if cloths:
+                title = menu.addAction(f"👗 切换服装（{cur_set} 立绘 · 当前：{cur_name}）")
+                title.setEnabled(False)
+                menu.addSeparator()
+                for name, cid, _h in cloths:
+                    act = menu.addAction(("✅ " if name == cur_name else "　　") + name)
+                    act.triggered.connect(lambda checked=False, n=name: self._switch_cloth(n))
+            if len([s for s in SETS]) > 1 and self._has_fgimages_set(SETS[1] if len(SETS) > 1 else "b"):
+                if cloths:
+                    menu.addSeparator()
+                sub = menu.addMenu("🧩 切换立绘类型（a / b）")
+                for s in SETS:
+                    label = f"{'✅ ' if s == cur_set else '　　'}{s} 立绘"
+                    act = sub.addAction(label)
+                    act.triggered.connect(lambda checked=False, ss=s: self._switch_portrait_set(ss))
+                # 自动切换立绘类型 开关（写入 config.json，立即生效）
+                act_auto = menu.addAction("🔁 自动切换立绘类型")
+                act_auto.setCheckable(True)
+                act_auto.setChecked(self._auto_switch_enabled())
+                act_auto.triggered.connect(self._toggle_auto_switch)
+            if menu.isEmpty():
+                return
+            menu.exec_(global_pos)
+        except Exception as e:
+            print(f"[桌宠] ⚠ 打开换装菜单失败: {e}")
+
+    def _has_fgimages_set(self, set_name: str) -> bool:
+        """角色是否有某套立绘素材（决定要不要给「切换立绘类型」入口）"""
+        try:
+            from pets.pet_registry import get_fgimages_dir, get_fgimages_prefix
+            d = get_fgimages_dir()
+            if not d:
+                return False
+            p = os.path.join(d, f"{get_fgimages_prefix()}{set_name}.txt")
+            return os.path.exists(p)
+        except Exception:
+            return False
+
+    def _current_set(self):
+        """当前显示的立绘体系（a/b）"""
+        s = str(getattr(self, "_display_set", "") or "")
+        if s in ("a", "b"):
+            return s
+        t = str(self.portrait_target or "")
+        return t[-1] if t[-1:] in ("a", "b") else (portrait_type or "a")
+
+    def _sync_config_portrait(self, set_name):
+        """同步 config.json 的 portrait：AI 选层/情绪立绘也按当前立绘体系生成"""
+        try:
+            _p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                              "config.json")
+            with open(_p, encoding="utf-8") as f:
+                _cfg = json.load(f)
+            if _cfg.get("portrait") == set_name:
+                return
+            _cfg["portrait"] = set_name
+            with open(_p, "w", encoding="utf-8") as f:
+                json.dump(_cfg, f, ensure_ascii=False, indent=4)
+            print(f"[桌宠] 🧩 立绘体系配置同步为 {set_name}（AI 选层同套）")
+        except Exception as e:
+            print(f"[桌宠] ⚠ 同步 portrait 配置失败: {e}")
+
+    def _target_for(self, set_name):
+        prefix = self._fgimages_prefix or "ムラサメ"
+        return f"{prefix}{set_name}"
+
+    def _first_portrait_for(self, set_name):
+        """某套的默认图层。
+
+        - 单图模式（每个表情一张整图）：固定用角色自己的默认表情整图
+        - 图层模式：角色包 portrait_prompts.json 的 first_portrait（如丛雨）"""
+        if self._portrait_mode == "single" and self._single_default_layers:
+            return list(self._single_default_layers)
+        try:
+            fp = ((self._portrait_sets or {}).get(set_name) or {}).get("first_portrait")
+            if fp:
+                return list(fp)
+        except Exception:
+            pass
+        return list(self.first_portrait or [])
+
+    def _switch_cloth(self, cloth_name):
+        """换装：保存到【当前显示那套】的配置（QQ/桌宠共用）→ 立即重新合成桌宠立绘"""
+        try:
+            from tool.portrait_outfit import save_outfit
+            cur_set = self._current_set()
+            if not save_outfit(cloth_name, set_name=cur_set):
+                return
+            print(f"[桌宠] 👗 {cur_set} 立绘已换装: {cloth_name}（QQ 立绘同步生效）")
+            layers = getattr(self, "_last_portrait_layers", None) or self._first_portrait_for(cur_set)
+            if self._has_fgimages:
+                self.update_portrait(self.portrait_target, list(layers))
+        except Exception as e:
+            print(f"[桌宠] ⚠ 换装失败: {e}")
+
+    def _toggle_auto_switch(self, checked=None):
+        """右键菜单：切换「自动切换立绘类型」并写入 config.json（立即生效）"""
+        try:
+            import json as _json
+            from tool.config import get_config
+            cfg = get_config("./config.json")
+            if checked is None:
+                val = "false" if self._auto_switch_enabled() else "true"
+            else:
+                val = "true" if checked else "false"
+            cfg["portrait_auto_switch"] = val
+            with open("./config.json", "w", encoding="utf-8") as f:
+                _json.dump(cfg, f, ensure_ascii=False, indent=2)
+            print(f"[桌宠] 🔁 自动切换立绘类型已{'开启' if val == 'true' else '关闭'}（已写入 config.json）")
+        except Exception as e:
+            print(f"[桌宠] ⚠ 保存自动切换开关失败: {e}")
+
+    def _switch_portrait_set(self, new_set):
+        """手动切换立绘体系（a/b）：持久保存 + 透明过渡动画"""
+        try:
+            if new_set == self._current_set():
+                return
+            try:
+                from tool.portrait_outfit import set_active
+                set_active(new_set)
+            except Exception:
+                pass
+            self._sync_config_portrait(new_set)
+            self._crossfade_to(new_set)
+        except Exception as e:
+            print(f"[桌宠] ⚠ 切换立绘类型失败: {e}")
+
+    # ── a/b 立绘灵动切换（回复/说话时概率触发，透明渐变过渡）──
+    _CROSSFADE_PROB = 0.35
+
+    def _maybe_crossfade_set(self):
+        """回复/说话时按概率换成另一套立绘（仅当同款服装两套都有时），
+        带透明过渡动画：先渐隐当前立绘，再渐显新立绘。"""
+        try:
+            if not self._has_fgimages or self.is_live2d_mode():
+                return
+            # ★ 自动切换开关（config.json: portrait_auto_switch，默认开）
+            if not self._auto_switch_enabled():
+                return
+            # ★ 过渡动画进行中不重复触发（否则两段动画互相覆盖 → 视觉上像两套立绘叠在一起）
+            if getattr(self, "_fade_state", None):
+                return
+            import random
+            from tool.portrait_outfit import load_outfit, common_cloths
+            cur = self._current_set()
+            other = "b" if cur == "a" else "a"
+            if load_outfit(cur).get("cloth") not in common_cloths():
+                return
+            if random.random() > self._CROSSFADE_PROB:
+                return
+            self._crossfade_to(other)
+        except Exception as e:
+            print(f"[桌宠] ⚠ 立绘灵动切换失败: {e}")
+
+    def _crossfade_to(self, new_set, ms=320, steps=8):
+        """透明过渡切换立绘体系：先渐隐当前立绘 → 再渐显新立绘（窗口透明，透出桌面）"""
+        try:
+            # 注意：QLabel.pixmap() 返回的是内部对象的包装（非独立副本），
+            # 直接跨帧持有会在下一次 setPixmap 后变成悬空对象 → 必须先深拷贝
+            old = QPixmap(self.pixmap())
+            target = self._target_for(new_set)
+            new_pm = self._compose_pixmap(target, self._first_portrait_for(new_set))
+            if new_pm is None or new_pm.isNull():
+                return
+            # ★ 两套立绘尺寸不同：统一到同一画布（小的补透明），并把窗口先调到该尺寸，
+            #   否则过渡帧会只覆盖一部分 → 看起来像两套立绘重叠/残留
+            from PyQt5.QtCore import QSize
+            w = max(old.width(), new_pm.width(), 1)
+            h = max(old.height(), new_pm.height(), 1)
+            canvas = QSize(w, h)
+            old = self._pad_pixmap(old, canvas)
+            new_pm = self._pad_pixmap(new_pm, canvas)
+            try:
+                self.resize(canvas)
+            except Exception:
+                pass
+            self._display_set = new_set
+            self.portrait_target = target
+            self.first_portrait = self._first_portrait_for(new_set)
+            print(f"[桌宠] 🧩 立绘类型切换 → {new_set} 套（透明过渡）")
+            self._fade_id += 1
+            self._fade_state = {"id": self._fade_id, "pm_out": old.copy(),
+                                "pm_in": QPixmap(new_pm),
+                                "target": str(target or ""),      # 记录目标套：目标变了要立刻结束旧淡入
+                                "n": max(1, int(steps)), "i": 0,
+                                "step_ms": max(16, int(ms) // (2 * max(1, int(steps))))}
+            self._fade_tick()
+        except Exception as e:
+            self._fade_state = None
+            print(f"[桌宠] ⚠ 立绘过渡切换失败: {e}")
+
+    def _fade_tick(self):
+        """渐变一帧：前半段渐隐旧立绘，后半段渐显新立绘"""
+        try:
+            st = getattr(self, "_fade_state", None)
+            if not st or st.get("id") != self._fade_id:
+                return
+            i, n = st["i"], st["n"]
+            pm = st["pm_out"] if i < n else st["pm_in"]
+            a = (1.0 - i / float(n)) if i < n else ((i - n) / float(n))
+            if pm is not None and not pm.isNull():
+                faded = self._alpha_pixmap(pm, a)
+                self.setPixmap(faded if faded is not None else pm)
+                self.update()
+            st["i"] = i + 1
+            if st["i"] <= 2 * n:
+                QTimer.singleShot(st["step_ms"], self._fade_tick)
+            else:
+                fin = st.get("pm_in")
+                self._fade_state = None
+                if fin is not None and not fin.isNull():
+                    self.setPixmap(fin)
+                    self.resize(fin.size())
+                    self.update()
+        except Exception as e:
+            self._fade_state = None
+            print(f"[桌宠] ⚠ 立绘渐变帧失败: {e}")
+
+    @staticmethod
+    def _pad_pixmap(pm, size):
+        """把 pixmap 画到指定尺寸的透明画布上（左上对齐），尺寸已一致则原样返回"""
+        try:
+            if pm is None or pm.isNull():
+                return pm
+            if pm.size() == size:
+                return pm
+            out = QPixmap(size)
+            out.fill(Qt.transparent)
+            p = QPainter(out)
+            if p.isActive():
+                p.drawPixmap(0, 0, pm)
+                p.end()
+            return out
+        except Exception:
+            return pm
+
+    def _auto_switch_enabled(self) -> bool:
+        """立绘类型自动切换开关（config.json: portrait_auto_switch，默认开）"""
+        try:
+            from tool.config import get_config
+            v = get_config("./config.json").get("portrait_auto_switch", "true")
+            return str(v).strip().lower() not in ("false", "0", "off", "no")
+        except Exception:
+            return True
+
+    @staticmethod
+    def _alpha_pixmap(pm, alpha):
+        """返回带整体透明度的 pixmap（用于立绘渐变过渡）；失败时返回原图（直接切换）"""
+        try:
+            a = max(0.0, min(1.0, float(alpha)))
+            if a >= 0.999 or pm is None or pm.isNull():
+                return pm
+            out = QPixmap(pm.size())
+            if out.isNull():
+                return pm
+            out.fill(Qt.transparent)
+            p = QPainter(out)
+            if not p.isActive():
+                return pm
+            p.setOpacity(a)
+            p.drawPixmap(0, 0, pm)
+            p.end()
+            return out
+        except Exception:
+            return pm
+
+    def _open_fgimages_dir(self):
+        try:
+            from pets.pet_registry import get_fgimages_dir
+            import subprocess as _sp
+            d = get_fgimages_dir()
+            if d and os.path.isdir(d):
+                _sp.Popen(["explorer", os.path.normpath(d)],
+                          creationflags=getattr(_sp, "CREATE_NO_WINDOW", 0))
+        except Exception as e:
+            print(f"[桌宠] ⚠ 打开立绘素材位置失败: {e}")
+
     # 鼠标移动事件
     def mouseMoveEvent(self, event):
-        # 判断是不是在“摸头”
-        if self.touch_head and self.head_press_x is not None:
+        # ① 触摸区域：按住拖动超过阈值 → 判定为“抚摸”，触发一次反应
+        if self._touch_hit and self._touch_press is not None and not self._touch_fired:
+            _dx = abs(event.x() - self._touch_press[0])
+            _dy = abs(event.y() - self._touch_press[1])
+            if (_dx + _dy) > 18:
+                self._fire_touch(self._touch_hit, "stroke")
+                self._touch_fired = True
+
+        # ② 兼容旧的“摸头”：在头部区域左右晃 ≥50px 也算抚摸
+        if self.touch_head and self.head_press_x is not None and not self._touch_fired:
             if abs(event.x() - self.head_press_x) > 50:
-                self.start_thread("主人摸了摸你的头", role="system")
+                self._fire_touch("head", "stroke")
+                self._touch_fired = True
                 self.touch_head = False
 
         # 中键拖动窗口
@@ -1280,6 +1751,12 @@ class Murasame(QLabel):
     # 鼠标释放事件
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
+            # 触摸区域：按住没怎么动 → 判定为“轻点”
+            if self._touch_hit and not self._touch_fired:
+                self._fire_touch(self._touch_hit, "tap")
+            self._touch_hit = ""
+            self._touch_press = None
+            self._touch_fired = False
             self.touch_head = False
             self.head_press_x = None
             self.setCursor(Qt.ArrowCursor)  # 恢复箭头
@@ -1288,13 +1765,147 @@ class Murasame(QLabel):
             self.offset = None
             self.setCursor(Qt.ArrowCursor)  # 拖动结束也要恢复箭头
 
-    # 文字区域矩形（Live2D 模式按角色配置：top/bottom + Shift+方向键微调；2D 模式保持原始布局）
+    # ── 触摸互动 ────────────────────────────────────────
+    def _touch_area_at(self, x, y, w=None, h=None):
+        """像素坐标 → 命中的触摸区域键（未启用触摸时返回空）
+
+        w/h：坐标所属控件的宽高（Live2D 模式下是模型控件；不传就用桌宠窗口的）。
+        """
+        try:
+            if not getattr(self, "_touch_enabled", True) or not self._touch_areas:
+                return ""
+            from tool.touch_areas import hit_area
+            self._use_touch_set()          # 显示模式可能刚被切换 → 用对应那一套
+            areas = {k: v for k, v in (self._touch_areas or {}).items()
+                     if k not in (getattr(self, "_touch_disabled_set", set()) or set())}
+            _w = max(1, int(w or self.width()))
+            _h = max(1, int(h or self.height()))
+            return hit_area(areas, x / _w, y / _h)
+        except Exception as e:
+            print(f"[桌宠] ⚠ 触摸命中判定失败: {e}")
+            return ""
+
+    # ── Live2D 模式的触摸：事件来自模型控件（文字层是点击穿透的）──
+    def _l2d_touch_pressed(self, x, y):
+        try:
+            wid = getattr(self, "_live2d_widget", None)
+            w = wid.width() if wid is not None else None
+            h = wid.height() if wid is not None else None
+            area = self._touch_area_at(x, y, w, h)
+            self._touch_hit = area or ""
+            self._touch_press = (x, y)
+            self._touch_fired = False
+            if area:
+                print(f"[桌宠] 👆 Live2D 触摸按下命中: {area}")
+        except Exception as e:
+            print(f"[桌宠] ⚠ Live2D 触摸按下处理失败: {e}")
+
+    def _l2d_touch_moved(self, x, y):
+        try:
+            if not getattr(self, "_touch_hit", "") or self._touch_press is None:
+                return
+            if getattr(self, "_touch_fired", False):
+                return
+            if abs(x - self._touch_press[0]) + abs(y - self._touch_press[1]) > 18:
+                self._fire_touch(self._touch_hit, "stroke")
+                self._touch_fired = True
+        except Exception as e:
+            print(f"[桌宠] ⚠ Live2D 触摸拖动处理失败: {e}")
+
+    def _l2d_touch_released(self, x, y):
+        try:
+            if getattr(self, "_touch_hit", "") and not getattr(self, "_touch_fired", False):
+                self._fire_touch(self._touch_hit, "tap")
+            self._touch_hit = ""
+            self._touch_press = None
+            self._touch_fired = False
+        except Exception as e:
+            print(f"[桌宠] ⚠ Live2D 触摸松开处理失败: {e}")
+
+    def _fire_touch(self, key, gesture):
+        """触发触摸反应：把「主人摸了摸你的XX」交给模型（与摸头同一条通路）"""
+        try:
+            from tool.touch_areas import reaction
+            from pets.pet_registry import get_active_pet_id as _ap
+            line = reaction(key, gesture, _ap())
+            if not line:
+                return
+            print(f"[桌宠] 👆 触摸 {key}({gesture}) → {line}")
+            # 只走模型的正式回应（对话框显示的就是云端生成的那句话）
+            self.start_thread(line, role="system")
+        except Exception as e:
+            print(f"[桌宠] ⚠ 触摸反应失败: {e}")
+
+    def _touch_mode_key(self) -> str:
+        """当前该用哪一套触摸区域（2D / Live2D 各自独立）"""
+        try:
+            return "live2d" if getattr(self, "_live2d_mode", False) else "2d"
+        except Exception:
+            return "2d"
+
+    def _use_touch_set(self):
+        """按当前显示模式切换到对应那一套区域 + 禁用表"""
+        k = self._touch_mode_key()
+        try:
+            self._touch_areas = (self._touch_sets or {}).get(k) or {}
+            self._touch_disabled_set = (self._touch_disabled or {}).get(k) or set()
+        except Exception:
+            pass
+
+    def reload_touch_areas(self):
+        """重新读取该角色的触摸区域（编辑器保存后立刻生效；两套一起刷新）"""
+        try:
+            from tool.touch_areas import get_pet_areas, touch_enabled, get_disabled
+            from pets.pet_registry import get_active_pet_id
+            pid = get_active_pet_id()
+            self._touch_pid = pid
+            self._touch_sets = {"2d": get_pet_areas(pid, "2d"),
+                                "live2d": get_pet_areas(pid, "live2d")}
+            self._touch_disabled = {"2d": set(get_disabled(pid, "2d")),
+                                    "live2d": set(get_disabled(pid, "live2d"))}
+            self._touch_enabled = touch_enabled(pid)
+            self._use_touch_set()
+            k = self._touch_mode_key()
+            print(f"[桌宠] 🔄 触摸区域已刷新（{k}：{len(self._touch_areas)} 个，"
+                  f"禁用 {len(getattr(self, '_touch_disabled_set', set()) or set())} 个）")
+        except Exception as e:
+            print(f"[桌宠] ⚠ 刷新触摸区域失败: {e}")
+
+    # 文字区域矩形（按「角色配置的对话框区域」优先，其次按立绘/模式自动算）
     def _text_rect(self):
+        rect = self._text_rect_raw()
+        # ⚠ 归一化并夹回窗口内：F9 调参调出来的偏移可能是负的（或很大），
+        #   经 adjusted() 之后会出现「右边界跑到左边界左边 / 下边界跑到上边界上面」的
+        #   无效矩形 → drawText 什么都不画（用户看到的就是"文字消失/被遮挡"）。
+        try:
+            r = self.rect()
+            w, h = max(1, r.width()), max(1, r.height())
+            left = max(0, min(rect.left(), w - 40))
+            top = max(0, min(rect.top(), h - 24))
+            right = min(w, max(rect.right(), left + 40))
+            bottom = min(h, max(rect.bottom(), top + 24))
+            return QRect(left, top, right - left, bottom - top)
+        except Exception:
+            return rect
+
+    def _text_rect_raw(self):
+        """未夹取的文字区域（按配置/模式算出来，可能越界）"""
         r = self.rect()
-        # 文本框偏移/下半身区域只在 Live2D 模式生效，2D 立绘用原始布局
         live2d = bool(getattr(self, "_live2d_mode", False))
-        ox = getattr(self, "_text_offset_x", 0) if live2d else 0
-        oy = getattr(self, "_text_offset_y", 0) if live2d else 0
+        ox = int(getattr(self, "_text_offset_x", 0) or 0)
+        oy = int(getattr(self, "_text_offset_y", 0) or 0)
+        # ① 向导/桌宠设置里可视化调好的对话框区域（归一化 → 任意窗口尺寸都自适应）
+        box = getattr(self, "_text_box", None)
+        if box and len(box) == 4:
+            w, h = max(1, r.width()), max(1, r.height())
+            x0 = int(round(w * float(box[0]))) + ox
+            y0 = int(round(h * float(box[1]))) + oy
+            bw = max(60, int(round(w * float(box[2]))))
+            bh = max(28, int(round(h * float(box[3]))))
+            x0 = max(0, min(x0, max(0, w - 40)))
+            y0 = max(0, min(y0, max(0, h - 20)))
+            return QRect(x0, y0, min(bw, w - x0), min(bh, h - y0))
+        # ② 旧布局（未配置对话框区域的老角色）
         if live2d and getattr(self, "_text_area_bottom", False):
             # 下半身区域（纯 Live2D 方形/半身模型把对话框放模型下半部分）
             top = r.height() // 2 + int(10 * self._current_scale) + oy
@@ -1329,20 +1940,20 @@ class Murasame(QLabel):
             else:
                 align_flag = Qt.AlignHCenter | Qt.AlignBottom
 
-            # 文字描边（黑色）
-            border_size = self.border_size
+            # 文字描边（黑色）：细笔画描边 —— 小字号只用 1px 笔 + 4 方向，
+            # 否则 8 次偏移会把小字糊成一圈「糊边」
+            border_size = max(1, int(getattr(self, "border_size", 1) or 1))
+            _px = int(getattr(self, "_font_px", 14) or 14)
+            _offs = (1, 2) if _px >= 22 else (1,)
             painter.setPen(QColor(44, 22, 28))
-            for dx, dy in [
-                (-border_size, 0),
-                (border_size, 0),
-                (0, -border_size),
-                (0, border_size),
-                (border_size, -border_size),
-                (border_size, border_size),
-                (-border_size, -border_size),
-                (-border_size, border_size),
-            ]:
-                painter.drawText(text_rect.translated(dx, dy), align_flag, self.display_text)
+            for _k in _offs:
+                _o = max(1, int(round(border_size * (1.0 if _k == 1 else 0.6))))
+                for dx, dy in ((-_o, 0), (_o, 0), (0, -_o), (0, _o)):
+                    painter.drawText(text_rect.translated(dx, dy), align_flag, self.display_text)
+            if _px >= 26:
+                for dx, dy in ((-border_size, -border_size), (border_size, -border_size),
+                               (-border_size, border_size), (border_size, border_size)):
+                    painter.drawText(text_rect.translated(dx, dy), align_flag, self.display_text)
 
             # 文字正体（白色）
             painter.setPen(Qt.white)
@@ -1357,8 +1968,52 @@ class Murasame(QLabel):
             self.setPixmap(QPixmap())
             return
 
+        # 记录本次图层（右键换装时用它立即重新合成）
+        try:
+            self._last_portrait_layers = list(layers or [])
+        except Exception:
+            pass
+
+        pixmap = self._compose_pixmap(target, layers)
+        if pixmap is None or pixmap.isNull():
+            return
+        # 渐变过渡进行中：把新立绘接到"渐显"阶段，动画不中断（做完自动定格）
+        st = getattr(self, "_fade_state", None)
+        if st and st.get("id") == self._fade_id:
+            # ⚠ 目标套（a/b）变了 → 不能接着淡入，否则两张立绘短暂同屏（看着像"两个立绘"）
+            if str(st.get("target") or "") == str(target or ""):
+                st["pm_in"] = pixmap
+                return
+            print(f"[桌宠] ℹ 立绘目标套变化（{st.get('target')} → {target}）→ 结束旧淡入")
+            try:
+                self._fade_id += 1
+                self._fade_state = None
+            except Exception:
+                pass
+        # 5. Attach to the QLabel and request a repaint
+        self.setPixmap(pixmap)
+        self.resize(pixmap.size())
+        self.update()
+
+    def _compose_pixmap(self, target, layers):
+        """按目标立绘体系合成 QPixmap：
+        - 图层跨套时自动换算（a↔b 的服装/发型/装饰/表情对应）；
+        - 自动穿该套保存的服装（portrait_choice.json）。"""
+        try:
+            from tool.portrait_outfit import normalize_layers, apply_outfit
+            s = None
+            t = str(target or "")
+            if t[-1:] in ("a", "b"):
+                s = t[-1]
+            layers = normalize_layers(layers, s)
+            layers = apply_outfit(layers, s)
+        except Exception:
+            pass
+
         # 1. Generate the RGBA numpy image
         cv_img = generate_fgimage(target, layers)
+        if cv_img is None or cv_img.size == 0:
+            return None
 
         # 2. Convert RGBA to BGRA to keep colors correct in Qt
         if cv_img.shape[2] == 4:
@@ -1379,12 +2034,7 @@ class Murasame(QLabel):
 
         # 4. Convert to QPixmap and apply adaptive scaling
         pixmap = QPixmap.fromImage(qimg)
-        pixmap = self._scale_portrait_pixmap(pixmap)
-
-        # 5. Attach to the QLabel and request a repaint
-        self.setPixmap(pixmap)
-        self.resize(pixmap.size())
-        self.update()
+        return self._scale_portrait_pixmap(pixmap)
 
     def _scale_portrait_pixmap(self, pixmap: QPixmap) -> QPixmap:
         """
@@ -1407,11 +2057,46 @@ class Murasame(QLabel):
         # 获取目标屏幕可用高度
         available_height = screen.availableGeometry().height() if screen else None
 
-        # 按屏幕高度缩放
+        # ── 显示尺寸（2D 立绘自己的设置：pet.json model.display_2d）──
+        # 兼容旧键：model.display.portrait_height_ratio / model.portrait_height_ratio
+        _d2 = self._display_cfg_2d()
+        _ratio = None
+        try:
+            _r = _d2.get("height_ratio")
+            if _r:
+                _ratio = max(0.05, min(1.0, float(_r)))
+        except Exception:
+            _ratio = None
+        if _ratio is None:
+            try:
+                _ratio = float(_pet_cfg.get("model", {}).get("portrait_height_ratio")
+                               or DEFAULT_PORTRAIT_SCREEN_RATIO)
+            except Exception:
+                _ratio = DEFAULT_PORTRAIT_SCREEN_RATIO
+
         if available_height:
-            target_height = int(available_height * DEFAULT_PORTRAIT_SCREEN_RATIO)
+            target_height = int(available_height * _ratio)
         else:
             target_height = pixmap.height()
+
+        # ★ 自动适配：多图层拼合的立绘可能很宽（如 1551x2916 拼出来更宽），
+        #   只按高度缩放会超出屏幕 → 这里同时按「可用宽度」限一次，保证完整显示
+        try:
+            _avail_w = int(screen.availableGeometry().width() * 0.98) if available_height else None
+            if _avail_w and target_height > 0 and pixmap.height() > 0:
+                _w_at_h = pixmap.width() * (target_height / float(pixmap.height()))
+                if _w_at_h > _avail_w:
+                    target_height = int(target_height * (_avail_w / _w_at_h))
+                    print(f"[桌宠] 立绘较宽 → 自动缩小到屏幕内（高 {target_height}px）")
+        except Exception:
+            pass
+        # 角色自定义缩放（1.0 = 默认）
+        try:
+            _sc = float(_d2.get("scale") or 1.0)
+            if abs(_sc - 1.0) > 0.01:
+                target_height = max(60, int(target_height * max(0.2, min(3.0, _sc))))
+        except Exception:
+            pass
 
         target_height = max(1, target_height)
         target_height = min(target_height, pixmap.height())
@@ -1426,24 +2111,205 @@ class Murasame(QLabel):
 
         return pixmap.scaledToHeight(target_height, Qt.SmoothTransformation)
 
+    def _display_cfg_2d(self) -> dict:
+        """2D 立绘的显示设置（pet.json model.display_2d；兼容旧的 display.* 键）。
+
+        与 Live2D 的显示设置**完全独立**，互不影响：大小 / 位置各存一份。"""
+        out = {}
+        try:
+            m = (self._pet_cfg.get("model") or {})
+            for src in (m.get("display_2d") or {}, m.get("display") or {}):
+                for k in ("height_ratio", "scale", "offset_x", "offset_y"):
+                    if src.get(k) is not None and k not in out:
+                        out[k] = src.get(k)
+            if out.get("height_ratio") is None:
+                hr = (m.get("display") or {}).get("portrait_height_ratio")
+                if hr is not None:
+                    out["height_ratio"] = hr
+        except Exception:
+            pass
+        return out
+
+    def _resolve_pet_font(self) -> str:
+        """加载项目自带「思源黑体Bold.otf」并返回真实字体族名。
+
+        ⚠ 以前只是把字体文件名当 family 传给 QFont，从没真正加载字体文件 →
+        Qt 落到系统兜底字体，小字号下笔画发虚、边缘发糊。"""
+        cached = getattr(self, "_font_family_ok", None)
+        if cached:
+            return cached
+        fam = self._font_family
+        try:
+            from PyQt5.QtGui import QFontDatabase
+            here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            for p in (os.path.join(os.getcwd(), "思源黑体Bold.otf"),
+                      os.path.join(here, "思源黑体Bold.otf")):
+                if os.path.isfile(p):
+                    fid = QFontDatabase.addApplicationFont(p)
+                    if fid >= 0:
+                        fams = QFontDatabase.applicationFontFamilies(fid)
+                        if fams:
+                            fam = fams[0]
+                            print(f"[桌宠] 已加载字体: {os.path.basename(p)} → {fam}")
+                            break
+        except Exception as e:
+            print(f"[桌宠] ⚠ 字体加载失败（用系统字体）: {e}")
+        self._font_family_ok = fam
+        return fam
+
     def _update_text_scaling(self):
+        """字号 / 左右留白：**按文字区实际宽度**算，任何立绘比例都不会"字太大显示不全"。
 
+        丛雨原值参考：可用宽 430px 左右 → 字号 12px、左右各约 39px。"""
         scale = max(self._current_scale, 0.1)
-        scaled_font_size = max(8, int(round(self._base_font_size * scale)))
-        self.text_font = QFont(self._font_family, scaled_font_size)
+        # ① 先定左右留白（按窗口宽度比例，且不超过旧算法给的宽度）
+        old_margin = max(10, int(round(self._base_text_x_offset * scale)))
+        self.text_x_offset = max(8, min(old_margin, max(10, int(round(self.width() * 0.08)))))
+        # ② 用新留白算文字区宽度 → 字号（保证任何窗口尺寸都能显示完整）
+        try:
+            area_w = max(60, int(self._text_rect().width()))
+        except Exception:
+            area_w = max(60, int(self.width() * 0.7))
+        fscale = self._live_font_scale()   # 实时值优先（拖动即时生效、聊天时不回退）
+        if getattr(self, "_live2d_mode", False) and not getattr(self, "_text_box", None):
+            # Live2D 且没配置对话框区域：沿用原算法（窗口高度 × font_scale），保持老角色现状
+            scaled_font_size = max(8, int(round(self._base_font_size * scale * fscale)))
+        else:
+            # 按文字区宽度定字号：430px → 12px（丛雨原值），窄立绘自动变小 → 显示完整
+            scaled_font_size = max(9, int(round(area_w * self._font_ratio * fscale)))
+        # 用「像素字号 + 全提示 + 抗锯齿」：小字号下笔画更实，不会有糊边
+        _pt = max(6, int(round(scaled_font_size * 1.333)))     # pt → px（保持原有大小观感）
+        self.text_font = QFont(self._resolve_pet_font())
+        self.text_font.setPixelSize(_pt)
+        try:
+            self.text_font.setHintingPreference(QFont.PreferFullHinting)
+            self.text_font.setStyleStrategy(QFont.PreferAntialias)
+        except Exception:
+            pass
+        self._font_px = _pt
 
-        self.text_x_offset = max(10, int(round(self._base_text_x_offset * scale)))
         scaled_y = int(round(self._base_text_y_offset * scale))
         self.text_y_offset = scaled_y if scaled_y < -10 else -10
 
-        self.border_size = max(1, int(round(self._base_border_size * scale)))
+        # 文字描边（黑边）：小字号时描边要细，否则字周边会糊成一圈
+        # （0.08 ≈ 12px 字号 → 1px 描边，与丛雨原观感一致；上限 3px 防大字号糊边）
+        self.border_size = max(1, min(3, int(round(scaled_font_size * 0.08))))
+
+    def _live_font_scale(self) -> float:
+        """当前生效的字号缩放（实时值优先，其次本模式配置值）"""
+        try:
+            v = getattr(self, "_font_scale_live", None)
+            if v is None:
+                v = (self._live2d_font_scale if getattr(self, "_live2d_mode", False)
+                     else getattr(self, "_text_font_scale_cfg", 1.0))
+            return max(0.4, min(3.0, float(v or 1.0)))
+        except Exception:
+            return 1.0
+
+    def set_font_scale(self, value, persist=False):
+        """实时调整对话框字号缩放（拖动就能看到效果；persist=True 时写入 pet.json）"""
+        try:
+            v = max(0.4, min(3.0, float(value)))
+            self._font_scale_live = v
+            if getattr(self, "_live2d_mode", False):
+                self._live2d_font_scale = v
+            else:
+                self._text_font_scale_cfg = v
+            self._update_text_scaling()
+            self._rewrap_current_text()
+            self.update()
+            if persist:
+                try:
+                    from pets.pet_registry import save_live2d_display
+                    save_live2d_display(font_scale=v)
+                except Exception as _e:
+                    print(f"[桌宠] ⚠ 字号写入配置失败: {_e}")
+            return v
+        except Exception as e:
+            print(f"[桌宠] ⚠ 设置字号失败: {e}")
+            return None
+
+    def _wrap_for_box(self, text) -> str:
+        """按「对话框实际宽度 + 当前字号」逐字换行。
+
+        ⚠ 以前统一用 wrap_text(text)（固定 10 字一行）：对话框宽/字号一变，
+        行宽就对不上——行数太多会被裁掉、行太长会超出右边界（用户反馈"文字显示不全"）。
+        """
+        s = str(text or "")
+        if not s:
+            return s
+        try:
+            fm = QFontMetrics(self.text_font)
+            max_w = max(40, int(self._text_rect().width()) - 6)
+            out = []
+            for para in s.split("\n"):
+                if not para:
+                    out.append("")
+                    continue
+                line = ""
+                for ch in para:
+                    if not line:
+                        line = ch
+                    elif fm.horizontalAdvance(line + ch) <= max_w:
+                        line += ch
+                    else:
+                        out.append(line)
+                        line = ch
+                out.append(line)
+            return "\n".join(out)
+        except Exception as e:
+            print(f"[桌宠] ⚠ 像素换行失败（回退固定宽度）: {e}")
+            return wrap_text(s)
+
+    def _autofit_text(self, text) -> None:
+        """文字放不下就自动缩小字号（保证「显示完整、不被裁掉」）"""
+        try:
+            s = str(text or "")
+            if not s:
+                return
+            avail_h = max(24, int(self._text_rect().height()) - 4)
+            for _ in range(8):
+                fm = QFontMetrics(self.text_font)
+                lines = self._wrap_for_box(s).split("\n")
+                need = fm.lineSpacing() * max(1, len(lines))
+                if need <= avail_h or int(getattr(self, "_font_px", 12)) <= 9:
+                    break
+                ratio = max(0.6, float(avail_h) / float(need))
+                new_px = max(9, int(int(getattr(self, "_font_px", 12)) * ratio) - 1)
+                if new_px >= int(getattr(self, "_font_px", 12)):
+                    break
+                self.text_font.setPixelSize(new_px)
+                self._font_px = new_px
+                self.border_size = max(1, min(3, int(round(new_px * 0.06))))
+        except Exception as e:
+            print(f"[桌宠] ⚠ 文字自适应缩放失败: {e}")
+
+    def _rewrap_current_text(self) -> None:
+        """按当前字号重新给现有文字换行（改字号/改窗口大小后调用）"""
+        try:
+            if not getattr(self, "full_text", ""):
+                return
+            raw = getattr(self, "_raw_text", "") or self.full_text
+            if raw:
+                self.full_text = self._wrap_for_box(raw)
+        except Exception:
+            pass
 
     # 显示文本及打字机效果
     def show_text(self, text, typing=True):
         # Live2D 模式：确保文字层可见（与 2D 一致——文字持续显示，不被模型遮挡）
         if self._live2d_mode and not self._overlay_visible:
             self._ensure_live2d_overlay()
-        wrapped_text = wrap_text(text)
+        # ① 先按当前窗口/缩放刷新字号（实时值优先 → 聊天中不会变回去）
+        try:
+            self._update_text_scaling()
+        except Exception:
+            pass
+        self._raw_text = str(text or "")
+        # ② 像素级换行 + ③ 放不下就自动缩小，保证显示完整
+        wrapped_text = self._wrap_for_box(text)
+        self._autofit_text(wrapped_text)
+        wrapped_text = self._wrap_for_box(text)
         self.full_text = wrapped_text  # 设置全部字符
         self.typing_prefix = f"【{self.pet_name}】\n"  # 设置名字格式
         self.index = 0

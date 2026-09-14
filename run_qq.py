@@ -90,7 +90,42 @@ def ensure_f5tts(cfg):
     print(f"[QQ] ⚠ 等待 F5-TTS 超时（60 秒）")
 
 
+class _Tee:
+    """把 stdout/stderr 同时写入日志文件（bridge 无日志导致排查困难，实为长期痛点）"""
+
+    def __init__(self, *streams):
+        self.streams = list(streams)
+
+    def write(self, s):
+        for st in self.streams:
+            try:
+                st.write(s)
+            except Exception:
+                pass
+
+    def flush(self):
+        for st in self.streams:
+            try:
+                st.flush()
+            except Exception:
+                pass
+
+
+def _setup_file_log():
+    """bridge 运行日志落盘 → tmp/qq_bridge_live.log（每次启动清空，防无限增长）"""
+    try:
+        log_dir = os.path.join(BASE_DIR, "tmp")
+        os.makedirs(log_dir, exist_ok=True)
+        f = open(os.path.join(log_dir, "qq_bridge_live.log"), "w",
+                 encoding="utf-8", errors="replace", buffering=1)
+        sys.stdout = _Tee(sys.__stdout__ if hasattr(sys, "__stdout__") else sys.stdout, f)
+        sys.stderr = _Tee(sys.__stderr__ if hasattr(sys, "__stderr__") else sys.stderr, f)
+    except Exception:
+        pass
+
+
 def main():
+    _setup_file_log()
     print("=" * 50)
     # 当前角色显示名（从 pets 注册中心读取）
     pet_name = "丛雨"

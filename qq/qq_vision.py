@@ -225,11 +225,13 @@ def describe_image(image_path: str) -> str:
         print(f"[QQVision] ⚠ 图片不存在: {image_path}")
         return ""
     pet_name = _get_pet_name()
+    # 注意：提示词绝不能出现"主人"字样——识别结果会原样注入回复上下文，
+    # 曾导致"主人发来…"进入上下文，诱导模型把任何发图的人都叫成主人。
     identity = (
-        "你是一个AI桌宠的助手，主人给你发来了一张图片。"
-        f"你需要在屏幕上看到这张图片并以{pet_name}的口吻简要描述主人发来的内容。"
+        "别人发来了一张图片。"
+        f"请以{pet_name}的口吻客观简要描述这张图片的内容。"
         "可以描述图中的人物、场景、文字、屏幕内容等。"
-        "只输出描述内容，不要有任何前后缀或客套话。"
+        "只输出描述内容，不要有任何前后缀或客套话，不要提是谁发来的。"
         "控制在 100 字以内。"
     )
     return _vision_request(identity, [image_path])
@@ -298,8 +300,11 @@ def _video_duration_sec(video_path: str) -> float:
     import re as _re
     import subprocess as _sp
     try:
+        # encoding+errors：ffmpeg 输出可能含非 GBK 字节，text=True 默认 gbk 解码会抛
+        # UnicodeDecodeError（reader 线程里崩溃 → 时长解析失败/日志噪音）
         r = _sp.run([find_ffmpeg(), "-i", video_path],
-                    capture_output=True, text=True, timeout=30)
+                    capture_output=True, text=True, encoding="utf-8",
+                    errors="replace", timeout=30)
         m = _re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", r.stderr or "")
         if m:
             h, mi, s = int(m.group(1)), int(m.group(2)), float(m.group(3))
@@ -332,10 +337,12 @@ def extract_video_frames(video_path: str, n: int = 3):
         tag = _uuid.uuid4().hex[:8]
         for idx, t in enumerate(times):
             out = os.path.join(tmp_dir, f"qq_vision_frame_{tag}_{idx}.jpg")
+            # 同上：ffmpeg 输出非 UTF-8/GBK 字节时，捕获解码必须容错，
+            # 否则 reader 线程 UnicodeDecodeError（此前日志里的崩溃来源）
             r = _sp.run(
                 [find_ffmpeg(), "-y", "-ss", f"{t:.2f}", "-i", video_path,
                  "-frames:v", "1", "-q:v", "3", out],
-                capture_output=True, timeout=60)
+                capture_output=True, encoding="utf-8", errors="replace", timeout=60)
             if os.path.exists(out) and os.path.getsize(out) > 0:
                 frames.append(out)
         print(f"[QQVision] 🎬 抽帧完成: {len(frames)}/{len(times)} 帧")

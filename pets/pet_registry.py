@@ -195,7 +195,14 @@ def get_pet_ids() -> list:
 
 
 def get_active_pet_id() -> str:
-    """返回当前活动桌宠 ID（config.json 的 active_pet 或注册表 active）。"""
+    """返回当前活动桌宠 ID（config.json 的 active_pet 或注册表 active）。
+
+    额外支持环境变量 AIPET_PET_ID：启动器要「为某个角色」枚举立绘/服装选项时，
+    用子进程带这个变量即可，不会改动全局的活动角色。
+    """
+    _env = os.environ.get("AIPET_PET_ID")
+    if _env and os.path.isdir(os.path.join(PETS_DIR, _env)):
+        return _env
     cfg = _load_json(os.path.join(BASE_DIR, "config.json"), {})
     active = cfg.get("active_pet")
     if active:
@@ -310,6 +317,73 @@ def get_fgimages_dir(pet_id: str = None) -> str:
     pet_id = pet_id or get_active_pet_id()
     path = os.path.join(get_pet_dir(pet_id), "fgimages")
     return path if os.path.isdir(path) else ""
+
+
+def get_portrait_cfg(pet_id: str = None) -> dict:
+    """pet.json 的 portrait 块（新角色由新建向导写入；老角色可能没有 → 返回 {}）"""
+    try:
+        return get_pet_config(pet_id).get("portrait") or {}
+    except Exception:
+        return {}
+
+
+def get_fgimages_prefix(pet_id: str = None) -> str:
+    """立绘资源前缀（按优先级解析，**绝不返回空**）：
+
+    1. model.fgimages_prefix（丛雨等老角色在这里）
+    2. portrait.prefix（新建向导写入的通用立绘块）
+    3. 角色 ID（新角色默认与角色包同名前缀，例如 pets/w1/fgimages/w1a.txt）
+    4. 兜底 "ムラサメ"（内置丛雨素材）
+
+    历史坑：新建角色若把前缀留空，桌宠会退回 "ムラサメ" 前缀去合成，
+    索引文件不存在 → 启动即异常 → 桌宠窗口根本不出现。
+    """
+    pet_id = pet_id or get_active_pet_id()
+    cfg = get_pet_config(pet_id)
+    p = str((cfg.get("model") or {}).get("fgimages_prefix") or "").strip()
+    if p:
+        return p
+    p = str(get_portrait_cfg(pet_id).get("prefix") or "").strip()
+    if p:
+        return p
+    if pet_id:
+        return str(pet_id)
+    return "ムラサメ"
+
+
+def get_portrait_mode(pet_id: str = None) -> str:
+    """立绘类型：'single'（每个表情一张整图）| 'layers'（多图层合成，如丛雨）"""
+    try:
+        m = str(get_portrait_cfg(pet_id).get("mode") or "").strip().lower()
+        if m in ("single", "layers"):
+            return m
+    except Exception:
+        pass
+    # 没有 portrait 块：有丛雨式索引（含 base 图层）就是 layers
+    return "layers"
+
+
+def get_portrait_emotions(pet_id: str = None) -> dict:
+    """{情绪名: 图层ID}（single 模式由向导写入；layers 模式为空）"""
+    try:
+        emo = get_portrait_cfg(pet_id).get("emotions") or {}
+        return {str(k): int(v) for k, v in emo.items() if str(v).strip().isdigit()}
+    except Exception:
+        return {}
+
+
+def get_portrait_default_layers(pet_id: str = None) -> list:
+    """single 模式启动时该显示的图层 = 默认表情那张整图；非 single 返回 []"""
+    if get_portrait_mode(pet_id) != "single":
+        return []
+    pc = get_portrait_cfg(pet_id)
+    emo = get_portrait_emotions(pet_id)
+    if not emo:
+        return []
+    want = str(pc.get("default_emotion") or "").strip()
+    if want in emo:
+        return [emo[want]]
+    return [next(iter(emo.values()))]
 
 
 def get_live2d_dir(pet_id: str = None) -> str:
@@ -484,11 +558,53 @@ def get_portrait_prompts(pet_id: str = None) -> dict:
     返回角色的立绘图层映射（portrait_prompts.json）。
     结构：{"prompt_template": str, "sets": {"a": {...}, "b": {...}}}
     文件不存在 → 返回空 dict（调用方回退默认）。
+
+    ⚠ sets 一律返回 dict：老版本新建向导曾把它写成 ["a"]（列表），
+    桌宠侧 sets.get(...) 会 AttributeError → 启动就崩、桌宠窗口不出现。
     """
     pet_id = pet_id or get_active_pet_id()
     path = os.path.join(PETS_DIR, pet_id, "portrait_prompts.json")
     data = _load_json(path, None)
-    return data if isinstance(data, dict) else {}
+    if not isinstance(data, dict):
+        return {}
+    if not isinstance(data.get("sets"), dict):
+        data["sets"] = {}
+    return data
+
+
+def get_pet_chat_style(pet_id: str = None) -> str:
+    """角色的说话风格（角色包 pet.json 的 chat_style）。空串 = 用默认风格。"""
+    try:
+        cfg = get_pet_config(pet_id) or {}
+        return str(cfg.get("chat_style") or "").strip()
+    except Exception:
+        return ""
+
+
+def is_default_pet(pet_id: str = None) -> bool:
+    """是否内置默认角色（丛雨）——它保持原有文案，观感不变"""
+    try:
+        pid = str(pet_id or get_active_pet_id() or "")
+        cfg = get_pet_config(pid) or {}
+        nm = str(cfg.get("display_name") or cfg.get("name") or "")
+        return (pid == "murasame") or ("丛雨" in nm)
+    except Exception:
+        return False
+
+
+def get_pet_self_ref(pet_id: str = None) -> str:
+    """角色的自称（角色包 pet.json 的 self_ref）。
+
+    没写就按角色给默认：默认角色（丛雨）保持「本座」，其它角色用「我」。
+    """
+    try:
+        cfg = get_pet_config(pet_id) or {}
+        v = str(cfg.get("self_ref") or "").strip()
+        if v:
+            return v
+        return "本座" if is_default_pet(pet_id) else "我"
+    except Exception:
+        return "我"
 
 
 def get_sticker_dir(pet_id: str = None) -> str:

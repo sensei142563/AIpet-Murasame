@@ -1,0 +1,35 @@
+{
+  "id": "silicon",
+  "name": "Silicon 现代（推荐）",
+  "version": "1.0",
+  "builtin": true,
+  "accent": "blue",
+  "desc": "Fluent 亚克力风格：深色半透明面板、圆角胶囊导航、强调色高亮。参考 PyQt-SiliconUI 设计语言。",
+  "colors": {
+    "Color1": "#e6eaf2",
+    "Color2": "#2f6fd0",
+    "Color3": "#4c8dff",
+    "Color4": "#6fa2ff",
+    "Color5": "#39405a",
+    "Color6": "#20263a",
+    "Color7": "#1a1f2e",
+    "Color8": "rgba(22,26,36,215)",
+    "Gray1": "#f2f4fa",
+    "Gray2": "#a9b2c6",
+    "Gray3": "#8b94ab",
+    "Gray4": "#6d7688",
+    "Gray5": "#4c5468",
+    "Gray6": "#39405a",
+    "Gray7": "#262c3d",
+    "Gray8": "#1c2130",
+    "RedBack": "rgba(255,92,92,46)",
+    "RedLight": "#ff6b6b",
+    "RedDark": "#d64545",
+    "GreenLight": "#5fd3a0",
+    "GreenDark": "#2fa87a",
+    "preview_bg": "#12141c"
+  },
+  "widgets": {
+    "btn_radius": 10
+  }
+}

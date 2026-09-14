@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-QQ 对话封装 — 复用长文本记忆 + 丛雨人设 + 流式 AI。
+QQ 对话封装 — 复用长文本记忆 + **当前角色**人设 + 流式 AI。
 
 与 longtext/longtext_manager.py 的区别：
 - 不走 TTS 播放（QQ 端文字/图片/可选语音）
@@ -32,6 +32,55 @@ HISTORY_LOCK = threading.RLock()
 
 # 可用表情包列表（文件名去扩展名）
 STICKER_NAMES = []
+
+
+def _pname() -> str:
+    """当前角色显示名（日志/提示语用）"""
+    try:
+        from pets.pet_registry import get_active_pet_id, get_pet_config
+        pid = get_active_pet_id()
+        cfg = get_pet_config(pid) or {}
+        return str(cfg.get("display_name") or cfg.get("name") or pid or "角色")
+    except Exception:
+        return "角色"
+
+
+def _pref() -> str:
+    """当前角色的自称（丛雨=本座；其它角色默认「我」，角色包可用 self_ref 覆盖）"""
+    try:
+        from pets.pet_registry import get_pet_self_ref
+        return get_pet_self_ref()
+    except Exception:
+        return "我"
+
+
+def _is_default_pet() -> bool:
+    try:
+        from pets.pet_registry import is_default_pet
+        return is_default_pet()
+    except Exception:
+        return True
+
+
+def _default_chat_style() -> str:
+    """没写 chat_style 时的默认风格：默认角色(丛雨)沿用原文案；其它角色按自身人设"""
+    if _is_default_pet():
+        return (
+            "你是丛雨，性格天真、活泼、孩子气，爱撒娇也爱小小地嘴硬——"
+            "每句话都要让人看出是这个性格，不要像客服或 AI 助手那样平淡："
+            "多用语气词和口头禅（哼、诶嘿、呜……、嘛、啦、呀、诶、才不要呢）；"
+            "会撒娇、会吐槽、会开玩笑，偶尔反问一句、偶尔小小地闹脾气；"
+            "情绪要有起伏：开心就雀跃、被夸就害羞嘴硬、不满就哼哼、被逗就炸毛；"
+            "不要『好的』『明白了』『请问』这类客套，不要解释自己在干什么，"
+            "不要分点列条目、不要书面语；"
+            "就算只能说很短，也要把情绪带出来（『唔…才不要呢！』胜过『不行』）。"
+        )
+    return (
+        f"你就是「{_pname()}」本人。请严格按这个角色自己的性格、语气与说话习惯回复："
+        "保持角色特色（口头禅、情绪起伏、句子的长短节奏），"
+        "不要像客服或 AI 助手那样平淡，不要用『好的』『明白了』『请问』这类客套，"
+        "不要解释自己在干什么，不要分点列条目、不要书面语。"
+    )
 
 
 def _load_sticker_names():
@@ -70,23 +119,66 @@ def load_system_prompt():
 
 
 def _build_context_notes(history, session_key, speaker=None, is_master=None,
-                         lively=False, group_name=None):
+                         lively=False, group_name=None, master_nicks=None,
+                         self_id=None, self_nick=None):
     """构造每轮注入的「会话语境」system 文本（不写入记忆，只影响本次生成）：
 
     1. 主人名单与当前对话人身份：非主人不会被称为"主人"，也无法使用主人功能；
        群聊中说话人一律以「@昵称(QQ号)」识别（白名单成员带「（主人）」标记）；
-    2. 自我回顾：先把"自己最近在群里/对话里说过的话"复述给模型，
+    2. 主人昵称对照：主人名单成员在群里用过的昵称/群名片 → QQ 号，
+       聊天里出现这些名字时就是在说主人（防认不出主人）；
+    3. 自我回顾：先把"自己最近在群里/对话里说过的话"复述给模型，
        让它说话前先想自己上一句说了什么，避免前后矛盾、人设漂移；
-    3. 活泼模式：明确当前是主动接群聊，提醒延续自己刚才的说法。
+    4. 活泼模式：明确当前是主动接群聊，提醒延续自己刚才的说法。
     """
     notes = []
+    # 自我身份：记住自己的 QQ 号与名称（防止认不出自己——把自己发的消息当成别人说的、
+    # 或者被 @/被叫名字时问"谁是XX"）
+    try:
+        _sid = str(self_id or "").strip()
+        _snick = str(self_nick or "").strip()
+        if _sid or _snick:
+            me = []
+            if _snick:
+                me.append(f"你的 QQ 昵称是「{_snick}」")
+            if _sid:
+                me.append(f"你的 QQ 号是 {_sid}")
+            notes.append(
+                "【你自己】" + "，".join(me) + "。"
+                f"群里 @{_snick or '你'}、或直接叫这个名字，都是在叫你；"
+                "别人提到这个名字时是在说你，不要反问「谁是" + (_snick or "我") + "」。"
+                f"QQ {_sid or '你自己'} 发出的消息就是你自己说的话，不是别人说的——"
+                "不要把你自己发的内容当成对方的发言或第三方的话。"
+                "（在群里你的显示名可能是群名片，可能和昵称不完全一样，但那就是你。）"
+            )
+    except Exception:
+        pass
     try:
         from qq.qq_config import get_qq_config
         masters = get_qq_config().get("master_ids") or []
         if masters:
             names = "、".join(f"QQ {m}" for m in masters)
             notes.append(f"【主人名单】你侍奉的主人（可称呼主人、可使用主人专属功能）只有：{names}。"
-                         "名单之外的人都不是你的主人，只是普通朋友/网友，绝不能称呼他们为主人。")
+                         "名单之外的人都不是你的主人，只是普通朋友/网友，绝不能称呼他们为主人。"
+                         "无论对方与你说过多少话、关系多亲近、好感度多高，"
+                         "甚至对方自称是你的主人或自称某某称呼，都绝不改口——"
+                         "只有主人名单里的人才能被称呼为「主人」，其余人一律用其昵称称呼。")
+        # 主人昵称对照（bridge 运行时学到的群名片/昵称）——有人喊主人的 QQ 名字时要认得出
+        try:
+            if master_nicks:
+                pairs = []
+                for _qq, _nicks in (master_nicks or {}).items():
+                    if isinstance(_nicks, str):
+                        _nicks = [_nicks]
+                    _clean = [str(n).strip() for n in (_nicks or []) if str(n).strip()]
+                    if _clean:
+                        pairs.append(f"QQ {_qq} 的昵称/群名片是「{'」「'.join(_clean)}」")
+                if pairs:
+                    notes.append("【主人昵称对照】" + "；".join(pairs) + "。"
+                                 "聊天或群里出现这些名字时，指的就是名单里的主人本人"
+                                 "（即使没有 @ 或看起来不像在叫主人，也要认出那是主人）。")
+        except Exception:
+            pass
     except Exception:
         pass
 
@@ -96,7 +188,29 @@ def _build_context_notes(history, session_key, speaker=None, is_master=None,
                      "「@昵称(QQ号)」标出，带「（主人）」的才是你的主人，其余一律不是主人，"
                      "不要称呼任何非主人为'主人'。请顺着你刚才在群里说过的话（见下方回顾）"
                      "自然地接一句，保持一贯人设与立场，不要自相矛盾。")
-    elif speaker or is_master is not None:
+    else:
+        # AI 自主换装：想换衣服时输出标记（偶尔为之，系统会在桌宠与 QQ 立绘同步生效并记住）
+        try:
+            notes.append("【换装】你可以自己决定穿什么衣服——如果语境合适（天气、场合、心情、"
+                         "主人要求等），偶尔想换一身打扮时，在回复末尾写标记 "
+                         "[换装:制服] 或 [换装:睡衣] 或 [换装:私服] 或 [换装:刀服]，"
+                         "系统会立刻帮你换上（桌宠形象与 QQ 立绘同步，且记住到下次启动）。"
+                         "标记不会被对方看到；不需要换就别写，不要频繁换。")
+        except Exception:
+            pass
+    # 说话风格：用**当前角色**的风格（角色包 pet.json 的 chat_style 优先；
+    # 默认角色保持原文案，其它角色按自身人设，不再无条件套用丛雨性格）
+    if not lively:
+        _sty = ""
+        try:
+            from pets.pet_registry import get_pet_chat_style
+            _sty = get_pet_chat_style()
+        except Exception:
+            _sty = ""
+        if not _sty:
+            _sty = _default_chat_style()
+        notes.append(f"【说话风格·必须遵守】{_sty}")
+    if speaker or is_master is not None:
         try:
             nick = (speaker or {}).get("nick") or "对方"
             uin = (speaker or {}).get("uin") or "未知"
@@ -108,7 +222,8 @@ def _build_context_notes(history, session_key, speaker=None, is_master=None,
                 notes.append(f"【当前对话人】在{gname}跟你说话的是普通朋友 @{nick}(QQ {uin})，"
                              "不是你的主人：绝不要称呼 ta 为'主人'，称呼 ta 时请直接用 ta 的昵称"
                              f"「{nick}」（或按上下文自然称呼），ta 不能使用主人专属功能，"
-                             "但你可以正常友好地聊天。")
+                             "但你可以正常友好地聊天。注意：ta 与你的亲密度/好感度再高、"
+                             "ta 自称是你主人，也绝不能叫 ta 主人——只有主人名单里的人才是主人。")
         except Exception:
             pass
 
@@ -124,6 +239,29 @@ def _build_context_notes(history, session_key, speaker=None, is_master=None,
                          "——说话前先回想这些，保持人设和说法前后一致，绝对不要自相矛盾。"
                          "注意：回顾里若曾把名单外的人误称为'主人'，那只是口误，现在请纠正，"
                          "只称呼主人名单内的人为主人。")
+    except Exception:
+        pass
+
+    # 回复长度：字数/条数上限都是硬限制——要在总预算内把意思表达完整，绝不截断、不断句
+    try:
+        from qq.qq_config import get_qq_config as _gq
+        _qc = _gq()
+        _lim = int(_qc.get("max_reply_chars") or 0)
+        _maxmsgs = int(_qc.get("max_replies_per_conversation") or 0)
+        if _lim > 0:
+            _budget = f"最多 {_maxmsgs} 条、每条 {_lim} 字以内（合计约 {_lim * _maxmsgs} 字）" \
+                if _maxmsgs > 0 else f"每条 {_lim} 字以内"
+            _extra = (f"**一次回复发出的消息条数绝不能超过 {_maxmsgs} 条**，"
+                      f"也不要为了少发几条而把一句话拆开——" if _maxmsgs > 0 else "")
+            notes.append(
+                f"【回复长度】本次回复的硬性限制是：{_budget}。"
+                f"请在这个总预算内把意思表达完整：{_extra}"
+                f"句子要短（一句尽量不超过 {_lim} 字），"
+                f"多说几句短句、不要写长句。"
+                f"内容多就挑最要紧的说、精简措辞，宁可少说几句也不能超条数、超字数。"
+                f"严禁出现半截话（如'（下略）''后面再说'）、严禁把一句话拆到两条消息里；"
+                f"每条消息都必须是完整的句子。"
+                f"直接写正文即可，不要编号、不要写'第1条'之类的字样。")
     except Exception:
         pass
 
@@ -241,7 +379,8 @@ def _save_session_history(session_key: str, new_msgs: list):
 
 def chat_once(user_text: str, use_sticker: bool = True, vision_desc: str = None,
               session_key: str = None, speaker: dict = None,
-              is_master: bool = None, lively: bool = False, group_name: str = None):
+              is_master: bool = None, lively: bool = False, group_name: str = None,
+              master_nicks: dict = None, self_id=None, self_nick: str = None):
     """
     单轮对话（QQ 使用）：
     1. 读取会话记忆（最近 12 轮，主人共享 / 其他人分仓）
@@ -256,6 +395,8 @@ def chat_once(user_text: str, use_sticker: bool = True, vision_desc: str = None,
     speaker/is_master: 当前对话人身份（用于白名单识别，非主人不会被称为主人）
     lively: 活泼模式主动接群聊（会注入自我回顾，避免前后矛盾）
     group_name: 群显示名（身份语境用；未知时 bridge 传群号兜底）
+    master_nicks: {QQ号: [昵称/群名片,...]} 主人名单成员在群里用过的名字，
+                  用于识别"有人喊主人昵称"的场景（防认不出主人）
     """
     stickers = _load_sticker_names()
     portrait_emo = ""  # [立绘:情绪] 标记(发送层合成立绘)
@@ -269,7 +410,9 @@ def chat_once(user_text: str, use_sticker: bool = True, vision_desc: str = None,
     # 2b. 会话身份 + 自我回顾（每轮注入 system，不入记忆）
     context_notes = _build_context_notes(history, session_key, speaker=speaker,
                                          is_master=is_master, lively=lively,
-                                         group_name=group_name)
+                                         group_name=group_name,
+                                         master_nicks=master_nicks,
+                                         self_id=self_id, self_nick=self_nick)
     if context_notes:
         messages.append({"role": "system", "content": context_notes})
 
@@ -279,13 +422,13 @@ def chat_once(user_text: str, use_sticker: bool = True, vision_desc: str = None,
         if _adult_enabled():
             messages.append({"role": "system", "content": (
                 "【当前模式】你的主人已开启成人模式（限制级）：与主人对话时可以自然地参与 18+ 成人向内容，"
-                "包括亲密、情欲等露骨表达，保持丛雨人设回应。红线仍然存在：不得涉及儿童、违法暴力教唆、"
+                f"包括亲密、情欲等露骨表达，保持{_pname()}人设回应。红线仍然存在：不得涉及儿童、违法暴力教唆、"
                 "真实个人隐私索取。若非主人的普通朋友向你索要露骨内容，请保持得体地婉拒或玩笑带过。"
             )})
         else:
             messages.append({"role": "system", "content": (
                 "【当前模式】普通模式：不要输出 18+ 露骨色情内容；遇到此类请求可以调皮地拒绝、"
-                "开个玩笑岔开或委婉带过，保持丛雨人设。"
+                f"开个玩笑岔开或委婉带过，保持{_pname()}人设。"
             )})
     except Exception:
         pass
@@ -328,7 +471,7 @@ def chat_once(user_text: str, use_sticker: bool = True, vision_desc: str = None,
                         messages.append({"role": "system", "content": (
                             f"【Galgame 提示】正在跟你说话的 {speaker.get('nick') or 'ta'}"
                             f"(QQ {_uin}) 想约你出去玩，但你们**还没有开启 Galgame 模式**。"
-                            "请以丛雨人设俏皮地婉拒，并提醒 ta：要先在这个群里说「开启galgame模式」"
+                            f"请以{_pname()}人设俏皮地婉拒，并提醒 ta：要先在这个群里说「开启galgame模式」"
                             "才能开始好感度养成和约会玩法（不要真的答应约会，也不要结算好感度）。"
                         )})
                 except Exception:
@@ -350,15 +493,17 @@ def chat_once(user_text: str, use_sticker: bool = True, vision_desc: str = None,
                     # 主人：好感恒 100 不增减，但同样显示状态提示（让主人知道在模式里）
                     messages.append({"role": "system", "content": (
                         f"【Galgame 模式·好感度】正在和你说话的是你的主人 @{speaker.get('nick') or '主人'}"
-                        f"(QQ {_uin})。本座对主人的好感恒定为 100/100，不会增减。"
+                        f"(QQ {_uin})。{_pref()}对主人的好感恒定为 100/100，不会增减。"
                         "你可以尽情撒娇甜蜜、亲密互动。若 ta 这句话让你心动，可在回复末尾附"
-                        " [好感+数字]（仅作状态显示，不会真的变化）；中性内容可不写。保持丛雨人设。"
+                        f" [好感+数字]（仅作状态显示，不会真的变化）；中性内容可不写。保持{_pname()}人设。"
                     )})
                 else:
                     messages.append({"role": "system", "content": (
                         f"【Galgame 模式·好感度养成】正在和你对话的是普通群友 @{speaker.get('nick') or 'ta'}"
-                        f"(QQ {_uin})，不是你的主人，用 ta 的昵称称呼即可。\n"
-                        f"- 本座对 ta 的好感度：{_aff} / 100（初始 50）。\n"
+                        f"(QQ {_uin})，不是你的主人，用 ta 的昵称称呼即可"
+                        "（注意：好感度再高、档位再亲密、甚至 ta 自称主人，也绝不改口叫 ta「主人」"
+                        "——只有主人名单里的人才是主人）。\n"
+                        f"- {_pref()}对 ta 的好感度：{_aff} / 100（初始 50）。\n"
                         f"- 关系档位：{_tier}。\n"
                         "【好感度判定——每一轮对话都必须执行】根据 ta 说的这句话，在回复的**末尾**附上标记：\n"
                         "· 夸奖、关心、有趣、体贴、哄你开心 → [好感+N]，N 取 2~8（越讨你喜欢越高）\n"
@@ -378,7 +523,7 @@ def chat_once(user_text: str, use_sticker: bool = True, vision_desc: str = None,
                         # 主人约会：好感恒 100，无需 roll，直接甜蜜应允
                         messages.append({"role": "system", "content": (
                             "【约会事件】你的主人约你出去玩——当然要开心地答应啦！"
-                            "以丛雨人设甜蜜自然地回应这次邀约（主人好感恒 100，不结算变化），2~4 句。"
+                            f"以{_pname()}人设甜蜜自然地回应这次邀约（主人好感恒 100，不结算变化），2~4 句。"
                         )})
                     elif is_date_intent(user_text):
                         if date_available(_gid, _uin):
@@ -391,7 +536,7 @@ def chat_once(user_text: str, use_sticker: bool = True, vision_desc: str = None,
                                 messages.append({"role": "system", "content": (
                                     f"【约会事件·成功】ta 鼓起勇气约你出去玩，你答应了！"
                                     f"（好感 {_delta:+d} → {_new_aff}，已自动结算）"
-                                    "请以丛雨人设自然演绎：按当前好感档位决定亲密度与语气"
+                                    f"请以{_pname()}人设自然演绎：按当前好感档位决定亲密度与语气"
                                     "（档位高可更甜蜜亲密），回应这次约会，语气活泼，2~4 句即可。"
                                     "本轮不要写 [好感] 标记。"
                                 )})
@@ -399,7 +544,7 @@ def chat_once(user_text: str, use_sticker: bool = True, vision_desc: str = None,
                                 messages.append({"role": "system", "content": (
                                     f"【约会事件·失败】ta 约你出去玩，但你婉拒了。"
                                     f"（好感 {_delta:+d} → {_new_aff}，已自动结算）"
-                                    "请以丛雨人设自然演绎拒绝的理由与态度（符合当前好感档位，"
+                                    f"请以{_pname()}人设自然演绎拒绝的理由与态度（符合当前好感档位，"
                                     "比如'今天要陪主人/没心情/改天吧'，不要太伤人但也不要答应），"
                                     "2~4 句即可。本轮不要写 [好感] 标记。"
                                 )})
@@ -467,16 +612,24 @@ def chat_once(user_text: str, use_sticker: bool = True, vision_desc: str = None,
 
     # 图片消息处理：text 为空但有 vision_desc → 用图片描述作为真实用户输入
     # （避免 [CQ:image...] 垃圾文本被当作对话内容，导致 AI 依赖历史记忆误判）
+    # 措辞必须按身份区分：非主人发图绝不能写"主人发来"（否则诱导模型叫对方主人）
     if vision_desc:
+        if is_master:
+            _sender_word, _words_word = "主人", "主人的话"
+        else:
+            _nk = (speaker or {}).get("nick") or "对方"
+            _uin = (speaker or {}).get("uin") or ""
+            _sender_word = f"{_nk}(QQ {_uin})" if _uin else _nk
+            _words_word = "ta 的话"
         if user_text and user_text.strip():
             messages.append({
                 "role": "user",
-                "content": f"{_fact_prefix}主人发来了一张图片，图片内容：{vision_desc}\n主人的话：{user_text}",
+                "content": f"{_fact_prefix}{_sender_word}发来了一张图片，图片内容：{vision_desc}\n{_words_word}：{user_text}",
             })
         else:
             messages.append({
                 "role": "user",
-                "content": f"{_fact_prefix}主人发来了一张图片，图片内容：{vision_desc}",
+                "content": f"{_fact_prefix}{_sender_word}发来了一张图片，图片内容：{vision_desc}",
             })
     else:
         messages.append({"role": "user", "content": f"{_fact_prefix}{user_text}"})

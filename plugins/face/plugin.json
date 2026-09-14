@@ -3,14 +3,14 @@
   "name": "人脸识别",
   "version": "1.0.0",
   "kind": "feature",
-  "desc": "桌宠摄像头人脸识别：识别到已登记的人脸时触发对应互动。人脸库登记请在「人脸」页面管理。",
+  "desc": "桌宠摄像头人脸识别：识别到已登记的人脸时触发对应互动。人脸库在插件设置里管理。",
   "default": true,
   "config_key": "face_recognition_enabled",
   "extra_keys": [],
   "settings": [
     {
       "type": "info",
-      "text": "人脸库（登记/删除人脸）在顶部「人脸」页管理；这里只调节识别相关参数。"
+      "text": "人脸库（添加主人/其他人、删除）在本页下方直接管理；上面是识别相关参数。"
     },
     {
       "key": "camera_enabled",

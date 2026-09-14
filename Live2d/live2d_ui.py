@@ -136,6 +136,11 @@ class Live2DWidget(QOpenGLWidget):
     trigger_touch_head = pyqtSignal()                 # 摸头触发
     trigger_input_mode = pyqtSignal()                 # 点击下半身 → 输入模式
     trigger_drag_move = pyqtSignal(int, int)          # 中键拖拽 → (dx, dy)
+    # 身体触摸（头/胸/腹/下体/四肢…）：把坐标交给 pet 用「触摸区域」判定并回应。
+    # ⚠ 以前这里只按固定高度区间判摸头，身体其它部位在 Live2D 模式下完全没反应。
+    touch_pressed = pyqtSignal(int, int)              # 左键按下 → (x, y)
+    touch_moved = pyqtSignal(int, int)                # 左键拖动 → (x, y)
+    touch_released = pyqtSignal(int, int)             # 左键松开 → (x, y)
     interacted = pyqtSignal()                         # 任何鼠标交互（重排文字层 z 序用）
 
     def __init__(self, parent=None, model_dir=None, model_json=None,
@@ -592,6 +597,10 @@ class Live2DWidget(QOpenGLWidget):
         if event.button() == Qt.LeftButton:
             x, y = event.x(), event.y()
             self.setCursor(Qt.ArrowCursor)
+            try:
+                self.touch_pressed.emit(x, y)        # 身体触摸（区域由桌宠判定）
+            except Exception:
+                pass
 
             if self._in_zone(y, self.head_top, self.head_bottom) and self._in_x_range(x):
                 # 头部区域 → 摸头
@@ -610,6 +619,11 @@ class Live2DWidget(QOpenGLWidget):
 
     def mouseMoveEvent(self, event):
         self.interacted.emit()
+        if event.buttons() & Qt.LeftButton:
+            try:
+                self.touch_moved.emit(event.x(), event.y())   # 拖动 = 抚摸
+            except Exception:
+                pass
         if self._touch_head and self._head_press_x is not None:
             if abs(event.x() - self._head_press_x) > 50:
                 self.trigger_touch_head.emit()
@@ -623,6 +637,10 @@ class Live2DWidget(QOpenGLWidget):
     def mouseReleaseEvent(self, event):
         self.interacted.emit()
         if event.button() == Qt.LeftButton:
+            try:
+                self.touch_released.emit(event.x(), event.y())  # 没怎么动 = 轻点
+            except Exception:
+                pass
             self._touch_head = False
             self._head_press_x = None
             self.setCursor(Qt.ArrowCursor)

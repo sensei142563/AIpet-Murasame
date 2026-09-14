@@ -14,6 +14,15 @@ from tool.chat import qwen3_lora, ollama_qwen3_sentence, ollama_qwen3_portrait, 
 portrait_type = get_config("./config.json")['portrait']
 
 
+def current_portrait_type():
+    """运行时读取立绘体系（桌宠右键换装会把 config 切到 a 套；
+    若仍用启动时的快照常量，AI 会继续按 b 套选层导致与 a 套渲染不匹配）"""
+    try:
+        return str(get_config("./config.json").get("portrait") or portrait_type or "a")
+    except Exception:
+        return portrait_type
+
+
 def clean_sentence(text):
     """防御性清理：去掉动作描写【】、括注（）/()、Emoji（人设 prompt 已禁止，此处兜底）"""
     import re
@@ -45,6 +54,17 @@ def _is_pure_punct(text):
     return not (text or "").strip("…。.!！?？、，~～\"'“”‘’「」『』 \t\n")
 
 
+def _persona_default_emotion() -> str:
+    """人设默认情绪（短文本语音兜底用）：角色包 pet.json voices.default_emotion，
+    默认「高兴」——活泼角色不要默认用冷淡的「平静」。"""
+    try:
+        from pets.pet_registry import get_pet_config
+        v = (get_pet_config().get("voices", {}) or {})
+        return str(v.get("default_emotion") or "高兴")
+    except Exception:
+        return "高兴"
+
+
 def _align_lists(reply_list, translate_list, emotion_list, portrait_list):
     """把翻译/情绪/立绘列表对齐到「中文回复句数」（TTS 与逐句显示一一对应）。
 
@@ -71,7 +91,10 @@ def _align_lists(reply_list, translate_list, emotion_list, portrait_list):
 
     e = list(emotion_list)
     if len(e) < n:
-        e += [e[-1] if e else "平静"] * (n - len(e))
+        # 情绪列表缺失时的补位：沿用最后一个标签；一个都没有 → 按人设默认情绪
+        # （活泼角色=高兴），不要一律用「平静」——那会让语音听起来冷淡
+        _pad = e[-1] if e else _persona_default_emotion()
+        e += [_pad] * (n - len(e))
     else:
         e = e[:n]
 
@@ -116,7 +139,7 @@ class qwen3_lora_Worker(QThread):
         reply = ollama_qwen3_sentence(reply)  # 句子分割
         if self.force_stop: print("[ollama-qwn3] 已中断生成。");return
         history[-1]["content"] = reply
-        portrait_list, portrait_history = ollama_qwen3_portrait(reply, self.portrait_history, portrait_type)  # 立绘
+        portrait_list, portrait_history = ollama_qwen3_portrait(reply, self.portrait_history, current_portrait_type())  # 立绘
         if self.force_stop: print("[ollama-qwn3] 已中断生成。");return
         emotion_list = ollama_qwen3_emotion(history)  # 情感
         if self.force_stop: print("[ollama-qwn3] 已中断生成。");return
@@ -137,20 +160,29 @@ class qwen3_lora_Worker(QThread):
             reply, translate, emotion_list, portrait_list)
 
         # 并发执行所有TTS任务（索引定位结果，杜绝空句导致的错位）
+        # 语音合成开关（启动器 设置→桌宠 可关）：关闭时跳过全部 TTS（合成较慢、会拖慢回复）
+        _voice_on = True
+        try:
+            _voice_on = bool(get_config("./config.json").get("voice_synthesis_enable", True))
+        except Exception:
+            _voice_on = True
         voices = [None] * len(translate)
-        with ThreadPoolExecutor(max_workers=3) as executor:
-            # 提交所有TTS任务
-            futures = []
-            for i, text in enumerate(translate):
-                if self.force_stop: print("[tts] 已中断生成。");return
-                if not text or _is_pure_punct(text):
-                    continue
-                futures.append((i, executor.submit(gpt_sovits_tts, text, emotion_list[i])))
+        if not _voice_on:
+            print("[tts] 语音合成已关闭（可在启动器 设置→桌宠 中开启），跳过 TTS")
+        else:
+            with ThreadPoolExecutor(max_workers=3) as executor:
+                # 提交所有TTS任务
+                futures = []
+                for i, text in enumerate(translate):
+                    if self.force_stop: print("[tts] 已中断生成。");return
+                    if not text or _is_pure_punct(text):
+                        continue
+                    futures.append((i, executor.submit(gpt_sovits_tts, text, emotion_list[i])))
 
-            # 按索引回填结果，保持与回复句一一对应
-            for i, future in futures:
-                if self.force_stop: print("[tts] 已中断生成。");return
-                voices[i] = future.result()
+                # 按索引回填结果，保持与回复句一一对应
+                for i, future in futures:
+                    if self.force_stop: print("[tts] 已中断生成。");return
+                    voices[i] = future.result()
 
         # 句内【情绪】标签（如【白】）→ 只覆盖「显示用情绪」（表情/动作），
         # TTS 已按原始情绪合成，语音不受影响。
@@ -206,7 +238,7 @@ class cloud_API_Worker(QThread):
         if self.force_stop:print("[deepseek] 已中断生成。");return
         with ThreadPoolExecutor(max_workers=5) as executor:  # 增加线程数
             # 提交所有任务（下游拿到切好的句子列表，保证对齐）
-            future_portrait = executor.submit(cloud_portrait, reply_json, self.portrait_history, portrait_type)
+            future_portrait = executor.submit(cloud_portrait, reply_json, self.portrait_history, current_portrait_type())
             future_translate = executor.submit(cloud_translate, reply_json)
             future_emotion = executor.submit(cloud_emotion, history)
 
@@ -229,19 +261,34 @@ class cloud_API_Worker(QThread):
             reply_list, translate_list, emotion_list, portrait_list)
 
         voices = [None] * len(translate_list)
-        with ThreadPoolExecutor(max_workers=3) as tts_executor:
-            # 提交所有TTS任务
-            futures = []
-            for i, text in enumerate(translate_list):
-                if self.force_stop:print("[tts] 已中断生成。");return
-                if not text or _is_pure_punct(text):
-                    continue
-                futures.append((i, tts_executor.submit(gpt_sovits_tts, text, emotion_list[i])))
+        # ⚠ 修复：设置里那个开关存的是**字符串** "false"（滑条写的就是 "true"/"false"），
+        #   而 bool("false") == True → 关了语音也照样合成，还会因为 TTS 服务慢而卡住整轮回复。
+        #   这里按字符串语义解析（false/0/off/no 都算关），并且每次都重新读配置（改完立即生效）。
+        _voice_on = True
+        try:
+            _v = get_config("./config.json").get("voice_synthesis_enable", True)
+            if isinstance(_v, str):
+                _voice_on = _v.strip().lower() in ("true", "1", "on", "yes", "开", "开启")
+            else:
+                _voice_on = bool(_v)
+        except Exception:
+            _voice_on = True
+        if not _voice_on:
+            print("[tts] 语音合成已关闭（设置里可开启）→ 本轮不合成语音，直接出文字")
+        else:
+            with ThreadPoolExecutor(max_workers=3) as tts_executor:
+                # 提交所有TTS任务
+                futures = []
+                for i, text in enumerate(translate_list):
+                    if self.force_stop:print("[tts] 已中断生成。");return
+                    if not text or _is_pure_punct(text):
+                        continue
+                    futures.append((i, tts_executor.submit(gpt_sovits_tts, text, emotion_list[i])))
 
-            # 按索引回填结果，保持与回复句一一对应
-            for i, future in futures:
-                if self.force_stop:print("[tts] 已中断生成。");return
-                voices[i] = future.result()
+                # 按索引回填结果，保持与回复句一一对应
+                for i, future in futures:
+                    if self.force_stop:print("[tts] 已中断生成。");return
+                    voices[i] = future.result()
 
         # 句内【情绪】标签（如【白】）→ 只覆盖「显示用情绪」（表情/动作），
         # TTS 已按原始情绪合成，语音不受影响。

@@ -187,9 +187,20 @@ async def cloudAPI(req: cloudAPIRequest):
 
 
 # ============== Control Endpoints (PCL 启动器按钮调用) ==============
-_control_flags: Dict[str, bool] = {"voice": False, "screenshot": False, "camera": False, "live2d": False, "longtext": False}
+_control_flags: Dict[str, bool] = {"voice": False, "screenshot": False, "camera": False,
+                                   "live2d": False, "longtext": False,
+                                   "reset_position": False,      # 重置桌宠位置（回屏幕中央）
+                                   "reload_touch": False}        # 重新读取触摸区域（编辑器保存后）
 _control_lock = threading.Lock()
-_feature_status: Dict[str, str] = {"voice": "off", "screenshot": "off", "camera": "off", "live2d": "off", "longtext": "off"}
+_feature_status: Dict[str, str] = {"voice": "off", "screenshot": "off", "camera": "off",
+                                   "live2d": "off", "longtext": "off"}
+
+# 桌宠窗口位置（由 main.py 定期同步；PCL「重置桌宠位置」按钮读它做提示）
+_window_pos: Dict[str, int] = {"x": -1, "y": -1}
+
+
+def set_window_pos(x: int, y: int) -> None:
+    _window_pos["x"], _window_pos["y"] = int(x), int(y)
 
 # 长文本模式当前是否激活（由桌宠同步）
 _long_text_mode_active = False
@@ -204,14 +215,44 @@ async def control_status():
     return {"flags": _control_flags.copy(), "status": _feature_status.copy()}
 
 
+# 关闭桌宠（启动器「关闭桌宠」按钮）——必须放在 /control/{feature} 之前，
+# 否则会被通配路由吃掉（历史 bug：请求返回「不支持的功能: shutdown」，桌宠关不掉）
+_shutdown_request = False
+
+
+@app.post("/control/shutdown")
+async def control_shutdown():
+    global _shutdown_request
+    _shutdown_request = True
+    print("[API] 收到关闭请求（启动器「关闭桌宠」）")
+    return {"ok": True, "action": "关闭桌宠"}
+
+
+def check_shutdown() -> bool:
+    """由 main.py 轮询：为 True 时优雅退出（会保存窗口位置）"""
+    global _shutdown_request
+    if _shutdown_request:
+        _shutdown_request = False
+        return True
+    return False
+
+
 @app.post("/control/{feature}")
 async def control_feature(feature: str):
-    mapping = {"voice": "语音识别", "screenshot": "屏幕识别", "camera": "摄像头", "live2d": "Live2D", "longtext": "长文本模式切换"}
+    mapping = {"voice": "语音识别", "screenshot": "屏幕识别", "camera": "摄像头", "live2d": "Live2D",
+               "longtext": "长文本模式切换", "reset_position": "重置桌宠位置（回到屏幕中央）",
+               "reload_touch": "重新读取触摸区域（全身触摸范围）"}
     if feature not in mapping:
         return {"error": f"不支持的功能: {feature}"}
     with _control_lock:
         _control_flags[feature] = True
     return {"ok": True, "action": mapping[feature]}
+
+
+@app.get("/pet/position")
+async def pet_position():
+    """桌宠窗口当前坐标（供启动器显示 / 判断在不在屏幕内）"""
+    return dict(_window_pos)
 
 
 @app.post("/voice/start")

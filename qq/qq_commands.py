@@ -17,11 +17,21 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 def _pet_display_name() -> str:
     """当前角色显示名（用于指令回复，替代硬编码「丛雨」）"""
     try:
-        from pets.pet_registry import get_pet_config
-        cfg = get_pet_config()
-        return cfg.get("display_name") or cfg.get("name") or "丛雨"
+        from pets.pet_registry import get_active_pet_id, get_pet_config
+        pid = get_active_pet_id()
+        cfg = get_pet_config(pid) or {}
+        return str(cfg.get("display_name") or cfg.get("name") or pid or "角色")
     except Exception:
-        return "丛雨"
+        return "角色"
+
+
+def _pref() -> str:
+    """当前角色的自称（丛雨=本座；其它角色默认「我」，角色包可用 self_ref 覆盖）"""
+    try:
+        from pets.pet_registry import get_pet_self_ref
+        return get_pet_self_ref()
+    except Exception:
+        return "我"
 
 
 def clear_session_memory(session_key: str, user_id=None):
@@ -97,8 +107,8 @@ def handle_qq_command(text: str, session_key: str, user_id) -> str:
                 return "这个指令只有主人能用哦~（当前仍是普通模式）"
             set_enabled(_tg)
             if _tg:
-                return ("🌙 已开启限制级模式。只有主人你面前本座才会放开 18+ 的内容，"
-                        "其他人面前本座还是会保持得体的哦~")
+                return (f"🌙 已开启限制级模式。只有主人你面前{_pref()}才会放开 18+ 的内容，"
+                        f"其他人面前{_pref()}还是会保持得体的哦~")
             return "☀️ 已关闭限制级模式，恢复正常聊天。"
     except Exception:
         pass
@@ -126,7 +136,7 @@ def handle_qq_command(text: str, session_key: str, user_id) -> str:
                 set_member_enabled(_gid, user_id, True)
                 print(f"[QQCmd] 🎮 Galgame 模式已在群 {_gid} 对 QQ{user_id} 开启")
                 return ("🎮 你的 Galgame 模式已开启！（仅对你生效，其他成员需自己说「开启galgame模式」）"
-                        "从现在起和本座聊天会积累好感度：说好话、逗本座开心会加分；冒犯、没礼貌会扣分。"
+                        f"从现在起和{_pref()}聊天会积累好感度：说好话、逗{_pref()}开心会加分；冒犯、没礼貌会扣分。"
                         "好感度高了可是能解锁亲密互动甚至满足一些过分要求哦～"
                         "（说「关闭galgame模式」可结束）")
             set_member_enabled(_gid, user_id, False)
@@ -169,20 +179,20 @@ def handle_qq_command(text: str, session_key: str, user_id) -> str:
                         "就能开始好感度养成和约会玩法啦（玩法见 /help）")
             from qq.qq_memory import is_owner as _is_owner
             if _is_owner(user_id):
-                return "❤️ 本座对主人的好感度当然是永远的 100 分啦～你可是本座最重要的人！"
+                return f"❤️ {_pref()}对主人的好感度当然是永远的 100 分啦～你可是{_pref()}最重要的人！"
             from qq.qq_galgame import get_affection as _get_aff
             _aff = _get_aff(_gid, user_id)
             if _aff >= 90:
-                _tier = "💕 亲密恋人级——本座的心已经向你敞开了"
+                _tier = f"💕 亲密恋人级——{_pref()}的心已经向你敞开了"
             elif _aff >= 70:
                 _tier = "💗 亲近级——可以适当亲密互动哦"
             elif _aff >= 50:
                 _tier = "😊 普通朋友级——继续加油培养感情吧"
             elif _aff >= 30:
-                _tier = "🧊 冷淡级……本座暂时不太想理你"
+                _tier = f"🧊 冷淡级……{_pref()}暂时不太想理你"
             else:
-                _tier = "💢 讨厌级！离本座远一点！"
-            return f"🎮 本座对你的好感度：{_aff} / 100\n{_tier}"
+                _tier = f"💢 讨厌级！离{_pref()}远一点！"
+            return f"🎮 {_pref()}对你的好感度：{_aff} / 100\n{_tier}"
     except Exception:
         pass
 
@@ -261,9 +271,9 @@ def handle_qq_command(text: str, session_key: str, user_id) -> str:
         lines.append("· 对 @我 说「开启galgame模式」开始（任意群成员都可以开）")
         lines.append("· 好感度 0~100（初始 50）：聊天有礼貌/有趣/关心会加分，冒犯/没礼貌会扣分")
         lines.append("· 好感 ≥70 可亲密互动（撒娇、抱抱…）；≥90 可满足较过分的要求（会扣好感）")
-        lines.append("· 好感 <50 时亲密和过分要求会被本座拒绝哦")
+        lines.append(f"· 好感 <50 时亲密和过分要求会被{_pref()}拒绝哦")
         lines.append("· 💕 约会玩法：对我说「和我约会吧」可以约会——成功大加好感(+15~25)，失败会扣大额好感；好感越高越容易成功，每次约会间隔 60 分钟")
-        lines.append("· 📊 对我说「查看好感度」可查看本座对你的好感度（初始50，0~100）")
+        lines.append(f"· 📊 对我说「查看好感度」可查看{_pref()}对你的好感度（初始50，0~100）")
         lines.append("· 说「关闭galgame模式」结束玩法")
         lines.append("")
         lines.append("🌐 自主学习：")

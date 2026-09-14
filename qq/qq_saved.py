@@ -62,7 +62,21 @@ def _save():
 
 
 def _trim(kind):
+    """超限时移除旧条目；表情收藏优先清理「自主学习自动收藏」的（保护用户手动收藏）"""
     items = _STATE[kind]
+    if len(items) <= MAX_PER_KIND:
+        return
+    # 1) 先淘汰标记 auto 的最旧条目
+    autos = sorted([x for x in items if x.get("auto")], key=lambda x: x.get("t", 0))
+    for x in autos:
+        if len(items) <= MAX_PER_KIND:
+            break
+        try:
+            items.remove(x)
+            _try_del_file(x.get("file"))
+        except Exception:
+            pass
+    # 2) 仍超限 → 删最旧（原逻辑）
     while len(items) > MAX_PER_KIND:
         old = items.pop(0)
         _try_del_file(old.get("file"))
@@ -80,11 +94,22 @@ def _download(url, dst_dir, ext_hint=".jpg"):
     try:
         if url.startswith("//"):
             url = "https:" + url
-        r = requests.get(url, timeout=20, headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0",
-            "Referer": "https://www.bilibili.com/"})
+        # Referer 按域名自动选择：QQ 多媒体域校验 Referer（用 B站 referer 会被 403 拒绝，
+        # 这是"群里表情自动收藏失败"的根因）
+        from urllib.parse import urlparse
+        host = (urlparse(url).hostname or "").lower()
+        if "qq.com" in host:
+            referer = "https://qun.qq.com/"
+        elif "bilibili" in host or "hdslb" in host:
+            referer = "https://www.bilibili.com/"
+        else:
+            referer = ""
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0"}
+        if referer:
+            headers["Referer"] = referer
+        r = requests.get(url, timeout=20, headers=headers)
         if r.status_code == 200 and r.content:
-            from urllib.parse import urlparse
             ext = os.path.splitext(urlparse(url).path)[1].lower()
             if ext not in (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"):
                 ext = ext_hint
@@ -138,9 +163,10 @@ def add_image(file_path=None, url=None, name=None) -> dict:
         return item
 
 
-def add_sticker(file_path=None, url=None, name=None, desc="") -> dict:
+def add_sticker(file_path=None, url=None, name=None, desc="", auto=False) -> dict:
     """收藏一张群表情包图片（与内置默认表情包分离）。
-    desc：图片内容简短描述（保存时由视觉识别生成，供模型自主选择时机发送）"""
+    desc：图片内容简短描述（保存时由视觉识别生成，供模型自主选择时机发送）；
+    auto：True 表示自主学习自动收藏（超量淘汰时优先清理这类条目，保护手动收藏）"""
     with _lock:
         st = _load()
         base, d = _paths()
@@ -161,6 +187,8 @@ def add_sticker(file_path=None, url=None, name=None, desc="") -> dict:
             name = desc[:10]
         item = {"name": _uniq_name("stickers", name), "file": saved,
                 "src": url or file_path or "", "desc": (desc or ""), "t": time.time()}
+        if auto:
+            item["auto"] = True
         st["stickers"].append(item)
         _trim("stickers")
         _save()

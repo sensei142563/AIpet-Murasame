@@ -6,14 +6,15 @@
   "desc": "遇到不懂的问题/不认识的内容自动联网学习并如实回答；可学习群内图片、视频、链接与群聊对话（本机存储，仅作回答参考）。",
   "default": true,
   "config_key": "qq_auto_learn_enable",
-  "extra_keys": ["qq_auto_learn_search", "qq_auto_learn_media", "qq_auto_learn_links", "qq_auto_learn_chats"],
+  "extra_keys": ["qq_auto_learn_search", "qq_auto_learn_media", "qq_auto_learn_links", "qq_auto_learn_chats", "qq_auto_learn_sticker_save"],
   "settings": [
     { "type": "info",
-      "text": "自主学习总开关。以下子项可分别调节：\n① 问题学习：问你「不知道/不认识/是什么意思/怎么…」等问题时自动联网搜索再回答；\n② 图片/视频学习：群里出现图片/视频时（限流）自动识别内容存档；\n③ 链接学习：群里的链接自动打开提取内容存档；\n④ 对话学习：记录群里大家聊天的话题与风格作为回答参考。\n以上均在本机存储，仅作为你提问时的参考素材。" },
+      "text": "自主学习总开关。以下子项可分别调节：\n① 问题学习：问你「不知道/不认识/是什么意思/怎么…」等问题时自动联网搜索再回答；\n② 图片/视频学习：群里出现图片/视频时（限流）自动识别内容存档；\n③ 链接学习：群里的链接自动打开提取内容存档；\n④ 对话学习：记录群里大家聊天的话题与风格作为回答参考；\n⑤ 表情收藏：把群里看到的动画表情自动存进表情收藏（最多 10 个，超量时优先淘汰更早自动收藏的，不动你手动收藏的），以后发送表情时会与默认表情随机混合使用，更灵动。\n以上均在本机存储，仅作为你提问时的参考素材。" },
     { "type": "checkbox", "key": "qq_auto_learn_search", "label": "问题自动联网搜索", "default": true },
     { "type": "checkbox", "key": "qq_auto_learn_media", "label": "群图片/视频自动学习", "default": true },
     { "type": "checkbox", "key": "qq_auto_learn_links", "label": "群链接自动学习", "default": true },
-    { "type": "checkbox", "key": "qq_auto_learn_chats", "label": "群聊对话/风格学习", "default": true }
+    { "type": "checkbox", "key": "qq_auto_learn_chats", "label": "群聊对话/风格学习", "default": true },
+    { "type": "checkbox", "key": "qq_auto_learn_sticker_save", "label": "自动收藏群表情（发送时随机使用）", "default": true }
   ],
   "builtin": true
 }

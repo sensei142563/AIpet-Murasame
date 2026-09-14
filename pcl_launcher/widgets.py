@@ -16,6 +16,9 @@ from PyQt5.QtWidgets import (
 
 from .colors import *
 from .colors import _app_base_dir
+# 顶层导入：确保 PyInstaller 一定把立绘工坊打进包内
+# （函数内相对导入曾导致打包遗漏 → 点击按钮静默无反应）
+from .portrait_studio import PortraitStudio  # noqa: F401
 
 S = 1.0
 
@@ -45,7 +48,10 @@ class PCLTitleBar(QWidget):
 
         self.btn_model = self._make_nav_btn("模型", block_icon("GoldBlock"), 0, img_key="model")
         self.btn_settings = self._make_nav_btn("设置", block_icon("RedstoneBlock"), 1, img_key="settings")
-        self.btn_faces = self._make_nav_btn("人脸", block_icon("RedstoneLampOn"), 2)
+        # 「人脸」目录已移除（管理功能并入 插件 → 人脸识别 → 设置）。
+        # ⚠ 不要创建这个按钮：无父控件的控件一旦 setVisible(True)，
+        #    Qt 会把它当成独立顶层窗口弹出来（就是"启动器一开就冒出的小窗口"）。
+        self.btn_faces = None
         self.btn_memory = self._make_nav_btn("记忆", block_icon("DiamondBlock"), 3, img_key="memory")
         self.btn_pets = self._make_nav_btn("桌宠", block_icon("Grass"), 4, img_key="pets")
         self.btn_prompt = self._make_nav_btn("提示词", block_icon("CommandBlock"), 5, img_key="prompt")
@@ -53,7 +59,8 @@ class PCLTitleBar(QWidget):
         self.btn_themes = self._make_nav_btn("主题", block_icon("DiamondBlock"), 7, img_key="themes")
         nav_layout.addWidget(self.btn_model)
         nav_layout.addWidget(self.btn_settings)
-        nav_layout.addWidget(self.btn_faces)
+        # 「人脸」目录已移除：人脸照片管理并入 插件 → 人脸识别 → 设置
+        # （按钮对象不再创建 —— 无父控件 + setVisible(True) 会被 Qt 当成独立小窗口弹出）
         nav_layout.addWidget(self.btn_memory)
         nav_layout.addWidget(self.btn_pets)
         nav_layout.addWidget(self.btn_prompt)
@@ -93,7 +100,16 @@ class PCLTitleBar(QWidget):
             btn = QPushButton(f"  {text}")
             btn.setIcon(QIcon(icon_path))
             btn.setIconSize(QPixmap(icon_path).scaled(int(18 * S), int(18 * S)).size())
-            btn.setStyleSheet(nav_btn_qss())
+            # 新主题（silicon）：现代胶囊导航；旧主题保持原样
+            try:
+                from .colors import current_theme_id
+                if current_theme_id() == "silicon":
+                    from .silicon_ui import nav_pill_qss
+                    btn.setStyleSheet(nav_pill_qss())
+                else:
+                    btn.setStyleSheet(nav_btn_qss())
+            except Exception:
+                btn.setStyleSheet(nav_btn_qss())
         btn.setCheckable(True)
         btn.clicked.connect(lambda: self._on_nav(index))
         return btn
@@ -115,10 +131,13 @@ class PCLTitleBar(QWidget):
         self.nav_changed.emit(index)
 
     def set_face_nav_visible(self, visible: bool):
-        """人脸库导航按钮显隐：跟随「人脸识别」插件启用状态（停用即隐藏目录）"""
-        self.btn_faces.setVisible(bool(visible))
-        if visible:
-            self.btn_faces.setChecked(self._nav_index == 2)
+        """人脸目录已移除 → 本接口保留但永远不显示（避免孤儿控件变成小窗口）"""
+        btn = getattr(self, "btn_faces", None)
+        if btn is not None:
+            try:
+                btn.setVisible(False)
+            except Exception:
+                pass
 
     def set_accent_direct(self, start_hex: str, end_hex: str):
         """直接设置标题栏渐变（主题启动/切换时避免闪色）"""
@@ -132,7 +151,7 @@ class PCLTitleBar(QWidget):
     def _update_nav_style(self):
         self.btn_model.setChecked(self._nav_index == 0)
         self.btn_settings.setChecked(self._nav_index == 1)
-        self.btn_faces.setChecked(self._nav_index == 2)
+        # 「人脸」按钮已移除（index 2 保留给旧的页面索引映射，不再有按钮）
         self.btn_memory.setChecked(self._nav_index == 3)
         self.btn_pets.setChecked(self._nav_index == 4)
         self.btn_prompt.setChecked(self._nav_index == 5)
@@ -371,7 +390,7 @@ class PCLSidebar(QWidget):
             QWidget {{ background: transparent; border-left: 3px solid transparent;
                 border-radius: 0 {int(6*S)}px {int(6*S)}px 0; }}
             QWidget:hover {{ background: {Color5.name()}; }}
-            QWidget[selected="true"] {{ background: {Color6.name()}; border-left: 3px solid {Color3.name()}; }}
+            QWidget[selected="true"] {{ background: rgba({Color6.red()},{Color6.green()},{Color6.blue()},120); border-left: 3px solid {Color3.name()}; }}
         """)
         setattr(container, 'model_idx', idx)
         row = QHBoxLayout(container)
@@ -521,6 +540,9 @@ class PCLSettingsPanel(QWidget):
 
         # ===== ④ 语音与视觉识别 =====
         self._section("语音合成与识别", "🗣")
+        self._add_slider("voice_synthesis_enable", "启用语音合成（关闭可加快对话回复）",
+                         ["false", "true"], "true",
+                         hint="开启时每条回复都会合成语音（较慢）；关闭后只显示文字，回复明显更快")
         self._add_slider("tts_type", "TTS 语音合成", ["local", "cloud"], "local")
         self._add_model_combo(
             "vision_model_name", "视觉识别模型名",
@@ -538,6 +560,12 @@ class PCLSettingsPanel(QWidget):
         # camera_enabled/camera_id/camera_interval 由插件设置界面统一管理）
         self._add_slider("live2d_enabled", "Live2D 模式", ["false", "true"], "true")
         self._add_slider("portrait", "立绘类型", ["a", "b"], "b")
+        # 立绘自动切换（a/b 两套之间的灵动切换）属于「Live2D 与立绘」这一区
+        self._add_slider("portrait_auto_switch", "自动切换立绘类型（a / b 两套）",
+                         ["false", "true"], "true",
+                         hint="开启时：说话时会按概率在 a/b 两套立绘间平滑切换（灵动效果）。\n"
+                              "只有两套立绘都有当前这身衣服时才会切换，衣服保持不变。\n"
+                              "关闭后立绘类型固定不动，可用桌宠右键菜单手动切换。")
 
         # ===== ⑥ QQ 聊天配置 =====
         self._open_box(("all", "qq"))
@@ -551,12 +579,34 @@ class PCLSettingsPanel(QWidget):
         cap_lbl.setFont(QFont("Microsoft YaHei", int(12 * S), QFont.Bold))
         cap_lbl.setStyleSheet(f"color: {Color1.name()}; margin-top: {int(14*S)}px;")
         self._cur_layout.addWidget(cap_lbl)
-        self._add_spin("qq_max_reply_chars", "单次回复最多字数（0=不限）", 0, 2000, 0)
+        self._add_spin("qq_max_reply_chars", "单条回复最多字数（0=不限）", 0, 2000, 0,
+                       hint="不是把话截断：AI 会尽量在这个字数内把意思表达完整；"
+                            "实在说不完时自动拆成 2~3 条短消息依次发出（内容不丢）。")
         self._add_spin("qq_max_replies_per_conversation",
-                       "单条回复最多发几条消息（0=不限）", 0, 30, 0)
+                       "单条回复最多发几条消息（0=不限）", 0, 30, 0,
+                       hint="一次回复最多拆成几条消息发出（防刷屏）；"
+                            "超出条数时多余句子会合并进最后一条，内容不丢。")
         # 对话调节改动即写盘（运行中的 QQ 桥接实时读取生效，无需重启 QQ）
         self._wire_autosave("spin", "qq_max_reply_chars")
         self._wire_autosave("spin", "qq_max_replies_per_conversation")
+
+        # ===== 私信回复范围 =====
+        pm_lbl = QLabel("  📨 私信回复范围")
+        pm_lbl.setFont(QFont("Microsoft YaHei", int(12 * S), QFont.Bold))
+        pm_lbl.setStyleSheet(f"color: {Color1.name()}; margin-top: {int(14*S)}px;")
+        self._cur_layout.addWidget(pm_lbl)
+        self._add_slider("qq_private_enable", "允许回复私信（总开关）", ["true", "false"], "true",
+                         hint="关闭后完全不回复任何私信（连主人也不回）。改动即时生效，无需重启 QQ。")
+        self._add_slider("qq_private_reply_stranger", "回复陌生人私信", ["true", "false"], "true",
+                         hint="非好友（临时会话/陌生网友）发来的私信是否回复。"
+                              "关闭后只忽略陌生人，好友与主人不受影响。")
+        self._add_slider("qq_private_reply_friend", "回复好友私信", ["true", "false"], "true",
+                         hint="好友（含从群里点开的临时会话）发来的私信是否回复。")
+        self._add_slider("qq_private_master_only", "只回复主人私信", ["false", "true"], "false",
+                         hint="开启后仅回复主人白名单里的 QQ 私信（覆盖上面两个范围开关）。")
+        for _pk in ("qq_private_enable", "qq_private_reply_stranger",
+                    "qq_private_reply_friend", "qq_private_master_only"):
+            self._wire_autosave("slider", _pk)
 
         self._add_slider("qq_enabled", "QQ 功能总开关", ["false", "true"], "false")
         self._add_slider("qq_send_sticker", "QQ 表情包", ["false", "true"], "true")
@@ -789,7 +839,7 @@ class PCLSettingsPanel(QWidget):
         self._cur_layout.addLayout(row)
         self._widgets[key] = (slider, options, lbl)
 
-    def _add_spin(self, key, label, min_val, max_val, default):
+    def _add_spin(self, key, label, min_val, max_val, default, hint=None):
         row = QHBoxLayout()
         lbl = QLabel(f"{label}")
         lbl.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(14*S)}px; min-width: 160px;")
@@ -799,6 +849,9 @@ class PCLSettingsPanel(QWidget):
         spin.setFixedWidth(int(90 * S))
         spin.setStyleSheet(f"QSpinBox {{ border:1px solid {Gray5.name()}; padding:{int(4*S)}px; font-size:{int(13*S)}px; border-radius:{int(3*S)}px; }}")
         self._block_wheel(spin)
+        if hint:
+            spin.setToolTip(hint)
+            lbl.setToolTip(hint)
         row.addWidget(spin); row.addStretch()
         self._cur_layout.addLayout(row)
         self._widgets[key] = spin
@@ -854,6 +907,8 @@ class PCLSettingsPanel(QWidget):
             self._set_slider("model_type", cfg.get("model_type", "qwen"))
             self._set_if("short_model_name", cfg.get("short_model_name", "qwen-plus"))
             self._set_slider("tts_type", cfg.get("tts_type", "local"))
+            self._set_slider("voice_synthesis_enable", cfg.get("voice_synthesis_enable", "true"))
+            self._set_slider("portrait_auto_switch", cfg.get("portrait_auto_switch", "true"))
             self._set_slider("portrait", cfg.get("portrait", "b"))
             self._set_slider("screen_type", cfg.get("screen_type", "false"))
             self._set_slider("voice_trigger", cfg.get("voice_trigger", "false"))
@@ -877,6 +932,10 @@ class PCLSettingsPanel(QWidget):
             self._set_slider("qq_vision_enabled", cfg.get("qq_vision_enabled", "true"))
             self._set_slider("qq_allow_groups", cfg.get("qq_allow_groups", "true"))
             self._set_slider("qq_offline_enable", cfg.get("qq_offline_enable", "true"))
+            self._set_slider("qq_private_enable", cfg.get("qq_private_enable", "true"))
+            self._set_slider("qq_private_reply_stranger", cfg.get("qq_private_reply_stranger", "true"))
+            self._set_slider("qq_private_reply_friend", cfg.get("qq_private_reply_friend", "true"))
+            self._set_slider("qq_private_master_only", cfg.get("qq_private_master_only", "false"))
             self._set_slider("qq_auto_offline_enable", cfg.get("qq_auto_offline_enable", "false"))
             self._set_slider("qq_lively_enable", cfg.get("qq_lively_enable", "false"))
             self._set_slider("wechat_enabled", cfg.get("wechat_enabled", "false"))
@@ -921,6 +980,8 @@ class PCLSettingsPanel(QWidget):
             cfg["portrait"] = self._get_slider("portrait")
             cfg["screen_type"] = self._get_slider("screen_type")
             cfg["voice_trigger"] = self._get_slider("voice_trigger")
+            cfg["voice_synthesis_enable"] = self._get_slider("voice_synthesis_enable")
+            cfg["portrait_auto_switch"] = self._get_slider("portrait_auto_switch")
             cfg["live2d_enabled"] = self._get_slider("live2d_enabled")
             cfg["force_gpu_check"] = self._get_slider("force_gpu_check")
             cfg["longtext_enabled"] = self._get_slider("longtext_enabled")
@@ -943,6 +1004,10 @@ class PCLSettingsPanel(QWidget):
             cfg["qq_vision_enabled"] = self._get_slider("qq_vision_enabled")
             cfg["qq_allow_groups"] = self._get_slider("qq_allow_groups")
             cfg["qq_offline_enable"] = self._get_slider("qq_offline_enable")
+            cfg["qq_private_enable"] = self._get_slider("qq_private_enable")
+            cfg["qq_private_reply_stranger"] = self._get_slider("qq_private_reply_stranger")
+            cfg["qq_private_reply_friend"] = self._get_slider("qq_private_reply_friend")
+            cfg["qq_private_master_only"] = self._get_slider("qq_private_master_only")
             cfg["qq_auto_offline_enable"] = self._get_slider("qq_auto_offline_enable")
             cfg["qq_lively_enable"] = self._get_slider("qq_lively_enable")
             cfg["wechat_enabled"] = self._get_slider("wechat_enabled")
@@ -1345,7 +1410,23 @@ class PCLMemoryManager(QScrollArea):
                 self._pet_combo.addItem(pid, pid)
         except Exception:
             pass
+        # ⚠ 默认选中「当前活动角色」：以前固定停在列表第一项（如 murasame），
+        #   而记忆是按角色分目录存的 → 切到别的角色时看着像"一条记录都没有"。
+        try:
+            from pets.pet_registry import get_active_pet_id
+            _act = str(get_active_pet_id() or "")
+            if _act:
+                _i = self._pet_combo.findData(_act)
+                if _i >= 0:
+                    self._pet_combo.setCurrentIndex(_i)
+        except Exception:
+            pass
         self._pet_combo.currentIndexChanged.connect(lambda _: self._refresh())
+        # 每次显示本页都校正一次（切角色后进来能看到对应的记忆）
+        try:
+            self._sync_combo_to_active = True
+        except Exception:
+            pass
         row_pet.addWidget(self._pet_combo)
         row_pet.addStretch()
         self._layout.addLayout(row_pet)
@@ -1415,7 +1496,7 @@ class PCLMemoryManager(QScrollArea):
     def _build_wechat_card(self):
         card = QWidget()
         card.setStyleSheet(f"""
-            QWidget#wxCard {{ background: {Color8.name()};
+            QWidget#wxCard {{ background: rgba({Color8.red()},{Color8.green()},{Color8.blue()},110);
                 border: 1px solid {Color5.name()}; border-radius: {int(10*S)}px; }}
         """)
         card.setObjectName("wxCard")
@@ -1500,7 +1581,16 @@ class PCLMemoryManager(QScrollArea):
             pass
 
     def showEvent(self, event):
-        """每次切到记忆页刷新微信登录状态"""
+        """每次切到记忆页：刷新微信登录状态 + 把角色下拉校正到「当前活动角色」"""
+        try:
+            from pets.pet_registry import get_active_pet_id
+            act = str(get_active_pet_id() or "")
+            if act:
+                i = self._pet_combo.findData(act)
+                if i >= 0 and i != self._pet_combo.currentIndex():
+                    self._pet_combo.setCurrentIndex(i)   # 会触发 _refresh()
+        except Exception:
+            pass
         try:
             self._refresh_wx_card()
         except Exception:
@@ -1805,8 +1895,8 @@ class PCLPetManager(QScrollArea):
         self._pet_layout.setSpacing(int(8*S))
         self._layout.addWidget(self._pet_list)
 
-        # 添加桌宠按钮
-        btn_add = QPushButton("  + 添加新桌宠（从模板创建）")
+        # 添加桌宠按钮 → 打开分步引导向导
+        btn_add = QPushButton("  + 添加新桌宠（跟着引导一步步来）")
         btn_add.setStyleSheet(f"""
             QPushButton {{ background: {Color3.name()}; color: white; border: none;
                 padding: {int(8*S)}px {int(16*S)}px; font-size: {int(13*S)}px;
@@ -1856,8 +1946,11 @@ class PCLPetManager(QScrollArea):
     def _make_pet_card(self, p):
         """构造单个桌宠卡片"""
         card = QWidget()
+        # 卡片底色用半透明（壁纸能透出来）—— 从源头避免"遮挡背景"
+        _c8 = Color8
+        _card_bg = f"rgba({_c8.red()},{_c8.green()},{_c8.blue()},90)"
         card.setStyleSheet(f"""
-            QWidget {{ background: {Color8.name()}; border: 1px solid {Color5.name()};
+            QWidget {{ background: {_card_bg}; border: 1px solid {Color5.name()};
                 border-radius: {int(8*S)}px; }}
         """)
         v = QVBoxLayout(card)
@@ -1945,6 +2038,18 @@ class PCLPetManager(QScrollArea):
         btn_open.clicked.connect(lambda checked, pid=p["id"]: self._open_dir(pid))
         btn_row.addWidget(btn_open)
 
+        # ⚙ 设置：打开桌宠向导（类型/立绘/Live2D/语音/人设 都能改）
+        btn_settings = QPushButton("⚙ 设置")
+        btn_settings.setStyleSheet(self._btn_style("#3f8fd8"))
+        btn_settings.clicked.connect(lambda checked, pid=p["id"]: self._open_pet_wizard(pid))
+        btn_row.addWidget(btn_settings)
+        # 立绘工坊：换服装/表情/装饰，预览并保存为该角色的默认立绘
+        btn_portrait = QPushButton("🎨 立绘工坊")
+        btn_portrait.setStyleSheet(self._btn_style("#c8506e"))
+        btn_portrait.clicked.connect(
+            lambda checked, pid=p["id"], nm=p.get("name", ""): self._open_portrait_studio(pid, nm))
+        btn_row.addWidget(btn_portrait)
+
         btn_del = QPushButton("🗑 删除")
         btn_del.setStyleSheet(self._btn_style("#e03030"))
         btn_del.clicked.connect(lambda checked, pid=p["id"], nm=p.get("name",""): self._delete_pet(pid, nm))
@@ -1954,6 +2059,128 @@ class PCLPetManager(QScrollArea):
         v.addLayout(btn_row)
 
         return card
+
+    def _open_pet_wizard(self, pet_id, pet_name=""):
+        """打开桌宠设置向导（编辑模式，可直接改 类型/立绘/Live2D/语音/人设）"""
+        try:
+            from .pet_wizard import PCLPetWizard
+            # ⚠ 同一个角色只保留一个设置窗口：以前每点一次就新开一个（越点越多、
+            #   互相盖住 → 分不清哪个能点）。已存在就置前复用。
+            _win = self.window()
+            cache = getattr(_win, "_pet_wizards", None)
+            if cache is None:
+                cache = {}
+                try:
+                    _win._pet_wizards = cache
+                except Exception:
+                    pass
+            dlg = cache.get(pet_id)
+            if dlg is not None:
+                try:
+                    dlg.isHidden()          # C++ 对象还活着吗
+                except Exception:
+                    dlg = None
+                if dlg is not None and not dlg.isVisible():
+                    dlg.reload_for_pet(pet_id) if hasattr(dlg, "reload_for_pet") else None
+            else:
+                dlg = None
+            if dlg is None:
+                dlg = PCLPetWizard(pet_id, _win)
+                dlg.saved.connect(lambda _pid: self._refresh())
+                try:
+                    cache[pet_id] = dlg
+                except Exception:
+                    pass
+            # ⚠ 用 show()（非模态）而不是 exec_()：模态会把 Live2D 预览窗口一起锁住
+            #   （表现：预览窗口拖不动、关不上，必须先关设置）
+            # ⚠ 置顶：启动器窗口较大，普通对话框容易被它盖住 → 「看到的是启动器，点的是设置」
+            try:
+                dlg.setWindowFlag(Qt.WindowStaysOnTopHint, True)
+            except Exception:
+                pass
+            dlg.show(); dlg.raise_(); dlg.activateWindow()
+            try:
+                from PyQt5.QtCore import QTimer as _QT
+                _QT.singleShot(160, lambda: (dlg.raise_(), dlg.activateWindow()))
+            except Exception:
+                pass
+            self._refresh()
+        except Exception as e:
+            import traceback
+            from PyQt5.QtWidgets import QMessageBox
+            print(f"[PCL] ⚠ 打开桌宠设置失败: {e}\n{traceback.format_exc()[:500]}")
+            QMessageBox.warning(self, "桌宠设置", f"打开设置失败：{e}")
+
+    def _open_portrait_studio(self, pet_id, pet_name=""):
+        """打开立绘工坊（按卡片角色编辑自己的立绘素材）"""
+        from PyQt5.QtCore import Qt as _Qt
+        globals().setdefault("Qt", _Qt)
+
+        def _dbg(msg):
+            try:
+                import time as _t
+                base = _app_base_dir()
+                with open(os.path.join(base, "tmp", "pcl_debug.log"), "a", encoding="utf-8") as f:
+                    f.write(f"[{_t.strftime('%m-%d %H:%M:%S')}] [立绘工坊] {msg}\n")
+            except Exception:
+                pass
+        try:
+            from pets.pet_registry import get_active_pet_id
+            active = get_active_pet_id()
+            _dbg(f"点击 pid={pet_id} active={active}")
+            # 不再强制「先设为活动」：直接按这张卡片对应的角色打开工坊（各自独立编辑）
+            if pet_id and active and pet_id != active:
+                print(f"[PCL] 立绘工坊：按卡片角色 {pet_id} 打开（当前活动 {active}）")
+            from .portrait_studio import PortraitStudio
+            _dbg("import PortraitStudio OK")
+            # 工坊实例挂在外壳窗口上（换肤会重建本页 → 重建后仍是同一个工坊，不会开出第二个）
+            _win = self.window()
+            st = getattr(_win, "_portrait_studio", None)
+            if st is None:
+                # ⚠ 用「无父窗口」构造：作为父窗口的子对话框时会被启动器盖住/不显示
+                #   （Live2D 预览窗口就是这么做的、显示正常）
+                st = PortraitStudio(None, pet_id=pet_id)
+                # ⚠ 置顶 + 独立顶层窗口：启动器是自带背景的不透明窗口，普通对话框很容易
+                #   被它盖住 → 用户「看到的是启动器的内容，可点的是下面的工坊」，
+                #   表现就是「显示的位置和实际点击的位置不一样」。预览窗口同款处理。
+                st.setWindowFlag(Qt.Window, True)
+                st.setWindowFlag(Qt.WindowStaysOnTopHint, True)
+                _win._portrait_studio = st
+                _dbg("构造 PortraitStudio OK（顶层窗口）")
+            else:
+                # ⚠ 关键：复用窗口时必须「重新加载这个角色的素材」，否则界面还停在上一个
+                #   角色的立绘/Live2D（反馈：点别人的工坊显示的是活动角色的立绘）。
+                try:
+                    st.reload_for_pet(pet_id)
+                except Exception as _e:
+                    print(f"[PCL] ⚠ 切换工坊角色失败: {_e}")
+                    try:
+                        st._pet_id = pet_id
+                        st._loaded_pet = None
+                    except Exception:
+                        pass
+            st.show()
+            st.raise_()
+            st.activateWindow()
+            try:
+                from PyQt5.QtWidgets import QApplication as _QA
+                print(f"[PCL] 立绘工坊可见={st.isVisible()} 尺寸={st.width()}x{st.height()} "
+                      f"| 前台窗口={(_QA.activeWindow().__class__.__name__ if _QA.activeWindow() else '无')}")
+            except Exception:
+                pass
+            # 再补两次置前（启动器是置顶/亚克力窗口时容易把它盖住 → 看着像"打不开"）
+            try:
+                from PyQt5.QtCore import QTimer as _QT
+                _QT.singleShot(150, lambda: (st.raise_(), st.activateWindow()))
+                _QT.singleShot(600, lambda: (st.raise_(), st.activateWindow()))
+            except Exception:
+                pass
+            _dbg("show OK")
+            print(f"[PCL] 🎨 立绘工坊已打开（角色: {active or '未知'}）")
+        except Exception as e:
+            import traceback
+            _dbg("异常: " + repr(e) + "\n" + traceback.format_exc())
+            print(f"[PCL] ⚠ 打开立绘工坊失败: {e}")
 
     @staticmethod
     def _btn_style(bg):
@@ -1965,10 +2192,36 @@ class PCLPetManager(QScrollArea):
         """
 
     def _set_active(self, pet_id):
-        from pets.pet_registry import set_active_pet_id
-        if set_active_pet_id(pet_id):
-            print(f"[PCL] 已设活动桌宠: {pet_id}")
-        self._refresh()
+        from pets.pet_registry import set_active_pet_id, get_active_pet_id
+        ok = set_active_pet_id(pet_id)
+        print(f"[PCL] 设为活动桌宠 {pet_id}: {'成功' if ok else '失败'}")
+        if ok:
+            # 卡片状态 + 活动标记刷新（以前点了看不到变化，像没生效）
+            try:
+                self._refresh()
+            except Exception:
+                pass
+            try:
+                # 刷新后重新透明化，避免重建的卡片把启动器背景挡住
+                from .silicon_window import _make_transparent
+                w = self.window()
+                pg = getattr(w, "pages", {}).get("pets")
+                if pg is not None:
+                    _make_transparent(pg)
+            except Exception as _e:
+                print(f"[PCL] ⚠ 设为活动后透明化失败: {_e}")
+            try:
+                from .widgets import show_save_toast as _toast
+                _toast(self, f"已把「{pet_id}」设为活动桌宠（重启桌宠后生效）")
+            except Exception:
+                pass
+            print(f"[PCL] 当前活动桌宠: {get_active_pet_id()}")
+        else:
+            try:
+                from PyQt5.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "设为活动", "设置失败：角色不存在或配置不可写")
+            except Exception:
+                pass
 
     def _open_dir(self, pet_id):
         from pets.pet_registry import get_pet_dir
@@ -1982,7 +2235,18 @@ class PCLPetManager(QScrollArea):
             print(f"[PCL] 目录不存在: {d}")
 
     def _add_pet(self):
-        """从模板创建新桌宠"""
+        """打开「添加新桌宠」引导向导（分步：类型 → 立绘/Live2D → 语音 → 人设）"""
+        try:
+            from .pet_wizard import PCLPetWizard
+            dlg = PCLPetWizard(None, self.window())
+            dlg.saved.connect(lambda _pid: self._refresh())
+            # 非模态：模态会把 Live2D 预览窗口一起锁住（拖不动/关不上）
+            dlg.show(); dlg.raise_(); dlg.activateWindow()
+            return
+        except Exception as e:
+            import traceback
+            print(f"[PCL] ⚠ 打开桌宠向导失败: {e}\n{traceback.format_exc()[:500]}")
+            # 兜底：仍然允许用最简方式创建
         from PyQt5.QtWidgets import QInputDialog, QMessageBox
         pet_id, ok = QInputDialog.getText(
             self, "新建桌宠", "请输入桌宠 ID（英文/数字，将作为文件夹名）：")
@@ -2383,28 +2647,57 @@ class PCLPromptEditor(QWidget):
             self.lbl_status.setText(f"保存失败: {e}")
 
 def show_save_toast(ok: bool, text: str = ""):
-    """屏幕中央弹出"保存成功/保存失败"提示，约 1.8 秒自动消失"""
+    """屏幕中央弹出"保存成功/保存失败"提示，约 2 秒自动消失（健壮版）"""
     try:
         from PyQt5.QtWidgets import QApplication, QLabel
         from PyQt5.QtCore import Qt, QTimer
         app = QApplication.instance()
         if app is None:
             return
-        scr = app.primaryScreen().availableGeometry()
-        lab = QLabel(None)
-        lab.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
-                           | Qt.Tool | Qt.WindowDoesNotAcceptFocus)
+        win = app.activeWindow()
+        scr = (win.screen() if win and win.screen() else app.primaryScreen())
+        if scr is None:
+            scr = app.primaryScreen()
+        geo = scr.availableGeometry()
+        parent = win if win is not None else None
+        lab = QLabel(parent)
+        if parent is None:
+            lab.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
+                               | Qt.Tool | Qt.WindowDoesNotAcceptFocus)
         lab.setAttribute(Qt.WA_TranslucentBackground)
-        bg = "rgba(46,125,50,235)" if ok else "rgba(211,47,47,235)"
-        lab.setStyleSheet(f"background:{bg};color:white;border-radius:10px;"
-                          "padding:12px 26px;font-size:16px;font-family:'Microsoft YaHei';")
+        from PyQt5.QtGui import QColor
+        from PyQt5.QtWidgets import QGraphicsDropShadowEffect
+        bg = "#2e7d32" if ok else "#c62828"   # 不透明深底，白字更清晰
+        lab.setStyleSheet(f"background:{bg};color:#ffffff;border-radius:12px;"
+                          "padding:14px 32px;font-size:18px;font-weight:bold;"
+                          "font-family:'Microsoft YaHei';")
         lab.setText(text or ("✅ 保存成功" if ok else "❌ 保存失败"))
+        # 黑色投影，模拟描边，白字在任何背景下都清楚
+        _sh = QGraphicsDropShadowEffect(lab)
+        _sh.setBlurRadius(1)
+        _sh.setOffset(1, 1)
+        _sh.setColor(QColor(0, 0, 0, 230))
+        lab.setGraphicsEffect(_sh)
         lab.adjustSize()
-        lab.move(scr.center().x() - lab.width() // 2,
-                 scr.center().y() - lab.height() // 2)
-        lab.show()
-        lab.raise_()
-        QTimer.singleShot(1900, lab.close)
-        QTimer.singleShot(2500, lab.deleteLater)
-    except Exception:
-        pass
+        lab.move(geo.center().x() - lab.width() // 2,
+                 geo.center().y() - lab.height() // 2)
+        if parent is None:
+            lab.show()
+            lab.raise_()
+            lab.activateWindow()
+        else:
+            # 子控件式浮层：父窗内居中置顶
+            lab.setStyleSheet(lab.styleSheet() +
+                              f"background:{bg};")
+            lab.move((parent.width() - lab.width()) // 2,
+                     (parent.height() - lab.height()) // 2)
+            lab.show()
+            lab.raise_()
+        # 保持引用直至关闭
+        _ref = {"lab": lab}
+        QTimer.singleShot(2000, lambda: (_ref["lab"].close()))
+        QTimer.singleShot(2600, _ref["lab"].deleteLater)
+        print("[PCL] Toast 已显示:", "保存成功" if ok else "保存失败")
+    except Exception as e:
+        print(f"[PCL] Toast 显示失败: {e}")
+

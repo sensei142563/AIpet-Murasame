@@ -1,0 +1,24 @@
+{
+  "name": "单图测试",
+  "display_name": "单图测试",
+  "model": {
+    "default": "2d",
+    "has_live2d": false,
+    "has_fgimages": true,
+    "fgimages_prefix": "测试",
+    "fgimages_sets": [
+      "a"
+    ]
+  },
+  "portrait": {
+    "mode": "single",
+    "default_emotion": "平静",
+    "emotions": {
+      "平静": 7,
+      "害羞": 8
+    }
+  },
+  "touch": {
+    "enabled": true
+  }
+}

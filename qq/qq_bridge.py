@@ -92,9 +92,19 @@ def get_sticker_path(sticker_name: str):
             return p
     return None
 
+_RECENT_CUSTOM_STICKERS = []  # 最近发送过的自存表情文件（防连续重复发同一张）
+
+
 def resolve_sticker_files(stickers):
-    """解析表情发送文件列表：自定义收藏表情优先且同轮不混发默认表情。
+    """解析表情发送文件列表：自存表情与默认表情随机混合（默认表情选择逻辑不变）。
+
+    - 模型点名自存表情（[表情:自存名]）→ 直接发自存（原逻辑，不变）；
+    - 模型点名默认表情 → 按名取默认文件（原逻辑，不变）；
+    - 但自存池非空时，本轮以约 1/2 概率改成"从自存池随机挑"发送
+      （群里学来的表情与默认表情随机混着用，增加灵动性、防呆板重复）；
+    - 自存池随机时避开最近发过的，防同一张连发。
     返回 (文件路径列表, 是否含自定义)。"""
+    import random as _rnd
     custom_files = []
     default_files = []
     custom_used = False
@@ -108,12 +118,31 @@ def resolve_sticker_files(stickers):
     except Exception:
         pass
     if custom_used:
-        # 本轮含自存表情 → 只发自存，不发默认（防止刷屏；不影响以后轮次）
+        # 本轮含模型点名的自存表情 → 只发自存（防止刷屏；不影响以后轮次）
         return custom_files, True
     for name in (stickers or []):
         p = get_sticker_path(name)
         if p:
             default_files.append(p)
+    # ── 随机混合：自存池非空时，一半概率改发自存池随机表情 ──
+    try:
+        from qq.qq_saved import names as _names, sticker_file as _sf2
+        pool = []
+        for _n in (_names("stickers") or []):
+            _p = _sf2(_n)
+            if _p and os.path.exists(_p):
+                pool.append(_p)
+        if pool and _rnd.random() < 0.5:
+            fresh = [p for p in pool if p not in _RECENT_CUSTOM_STICKERS] or pool
+            _rnd.shuffle(fresh)
+            n = min(max(1, len(stickers or []) or 1), 2)  # 1~2 张，与原上限一致
+            picked = fresh[:n]
+            for p in picked:
+                _RECENT_CUSTOM_STICKERS.append(p)
+            del _RECENT_CUSTOM_STICKERS[:-10]
+            return picked, True
+    except Exception:
+        pass
     return default_files, False
 
 
@@ -151,6 +180,103 @@ def cap_clauses_count(clauses, max_msgs):
     if m <= 0 or not clauses or len(clauses) <= m:
         return clauses
     return clauses[:m - 1] + ["".join(clauses[m - 1:])]
+
+
+def split_sentences(reply: str):
+    """只按【完整句子】边界切分（不切逗号/顿号，绝不把一句话拆到两条消息里）。
+
+    规则：
+    - 强断句：。！？…；; 换行（无条件切断）
+    - 右引号/省略号随断句符并入前句
+    - 不足 4 字的残段并入上一句（避免发出"嗯。"这种碎片单独成条）
+    返回: [完整句子, ...]
+    """
+    reply = (reply or "").strip()
+    if not reply:
+        return []
+    clauses = []
+    buffer = ""
+    i = 0
+    while i < len(reply):
+        ch = reply[i]
+        buffer += ch
+        if ch in _PRIVATE_STRONG_BREAKS:
+            j = i + 1
+            while j < len(reply) and reply[j] in _PRIVATE_RIGHT_QUOTES:
+                buffer += reply[j]
+                j += 1
+            while j < len(reply) and reply[j] == "\u2026":
+                buffer += reply[j]
+                j += 1
+            i = j - 1
+            clause = buffer.strip()
+            if clause:
+                if len(clause) < 4 and clauses:
+                    clauses[-1] = clauses[-1] + clause
+                else:
+                    clauses.append(clause)
+            buffer = ""
+        i += 1
+    rest = buffer.strip()
+    if rest:
+        if len(rest) < 4 and clauses:
+            clauses[-1] = clauses[-1] + rest
+        else:
+            clauses.append(rest)
+    return clauses
+
+
+def split_by_char_limit(text, limit, max_parts=3):
+    """按「单次回复字数上限」把回复切成若干条短消息。
+
+    设计原则（用户要求）：
+    - 只按【完整句子】边界切分，绝不把一句话拆成两条消息（不出现断句）；
+    - 每条尽量不超过 limit 字（limit<=0 表示不限，原样返回）；
+    - 条数不超过 max_parts（=「单条回复最多发几条消息」这个硬上限），
+      超出时把句子并入相邻条（内容不丢），绝不为了凑条数把句子切开。
+    """
+    text = (text or "").strip()
+    if not text:
+        return []
+    try:
+        lim = int(limit or 0)
+    except Exception:
+        lim = 0
+    if lim <= 0:
+        return [text]
+    clauses = split_sentences(text) or [text]
+    # ① 贪心打包：每段尽量贴近但不超过 limit
+    parts = []
+    for c in clauses:
+        if parts and len(parts[-1]) + len(c) <= lim:
+            parts[-1] = parts[-1] + c
+        else:
+            parts.append(c)
+    try:
+        mp = max(1, int(max_parts or 1))
+    except Exception:
+        mp = 1
+    if len(parts) <= mp:
+        return [p for p in parts if p]
+    # ② 条数超上限（硬限制）：按句子边界合并到 mp 条以内，长度按剩余内容均摊。
+    #    合并后单条可能超过 limit 字 —— 这是"字数上限"与"条数上限"冲突时的
+    #    必要取舍：宁可单条长一点，也不断句、不少说（模型侧已按 条数×字数
+    #    的总预算要求表达，实际很少触发）。
+    merged = []
+    i, remaining, left = 0, mp, sum(len(c) for c in clauses)
+    while i < len(clauses) and len(merged) < mp:
+        target = max(lim, -(-left // max(1, remaining)))
+        cur = clauses[i]
+        i += 1
+        while i < len(clauses) and len(cur) + len(clauses[i]) <= target:
+            cur += clauses[i]
+            i += 1
+        merged.append(cur)
+        left -= len(cur)
+        remaining -= 1
+    if i < len(clauses):                      # 兜底：剩余句子并入最后一条
+        merged[-1] = merged[-1] + "".join(clauses[i:])
+    return [p for p in merged if p]
 
 
 def split_private_reply(reply: str):
@@ -238,6 +364,7 @@ class QQBotBridge:
         self.ws = None
         self.running = False
         self.self_id = None  # 登录的 QQ 号（识别是否自己发的消息）
+        self.self_nick = ""  # 登录昵称（让 AI 记住"自己是谁"，防止认不出自己）
         self._lock = threading.Lock()
         self._send_fail_count = 0  # 断线窗口内发送失败计数（重连成功后清零）
         self._stt_warm_started = False  # 语音模型预热只做一次（重连循环避免反复下载/刷屏）
@@ -269,6 +396,7 @@ class QQBotBridge:
         self._health_fail = 0              # 连续失败次数
         self._last_recover_ts = 0.0        # 上次自动重启 NapCat 时间（冷却防循环）
         self._last_scan_hint_ts = 0.0      # 上次扫码提示时间（防刷屏）
+        self._napcat_log_pos = {}          # NapCat 日志已扫描到的字节偏移（只看新增内容）
         # ===== 自主学习（官方插件）限流状态 =====
         self._learn_media_ts = {}   # gid -> 上次学习群媒体时间
         self._learn_link_ts = {}    # gid -> 上次学习链接时间
@@ -282,6 +410,10 @@ class QQBotBridge:
         self._group_names_lock = threading.Lock()
         self._group_names = {}             # str(group_id) -> group_name
         self._group_names_pending = set()  # 已请求过、等待响应的群（防止重复请求）
+
+        # ===== 主人昵称学习（识别"有人喊主人的 QQ 名字"场景，防认不出主人）=====
+        self._master_nicks_lock = threading.Lock()
+        self._master_nicks = {}            # str(QQ号) -> {昵称/群名片, ...}
 
     def connect(self):
         """建立 WebSocket 连接并进入事件循环（阻塞）。
@@ -334,12 +466,54 @@ class QQBotBridge:
         return False
 
     def _ws_auth_headers(self):
-        """NapCat 正向 WS 开启 token 鉴权时的握手头（config.json 的 qq_napcat_token；
-        未配置则返回 None → 不带鉴权头，兼容未开鉴权的 NapCat）"""
+        """NapCat 正向 WS 开启 token 鉴权时的握手头。
+
+        token 来源：config.json 的 qq_napcat_token；**没配就自动去 NapCat 自己的
+        onebot11_*.json 里读**（仅本机地址）——NapCat 重装/重置会随机换 token，
+        自动读取可以免掉"连上就断"这类故障。未拿到 token 时返回 None（兼容未开鉴权的 NapCat）。
+        """
         token = str(self.cfg.get("napcat_token", "") or "").strip()
+        if not token:
+            try:
+                from qq.qq_config import discover_ws_token
+                token = discover_ws_token(self.ws_url) or ""
+                if token:
+                    self._auto_token = token
+                    self.cfg["napcat_token"] = token      # 本次运行内复用
+            except Exception as e:
+                print(f"[QQBridge] ⚠ 自动获取 token 失败: {e}")
         if token:
             return [f"Authorization: Bearer {token}"]
         return None
+
+    def _warn_auth_failed(self, raw: str = ""):
+        """识别 NapCat 的 token 鉴权失败（retcode 1403）并说清楚怎么修。
+
+        NapCat 开启 token 后，握手不带/带错 token 时它**不是拒绝连接**，而是先接受、
+        再回一帧 {"status":"failed","retcode":1403,"message":"token验证失败"} 然后断开 →
+        以前只会看到「接收异常: Connection is closed」，完全看不出原因。
+        """
+        try:
+            from qq.qq_config import discover_ws_token
+            good = discover_ws_token(self.ws_url) or ""
+        except Exception:
+            good = ""
+        print("[QQBridge] ❌ NapCat 返回 retcode 1403：WS token 验证失败（连接被立即关闭）")
+        if good:
+            print(f"[QQBridge] 🔑 从 NapCat 配置里读到正确 token：{good}")
+            print("[QQBridge] → 已自动切换使用该 token（下一次重连生效）；"
+                  "如需固定，可写入 config.json: \"qq_napcat_token\": \"" + good + "\"")
+        else:
+            print("[QQBridge] → 请在 config.json 里配置 qq_napcat_token，"
+                  "或确认 NapCat 的 onebot11_*.json 里的 websocketServers.token")
+        # 丢掉可能过期的 token，下次重连重新发现（NapCat 换 token 后能自愈）
+        try:
+            self.cfg["napcat_token"] = ""
+            self._auto_token = ""
+        except Exception:
+            pass
+        if raw:
+            print(f"[QQBridge] 原始响应: {str(raw)[:200]}")
 
     def _reconnect_loop(self):
         """断开后自动重连（不退出），给用户 NapCat 就绪时间窗口"""
@@ -378,6 +552,61 @@ class QQBotBridge:
         """该消息是否来自主人白名单成员（自动离线的唤醒入口、主人功能判定）"""
         return bool(self._master_ids) and user_id is not None and str(user_id) in self._master_ids
 
+    def _learn_master_nick(self, user_id, nick):
+        """记录主人名单成员的昵称/群名片（有人喊主人的 QQ 名字时要认得出）"""
+        try:
+            qq = str(user_id or "").strip()
+            n = str(nick or "").strip()
+            if not qq or not n or n in ("未知", "群友", "对方"):
+                return
+            with self._master_nicks_lock:
+                s = self._master_nicks.setdefault(qq, set())
+                s.add(n)
+        except Exception:
+            pass
+
+    def _master_nicks_snapshot(self):
+        """主人昵称映射快照 {QQ: [昵称,...]}（供 chat_once 注入对照表）"""
+        try:
+            with self._master_nicks_lock:
+                return {k: sorted(v) for k, v in self._master_nicks.items() if v}
+        except Exception:
+            return None
+
+    def _master_mention_note(self, text):
+        """消息文本里提到主人昵称时给出对照注记（防认不出主人）。
+        返回如：『（注：「申余不是鱼」是主人 QQ 1851959578 的名字，提到 ta 就是在说你的主人）』"""
+        try:
+            t = str(text or "")
+            if not t:
+                return ""
+            hits = []
+            with self._master_nicks_lock:
+                for qq, nicks in self._master_nicks.items():
+                    for n in nicks:
+                        if n and n in t:
+                            hits.append(f"「{n}」是主人 QQ {qq} 的名字")
+                            break
+            if hits:
+                return "（注：" + "；".join(hits) + "，提到 ta 就是在说你的主人）"
+        except Exception:
+            pass
+        return ""
+
+    @staticmethod
+    def _media_from_speaker(item, user_id) -> bool:
+        """媒体条目是否由该发言者本人发出（who 形如『（主人）@昵称(QQ号)』）。
+        用于收紧"群最近媒体"注入：只注入发言者自己发的图/视频，
+        避免把别人发的表情包算到当前说话人头上（用户反馈的"回错人"问题）。"""
+        try:
+            who = (item or {}).get("who") or ""
+            m = re.search(r"\((\d+)\)\s*$", who)
+            if not m:
+                return False
+            return str(m.group(1)) == str(user_id)
+        except Exception:
+            return False
+
     def _touch_activity(self):
         """记录一次有效活动（收到主人消息/正常对话）——空闲计时据此重置"""
         with self._activity_lock:
@@ -399,14 +628,82 @@ class QQBotBridge:
         except Exception:
             return 0, 0
 
-    def _cap_reply(self, reply):
-        """单次回复字数上限（qq_max_reply_chars；0=不限）"""
+    def _reply_parts(self, reply, max_parts=3, hard_limit=None):
+        """把回复按「单次回复字数上限」拆成若干条短消息（不砍半句话，内容不丢）。
+
+        - 字数在限制内：原样一条发出（模型被要求"在限制内把意思表达完整"）；
+        - 超限：按句子边界拆成最多 max_parts 条（默认 2~3 条），逐条发送；
+        - 限制为 0（不限）：原样一条；
+        - 「每次对话最多回复次数」配置了条数上限时，分条数不超过它（多出的并入最后一条）；
+        - hard_limit：强制上限（活泼模式防刷屏用，与配置上限取较小值）。"""
         try:
-            m = self._reply_limits()[1]
+            _msgs, m = self._reply_limits()
         except Exception:
-            m = 0
-        if m > 0 and reply and len(reply) > m:
-            reply = reply[:m]
+            _msgs, m = 0, 0
+        if hard_limit:
+            try:
+                m = min(m, int(hard_limit)) if m > 0 else int(hard_limit)
+            except Exception:
+                m = int(hard_limit)
+        mp = max(1, int(max_parts or 1))
+        try:
+            if _msgs and int(_msgs) > 0:
+                mp = min(mp, int(_msgs))
+        except Exception:
+            pass
+        try:
+            return split_by_char_limit(reply, m, mp) or ([reply] if reply else [])
+        except Exception:
+            return [reply] if reply else []
+
+    def _private_reply_allowed(self, user_id, sub_type=None) -> bool:
+        """私信回复范围（启动器 设置→QQ；改动即时生效，无需重启 QQ）：
+
+        - qq_private_enable         总开关（false = 完全不回私信，含主人）
+        - qq_private_master_only    true = 只回主人私信（覆盖下面两项）
+        - qq_private_reply_friend   是否回好友私信（sub_type=friend/group 视为好友）
+        - qq_private_reply_stranger 是否回陌生人私信（非好友/临时会话）
+        主人始终在允许范围内（除非总开关关闭）。"""
+        try:
+            from qq.qq_config import get_qq_config
+            c = get_qq_config()
+            if not c.get("private_enable", True):
+                return False
+            if self._is_owner(user_id):
+                return True
+            if c.get("private_master_only"):
+                return False
+            is_friend = str(sub_type or "").strip().lower() in ("friend", "group")
+            if is_friend:
+                return bool(c.get("private_reply_friend", True))
+            return bool(c.get("private_reply_stranger", True))
+        except Exception as e:
+            print(f"[QQBridge] ⚠ 私信范围判定失败（按允许处理）: {e}")
+            return True
+
+    def _cap_reply(self, reply):
+        """（保留旧接口）单次回复字数上限：不再硬截断句子——
+        实际发送由 _reply_parts / 发送层按句子边界分条，内容不丢。"""
+        return reply
+
+    def _apply_cloth_marker(self, reply):
+        """解析 AI 回复里的 [换装:制服|睡衣|私服|刀服] 标记：
+        保存装扮到【当前立绘类型（a/b）】（桌宠 + QQ 立绘同步生效、持久化），
+        并从文本中移除标记。仅当标记里的服装可识别时才处理，避免误删正常文本。"""
+        try:
+            import re as _re
+            text = str(reply or "")
+            m = _re.search(r"[\[【]\s*换装\s*[:：]\s*([^\]】]{1,8})\s*[\]】]", text)
+            if not m:
+                return reply
+            from tool.portrait_outfit import resolve_cloth, save_outfit, active_set
+            name = resolve_cloth(m.group(1))
+            if name and save_outfit(name, set_name=active_set()):
+                print(f"[QQBridge] 👗 AI 自主换装: {name}（{active_set()} 立绘 · 桌宠同步）")
+                text = _re.sub(r"[\[【]\s*换装\s*[:：]\s*[^\]】]{1,8}\s*[\]】]", "", text).strip()
+                return text
+        except Exception as e:
+            print(f"[QQBridge] ⚠ 换装标记处理失败: {e}")
         return reply
 
     def _dedupe_msg(self, message_id) -> bool:
@@ -500,6 +797,10 @@ class QQBotBridge:
         防止模型把别人发的图当成主人发的而叫错人。"""
         try:
             if not isinstance(message, list):
+                return
+            # 防御：绝不记录 bot 自己发的图/表情包（否则后续回复会"识别到自己发的表情包"）
+            if user_id is not None and self.self_id is not None \
+                    and str(user_id) == str(self.self_id):
                 return
             with self._groups_lock:
                 g = self._group_buf.setdefault(str(group_id), {
@@ -622,8 +923,55 @@ class QQBotBridge:
             if desc:
                 add_media(group_id, f"{nickname}({user_id})", kind, desc)
                 print(f"[QQBridge] 🧠 已学习群{kind}: {desc[:40]}")
+            # 自主学习·表情收藏：群里的动画表情包 → 自动存入自存表情池，
+            # 供以后发送时随机使用（增加灵动性；受开关/限流/总数上限约束）
+            if kind == "image" and desc:
+                self._maybe_autosave_sticker(message, desc)
         except Exception:
             pass
+
+    @staticmethod
+    def _sticker_url_from_seg(message):
+        """从消息段取「表情包」图片的 (url, summary)；非表情返回 (None, '')。
+        判定：QQ 动画表情/贴纸（sub_type==1、summary 含"表情"或 .gif 结尾）。"""
+        try:
+            for seg in (message or []):
+                if not isinstance(seg, dict) or seg.get("type") != "image":
+                    continue
+                d = seg.get("data") or {}
+                url = str(d.get("url") or "")
+                summary = str(d.get("summary") or "")
+                sub = str(d.get("sub_type", ""))
+                f = str(d.get("file") or "")
+                is_sticker = (sub == "1") or ("表情" in summary) \
+                    or f.lower().endswith(".gif") \
+                    or url.lower().split("?")[0].endswith(".gif")
+                if is_sticker and url:
+                    return url, summary
+        except Exception:
+            pass
+        return None, ""
+
+    def _maybe_autosave_sticker(self, message, desc):
+        """自主学习：把群里的动画表情自动收藏进自存表情池（以后可随机发送）。
+        受配置开关（qq_auto_learn_sticker_save，默认开）与 10 个上限约束；
+        超限时优先淘汰更早的自动收藏（不挤掉用户手动收藏）。"""
+        try:
+            from qq.qq_config import get_qq_config as _g
+            if not _g().get("auto_learn_sticker_save", True):
+                return
+            url, _summary = self._sticker_url_from_seg(message)
+            if not url:
+                return
+            from qq.qq_saved import add_sticker
+            # 命名简洁（"群表情/群表情2…"），完整描述存 desc 供模型选择发送时机
+            item = add_sticker(url=url, name="群表情", desc=(desc or "")[:40], auto=True)
+            if item:
+                print(f"[QQBridge] 😊 自主学习已收藏表情「{item['name']}」（以后可随机发送）")
+            else:
+                print(f"[QQBridge] ⚠ 表情收藏失败（下载/保存未成功）: {url[:60]}")
+        except Exception as e:
+            print(f"[QQBridge] ⚠ 表情收藏异常: {e}")
 
     def _group_recent_image_desc(self, group_id, img_ref=None, max_age=240):
         """回复群消息前识别一张图（须在调度线程内调用；只走本地路径/URL，线程安全）。
@@ -800,15 +1148,17 @@ class QQBotBridge:
     # ================= QQ 会话活性探测 & 自动自愈 =================
     def _health_tick(self):
         """每 20s 由后台守护调用：探测 QQ 会话活性，检测到平台下线(NapCat 无感)
-        时自动重启 NapCat 并（如需要扫码）弹码提示。"""
+        时自动重启 NapCat 并（如需要扫码）弹码提示。
+        核心判据：get_status 的 online 字段（QQ 真掉线时为 false，
+        而 get_login_info 在掉线后仍会成功返回缓存的登录信息，不可靠）。"""
         now = time.time()
-        # 无在途探针且距上次 >=50s → 发探针(get_login_info)
+        # 无在途探针且距上次 >=50s → 发探针(get_status)
         if self._health_pending == 0 and now - self._last_recover_ts >= 50:
             self._health_seq += 1
             self._health_pending = now
             try:
                 _sent = self._safe_send({
-                    "action": "get_login_info",
+                    "action": "get_status",
                     "echo": f"health_{self._health_seq}",
                 }, label="活性探测 ")
                 if not _sent:
@@ -835,22 +1185,49 @@ class QQBotBridge:
         # 长时间无任何真实消息事件(30分钟)且探测正常 → 重置计时即可(群静默正常)
 
     def _scan_napcat_logs(self) -> bool:
-        """扫描 NapCat 日志文件尾部：出现平台下线/登录失效通知(3分钟内) → True。
-        这是 QQ 被平台踢下线时 NapCat 必写的日志，比 API 探针可靠。"""
+        """扫描 NapCat 日志【新增内容】：出现平台下线/登录失效通知 → True。
+
+        这是 QQ 被平台踢下线时 NapCat 必写的日志（实测为中文"账号状态变更为离线"），
+        比 API 探针可靠（get_login_info 掉线后仍会成功）。
+
+        ⚠ 只看「上次扫描之后新增的字节」（首次见到某文件时从当前末尾开始）：
+        旧实现每次读文件尾部 4KB 做关键词匹配，NapCat 日志里历史的下线/超时行
+        会在 65 分钟 mtime 窗口内被反复命中 → 假报"下线"→ 误重启 NapCat
+        → 用户白白重新扫码。现在只认新写入的内容，杜绝这种误伤。"""
         import glob as _glob
         try:
             base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             now = time.time()
             kws = ("KickedOffLine", "下线通知", "登录已失效", "身份已失效",
-                   "账号当前登录已失效", "请重新登录")
-            for fp in _glob.glob(os.path.join(base, "tmp", "napcat_run*.log")) +                     _glob.glob(os.path.join(base, "tmp", "napcat_auto.log")):
+                   "账号当前登录已失效", "请重新登录",
+                   "账号状态变更为离线", "变更为离线",
+                   # 会话假死伴随错误：QQ 内核已下线时 sendMsg 会超时（NTEvent Timeout）
+                   "Timeout: NTEvent", "NodeIKernelMsgService/sendMsg")
+            files = (_glob.glob(os.path.join(base, "tmp", "napcat_run*.log"))
+                     + _glob.glob(os.path.join(base, "tmp", "napcat_auto.log"))
+                     + _glob.glob(os.path.join(base, "tmp", "napcat_manual.log")))
+            for fp in files:
                 try:
                     st = os.stat(fp)
-                    if now - st.st_mtime > 180:
-                        continue  # 3 分钟内没有新写入
-                    with open(fp, "r", encoding="utf-8", errors="replace") as f:
-                        tail = f.read()[-4000:]
-                    if any(k in tail for k in kws):
+                    if now - st.st_mtime > 3900:
+                        continue  # 65 分钟内无新写入（NapCat 心跳每小时一次）
+                    size = st.st_size
+                    if fp not in self._napcat_log_pos:
+                        # 首次见到：只从当前末尾开始看，忽略历史内容
+                        self._napcat_log_pos[fp] = size
+                        continue
+                    pos = self._napcat_log_pos[fp]
+                    if pos > size:      # 日志被重写/轮转 → 从头看
+                        pos = 0
+                    if size - pos < 8:
+                        continue        # 没有新增内容
+                    with open(fp, "rb") as f:
+                        f.seek(pos)
+                        chunk = f.read(200000)
+                    self._napcat_log_pos[fp] = pos + len(chunk)
+                    text = chunk.decode("utf-8", errors="replace")
+                    if any(k in text for k in kws):
+                        print(f"[QQBridge] 🔎 {os.path.basename(fp)} 新增日志命中下线特征")
                         return True
                 except Exception:
                     continue
@@ -858,12 +1235,24 @@ class QQBotBridge:
             pass
         return False
 
-    def _health_ok(self, seq):
-        """收到探针响应 → 清零失败计数"""
+    def _health_ok(self, seq, data=None):
+        """收到探针响应：online=true 清零失败计数；
+        online=false → QQ 已被平台下线(NapCat 进程无感) → 计数触发自愈。"""
         try:
-            if int(seq) == self._health_seq:
-                self._health_pending = 0
-                self._health_fail = 0
+            if int(seq) != self._health_seq:
+                return
+            self._health_pending = 0
+            online = None
+            if isinstance(data, dict):
+                online = data.get("online")
+            if online is False:
+                self._health_fail += 1
+                print(f"[QQBridge] ❤️ 检测到 QQ 账号离线(online=false，{self._health_fail}/2)")
+                if self._health_fail >= 2:
+                    self._health_fail = 0
+                    self._auto_recover_qq()
+                return
+            self._health_fail = 0
         except Exception:
             pass
 
@@ -874,11 +1263,77 @@ class QQBotBridge:
         if now - self._last_recover_ts < 1500:  # 25 分钟冷却，防循环
             print("[QQBridge] ❤️ 距上次自动恢复不足 25 分钟，跳过(避免循环)")
             return
+        # 若 NapCat 活着且正在等扫码（端口未就绪 + 二维码近 10 分钟有更新）：
+        # 不重启——重启会作废当前二维码，导致用户反复扫到过期码永远登不上。
+        if self._napcat_waiting_scan():
+            print("[QQBridge] ❤️ NapCat 正在等待扫码（二维码新鲜），跳过重启，仅提示扫码")
+            self._prompt_scan()
+            return
         self._last_recover_ts = now
+        # 备份掉线现场日志（自愈重启会用 'wb' 覆盖日志，导致掉线原因事后不可查）
+        self._backup_napcat_logs(tag="offline")
         print("[QQBridge] ❤️ 检测到 QQ 会话失效，开始自动重启 NapCat...")
         import threading as _th
         _th.Thread(target=self._recover_worker, daemon=True,
                    name="QQAutoRecover").start()
+
+    def _napcat_waiting_scan(self) -> bool:
+        """NapCat 进程活着、3001 未监听、且二维码文件近 10 分钟刚更新 → 正在等扫码。
+        此时不能重启 NapCat（会作废用户正在扫的二维码）。"""
+        try:
+            import socket as _s
+            with _s.socket(_s.AF_INET, _s.SOCK_STREAM) as sd:
+                sd.settimeout(1.5)
+                if sd.connect_ex(("127.0.0.1", 3001)) == 0:
+                    return False  # 端口通 → 已登录，无需扫码
+            base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            qr = os.path.join(base, "NapCat.Shell.Windows.OneKey", "NapCat",
+                              "cache", "qrcode.png")
+            if not os.path.exists(qr):
+                return False
+            # NapCat 进程在吗（QQ 是它的子进程，注入启动）
+            import subprocess as _sp
+            r = _sp.run(
+                ["powershell", "-NoProfile", "-Command",
+                 "(Get-CimInstance Win32_Process -Filter \"Name='NapCatWinBootMain.exe'\" | Measure-Object).Count"],
+                capture_output=True, text=True, timeout=10,
+                creationflags=getattr(_sp, "CREATE_NO_WINDOW", 0))
+            if (r.stdout or "").strip() in ("", "0"):
+                return False
+            return (time.time() - os.path.getmtime(qr)) < 600
+        except Exception:
+            return False
+
+    @staticmethod
+    def _backup_napcat_logs(tag="offline"):
+        """掉线现场备份：把当前 NapCat 日志复制到 tmp/napcat_crash_backup/（带时间戳）。
+        自愈重启会用 'wb' 模式覆盖 napcat_auto.log，导致掉线原因事后不可查。"""
+        try:
+            import shutil
+            import datetime as _dt
+            base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            src_dir = os.path.join(base, "tmp")
+            dst_dir = os.path.join(src_dir, "napcat_crash_backup")
+            os.makedirs(dst_dir, exist_ok=True)
+            ts = _dt.datetime.now().strftime("%m%d_%H%M%S")
+            for name in ("napcat_auto.log", "napcat_manual.log"):
+                src = os.path.join(src_dir, name)
+                try:
+                    if os.path.exists(src) and os.path.getsize(src) > 0:
+                        shutil.copy2(src, os.path.join(dst_dir, f"{tag}_{ts}_{name}"))
+                except Exception:
+                    continue
+            # 只保留最近 30 个备份，防无限堆积
+            try:
+                files = sorted(
+                    [os.path.join(dst_dir, f) for f in os.listdir(dst_dir)],
+                    key=lambda p: os.path.getmtime(p))
+                for p in files[:-30]:
+                    os.remove(p)
+            except Exception:
+                pass
+        except Exception:
+            pass
 
     def _recover_worker(self):
         """在独立线程执行恢复流程(不阻塞后台守护)"""
@@ -995,7 +1450,13 @@ class QQBotBridge:
                 self._send_music_text("语音发送失败，稍后再试试？", ctx)
                 self._del_wav(wav)
                 return
-            self._del_wav(wav)  # 发送完成后清理临时音频，不残留文件
+            # 延迟清理：NapCat 收包后异步读文件转码上传，立即删会让它读不到文件而静默丢弃
+            # （点歌语音历史 bug 根因）。成功发送后 90 秒再删，既保发送成功又不留残留。
+            try:
+                import threading as _th
+                _th.Timer(90.0, self._del_wav, args=(wav,)).start()
+            except Exception:
+                pass
             self._send_music_text("🎵 已为你点播《" + title[:60] + "》", ctx)
 
         except Exception as e:
@@ -1022,9 +1483,13 @@ class QQBotBridge:
             print(f"[QQBridge] ⚠ 点歌回执失败: {e}")
 
     def _napcat_token(self) -> str:
+        """HTTP API 用的同一份 token（config.json 优先，缺省时自动从 NapCat 配置读取）"""
         try:
-            from qq.qq_config import get_qq_config as _c
-            return str(_c().get("napcat_token") or "")
+            tok = str(self.cfg.get("napcat_token", "") or "").strip()
+            if tok:
+                return tok
+            from qq.qq_config import get_qq_token
+            return get_qq_token(getattr(self, "ws_url", "") or "") or ""
         except Exception:
             return ""
 
@@ -1124,30 +1589,47 @@ class QQBotBridge:
                 session_key=f"group_{group_id}",  # 与 @ 回复共用群记忆 → 上下文连贯
                 lively=True,
                 group_name=group_name,
+                master_nicks=self._master_nicks_snapshot(),
+                self_id=self.self_id,
+                self_nick=self.self_nick,
             )
             if not reply:
                 return
             reply = reply.strip()
-            # 只过滤 API 兜底文案（"（AI 暂时开小差了...）"这类）与超长刷屏；
-            # 正常以动作描写"（…）"开头的活泼发言不算异常，不能误杀
+            # 只过滤 API 失败兜底文案（"（AI 暂时开小差了…）"这类）：整条很短 且 命中兜底特征。
+            # 注意此前"长度>200 就丢弃"是误杀——活泼接话正常写超 200 字时发言被吃掉
+            # （日志大量"活泼发言异常文案，跳过"的根因）；长文应截断发送而非丢弃。
             _api_fluff = ("（AI", "（网络", "（未配置", "（什么都没说")
-            if reply.startswith(_api_fluff) or len(reply) > 200 or "开小差" in reply or "网络开小差" in reply:
-                print(f"[QQBridge] ⚠ 活泼发言异常文案，跳过: {reply[:30]}")
+            _is_fluff = (len(reply) < 80) and (
+                reply.startswith(_api_fluff) or "开小差" in reply)
+            if _is_fluff:
+                print(f"[QQBridge] ⚠ 活泼发言为 API 兜底文案，跳过: {reply[:30]}")
                 return
-            # 对话调节：单次回复字数上限（0=不限时上面 200 字防刷屏兜底仍然有效）
-            reply = self._cap_reply(reply)
-            ok = self._safe_send({
-                "action": "send_msg",
-                "params": {
-                    "message_type": "group",
-                    "group_id": int(group_id),
-                    "message": reply,
-                },
-                "echo": f"lively_{uuid.uuid4().hex[:8]}",
-            }, label=f"活泼群{group_id} ")
-            if ok:
-                print(f"[QQBridge] 🎉 活泼群 {group_id} 发言: {reply[:40]}...")
-            for path in resolve_sticker_files(stickers)[0]:
+                # 对话调节：单次回复字数上限（0=不限）；活泼发言额外兜底 200 字防刷屏
+                # —— 超限不再硬截断，改为按句子边界拆成至多 2 条短消息发出（内容不丢）
+                reply = self._apply_cloth_marker(reply)
+                lively_parts = self._reply_parts(reply, 2, hard_limit=200) or [reply]
+                ok = True
+                for _i, _part in enumerate(lively_parts):
+                    ok = self._safe_send({
+                        "action": "send_msg",
+                        "params": {
+                            "message_type": "group",
+                            "group_id": int(group_id),
+                            "message": _part,
+                        },
+                        "echo": f"lively_{uuid.uuid4().hex[:8]}",
+                    }, label=f"活泼群{group_id} ")
+                    if not ok:
+                        break
+                    _tag = f"（{_i+1}/{len(lively_parts)}）" if len(lively_parts) > 1 else ""
+                    print(f"[QQBridge] 🎉 活泼群 {group_id} 发言{_tag}: {_part[:40]}...")
+                    if _i < len(lively_parts) - 1:
+                        time.sleep(_PRIVATE_SEND_INTERVAL[0])
+                if ok:
+                    reply = lively_parts[0]
+            # ⚠ 表情包开关关闭时不发（连自存池随机逻辑都不执行）——见 _stickers_on()
+            for path in (resolve_sticker_files(stickers)[0] if self._stickers_on() else []):
                 if path:
                     try:
                         send_image(self.ws, path, "group", int(group_id), self.self_id)
@@ -1190,7 +1672,9 @@ class QQBotBridge:
             from qq.qq_config import load_config as _lc
             owner = str((_lc() or {}).get("qq_owner_id", ""))
             if owner:
-                stray_events, seen_ids = fetch_before_loop(self.ws, owner, self.scheduler, self_id=self.self_id) or ([], set())
+                stray_events, seen_ids = fetch_before_loop(self.ws, owner, self.scheduler,
+                                                           self_id=self.self_id,
+                                                           private_filter=self._private_reply_allowed) or ([], set())
             else:
                 print("[QQBridge] ⚠ 未配置 qq_owner_id，跳过离线拉取")
         except Exception as e:
@@ -1235,6 +1719,10 @@ class QQBotBridge:
                 raw = self.ws.recv()
                 if not raw:
                     continue
+                # NapCat 鉴权失败：连上后第一帧就是 retcode 1403 → 说清原因再断
+                if "1403" in raw and "\"retcode\"" in raw:
+                    self._warn_auth_failed(raw)
+                    break
                 self._handle(raw)
             except websocket.WebSocketTimeoutException:
                 # 超时保活
@@ -1275,15 +1763,37 @@ class QQBotBridge:
         if "echo" in data and "data" in data:
             echo = data.get("echo", "")
             if echo.startswith("health_"):
-                # 活性探针响应 → 清零失败计数
+                # 活性探针响应(get_status) → online 判定 + 清零/计数
                 try:
-                    self._health_ok(echo[len("health_"):])
+                    self._health_ok(echo[len("health_"):], data.get("data"))
                 except Exception:
                     pass
             elif echo == "login_info" and data.get("data"):
                 info = data.get("data") or {}
                 self.self_id = info.get("user_id")
-                print(f"[QQBridge] 当前登录账号: {self.self_id} ({info.get('nickname', '')})")
+                self.self_nick = str(info.get("nickname") or "").strip()
+                print(f"[QQBridge] 当前登录账号: {self.self_id} ({self.self_nick})")
+                # 主动查询主人名单成员的昵称（有人喊主人的 QQ 名字时要认得出，
+                # 不必等主人先发言）
+                try:
+                    for _m in (self._master_ids or []):
+                        try:
+                            self._safe_send({
+                                "action": "get_stranger_info",
+                                "params": {"user_id": int(_m)},
+                                "echo": f"mstnick_{_m}",
+                            }, label="主人昵称查询 ")
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+            elif echo.startswith("mstnick_"):
+                qq = echo[len("mstnick_"):]
+                info = data.get("data") or {}
+                nk = info.get("nick") or info.get("nickname") or ""
+                if nk:
+                    self._learn_master_nick(qq, nk)
+                    print(f"[QQBridge] 🏷 主人 QQ {qq} 的昵称: {nk}")
             elif echo.startswith("grpname_"):
                 gid = echo[len("grpname_"):]
                 info = data.get("data") or {}
@@ -1321,9 +1831,18 @@ class QQBotBridge:
         raw_message = data.get("raw_message", "") or ""
         message = data.get("message", [])
 
-        # 忽略自己发的消息
-        if user_id == self.self_id:
+        # 忽略自己发的消息（self.self_id 未就绪时用上报自带的 self_id 兜底，
+        # 否则启动早期会把自己发的表情包/图片当成他人消息记录并识别 → 回复自己的表情包）
+        _self_keys = set()
+        for _x in (self.self_id, data.get("self_id")):
+            if _x is not None:
+                _self_keys.add(str(_x))
+        if user_id is not None and str(user_id) in _self_keys:
             return
+
+        # 学习主人名单成员的昵称/群名片（识别"有人喊主人的 QQ 名字"场景）
+        if nickname and self._is_owner(user_id):
+            self._learn_master_nick(user_id, nickname)
 
         # 活消息去重：同一条 message_id 短时间内重复上报 → 跳过（防重复回复同一问题）
         if self._dedupe_msg(message_id):
@@ -1346,6 +1865,11 @@ class QQBotBridge:
         cfg = _get_cfg()
 
         if message_type == "private":
+            # 私信回复范围（设置→QQ：总开关 / 陌生人 / 好友 / 仅主人）——不在范围内直接忽略
+            if not self._private_reply_allowed(user_id, data.get("sub_type")):
+                print(f"[QQBridge] 🔕 私信不在回复范围（sub_type={data.get('sub_type')}），忽略 "
+                      f"{nickname}({user_id})")
+                return
             # 提取纯文本
             text = self._extract_text(message, raw_message)
             # 文字+链接卡片：文本里没有 URL 时把卡片里的链接补进来（触发联网解析）
@@ -1695,6 +2219,16 @@ class QQBotBridge:
                                         self._send_group_command_reply(_xt, user_id, group_id)
                                     elif _xt:
                                         self._send_command_reply(_xt, user_id)
+                                elif _at == "music":
+                                    # 点歌：搜索+下载+转码耗时 → 独立线程执行，不阻塞调度
+                                    _kw = _a.get("keyword") or _a.get("extra")
+                                    if _kw:
+                                        import threading as _th
+                                        _th.Thread(
+                                            target=self._play_music_worker,
+                                            args=(_kw, (session_key, user_id, group_id)),
+                                            daemon=True,
+                                        ).start()
                             except Exception as _ae:
                                 print(f"[QQBridge] ⚠ 收藏发送失败: {_ae}")
                         # 回执文本
@@ -1722,6 +2256,10 @@ class QQBotBridge:
                         text = f"{text}\n（你发来一段视频，内容大概是：{vid_desc}）"
                     else:
                         text = f"（你发来一段视频，内容大概是：{vid_desc}）"
+                # 消息里提到主人昵称 → 注入对照注记（防认不出主人）
+                _mnote = self._master_mention_note(text)
+                if _mnote:
+                    text = f"{text}\n{_mnote}"
                 reply, stickers, portrait_emo = chat_once(
                     text,
                     use_sticker=self.cfg["send_sticker"],
@@ -1729,11 +2267,14 @@ class QQBotBridge:
                     session_key=session_key,
                     speaker={"nick": msg.get("nickname") or "", "uin": user_id},
                     is_master=self._is_owner(user_id),
+                    master_nicks=self._master_nicks_snapshot(),
+                    self_id=self.self_id,
+                    self_nick=self.self_nick,
                 )
                 if not reply:
                     return
-                # 对话调节：单次回复字数上限
-                reply = self._cap_reply(reply)
+                # 换装标记 + 发送层按「单次回复字数上限」分条（超限拆 2~3 条，不截断）
+                reply = self._apply_cloth_marker(reply)
                 # 发送层再按「每次对话最多回复次数」控制单条回复拆成几条消息
                 # （cap_clauses_count 在 _send_private_reply 内合并，内容不丢）
                 sent_ok = self._send_private_reply(reply, stickers, user_id)
@@ -1764,24 +2305,25 @@ class QQBotBridge:
                         d = self._extract_private_video(seg, allow_ws=False)
                         if d:
                             media_note = self._media_note_sentence("video", d, cur_item)
-                    if not media_note and msg.get("img_ref"):
+                    # 收紧：只注入「当前发言者本人刚发的」图/视频——
+                    # 防止把别人发的表情包/图算到说话人头上（用户反馈的"回错人"根源）；
+                    # 也不再"实时兜底取群最近媒体"（那会把任意旧图塞给任意发言者）
+                    if not media_note and msg.get("img_ref") \
+                            and self._media_from_speaker(msg["img_ref"], user_id):
                         d, item = self._group_recent_image_desc(group_id, img_ref=msg["img_ref"])
                         if d:
                             media_note = self._media_note_sentence("image", d, item)
-                    if not media_note and msg.get("vid_ref"):
+                    if not media_note and msg.get("vid_ref") \
+                            and self._media_from_speaker(msg["vid_ref"], user_id):
                         d, item = self._group_recent_video_desc(group_id, vid_ref=msg["vid_ref"])
-                        if d:
-                            media_note = self._media_note_sentence("video", d, item)
-                    if not media_note:
-                        d, item = self._group_recent_image_desc(group_id)
-                        if d:
-                            media_note = self._media_note_sentence("image", d, item)
-                    if not media_note:
-                        d, item = self._group_recent_video_desc(group_id)
                         if d:
                             media_note = self._media_note_sentence("video", d, item)
                     if media_note:
                         text = f"{text}\n{media_note}"
+                    # 消息里提到主人昵称 → 注入对照注记（防认不出主人）
+                    _mnote = self._master_mention_note(text)
+                    if _mnote:
+                        text = f"{text}\n{_mnote}"
                 except Exception as e:
                     print(f"[QQBridge] ⚠ 群媒体识别失败(忽略): {e}")
                 # 合并消息组里若有链接卡片段（如先文字、后卡片被合并成一组）→ 补 URL 触发解析
@@ -1797,11 +2339,14 @@ class QQBotBridge:
                     speaker={"nick": msg.get("nickname") or "", "uin": user_id},
                     is_master=self._is_owner(user_id),
                     group_name=self._group_display_name(group_id),
+                    master_nicks=self._master_nicks_snapshot(),
+                    self_id=self.self_id,
+                    self_nick=self.self_nick,
                 )
                 if not reply:
                     return
-                # 对话调节：单次回复字数上限（群聊整条一次发送，不拆句）
-                reply = self._cap_reply(reply)
+                # 换装标记；字数上限由 _send_group_reply 按句子边界分条处理（超限拆 2~3 条，不截断）
+                reply = self._apply_cloth_marker(reply)
                 sent_ok = self._send_group_reply(reply, stickers, user_id, group_id)
                 if sent_ok:
                     self._mark_replied_msgs(msg)
@@ -1903,13 +2448,38 @@ class QQBotBridge:
                   f"（累计 {self._send_fail_count} 次发送失败，重连后请对方重发）")
             return False
 
+    def _stickers_on(self) -> bool:
+        """表情包开关 —— **实时**读 config.json。
+
+        ⚠ 以前读的是进程启动时的 self.cfg 快照：在设置里关掉开关、不重启 QQ 模块
+        是不生效的；而且 resolve_sticker_files() 在「模型没点名表情」时仍有约一半概率
+        从自存池随机抽一张，导致"开关关了还一直发表情包"。所以每个发送点都要判。
+        """
+        try:
+            from qq.qq_config import _load_config
+            v = str(_load_config().get("qq_send_sticker", "true")).strip().lower()
+            return v in ("true", "1", "on", "yes")
+        except Exception:
+            try:
+                return bool(self.cfg.get("send_sticker", True))
+            except Exception:
+                return True
+
     def _send_private_reply(self, reply, stickers, user_id):
-        """私聊回复：按标点切句逐条发送 + 可选表情包(0~2个)/语音。
+        """私聊回复：按句切分逐条发送 + 可选表情包(0~2个)/语音。
         返回 True = 文字部分完整发送成功（分句全部送达）；
         False = 断线/失败（调用方不应标记为已回复，避免重连补拉漏回）。
-        对话调节：一次回复切句后若超过「每次对话最多回复次数」，
-        自动把多余句子合并进最后一条（内容不丢，消息条数不超上限）。"""
-        clauses = split_private_reply(reply)
+
+        对话调节：
+        - 「单次回复字数上限」→ 超限按句子边界拆成 2~3 条（不砍半句话、内容不丢）；
+        - 「每次对话最多回复次数」→ 条数超上限时把多余句子合并进最后一条。"""
+        # 字数限制：按【完整句子】打包成 ≤ 上限的若干条（永不把一句话拆开）；
+        # 未配置字数限制时也按完整句子逐条发送（同样不切逗号）
+        try:
+            _lim = self._reply_limits()[1]
+        except Exception:
+            _lim = 0
+        clauses = split_by_char_limit(reply, _lim, 3) if _lim > 0 else split_sentences(reply)
         if not clauses:
             return True
         try:
@@ -1938,7 +2508,8 @@ class QQBotBridge:
                 print(f"[QQBridge] → 私聊 {user_id} 第{idx+1}/{len(clauses)}句: {clause[:30]}...")
 
         # 表情包（最后一条文字后发送，0~2 个；失败不影响"已回复"判定）
-        for path in resolve_sticker_files(stickers)[0]:
+        # ⚠ 表情包开关关闭时不发（连自存池随机逻辑都不执行）——见 _stickers_on()
+        for path in (resolve_sticker_files(stickers)[0] if self._stickers_on() else []):
             if path:
                 try:
                     send_image(self.ws, path, "private", user_id, self.self_id)
@@ -1954,24 +2525,33 @@ class QQBotBridge:
         return True
 
     def _send_group_reply(self, reply, stickers, user_id, group_id):
-        """群聊回复：一次性发送完整回复 + 可选表情包(0~2个)/语音。
-        返回 True = 发送成功；False = 断线/失败。"""
-        # 群聊回复时加 @ 提问者（一次性发送）
-        at_msg = f"[CQ:at,qq={user_id}] {reply}"
-        ok = self._safe_send({
-            "action": "send_msg",
-            "params": {
-                "message_type": "group",
-                "group_id": group_id,
-                "message": at_msg,
-            },
-            "echo": f"reply_{uuid.uuid4().hex[:8]}",
-        }, label=f"群{group_id} ")
-        if ok:
-            print(f"[QQBridge] → 群 {group_id} 回复: {reply[:40]}...")
-        else:
-            return False
-        for path in resolve_sticker_files(stickers)[0]:
+        """群聊回复：发送回复（超字数上限时按句子边界拆成 2~3 条，内容不丢）
+        + 可选表情包(0~2个)/语音。返回 True = 发送成功；False = 断线/失败。"""
+        # 对话调节：单次回复字数上限 → 分条发送（第一条带 @ 提问者）
+        parts = self._reply_parts(reply, 3)
+        if not parts:
+            parts = [reply]
+        ok = True
+        for idx, part in enumerate(parts):
+            # 群聊回复时加 @ 提问者（仅第一条）
+            msg = f"[CQ:at,qq={user_id}] {part}" if idx == 0 else part
+            ok = self._safe_send({
+                "action": "send_msg",
+                "params": {
+                    "message_type": "group",
+                    "group_id": group_id,
+                    "message": msg,
+                },
+                "echo": f"reply_{uuid.uuid4().hex[:8]}",
+            }, label=f"群{group_id} ")
+            if not ok:
+                return False
+            tip = f"→ 群 {group_id} 回复" + (f"（{idx+1}/{len(parts)}）" if len(parts) > 1 else "")
+            print(f"[QQBridge] {tip}: {part[:40]}...")
+            if idx < len(parts) - 1:
+                time.sleep(_PRIVATE_SEND_INTERVAL[0])
+        # ⚠ 表情包开关关闭时不发（连自存池随机逻辑都不执行）——见 _stickers_on()
+        for path in (resolve_sticker_files(stickers)[0] if self._stickers_on() else []):
             if path:
                 try:
                     send_image(self.ws, path, "group", group_id, self.self_id)

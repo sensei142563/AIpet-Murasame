@@ -7,8 +7,18 @@ if os.path.exists(torch_path):
     os.add_dll_directory(torch_path)
     os.environ['PATH'] = torch_path + os.pathsep + os.environ.get('PATH', '')
 
-import torch          # ← 必须在这里，任何第三方库之前
-print("Torch loaded OK:", torch.__version__)
+# ⚠ 云端模式（deepseek/qwen）并不需要 torch：以前这里硬 import，
+#   一旦 torch 的 DLL 有问题（例如 c10.dll 初始化失败）→ 桌宠直接启动失败。
+#   现在做成容错：加载不了也照常启动，只提示本地模型/本地语音不可用。
+TORCH_OK = False
+torch = None
+try:
+    import torch          # ← 仍需在这里（本地模式要求在任何第三方库之前导入）
+    TORCH_OK = True
+    print("Torch loaded OK:", torch.__version__)
+except Exception as _torch_err:
+    print(f"[AIpet] ⚠ PyTorch 不可用（{_torch_err}）→ 云端模式可正常使用；"
+          f"本地模型 / 本地语音相关功能将不可用")
 
 import sys
 import threading
@@ -39,12 +49,26 @@ from tool.config import get_config
 from pets.pet_registry import get_live2d_dir, get_live2d_model_json, get_active_pet_id, detect_capabilities
 
 # Live2D 导入（延迟，仅在 Live2D 模式下激活）
+# ⚠ 配置里关掉 Live2D 时**连 DLL 都不加载**：个别显卡/驱动下 Cubism 原生库在
+#   导入或初始化时会直接把进程干掉（表现：桌宠跑一两分钟突然消失，无任何报错）。
 _LIVE2D_AVAILABLE = False
 try:
-    from Live2d.live2d_ui import Live2DWidget
-    _LIVE2D_AVAILABLE = True
+    import json as _json_l2d
+    _l2d_cfg = {}
+    try:
+        with open("./config.json", "r", encoding="utf-8") as _f:
+            _l2d_cfg = _json_l2d.load(_f) or {}
+    except Exception:
+        _l2d_cfg = {}
+    if str(_l2d_cfg.get("live2d_enabled", "false")).lower() != "true":
+        print("[AIpet] 配置 live2d_enabled=false → 不加载 Live2D 引擎（更稳，也更快）")
+    else:
+        from Live2d.live2d_ui import Live2DWidget
+        _LIVE2D_AVAILABLE = True
 except ImportError:
     print("[AIpet] Live2D 模块未安装，跳过 Live2D 功能")
+except Exception as _e:
+    print(f"[AIpet] Live2D 加载失败（已跳过）: {_e}")
 
 
 CONFIG = get_config("./config.json")
@@ -76,6 +100,77 @@ def save_screen_type(pet: Murasame) -> None:
         print(f"[AIpet] 保存 screen_type 失败: {e}")
 
 
+# ============ 桌宠窗口位置：退出时记录 / 启动时恢复 / 一键回到屏幕中央 ============
+def _pet_json_path() -> str:
+    try:
+        from pets.pet_registry import get_active_pet_id, get_pet_dir
+        return os.path.join(get_pet_dir(get_active_pet_id()), "pet.json")
+    except Exception:
+        return ""
+
+
+def save_window_pos(pet) -> None:
+    """把当前窗口坐标写进 pet.json（interaction.window_pos）→ 下次启动回到原位置"""
+    try:
+        p = _pet_json_path()
+        if not p or not os.path.exists(p):
+            return
+        with open(p, encoding="utf-8") as f:
+            cfg = json.load(f)
+        cfg.setdefault("interaction", {})["window_pos"] = [int(pet.x()), int(pet.y())]
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=1)
+        print(f"[AIpet] 已记录桌宠位置: ({pet.x()}, {pet.y()})")
+    except Exception as e:
+        print(f"[AIpet] ⚠ 记录桌宠位置失败: {e}")
+
+
+def load_window_pos() -> tuple:
+    """读上次记录的窗口坐标；没有/不合法 → (None, None)"""
+    try:
+        p = _pet_json_path()
+        if not p or not os.path.exists(p):
+            return None, None
+        with open(p, encoding="utf-8") as f:
+            cfg = json.load(f)
+        pos = (cfg.get("interaction") or {}).get("window_pos")
+        if isinstance(pos, (list, tuple)) and len(pos) == 2:
+            return int(pos[0]), int(pos[1])
+    except Exception as e:
+        print(f"[AIpet] ⚠ 读取桌宠位置失败: {e}")
+    return None, None
+
+
+def pos_visible_on_some_screen(x: int, y: int, size=(200, 200)) -> bool:
+    """坐标是否还在某块屏幕可见范围内（拔显示器/改分辨率后防止桌宠跑到看不见的地方）"""
+    try:
+        from PyQt5.QtWidgets import QApplication
+        w, h = size
+        for sc in QApplication.screens():
+            g = sc.availableGeometry()
+            ix = min(x + w, g.x() + g.width()) - max(x, g.x())
+            iy = min(y + h, g.y() + g.height()) - max(y, g.y())
+            if ix > 60 and iy > 60:
+                return True
+    except Exception:
+        return True
+    return False
+
+
+def center_on_screen(win, screen_index: int = 0) -> None:
+    """把窗口移到指定屏幕中央"""
+    try:
+        from PyQt5.QtWidgets import QApplication
+        screens = QApplication.screens()
+        sc = screens[screen_index] if 0 <= screen_index < len(screens) else QApplication.primaryScreen()
+        g = sc.availableGeometry()
+        win.move(g.x() + max(0, (g.width() - win.width()) // 2),
+                 g.y() + max(0, (g.height() - win.height()) // 2))
+        print(f"[AIpet] 桌宠已回到屏幕中央: ({win.x()}, {win.y()})")
+    except Exception as e:
+        print(f"[AIpet] ⚠ 居中失败: {e}")
+
+
 if __name__ == "__main__":
 
     # 设置全局 OpenGL 默认格式（启用 alpha 通道，支持透明背景）
@@ -101,11 +196,86 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)  # 创建应用对象
     pet = Murasame()  # 创建桌宠实例
     app.aboutToQuit.connect(lambda: save_screen_type(pet))
+    # 退出时记录桌宠位置（下次启动回到原位置；配合启动器「重置桌宠位置」按钮）
+    app.aboutToQuit.connect(lambda: save_window_pos(pet))
     pet.show()  # 显示窗口
 
     # ===== Live2D 初始化 =====
     live2d_widget = None
     _LIVE2D_CONFIG_ENABLED = CONFIG.get("live2d_enabled", "true") == "true"
+
+    # ===== Live2D 崩溃自学习 =====
+    # 上次进 Live2D 留下的标记还在 → 说明那次进程被崩掉了（原生崩溃，抓不到异常）
+    _L2D_FLAG = os.path.join(os.getcwd(), "data", "live2d_active.flag")
+    try:
+        if os.path.exists(_L2D_FLAG):
+            print("[Live2D] ⚠ 检测到上次进入 Live2D 后进程异常退出 → 本次不再自动进入 Live2D，"
+                  "并把兼容性探测结果记为失败（可在设置里改回来）")
+            try:
+                with open("./config.json", "r", encoding="utf-8") as _f:
+                    _c = json.load(_f)
+                _c["live2d_probe_ok"] = "false"
+                with open("./config.json", "w", encoding="utf-8") as _f:
+                    json.dump(_c, _f, ensure_ascii=False, indent=2)
+            except Exception as _e:
+                print(f"[Live2D] ⚠ 写入探测结果失败: {_e}")
+            os.remove(_L2D_FLAG)
+    except Exception as _e:
+        print(f"[Live2D] ⚠ 检查崩溃标记失败: {_e}")
+
+    def _probe_live2d() -> bool:
+        """子进程试跑一次 Live2D（GL 初始化在个别机器/显卡驱动下会直接终止进程 →
+        表现就是「桌宠突然消失」）。放进子进程探测，崩了也不影响桌宠本体。
+
+        结果缓存在 config.json 的 live2d_probe_ok，避免每次启动都探测。"""
+        try:
+            import subprocess as _sp
+            py = sys.executable
+            code = (
+                "import os,sys;"
+                "os.add_dll_directory(os.path.join(os.getcwd(),'Live2d'));"
+                "os.environ['PATH']=os.path.join(os.getcwd(),'Live2d')+os.pathsep+os.environ.get('PATH','');"
+                "sys.path.insert(0,'.');"
+                "from PyQt5.QtGui import QSurfaceFormat;"
+                "from PyQt5.QtWidgets import QApplication;"
+                "f=QSurfaceFormat();f.setAlphaBufferSize(8);f.setSamples(0);QSurfaceFormat.setDefaultFormat(f);"
+                "app=QApplication([]);"
+                "from Live2d.live2d_ui import Live2DWidget;"
+                "w=Live2DWidget();w.resize(320,420);w.show();"
+                "from PyQt5.QtCore import QTimer;QTimer.singleShot(2600,app.quit);app.exec_();"
+                "print('L2D_PROBE_OK')"
+            )
+            r = _sp.run([py, "-c", code], cwd=os.getcwd(), capture_output=True, timeout=45,
+                        creationflags=getattr(_sp, "CREATE_NO_WINDOW", 0))
+            ok = b"L2D_PROBE_OK" in (r.stdout or b"")
+            print(f"[Live2D] 兼容性探测: {'通过' if ok else '失败（将跳过 Live2D，避免桌宠崩溃）'}")
+            return ok
+        except Exception as e:
+            print(f"[Live2D] 探测异常（按失败处理）: {e}")
+            return False
+
+    if _LIVE2D_AVAILABLE and _LIVE2D_CONFIG_ENABLED:
+        # 先探测这台机器的 Live2D 能不能跑（结果缓存，避免每次启动都跑一遍）
+        try:
+            _cfg_now = CONFIG
+            _cached = str(_cfg_now.get("live2d_probe_ok", "")).lower()
+            if _cached in ("true", "false"):
+                _LIVE2D_AVAILABLE = _cached == "true"
+                print(f"[Live2D] 使用上次探测结果: {_cached}")
+            else:
+                _ok = _probe_live2d()
+                _LIVE2D_AVAILABLE = _ok
+                try:
+                    with open("./config.json", "r", encoding="utf-8") as _f:
+                        _c = json.load(_f)
+                    _c["live2d_probe_ok"] = "true" if _ok else "false"
+                    with open("./config.json", "w", encoding="utf-8") as _f:
+                        json.dump(_c, _f, ensure_ascii=False, indent=2)
+                except Exception:
+                    pass
+        except Exception as _e:
+            print(f"[Live2D] ⚠ 探测流程异常: {_e}")
+
     if _LIVE2D_AVAILABLE and _LIVE2D_CONFIG_ENABLED:
         try:
             # 模型目录按当前角色动态解析（DLL 在引擎 Live2d/，模型在角色包内）
@@ -121,6 +291,20 @@ if __name__ == "__main__":
             # 按角色显示/交互配置（窗口比例/缩放/字号/摸头区域/情绪映射，阶段 E）
             from pets.pet_registry import get_live2d_display, get_live2d_params
             disp = get_live2d_display()
+            # 角色若在「立绘设置 → Live2D」里单独调过大小/位置，优先用那份（与 2D 独立）
+            try:
+                _mc = pet._pet_cfg.get("model") or {}
+                _dl = (_mc.get("display_live2d") or {})
+                for _k, _dk in (("height_ratio", "window_height_ratio"),
+                                ("width_ratio", "window_ratio"),
+                                ("scale", "scale"),
+                                ("offset_x", "offset_x"), ("offset_y", "offset_y")):
+                    if _dl.get(_k) is not None:
+                        disp[_dk] = float(_dl[_k])
+                if _dl:
+                    print(f"[Live2D] 使用角色独立显示设置: {_dl}")
+            except Exception as _e:
+                print(f"[Live2D] ⚠ 读取独立显示设置失败: {_e}")
             params = get_live2d_params()
             print(f"[Live2D] 模型目录: {model_dir}")
             print(f"[Live2D] 模型文件存在: {bool(model_json) and os.path.exists(model_json)}")
@@ -518,6 +702,16 @@ if __name__ == "__main__":
         live2d_widget.trigger_touch_head.connect(
             lambda: pet.start_thread("主人摸了摸你的头", role="system")
         )
+        # 身体各处触摸（头/胸/腹/下体/四肢/自定义部位）—— Live2D 模式下由模型控件转发，
+        # 桌宠用与 2D 完全相同的「触摸区域」判定 + 同一套反应（这样 Live2D 也能摸全身）
+        for _sig, _fn in ((live2d_widget.touch_pressed, pet._l2d_touch_pressed),
+                          (live2d_widget.touch_moved, pet._l2d_touch_moved),
+                          (live2d_widget.touch_released, pet._l2d_touch_released)):
+            try:
+                _sig.connect(_fn)
+            except Exception as _e:
+                print(f"[AIpet] ⚠ Live2D 触摸信号连接失败: {_e}")
+        print("[AIpet] ✅ Live2D 身体触摸已接入（与 2D 同一套区域与反应）")
         live2d_widget.trigger_input_mode.connect(lambda: pet._trigger_input_mode())
         def _sync_move(dx, dy):
             pet.move(pet.x() + dx, pet.y() + dy)
@@ -579,7 +773,22 @@ if __name__ == "__main__":
     screens = QApplication.screens()
     target_screen = screens[screen_index]
     geometry = target_screen.availableGeometry()
-    pet.move(geometry.x(), geometry.y())
+    # 恢复上次关闭时记录的窗口位置；没有/已不在屏幕内 → 回到该屏左上角
+    _sx, _sy = load_window_pos()
+    if _sx is not None and pos_visible_on_some_screen(_sx, _sy, (pet.width(), pet.height())):
+        pet.move(_sx, _sy)
+        print(f"[AIpet] 已恢复上次的桌宠位置: ({_sx}, {_sy})")
+    else:
+        pet.move(geometry.x(), geometry.y())
+        # 没记录过位置时，用「立绘设置」里的偏移量摆放（2D 立绘自定义偏移）
+        try:
+            _off = pet._display_cfg_2d()
+            _ox, _oy = int(_off.get("offset_x") or 0), int(_off.get("offset_y") or 0)
+            if _ox or _oy:
+                pet.move(pet.x() + _ox, pet.y() + _oy)
+                print(f"[AIpet] 已应用立绘位置偏移: ({_ox}, {_oy})")
+        except Exception:
+            pass
 
     # ===== 轮询 API 控制标志（PCL 启动器按钮 → API → 此定时器检测） =====
     _control_poll_timer = QTimer()
@@ -654,8 +863,22 @@ if __name__ == "__main__":
         global _pcl_voice_recorder, _pcl_voice_recording
         try:
             from api import check_flag, check_voice_start, check_voice_end, set_feature_status
-            from api import consume_live2d_request, set_live2d_display_state
+            from api import consume_live2d_request, set_live2d_display_state, check_shutdown
         except ImportError:
+            return
+
+        # ===== 启动器「关闭桌宠」→ 优雅退出（会保存窗口位置）=====
+        if check_shutdown():
+            try:
+                print("[API Control] 收到关闭请求，正在退出…")
+                pet.show_text("那我先睡啦～", typing=False)
+            except Exception:
+                pass
+            try:
+                save_window_pos(pet)
+            except Exception:
+                pass
+            QTimer.singleShot(400, app.quit)
             return
 
         # ===== PCL 图形化调参请求（应用/保存/重置）=====
@@ -859,6 +1082,38 @@ if __name__ == "__main__":
                     set_feature_status("live2d", "on")
             except Exception as e:
                 print(f"[API Control] live2d error: {e}")
+
+        # 重置桌宠位置（PCL「重置桌宠位置」按钮）→ 回到当前屏幕中央
+        if check_flag("reset_position"):
+            try:
+                _si = int(CONFIG.get("screen_index", 0) or 0)
+                center_on_screen(pet, _si)
+                try:
+                    if live2d_widget is not None:
+                        live2d_widget.move(pet.pos())
+                except Exception:
+                    pass
+                save_window_pos(pet)
+                pet.show_text("我回到屏幕中央啦～", typing=False)
+                print("[API Control] 桌宠已重置到屏幕中央")
+            except Exception as e:
+                print(f"[API Control] reset_position error: {e}")
+
+        # 重新读取触摸区域（在「触摸区域调节」里保存后，正在运行的桌宠立刻生效）
+        if check_flag("reload_touch"):
+            try:
+                pet.reload_touch_areas()
+                pet.show_text("唔…身体的感觉变了？", typing=False)
+                print("[API Control] 触摸区域已刷新")
+            except Exception as e:
+                print(f"[API Control] reload_touch error: {e}")
+
+        # 同步窗口坐标给 API（启动器可显示/判断是否在屏幕内）
+        try:
+            from api import set_window_pos as _set_wpos
+            _set_wpos(pet.x(), pet.y())
+        except Exception:
+            pass
 
     _control_poll_timer.timeout.connect(_poll_control_flags)
     _control_poll_timer.start()

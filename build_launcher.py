@@ -81,6 +81,20 @@ cmd = [
     #       websocket 由子进程 run_qq.py 的解释器环境提供，壳不需要。
     "--hidden-import", "OpenGL.GL",
     "--hidden-import", "live2d.v3",
+    # ===== 页面模块：壳里用「字符串动态导入」懒加载（__import__("pcl_launcher.widgets")）=====
+    # PyInstaller 静态分析看不到这种导入 → 必须显式 hidden-import，
+    # 否则桌宠/记忆/提示词/设置（widgets.py）与插件（plugins_panel.py）页面会「加载失败」。
+    "--hidden-import", "pcl_launcher.widgets",
+    "--hidden-import", "pcl_launcher.plugins_panel",
+    "--hidden-import", "pcl_launcher.themes_panel",
+    "--hidden-import", "pcl_launcher.pet_wizard",
+    "--hidden-import", "pcl_launcher.portrait_studio",
+    "--hidden-import", "pcl_launcher.silicon_dialog",
+    "--hidden-import", "pcl_launcher.silicon_ui",
+    "--hidden-import", "pcl_launcher.live2d_preview",
+    "--hidden-import", "pcl_launcher.safety",
+    "--hidden-import", "pcl_launcher.touch_editor",
+    "--hidden-import", "tool.touch_areas",
     # ===== 排除：桌宠本体的重依赖（走子进程 venv，绝不进壳）=====
     "--exclude-module", "torch",
     "--exclude-module", "torchvision",
@@ -124,6 +138,55 @@ subprocess.run(cmd, check=True)
 
 out_dir = os.path.join("dist", "AIpet-Murasame")
 
+# ============ 1.5 补齐 PyInstaller 收集不全的第三方包（cv2 等）============
+# 背景：构建机上若 cv2 导入异常（"recursion is detected during loading of cv2"），
+# PyInstaller 只抄到 cv2/__init__.py 而漏掉 cv2.pyd 与子包 →
+# 绿色版/安装版双击启动器立刻 ImportError: recursion detected（装完用不了）。
+# 这里从健康的运行环境把整个 cv2 包原样同步进 _internal，保证开箱可用。
+def _sync_pkg(name: str, dest_parent: str):
+    srcs = [
+        os.path.join("runtime", "venv", "Lib", "site-packages", name),
+        os.path.join(".venv", "Lib", "site-packages", name),
+    ]
+    src = next((s for s in srcs if os.path.isdir(s)), None)
+    if not src:
+        print(f"[补齐] ⚠ 未找到 {name} 源目录，跳过")
+        return
+    dst = os.path.join(dest_parent, name)
+    n = 0
+    for dp, dns, fns in os.walk(src):
+        dns[:] = [d for d in dns if d != "__pycache__"]
+        rel = os.path.relpath(dp, src)
+        target_dir = dst if rel == "." else os.path.join(dst, rel)
+        os.makedirs(target_dir, exist_ok=True)
+        for fn in fns:
+            if fn.endswith((".pyc", ".pyo")):
+                continue
+            try:
+                shutil.copy2(os.path.join(dp, fn), os.path.join(target_dir, fn))
+                n += 1
+            except Exception:
+                pass
+    print(f"[补齐] {name}: 同步 {n} 个文件 ← {src}")
+
+
+_internal = os.path.join(out_dir, "_internal")
+if os.path.isdir(_internal):
+    if not os.path.exists(os.path.join(_internal, "cv2", "cv2.pyd")):
+        print("[补齐] 检测到 _internal/cv2 缺少 cv2.pyd（PyInstaller 收集失败）→ 从运行环境同步")
+        _sync_pkg("cv2", _internal)
+    else:
+        print("[补齐] _internal/cv2 完整 ✓")
+
+    # ===== 启动器界面自己用到的第三方运行库 =====
+    # 这些不在打包 venv 里（PyInstaller 收集不到），但界面代码会 import →
+    # 缺了就会在界面上弹「No module named 'xxx'」（例如：记忆页微信凭据请求 requests、
+    # 解密凭据 Crypto、图片处理 cv2）。统一从 runtime/venv 同步进 _internal。
+    for _pkg in ("requests", "urllib3", "certifi", "charset_normalizer", "idna", "Crypto"):
+        if os.path.isdir(os.path.join(_internal, _pkg)):
+            continue
+        _sync_pkg(_pkg, _internal)
+
 # ============ 2. 复制完整项目源码/资源到 exe 旁 ============
 print()
 print("=" * 60)
@@ -161,7 +224,7 @@ if files is None:
         "run.py", "run_launcher.py", "run_qq.py",
         "思源黑体Bold.otf", "启动QQ.bat", "启动桌宠.bat",
         "biaoqingbao", "classes", "fgimages", "Live2d", "longtext",
-        "pcl_launcher", "pets", "qq", "reference_voices", "tool",
+        "pcl_launcher", "pets", "qq", "reference_voices", "tool", "场景素材",
     ]
     files = []
     for item in top_items:
@@ -172,6 +235,40 @@ if files is None:
                     files.append(os.path.join(root, fn).replace("\\", "/"))
         elif os.path.exists(item):
             files.append(item)
+
+# ===== 追加：git「未追踪」但需要随包分发的新文件 =====
+# 教训：pcl_launcher/portrait_studio.py、tool/portrait_outfit.py 等新写的模块
+# 未被 git 追踪 → 只按 git ls-files 复制会漏掉 → 安装后启动器/桌宠直接 ModuleNotFoundError。
+_UNTRACKED_SKIP_PREFIX = (
+    "dist/", "build/", "_internal", ".venv/", "tmp/", "models/", "runtime/",
+    "GPT-SoVITS/", "tool/pack/", "data/", "face_shibie/", "__pycache__/",
+    "reference_voices/", "NapCat.Shell.Windows.OneKey/", "F5-TTS_Models/", "场景素材/",
+)
+# 注意：绝不能包含 .pyd / .pyc —— cv2.pyd 等扩展模块漏掉会让安装副本直接起不来
+_UNTRACKED_SKIP_SUFFIX = (".log", ".pyo", ".7z", ".tar", ".spec", ".ps1",
+                          ".exe", ".zip", ".bin", ".pth")
+try:
+    _out = subprocess.run(["git", "ls-files", "--others", "--exclude-standard", "-z"],
+                          capture_output=True, text=True, encoding="utf-8", check=True).stdout
+    _extra = []
+    for _f in _out.split("\0"):
+        if not _f:
+            continue
+        _n = _f.replace("\\", "/")
+        if any(_n.startswith(_pfx) for _pfx in _UNTRACKED_SKIP_PREFIX):
+            continue
+        if _n.lower().endswith(_UNTRACKED_SKIP_SUFFIX):
+            continue
+        if os.path.basename(_n) in _SKIP_FILES or os.path.basename(_n) == "nul":
+            continue
+        if os.path.basename(_n).startswith(("AIpet-Murasame-安装包", "AIpet-Installer", "payload.zip")):
+            continue
+        _extra.append(_f)
+    if _extra:
+        print(f"  [git] 追加未追踪的新文件 {len(_extra)} 个（新模块/资源）")
+        files += _extra
+except Exception as _e:
+    print(f"  [警告] 未追踪文件列表获取失败: {_e}")
 
 copied = 0
 for rel in files:
@@ -194,6 +291,23 @@ for rel in files:
     except Exception as e:
         print(f"  [跳过] {rel}: {e}")
 print(f"  [git] 已复制 {copied} 个文件（已排除 {len(_SKIP_FILES)} 个过时/调试文件）")
+
+# 显式补拷「场景素材」目录（立绘背景场景图；新加目录可能还没纳入 git 追踪）
+try:
+    _scene_src = os.path.join(os.getcwd(), "场景素材")
+    if os.path.isdir(_scene_src):
+        _n = 0
+        for _r, _dirs, _fs in os.walk(_scene_src):
+            _dirs[:] = [d for d in _dirs if d != "__pycache__"]
+            for _f in _fs:
+                _rel = os.path.relpath(os.path.join(_r, _f), os.getcwd())
+                _dst = os.path.join(out_dir, _rel)
+                os.makedirs(os.path.dirname(_dst), exist_ok=True)
+                shutil.copy2(os.path.join(_r, _f), _dst)
+                _n += 1
+        print(f"  [复制] 场景素材/ {_n} 个文件 ✅")
+except Exception as _e:
+    print(f"  [警告] 复制场景素材失败: {_e}")
 
 # ============ 3. 复制被 git 忽略的「模型目录」（语音必需）============
 # 说明：F5-TTS_Models 与 GPT-SoVITS 都在 .gitignore 里，git ls-files 不会复制。
@@ -351,6 +465,53 @@ print("=" * 60)
 print("  绿色版打包完成！")
 print(f"  位置: {out_dir}")
 print()
+# ============ 6. 部署到项目根目录（用户日常就是双击根目录的 exe）============
+# 之前这步是手工做的，容易忘 → 打包后自动把新 exe 与 _internal 同步到根目录。
+try:
+    import filecmp
+    _src_exe = os.path.join(out_dir, "AIpet-Murasame.exe")
+    if os.path.exists(_src_exe):
+        _dst_exe = os.path.join(os.getcwd(), "AIpet-Murasame.exe")
+        try:
+            shutil.copy2(_src_exe, _dst_exe)
+        except PermissionError:
+            # 启动器正在运行 → exe 被占用。Windows 允许重命名运行中的 exe，
+            # 于是「旧 exe 改名为 .old → 拷新 exe」即可，不用让用户先关程序。
+            try:
+                _old = _dst_exe + ".old"
+                if os.path.exists(_old):
+                    os.remove(_old)
+                os.replace(_dst_exe, _old)
+                shutil.copy2(_src_exe, _dst_exe)
+                print("  [部署] 检测到启动器正在运行：旧 exe 已改名 .old，新 exe 已就位 ✅"
+                      "（重启启动器后生效）")
+            except Exception as _e2:
+                print(f"  [部署] ⚠ exe 被占用，未能更新（关掉启动器后重新打包即可）: {_e2}")
+        # _internal 增量同步（exe 与它必须同版本）
+        _src_int = os.path.join(out_dir, "_internal")
+        _dst_int = os.path.join(os.getcwd(), "_internal")
+        if os.path.isdir(_src_int):
+            n = 0
+            for dp, dns, fns in os.walk(_src_int):
+                rel = os.path.relpath(dp, _src_int)
+                td = _dst_int if rel == "." else os.path.join(_dst_int, rel)
+                os.makedirs(td, exist_ok=True)
+                for fn in fns:
+                    sp = os.path.join(dp, fn)
+                    dp2 = os.path.join(td, fn)
+                    try:
+                        if os.path.exists(dp2) and filecmp.cmp(sp, dp2, shallow=True):
+                            continue
+                        shutil.copy2(sp, dp2)
+                        n += 1
+                    except Exception:
+                        pass
+            print(f"  [部署] 根目录 exe 已更新；_internal 同步 {n} 个文件 ✅")
+        else:
+            print("  [部署] 根目录 exe 已更新 ✅（未找到 _internal，跳过）")
+except Exception as _e:
+    print(f"  [部署] ⚠ 同步到根目录失败: {_e}")
+
 print("  目录结构：")
 print(f"    {out_dir}/")
 print(f"    ├── AIpet-Murasame.exe        ← PCL 启动器（双击）")

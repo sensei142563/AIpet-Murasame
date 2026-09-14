@@ -190,17 +190,26 @@ def _time_guard_set(enabled: bool) -> bool:
         return False
 
 
-class PCLPluginSettingsDialog(QDialog):
+from .silicon_dialog import SiliconDialog  # noqa: E402
+
+
+class PCLPluginSettingsDialog(SiliconDialog):
     """插件设置对话框：按 plugin.json 的 settings 声明渲染表单并写回 config.json"""
 
     def __init__(self, meta, parent=None):
         super().__init__(parent)
+        # 去掉标题栏右上角那个点了没反应的「?」帮助按钮（Qt 默认给 QDialog 加）
+        try:
+            self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+        except Exception:
+            pass
+        _title = f"⚙ {meta.get('name', meta.get('id', '插件'))} 设置"
+        super().__init__(_title, parent, width=560, height=620)
+        self.setWindowTitle(_title)
         self._meta = meta
         self._widgets = {}
-        self.setWindowTitle(f"⚙ {meta.get('name', meta.get('id', '插件'))} 设置")
-        self.setMinimumWidth(int(480 * S))
 
-        lay = QVBoxLayout(self)
+        lay = self.content
         lay.setContentsMargins(int(20 * S), int(16 * S), int(20 * S), int(16 * S))
         lay.setSpacing(int(10 * S))
 
@@ -282,25 +291,47 @@ class PCLPluginSettingsDialog(QDialog):
             """)
         btn_cancel.setStyleSheet(btn_cancel.styleSheet() +
                                 f"QPushButton {{ background: {Gray4.name()}; }}")
-        btn_save.clicked.connect(self._save)
+        btn_save.clicked.connect(self._on_save_clicked)
         btn_cancel.clicked.connect(self.reject)
         btns.addStretch()
         btns.addWidget(btn_save)
         btns.addWidget(btn_cancel)
         lay.addLayout(btns)
 
-        # 人脸识别插件：参数在对话框内调整；照片库请到顶部「人脸」页管理（弹窗内嵌在大窗口下不稳定）
+        # 人脸识别插件：照片库直接内嵌在本设置对话框里（原来的顶部「人脸」目录已移除）
         if meta.get("id") == "face":
-            info = QLabel("📷 人脸照片（主人/其他人）的添加与删除请到顶部「人脸」页面操作；"
-                          "此处仅调节识别参数。")
+            info = QLabel("📷 主人 / 其他人的照片在这里添加、删除；下面是识别参数。")
             info.setWordWrap(True)
             info.setStyleSheet(f"color: {Color3.name()}; font-size: {int(12*S)}px;"
                                f"background: {Color6.name()}; border-radius: {int(4*S)}px;"
                                f"padding: {int(8*S)}px;")
             lay.addWidget(info)
+            # 内嵌照片管理面板（复用原「人脸」页的控件：添加主人/添加其他人/删除）
+            try:
+                from .widgets import PCLFaceManager
+                fm = PCLFaceManager(self)
+                fm.setMinimumHeight(300)
+                lay.addWidget(fm)
+                self._face_manager = fm
+            except Exception as e:
+                print(f"[Plugins] 内嵌人脸管理面板失败: {e}")
+                err = QLabel("（人脸管理面板加载失败，可在插件目录用脚本管理照片）")
+                err.setWordWrap(True)
+                lay.addWidget(err)
             self.setMinimumWidth(int(480 * S))
         else:
             self.setMinimumWidth(int(480 * S))
+
+    def _on_save_clicked(self):
+        """保存按钮：写配置成功后关闭对话框并标记为「已保存」(Accepted)"""
+        try:
+            self._save()
+        except Exception as e:
+            print(f"[Plugins] 保存失败: {e}")
+        try:
+            self.accept()
+        except Exception:
+            pass
 
     def _save(self):
         cfg = _load_config()
@@ -408,7 +439,7 @@ class PCLPluginsPanel(QScrollArea):
         self._layout.addWidget(self._list_widget)
 
         path_lbl = QLabel(f"插件目录：{_plugins_dir()}")
-        path_lbl.setStyleSheet(f"color: {Gray3.name()}; font-size: {int(11*S)}px;")
+        path_lbl.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(11*S)}px;")
         self._layout.addWidget(path_lbl)
         self._layout.addStretch()
 
@@ -519,12 +550,12 @@ class PCLPluginsPanel(QScrollArea):
         left.addWidget(name_lbl)
         desc_lbl = QLabel(meta.get("desc", ""))
         desc_lbl.setWordWrap(True)
-        desc_lbl.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(12*S)}px; background: transparent; border: none;")
+        desc_lbl.setStyleSheet(f"color: {Color1.name()}; font-size: {int(12*S)}px; background: transparent; border: none;")
         left.addWidget(desc_lbl)
         key_hint = meta.get("config_key") or ("进程/任务" if meta.get("kind") == "tool" else "")
         if key_hint:
             k = QLabel(f"配置键：{key_hint}")
-            k.setStyleSheet(f"color: {Gray3.name()}; font-size: {int(10*S)}px; background: transparent; border: none;")
+            k.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(10*S)}px; background: transparent; border: none;")
             left.addWidget(k)
         row.addLayout(left, 1)
 
@@ -532,6 +563,11 @@ class PCLPluginsPanel(QScrollArea):
         right = QVBoxLayout()
         right.setSpacing(int(6*S))
         chk = QCheckBox("启用")
+        try:
+            from .silicon_ui import enabled_check_qss
+            chk.setStyleSheet(enabled_check_qss(Color1.name()))
+        except Exception:
+            pass
         chk.setChecked(is_enabled(meta, cfg))
         chk.setStyleSheet(f"QCheckBox {{ color: {Color1.name()}; font-size: {int(13*S)}px; "
                           f"font-family: 'Microsoft YaHei'; background: transparent; }}"
@@ -567,8 +603,10 @@ class PCLPluginsPanel(QScrollArea):
 
     def _open_settings(self, meta):
         dlg = PCLPluginSettingsDialog(meta, self)
-        dlg.exec_()
-        self._reload()
+        accepted = dlg.exec_()
+        # ⚡ 只有真正保存过才重建整个插件列表；「取消」直接返回（原来无条件 _reload 会卡一下）
+        if accepted == QDialog.Accepted:
+            self._reload()
 
     # ---- 动作 ----
     def _on_toggle(self, meta, state):

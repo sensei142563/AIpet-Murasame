@@ -18,6 +18,7 @@ def now_time():
 ollama_url = get_config("./config.json")["local_api"]["ollama"]
 qwen3_lora_url = get_config("./config.json")["local_api"]["qwen3_lora"]
 gpt_sovits_tts_url = get_config("./config.json")["local_api"]["gpt_sovits_tts"]
+_TTS_HINT_SHOWN = False   # 语音服务未就绪的提示只打一次（防刷屏）
 tts_type = get_config("./config.json")["tts_type"]
 
 
@@ -226,12 +227,32 @@ def ollama_qwen3_emotion(history: list):
     from pets.pet_registry import get_pet_config
     pet_cfg = get_pet_config()
     pet_name = pet_cfg.get("name", "丛雨")
+    vcfg = pet_cfg.get("voices", {}) or {}
     labels = '，'.join(emotion_dirs) if emotion_dirs else '平静'
     if emotion_dirs:
         example = f'如["{emotion_dirs[0]}", "{emotion_dirs[1] if len(emotion_dirs) > 1 else emotion_dirs[0]}"]'
     else:
         example = '如["平静", "平静"]'
-    identity = f"你是一个情感分析助手，负责分析“{pet_name}”说的话的情感。你现在需要将用户输入的句子进行分析，综合用户的输入和{pet_name}的输出返回一个{pet_name}最新一句话每个分句情感的标签。你只可以选择的标签有{labels}。你需要直接返回一个情感列表，不需要其他任何内容。{example}/no_think"
+
+    # 人设语气 + 各标签适用场景：让语音按人设来（活泼元气），而不是默认冷淡的「平静」
+    persona = vcfg.get("emotion_persona") or \
+        f"{pet_name}性格活泼、元气、爱撒娇，说话起伏丰富，很少一本正经地平静。"
+    hints = vcfg.get("emotion_hints") or {}
+    if hints:
+        guide = "；".join(f"{k} = {v}" for k, v in hints.items()
+                          if not emotion_dirs or k in emotion_dirs)
+    else:
+        guide = "越有情绪起伏越好，只有明显平静/认真的句子才用「平静」"
+    identity = (
+        f"你是一个情感分析助手，负责分析“{pet_name}”说的话的情感。"
+        f"人设语气：{persona}"
+        f"可选的标签只有：{labels}。各标签适用场景：{guide}。"
+        f"你需要综合用户的输入和{pet_name}的输出，为{pet_name}最新一句话的每个分句"
+        f"各选一个最贴合的情绪标签（分句数 = 标签数，顺序一一对应）。"
+        f"重要：按人设优先挑有情绪起伏的标签，不要把「平静」当默认——"
+        f"只有句子本身确实平静/严肃时才用它。"
+        f"你需要直接返回一个情感列表，不需要其他任何内容。{example}/no_think"
+    )
     history_l = history[1:]
     prompt = {"model": "qwen3:14b",
               "prompt": f"{identity}   历史：{history_l}",
@@ -252,16 +273,37 @@ def ollama_qwen25vl(image_path: str):
     return reply
 
 def _gpt_sovits_service_ready(timeout: float = 1.0) -> bool:
-    """探测 GPT-SoVITS HTTP 服务是否可用（避免连接失败刷 traceback）"""
+    """探测 TTS 服务是否「真的能用」——注意有两层：
+
+      本机 api.py 代理（配置里的 gpt_sovits_tts，如 http://localhost:28565/tts）
+        ↓ 转发
+      GPT-SoVITS 本体（local 模式固定 127.0.0.1:9880）
+
+    只探测代理会误判：代理一直在，但本体没启动/还在加载模型时，
+    请求会返回 "TTS upstream 请求失败: Cannot connect to host localhost:9880"
+    并刷一堆 ERROR 日志（用户实际遇到的就是这个）。
+    所以 local 模式下两个端口都要通才算就绪。
+    """
     try:
         import socket
         from urllib.parse import urlparse
+
+        def _port_open(host: str, port: int) -> bool:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(timeout)
+                return s.connect_ex((host, port)) == 0
+
         u = urlparse(gpt_sovits_tts_url)
-        host = u.hostname or "127.0.0.1"
-        port = u.port or 9880
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(timeout)
-            return s.connect_ex((host, port)) == 0
+        if not _port_open(u.hostname or "127.0.0.1", u.port or 9880):
+            return False
+        # local 模式：本体端口也要通（cloud 模式在本机没有 9880，跳过该检查）
+        try:
+            from tool.config import get_config as _gc
+            if str(_gc("./config.json").get("tts_type") or "local").lower() == "local":
+                return _port_open("127.0.0.1", 9880)
+        except Exception:
+            pass
+        return True
     except Exception:
         return False
 
@@ -296,12 +338,22 @@ def gpt_sovits_tts(sentence: str, emotion: str, aux_ref_audio_paths: list = []):
         print(f"[{now_time()}] [gpt-sovits-tts] ⚠ 空文本，跳过语音合成")
         return None
 
-    # GPT-SoVITS 服务不可用（未启动 / 绿色版未打包整合包）→ 优雅跳过，不崩溃
+    # GPT-SoVITS 服务不可用（未启动 / 模型还在加载 / 绿色版未打包整合包）→ 优雅跳过
     if not _gpt_sovits_service_ready():
-        print(f"[{now_time()}] [gpt-sovits-tts] ⚠ GPT-SoVITS 服务不可用（{gpt_sovits_tts_url}），跳过语音合成")
+        # 只提示一次（每句都刷会淹没有用日志）；提示写清"怎么恢复"
+        global _TTS_HINT_SHOWN
+        if not _TTS_HINT_SHOWN:
+            _TTS_HINT_SHOWN = True
+            print(f"[{now_time()}] [gpt-sovits-tts] ⚠ GPT-SoVITS 未就绪（{gpt_sovits_tts_url} → localhost:9880），"
+                  f"本次及后续语音将跳过（只说话不出声，不影响聊天）。")
+            print(f"[{now_time()}] [gpt-sovits-tts]    · 未启动：在启动器启动桌宠时会自动拉起（GPT-SoVITS 整合包目录）")
+            print(f"[{now_time()}] [gpt-sovits-tts]    · 正在加载：模型加载约需 1~2 分钟，就绪后自动恢复发声")
+            print(f"[{now_time()}] [gpt-sovits-tts]    · 想关掉语音合成/提示：设置 → 语音合成与识别 → 关闭")
         return None
 
     # 情感目录从角色语音包动态解析
+    from pets.pet_registry import get_pet_config
+    pet_cfg = get_pet_config()
     voices_dir = get_short_voices_dir()
     emotion_dirs = get_short_emotion_dirs()
     # 情感不在可用列表中 → 回退到「平静」（若存在）或第一个可用情感
@@ -309,7 +361,18 @@ def gpt_sovits_tts(sentence: str, emotion: str, aux_ref_audio_paths: list = []):
         print(f"[{now_time()}] [gpt-sovits-tts] ⚠ 当前桌宠无短文本语音包，跳过语音合成")
         return None
     if emotion not in emotion_dirs:
-        emotion = "平静" if "平静" in emotion_dirs else emotion_dirs[0]
+        # 情绪标签拿不到/不合法时的兜底：按人设选「默认情绪」（活泼角色=高兴），
+        # 而不是一律回落到「平静」——那正是"语音听着冷淡、没起伏"的根因
+        _default = str((pet_cfg.get("voices", {}) or {}).get("default_emotion") or "").strip()
+        if _default and _default in emotion_dirs:
+            emotion = _default
+        elif "高兴" in emotion_dirs:
+            emotion = "高兴"
+        elif "平静" in emotion_dirs:
+            emotion = "平静"
+        else:
+            emotion = emotion_dirs[0]
+        print(f"[gpt-sovits-tts] ℹ️ 情绪标签不可用 → 按人设使用「{emotion}」参考音频")
 
     emotion_path = os.path.join(voices_dir, emotion)
     if not os.path.isdir(emotion_path):
@@ -334,6 +397,17 @@ def gpt_sovits_tts(sentence: str, emotion: str, aux_ref_audio_paths: list = []):
         path = f"/root/reference_voices/{emotion}/{audio[0]}"
     with open(os.path.join(emotion_path, "asr.txt"), "r", encoding="utf-8") as f:
         ref = f.read().strip()
+    # 语速按情绪微调（活泼人设：高兴/着急说得快一点更有元气；害羞稍慢）
+    # 角色包 pet.json 的 voices.emotion_speed 可覆盖默认值
+    _SPEED_DEFAULT = {"高兴": 1.08, "着急": 1.10, "惊讶": 1.06,
+                      "生气": 1.05, "害羞": 0.96, "平静": 1.0}
+    try:
+        _speed_map = dict(_SPEED_DEFAULT)
+        _speed_map.update({str(k): float(v) for k, v in
+                           ((pet_cfg.get("voices", {}) or {}).get("emotion_speed") or {}).items()})
+    except Exception:
+        _speed_map = _SPEED_DEFAULT
+    _speed = float(_speed_map.get(emotion, 1.0))
     params = {
         "text": sentence,
         "text_lang": "ja",
@@ -348,7 +422,7 @@ def gpt_sovits_tts(sentence: str, emotion: str, aux_ref_audio_paths: list = []):
         "batch_size": 1,
         "batch_threshold": 0.75,
         "split_bucket": True,
-        "speed_factor": 1.0,
+        "speed_factor": _speed,
         "streaming_mode": False,
         "seed": -1,
         "parallel_infer": True,

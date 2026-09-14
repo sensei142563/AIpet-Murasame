@@ -31,6 +31,13 @@ class LongTextVoice:
     def __init__(self, ref_audio=None, ref_text=None):
         self.ref_audio = ref_audio or DEFAULT_REF_AUDIO
         self.ref_text = ref_text or DEFAULT_REF_TEXT
+        # 语速：默认略快（丛雨是活泼元气的角色，语速太慢会显得冷淡）
+        # 角色包 pet.json 里 voices.long_speed 可覆盖
+        try:
+            from pets.pet_registry import get_pet_config
+            self._speed = float((get_pet_config().get("voices", {}) or {}).get("long_speed", 1.06))
+        except Exception:
+            self._speed = 1.06
 
     def is_available(self) -> bool:
         """检查 F5-TTS 服务是否在线"""
@@ -74,7 +81,7 @@ class LongTextVoice:
                     "text": msg.strip(),
                     "ref_audio": self.ref_audio,
                     "ref_text": self.ref_text,
-                    "speed": 1.0,
+                    "speed": self._speed,
                 }
                 resp = requests.post(
                     F5TTS_URL,

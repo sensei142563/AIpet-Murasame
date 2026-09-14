@@ -1,4 +1,14 @@
+import os
 import threading
+
+# HF 模型缓存统一放到项目内（D 盘），不放 C 盘用户目录：
+# ① C 盘空间紧张；② C 盘清理工具会把用户目录里的模型当"缓存"删掉，
+#    曾导致 large-v3 约 3GB 权重被清空、语音识别失效（model.bin 无法打开）。
+try:
+    _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    os.environ.setdefault("HF_HOME", os.path.join(_BASE, "models", "hf"))
+except Exception:
+    pass
 
 from faster_whisper import WhisperModel
 from tool.config import get_config

@@ -5,7 +5,8 @@
 - themes/<id>/theme.json 定义一套完整色板（含全部 Color*/Gray*/Red*/Green*/preview_bg/accent）
 - 启动时按 config.json 的 ui_theme（默认 classic）加载色板，缺省字段回退内置经典值
 - THEME_COLORS 提供 6 套强调色（blue/red/green/gold/dark/crimson），可随时切换
-- 控件在构建时读取本模块颜色对象 → 切换主题后需重启启动器生效（应用主题会自动重启）
+- 控件在构建时读取本模块颜色对象 → 切换主题时用 apply_theme_live() 原地改值 +
+  重建外壳/页面样式，**无需重启启动器**（apply_accent_live() 同理切换强调色）
 """
 
 from PyQt5.QtGui import QColor
@@ -126,8 +127,61 @@ def _q(value):
         return QColor("#808080")
 
 
+def _derive_from_base(pal: dict) -> dict:
+    """按「启动器底色」(config.ui_bg_color) 派生整套界面颜色。
+
+    目的：用户改底色时，按钮旁边的白色区域（页面/面板/卡片/输入框底色）与
+    所有文字颜色一起跟着变，并且自动保证对比度（底深→浅字，底浅→深字）。
+    未设置 ui_bg_color 时原样返回（保持主题自带配色）。
+    """
+    try:
+        import json as _json
+        cfg_path = os.path.join(_app_base_dir(), "config.json")
+        with open(cfg_path, "r", encoding="utf-8") as f:
+            cfg = _json.load(f)
+        base_hex = str(cfg.get("ui_bg_color") or "").strip()
+        if not base_hex:
+            return pal
+        b = QColor(base_hex)
+        if not b.isValid():
+            return pal
+        dark = b.lightness() < 140
+        p2 = dict(pal)
+        # 窗口底色 / 面板面（半透明，壁纸仍可透出）
+        p2["Color8"] = f"rgba({b.red()},{b.green()},{b.blue()},215)"
+        # 卡片、输入框、次级面：朝白/黑插值（纯黑用 lighter 是无效的 → 会看不出层次）
+        def _mix(c: QColor, k: float) -> QColor:
+            """k>0 往白里混，k<0 往黑里混"""
+            if k >= 0:
+                return QColor(int(c.red() + (255 - c.red()) * k),
+                              int(c.green() + (255 - c.green()) * k),
+                              int(c.blue() + (255 - c.blue()) * k))
+            k = -k
+            return QColor(int(c.red() * (1 - k)), int(c.green() * (1 - k)),
+                          int(c.blue() * (1 - k)))
+        if dark:
+            face, face2, border = _mix(b, 0.10), _mix(b, 0.17), _mix(b, 0.30)
+        else:
+            face, face2, border = _mix(b, -0.05), _mix(b, -0.10), _mix(b, -0.20)
+        p2["Color6"] = face.name()
+        p2["Color7"] = face2.name()
+        p2["Color5"] = border.name()
+        # 文字：深底浅字 / 浅底深字
+        p2["Color1"] = "#eef1f7" if dark else "#1f232b"
+        p2["Gray1"] = "#ffffff" if dark else "#000000"
+        p2["Gray2"] = "#b9c2d6" if dark else "#5a5f6b"
+        p2["Gray3"] = "#98a2b8" if dark else "#6d7280"
+        p2["preview_bg"] = (b.darker(120) if dark else b.lighter(104)).name()
+        print(f"[Colors] 已按启动器底色派生界面配色: 底={base_hex}"
+              f" 文字={'浅' if dark else '深'} 面={face.name()}")
+        return p2
+    except Exception as e:
+        print(f"[Colors] ⚠ 底色派生失败（用主题配色）: {e}")
+        return pal
+
+
 # ===== 当前主题色板（启动时加载一次）=====
-_PAL = _load_theme_palette(current_theme_id())
+_PAL = _derive_from_base(_load_theme_palette(current_theme_id()))
 ACCENT_ID = str(_PAL.get("accent", "blue"))
 
 # ===== 基础色板 =====
@@ -165,8 +219,9 @@ PREVIEW_BG = _q(_PAL.get("preview_bg", "#eaf2fe"))
 # ===== 6 套强调色（accent）=====
 THEME_COLORS = {
     "blue": {
-        "title_start": "#1370f3", "title_end": "#4890f5",
-        "btn_start": "#4890f5", "btn_end": "#1370f3",
+        # Silicon 现代蓝（新界面主色）：深→亮渐变，胶囊/高亮统一用它
+        "title_start": "#2f6fd0", "title_end": "#4c8dff",
+        "btn_start": "#4c8dff", "btn_end": "#2f6fd0",
         "sidebar_bg": QColor(241, 255, 255, 242),
     },
     "red": {
@@ -309,3 +364,77 @@ def nav_btn_qss() -> str:
 
 # ===== 缩放系数 =====
 S = 1.0  # 基础缩放（可根据屏幕调整）
+
+
+# ══════════════════ 运行时换肤（切换主题/强调色无需重启启动器）══════════════════
+# 各界面模块都是 `from .colors import *`：拿到的是**同一批 QColor 对象**。
+# 所以原地 setRgba 改值 → 所有持有者（含 SF()/PREVIEW_BG/按钮渐变）立刻看到新颜色；
+# 已经生成的 QSS 字符串由调用方重建控件刷新（外壳重设样式 + 当前页面重建）。
+_RUNTIME_KEYS = (
+    "Color1", "Color2", "Color3", "Color4", "Color5", "Color6", "Color7", "Color8",
+    "Gray1", "Gray2", "Gray3", "Gray4", "Gray5", "Gray6", "Gray7", "Gray8",
+    "RedBack", "RedLight", "RedDark", "GreenLight", "GreenDark", "PREVIEW_BG",
+)
+
+
+def _apply_palette_inplace(pal: dict) -> None:
+    """把新色板写进已存在的颜色对象（原地改值，不换对象 → 全局生效）"""
+    g = globals()
+    for key in _RUNTIME_KEYS:
+        if key not in pal:
+            continue
+        obj = g.get(key)
+        if not isinstance(obj, QColor):
+            continue
+        try:
+            obj.setRgba(_q(pal[key]).rgba())
+        except Exception:
+            pass
+
+
+def accent_hex(accent_key: str = None) -> str:
+    """强调色主色（accent_key 为空时用当前强调色）"""
+    key = str(accent_key or ACCENT_ID or "blue")
+    return str(THEME_COLORS.get(key, {}).get("title_start", "#4c8dff"))
+
+
+def apply_theme_live(theme_id: str) -> dict:
+    """实时切换主题（不重启启动器）：重载色板 → 按启动器底色派生 → 原地更新颜色对象。
+
+    返回新色板（含 accent）。调用方随后重建外壳样式与当前页面。
+    """
+    global _PAL, ACCENT_ID
+    theme_id = str(theme_id or "").strip() or "silicon"
+    pal = _derive_from_base(_load_theme_palette(theme_id))
+    _apply_palette_inplace(pal)
+    _PAL = pal
+    ACCENT_ID = str(pal.get("accent", "blue") or "blue")
+    print(f"[Colors] 主题已实时切换 → {theme_id}（强调色 {ACCENT_ID}）")
+    return pal
+
+
+def apply_accent_live(accent_key: str) -> str:
+    """实时切换强调色（主题色）：更新 _PAL/ACCENT_ID，并写回当前主题的 theme.json。"""
+    global ACCENT_ID
+    key = str(accent_key or "").strip()
+    if key not in THEME_COLORS:
+        return accent_hex()
+    ACCENT_ID = key
+    try:
+        _PAL["accent"] = key
+    except Exception:
+        pass
+    try:
+        pj = os.path.join(_current_theme_dir(), "theme.json")
+        if os.path.isfile(pj):
+            with open(pj, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            data["accent"] = key
+            tmp = pj + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, pj)
+    except Exception as e:
+        print(f"[Colors] ⚠ 强调色写回主题失败: {e}")
+    print(f"[Colors] 强调色已实时切换 → {key} ({accent_hex(key)})")
+    return accent_hex(key)
