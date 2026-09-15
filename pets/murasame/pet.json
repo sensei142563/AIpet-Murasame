@@ -1,103 +1,447 @@
 {
-  "id": "murasame",
-  "name": "丛雨",
-  "display_name": "丛雨ムラサメ",
-  "intro": "寄宿在神刀丛雨丸中的少女刀魂，活了五百多年",
-  "avatar": "avatar.png",
-  "prompt": {
-    "short": "prompt.txt",
-    "long": "longtext_prompt.txt"
+ "id": "murasame",
+ "name": "丛雨",
+ "display_name": "丛雨ムラサメ",
+ "intro": "寄宿在神刀丛雨丸中的少女刀魂，活了五百多年",
+ "avatar": "avatar.png",
+ "prompt": {
+  "short": "prompt.txt",
+  "long": "longtext_prompt.txt"
+ },
+ "translate_rules": "你是一个翻译助手，负责将用户输入的中文翻译成日文。要求：要将中文的\"本座\"翻译为\"吾輩（わがはい）\"；将\"主人\"翻译为\"ご主人（ごしゅじん）\"；将\"丛雨\"翻译为\"ムラサメ\"；\"小雨\"则是丛雨的昵称，翻译为\"ムラサメちゃん\"。且日文要有强烈的古日语风格。你只需要返回翻译即可，不需要对其中的日文汉字进行注音。给你提供的格式是[\"句子1\", \"句子2\", \"句子3\", .....]，必须严格按照原格式，输出一个json列表，逐句翻译。",
+ "model": {
+  "default": "live2d",
+  "has_live2d": true,
+  "has_fgimages": true,
+  "fgimages_prefix": "ムラサメ",
+  "fgimages_sets": [
+   "a",
+   "b"
+  ],
+  "live2d_dir": "live2d/",
+  "live2d_scale": 1.0,
+  "live2d_offset_x": 0.0,
+  "live2d_offset_y": 0.0,
+  "live2d_window_ratio": 0.42,
+  "live2d_font_scale": 0.35,
+  "live2d_window_height_ratio": 0.85,
+  "default_expression": "",
+  "emotions": {
+   "高兴": [
+    "exp6.exp3.json"
+   ],
+   "微笑": [
+    "exp1.exp3.json"
+   ],
+   "好奇": [],
+   "平静": [],
+   "难过": [
+    "exp2.exp3.json"
+   ],
+   "伤心": [
+    "exp2.exp3.json"
+   ],
+   "委屈": [
+    "exp2.exp3.json"
+   ],
+   "生气": [
+    "exp5.exp3.json"
+   ],
+   "吐槽": [
+    "exp5.exp3.json"
+   ],
+   "阴沉": [
+    "exp3.exp3.json"
+   ],
+   "威胁": [
+    "exp4.exp3.json"
+   ],
+   "害羞": [
+    "exp6.exp3.json"
+   ],
+   "脸红": [
+    "exp6.exp3.json"
+   ],
+   "可爱": [
+    "exp6.exp3.json"
+   ],
+   "睡觉": [
+    "exp7.exp3.json"
+   ]
   },
-  "translate_rules": "你是一个翻译助手，负责将用户输入的中文翻译成日文。要求：要将中文的\"本座\"翻译为\"吾輩（わがはい）\"；将\"主人\"翻译为\"ご主人（ごしゅじん）\"；将\"丛雨\"翻译为\"ムラサメ\"；\"小雨\"则是丛雨的昵称，翻译为\"ムラサメちゃん\"。且日文要有强烈的古日语风格。你只需要返回翻译即可，不需要对其中的日文汉字进行注音。给你提供的格式是[\"句子1\", \"句子2\", \"句子3\", .....]，必须严格按照原格式，输出一个json列表，逐句翻译。",
-  "model": {
-    "default": "2d",
-    "has_live2d": true,
-    "has_fgimages": true,
-    "fgimages_prefix": "ムラサメ",
-    "fgimages_sets": [
-      "a",
-      "b"
-    ],
-    "live2d_dir": "live2d/",
-    "live2d_scale": 1.0,
-    "live2d_offset_x": 0.0,
-    "live2d_offset_y": 0.0,
-    "live2d_window_ratio": 0.42,
-    "live2d_font_scale": 0.35,
-    "live2d_window_height_ratio": 0.85,
-    "default_expression": "",
-    "emotions": {
-      "高兴": ["exp6.exp3.json"],
-      "微笑": ["exp1.exp3.json"],
-      "好奇": [],
-      "平静": [],
-      "难过": ["exp2.exp3.json"],
-      "伤心": ["exp2.exp3.json"],
-      "委屈": ["exp2.exp3.json"],
-      "生气": ["exp5.exp3.json"],
-      "吐槽": ["exp5.exp3.json"],
-      "阴沉": ["exp3.exp3.json"],
-      "威胁": ["exp4.exp3.json"],
-      "害羞": ["exp6.exp3.json"],
-      "脸红": ["exp6.exp3.json"],
-      "可爱": ["exp6.exp3.json"],
-      "睡觉": ["exp7.exp3.json"]
-    },
-    "motions": {
-      "高兴": ["motion02.motion3.json"],
-      "害羞": ["motion04.motion3.json"],
-      "可爱": ["motion07.motion3.json"],
-      "生气": ["motion10.motion3.json"],
-      "吐槽": ["motion10.motion3.json"],
-      "难过": ["motion09.motion3.json"],
-      "伤心": ["motion09.motion3.json"],
-      "委屈": ["motion09.motion3.json"],
-      "认真": ["motion05.motion3.json"],
-      "说教": ["motion08.motion3.json"],
-      "得意": ["motion12.motion3.json"],
-      "调侃": ["motion11.motion3.json"],
-      "疑惑": ["motion06.motion3.json"],
-      "好奇": ["motion06.motion3.json"],
-      "惊讶": ["motion06.motion3.json"],
-      "平静": ["motion03.motion3.json"]
-    }
-  },
-  "languages": {
-    "primary": "ja",
-    "secondary": "zh",
-    "dialog_language": "zh"
-  },
-  "voices": {
-    "short_emotions": [
-      "高兴",
-      "害羞",
-      "惊讶",
-      "平静",
-      "生气",
-      "着急"
-    ],
-    "short_ref_dir": "voices/short/",
-    "long_ref_audio": "voices/long/953244.wav",
-    "long_ref_text": "能和老师在一起，我真的，好高兴！"
-  },
-  "sticker": {
-    "dir": "biaoqingbao/"
-  },
-  "memory": {
-    "isolated": true,
-    "dir": "memory/"
-  },
-  "capabilities": {
-    "chat": true,
-    "short_tts": true,
-    "long_tts": true,
-    "screen_vision": true,
-    "camera_vision": true,
-    "face_recognition": true,
-    "qq": true
-  },
-  "interaction": {
-    "text_offset_x": -40,
-    "text_offset_y": 60
+  "motions": {
+   "高兴": [
+    "motion02.motion3.json"
+   ],
+   "害羞": [
+    "motion04.motion3.json"
+   ],
+   "可爱": [
+    "motion07.motion3.json"
+   ],
+   "生气": [
+    "motion10.motion3.json"
+   ],
+   "吐槽": [
+    "motion10.motion3.json"
+   ],
+   "难过": [
+    "motion09.motion3.json"
+   ],
+   "伤心": [
+    "motion09.motion3.json"
+   ],
+   "委屈": [
+    "motion09.motion3.json"
+   ],
+   "认真": [
+    "motion05.motion3.json"
+   ],
+   "说教": [
+    "motion08.motion3.json"
+   ],
+   "得意": [
+    "motion12.motion3.json"
+   ],
+   "调侃": [
+    "motion11.motion3.json"
+   ],
+   "疑惑": [
+    "motion06.motion3.json"
+   ],
+   "好奇": [
+    "motion06.motion3.json"
+   ],
+   "惊讶": [
+    "motion06.motion3.json"
+   ],
+   "平静": [
+    "motion03.motion3.json"
+   ]
   }
+ },
+ "languages": {
+  "primary": "ja",
+  "secondary": "zh",
+  "dialog_language": "zh"
+ },
+ "voices": {
+  "short_emotions": [
+   "高兴",
+   "害羞",
+   "惊讶",
+   "平静",
+   "生气",
+   "着急"
+  ],
+  "short_ref_dir": "voices/short/",
+  "long_ref_audio": "voices/long/953244.wav",
+  "long_ref_text": "能和老师在一起，我真的，好高兴！",
+  "emotion_persona": "丛雨性格天真、活泼、孩子气，爱撒娇也爱小小地嘴硬；说话起伏大、元气十足，很少一本正经地平静。",
+  "emotion_hints": {
+   "高兴": "开心、兴奋、被夸、撒娇得逞、开怀——最常用",
+   "害羞": "被夸到、被逗弄、脸红、羞答答、嘴硬心虚",
+   "惊讶": "意外、被吓了一跳、突然得知、没想到",
+   "生气": "佯怒、吃醋、不服气、被惹到、闹别扭",
+   "着急": "催促、担心、急切、撒娇式抱怨、手足无措",
+   "平静": "只有真的在认真叙述/内心平静时才用（尽量少用，绝不要当默认）"
+  },
+  "emotion_speed": {
+   "高兴": 1.08,
+   "着急": 1.1,
+   "惊讶": 1.06,
+   "生气": 1.05,
+   "害羞": 0.96,
+   "平静": 1.0
+  },
+  "long_speed": 1.06,
+  "default_emotion": "高兴"
+ },
+ "sticker": {
+  "dir": "biaoqingbao/"
+ },
+ "memory": {
+  "isolated": true,
+  "dir": "memory/"
+ },
+ "capabilities": {
+  "chat": true,
+  "short_tts": true,
+  "long_tts": true,
+  "screen_vision": true,
+  "camera_vision": true,
+  "face_recognition": true,
+  "qq": true
+ },
+ "interaction": {
+  "text_offset_x": -40,
+  "text_offset_y": 60,
+  "window_pos": [
+   1411,
+   98
+  ]
+ },
+ "touch": {
+  "areas": {
+   "head": [
+    0.3996,
+    0.01,
+    0.2398,
+    0.1849
+   ],
+   "chest": [
+    0.4035,
+    0.2,
+    0.2384,
+    0.0923
+   ],
+   "belly": [
+    0.3767,
+    0.386,
+    0.2551,
+    0.08
+   ],
+   "privates": [
+    0.3872,
+    0.4656,
+    0.26,
+    0.07
+   ],
+   "thigh_l": [
+    0.3638,
+    0.5386,
+    0.1435,
+    0.1519
+   ],
+   "thigh_r": [
+    0.5728,
+    0.5375,
+    0.1284,
+    0.1565
+   ],
+   "shin_l": [
+    0.3592,
+    0.6921,
+    0.14,
+    0.2014
+   ],
+   "shin_r": [
+    0.5836,
+    0.6976,
+    0.1292,
+    0.1991
+   ],
+   "foot_l": [
+    0.4041,
+    0.8993,
+    0.14,
+    0.1
+   ],
+   "foot_r": [
+    0.5489,
+    0.9,
+    0.14,
+    0.1
+   ],
+   "arm_l": [
+    0.3083,
+    0.2002,
+    0.0851,
+    0.1696
+   ],
+   "arm_r": [
+    0.6542,
+    0.2048,
+    0.0872,
+    0.1649
+   ],
+   "hand_l": [
+    0.3971,
+    0.3002,
+    0.1175,
+    0.063
+   ],
+   "hand_r": [
+    0.5157,
+    0.2991,
+    0.1284,
+    0.0653
+   ]
+  },
+  "enabled": true,
+  "areas_2d": {
+   "head": [
+    0.3996,
+    0.01,
+    0.2398,
+    0.1849
+   ],
+   "chest": [
+    0.4035,
+    0.2,
+    0.2384,
+    0.0923
+   ],
+   "belly": [
+    0.3767,
+    0.386,
+    0.2551,
+    0.08
+   ],
+   "privates": [
+    0.3872,
+    0.4656,
+    0.26,
+    0.07
+   ],
+   "thigh_l": [
+    0.3638,
+    0.5386,
+    0.1435,
+    0.1519
+   ],
+   "thigh_r": [
+    0.5728,
+    0.5375,
+    0.1284,
+    0.1565
+   ],
+   "shin_l": [
+    0.3592,
+    0.6921,
+    0.14,
+    0.2014
+   ],
+   "shin_r": [
+    0.5836,
+    0.6976,
+    0.1292,
+    0.1991
+   ],
+   "foot_l": [
+    0.4041,
+    0.8993,
+    0.14,
+    0.1
+   ],
+   "foot_r": [
+    0.5489,
+    0.9,
+    0.14,
+    0.1
+   ],
+   "arm_l": [
+    0.3083,
+    0.2002,
+    0.0851,
+    0.1696
+   ],
+   "arm_r": [
+    0.6542,
+    0.2048,
+    0.0872,
+    0.1649
+   ],
+   "hand_l": [
+    0.3971,
+    0.3002,
+    0.1175,
+    0.063
+   ],
+   "hand_r": [
+    0.5157,
+    0.2991,
+    0.1284,
+    0.0653
+   ]
+  },
+  "disabled_2d": [],
+  "areas_live2d": {
+   "head": [
+    0.3996,
+    0.01,
+    0.2398,
+    0.1849
+   ],
+   "chest": [
+    0.4035,
+    0.2,
+    0.2384,
+    0.0923
+   ],
+   "belly": [
+    0.3767,
+    0.386,
+    0.2551,
+    0.08
+   ],
+   "privates": [
+    0.3872,
+    0.4656,
+    0.26,
+    0.07
+   ],
+   "thigh_l": [
+    0.3638,
+    0.5386,
+    0.1435,
+    0.1519
+   ],
+   "thigh_r": [
+    0.5728,
+    0.5375,
+    0.1284,
+    0.1565
+   ],
+   "shin_l": [
+    0.3592,
+    0.6921,
+    0.14,
+    0.2014
+   ],
+   "shin_r": [
+    0.5836,
+    0.6976,
+    0.1292,
+    0.1991
+   ],
+   "foot_l": [
+    0.4041,
+    0.8993,
+    0.14,
+    0.1
+   ],
+   "foot_r": [
+    0.5489,
+    0.9,
+    0.14,
+    0.1
+   ],
+   "arm_l": [
+    0.3083,
+    0.2002,
+    0.0851,
+    0.1696
+   ],
+   "arm_r": [
+    0.6542,
+    0.2048,
+    0.0872,
+    0.1649
+   ],
+   "hand_l": [
+    0.3971,
+    0.3002,
+    0.1175,
+    0.063
+   ],
+   "hand_r": [
+    0.5157,
+    0.2991,
+    0.1284,
+    0.0653
+   ]
+  },
+  "disabled_live2d": []
+ }
 }

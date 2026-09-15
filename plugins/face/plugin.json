@@ -1,0 +1,41 @@
+{
+  "id": "face",
+  "name": "人脸识别",
+  "version": "1.0.0",
+  "kind": "feature",
+  "desc": "桌宠摄像头人脸识别：识别到已登记的人脸时触发对应互动。人脸库在插件设置里管理。",
+  "default": true,
+  "config_key": "face_recognition_enabled",
+  "extra_keys": [],
+  "settings": [
+    {
+      "type": "info",
+      "text": "人脸库（添加主人/其他人、删除）在本页下方直接管理；上面是识别相关参数。"
+    },
+    {
+      "key": "camera_enabled",
+      "label": "常开摄像头识别",
+      "type": "checkbox",
+      "default": true
+    },
+    {
+      "key": "camera_id",
+      "label": "摄像头设备编号",
+      "type": "spin",
+      "min": 0,
+      "max": 5,
+      "step": 1,
+      "default": 0
+    },
+    {
+      "key": "camera_interval",
+      "label": "摄像头识别间隔 (秒)",
+      "type": "spin",
+      "min": 30,
+      "max": 3600,
+      "step": 5,
+      "default": 300
+    }
+  ],
+  "builtin": true
+}

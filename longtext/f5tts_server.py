@@ -73,125 +73,67 @@ def _arabic_to_chinese(text: str) -> str:
 
 
 def _detect_device() -> str:
-    """GPU 优先，CPU 回退；支持环境变量 F5TTS_DEVICE=cpu|cuda|auto 强制指定。
+    """GPU 优先，CPU 回退。
 
-    加固点（A 卡/纯 CPU/半残 CUDA 环境实测）：
-    - torch.cuda.is_available() 在驱动异常/容器环境可能误报 → 真到 .cuda() 才炸；
-    - 因此 is_available() 为真后再做一次真实 CUDA 分配实测，失败立即回退 CPU 并打印原因；
-    - 支持显式指定设备，便于部署方强制 CPU。
+    无 NVIDIA 独显 / A 卡 / 驱动异常等环境，可通过环境变量强制：
+        F5TTS_DEVICE=cpu    （强制 CPU，最稳）
+        F5TTS_DEVICE=cuda   （强制 CUDA）
+        F5TTS_DEVICE=auto   （默认：CUDA 可用即用，否则 CPU）
     """
-    forced = os.environ.get("F5TTS_DEVICE", "").strip().lower()
-    if forced in ("cuda", "cpu"):
-        print(f"[F5TTS] F5TTS_DEVICE={forced}，使用 {forced} 模式")
+    forced = os.environ.get("F5TTS_DEVICE", "auto").strip().lower()
+    if forced in ("cpu", "cuda"):
+        print(f"[F5TTS] 环境变量 F5TTS_DEVICE={forced}，强制使用 {forced.upper()} 模式")
         return forced
     try:
         import torch
         if torch.cuda.is_available():
-            # 实测：真分配一个 CUDA 张量，捕获"误报/半残"环境
+            # 实测可用性：个别环境 is_available() 误报（驱动/容器/远程桌面问题），
+            # 真跑一次张量运算验证，失败立即回退 CPU，避免服务启动即崩
             try:
                 torch.zeros(1, device="cuda")
+                print(f"[F5TTS] 检测到 GPU: {torch.cuda.get_device_name(0)}")
+                return "cuda"
             except Exception as e:
-                print(f"[F5TTS] CUDA 实测失败（{e}），回退 CPU")
-                return "cpu"
-            print(f"[F5TTS] 检测到 GPU: {torch.cuda.get_device_name(0)}")
-            return "cuda"
+                print(f"[F5TTS] CUDA 初始化失败（{e}），自动回退 CPU")
     except Exception as e:
         print(f"[F5TTS] torch 不可用: {e}")
-    # 走 CPU 前诊断：若本机有 NVIDIA GPU 但 torch 是 CPU 构建（或 CUDA 不可用），
-    # 明确提示可装 cu 版 torch 提速（N 卡真机调试 §5：有 5060 却只能 CPU 的典型原因）。
-    if _nvidia_present_but_cpu():
-        print("[F5TTS] ⚠ 检测到 NVIDIA 显卡，但当前 torch 为 CPU 构建/CUDA 不可用。")
-        print("[F5TTS]   如需 GPU 加速，请在项目 runtime\\venv 内安装 cu 版 torch，例如：")
-        print("[F5TTS]     pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128")
-    print("[F5TTS] 使用 CPU 模式（无可用 GPU 时合成较慢属正常）")
+    print("[F5TTS] 使用 CPU 模式（无可用 CUDA；CPU 合成速度较 GPU 慢，属正常现象）")
     return "cpu"
 
 
-def _nvidia_present_but_cpu() -> bool:
-    """本机是否有 NVIDIA GPU（nvidia-smi 探测，不依赖 torch）。"""
-    try:
-        import subprocess as _sp
-        _r = _sp.run(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
-                     capture_output=True, timeout=5, text=True, errors="replace")
-        return _r.returncode == 0 and bool(_r.stdout.strip())
-    except Exception:
-        return False
-
-
-# 模块级标志：回退只执行一次（幂等，避免二次调用时把已替换的 soundfile 误判为"原生可用"）
-_FALLBACK_DONE = False
-
-
 def _install_torchaudio_fallback():
-    """torchaudio 的 soundfile 回退（CPU 部署关键，见 A 卡真机调试 §7）。
-
-    背景：torchaudio 2.11 的 load()/save() 只走 torchcodec（无 sox 回退），
-    而 torchcodec 在 Windows 上需要系统级 FFmpeg shared DLL，未装则加载失败：
-        RuntimeError: Could not load libtorchcodec ...
-    f5-tts 推理第一步 torchaudio.load(ref_audio) 即崩。
-
-    策略（审计 P2 修正）：先实测原生 torchaudio.load 是否能加载一个 wav——能则环境
-    原生 torchcodec 正常（N 卡/完整 FFmpeg），**不替换**，避免无谓改变 N 卡行为；
-    不能（缺 FFmpeg）才把 load/save 换成 soundfile 实现（纯 wav 等价）。
-    只探测一次（_FALLBACK_DONE 缓存），重复调用幂等。
-    """
-    global _FALLBACK_DONE
-    if _FALLBACK_DONE:
-        return
-    _FALLBACK_DONE = True
+    """torchaudio 2.11 起 load/save 必须走 torchcodec，而 torchcodec 在 Windows 上
+    需要系统安装 FFmpeg shared DLL——无 FFmpeg 的机器（CPU 部署常见）会直接报
+    "Could not load libtorchcodec"。本项目所有音频均为 wav，用 soundfile 实现
+    同签名回退，不依赖 FFmpeg。"""
     try:
         import torch
         import torchaudio
-    except Exception:
-        return  # 连 torchaudio 都没有 → 无需回退（f5-tts 本来就起不来）
+        import soundfile as sf
+        import numpy as np
 
-    # 实测原生 load：临时写一个 1s 静音 wav 试读
-    def _native_ok() -> bool:
-        try:
-            import io as _io
-            import soundfile as _sf
-            import numpy as _np
-            import tempfile as _tf
-            fd, p = _tf.mkstemp(suffix=".wav")
-            os.close(fd)
-            try:
-                sr = 16000
-                _sf.write(p, _np.zeros(sr, dtype="float32"), sr)
-                w, sr2 = torchaudio.load(p)
-                return w is not None and sr2 == sr
-            finally:
-                try: os.remove(p)
-                except Exception: pass
-        except Exception:
-            return False
+        if getattr(torchaudio, "_AIpet_sf_fallback", False):
+            return
+        torchaudio._AIpet_sf_fallback = True
 
-    if _native_ok():
-        print("[F5TTS] torchaudio 原生可用（torchcodec 正常），无需 soundfile 回退")
-        return
-
-    # 原生不可用 → 装 soundfile 回退
-    try:
-        import soundfile as _sf
-        import numpy as _np
-
-        def _load_sf(path, *a, **k):
-            data, sr = _sf.read(str(path), dtype="float32", always_2d=True)
+        def _load_sf(path, *args, **kwargs):
+            data, sr = sf.read(str(path), dtype="float32", always_2d=True)
+            # torchaudio.load 约定返回 (channels, samples) 的 float32 Tensor
             return torch.from_numpy(data.T.copy()), int(sr)
 
-        def _save_sf(path, wav, sample_rate, *a, **k):
+        def _save_sf(path, wav, sample_rate, *args, **kwargs):
             arr = wav.detach().cpu().numpy()
             if arr.ndim > 1:
                 arr = arr.T
-            _sf.write(str(path), arr, int(sample_rate))
+            sf.write(str(path), arr, int(sample_rate))
 
         torchaudio.load = _load_sf
         torchaudio.save = _save_sf
-        print("[F5TTS] torchaudio 原生不可用，已启用 soundfile 回退（load/save 走 soundfile）")
+        print("[F5TTS] torchaudio 已切换为 soundfile 回退（无需 FFmpeg）")
     except Exception as e:
-        print(f"[F5TTS] torchaudio 回退安装失败（不影响运行）: {e}")
+        print(f"[F5TTS] torchaudio 回退安装失败（继续尝试原实现）: {e}")
 
 
-# 模块加载时即探测并（如需要）启用回退（先于任何推理/模型加载）
 _install_torchaudio_fallback()
 
 
@@ -274,9 +216,9 @@ def load_model():
                 vocoder_local_path=vocoder_local_path,
             )
         except Exception as e:
-            # cuda 构造失败（半残环境实测）→ 自动降级 CPU 重试一次
+            # CUDA 构造/加载失败（驱动不匹配、显存不足等）→ 自动回退 CPU 重试一次
             if _device == "cuda":
-                print(f"[F5TTS] CUDA 构造失败（{e}），自动降级 CPU 重试...")
+                print(f"[F5TTS] CUDA 构造失败（{e}），自动回退 CPU 重试...")
                 _device = "cpu"
                 _model = F5TTS(
                     model="F5TTS_v1_Base",
@@ -409,6 +351,8 @@ if __name__ == "__main__":
     print(" F5-TTS 服务启动中... 端口 9881")
     print(f" 参考音频: {DEFAULT_REF_AUDIO}")
     print(f" 参考文本: {DEFAULT_REF_TEXT}")
+    if not os.environ.get("F5TTS_DEVICE"):
+        print(" 设备策略: 自动（CUDA 可用则 GPU，否则 CPU；无独显可设环境变量 F5TTS_DEVICE=cpu）")
     print(" 模型将在后台预加载，请稍候...")
     print("=" * 60)
 

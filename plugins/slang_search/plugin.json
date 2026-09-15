@@ -1,0 +1,17 @@
+{
+  "id": "slang_search",
+  "name": "网络用语自动查询",
+  "version": "1.1.0",
+  "kind": "feature",
+  "desc": "群里出现看不懂的网络黑话/梗时自动联网搜索含义再接话（带缓存与限流）。停用后不联网查询。",
+  "default": true,
+  "config_key": "qq_slang_enable",
+  "extra_keys": [],
+  "settings": [
+    {
+      "type": "info",
+      "text": "本插件无数字参数。\n触发：短黑话或「XX什么意思/什么梗」提问；寒暄不查，两次搜索至少间隔 15 秒。\n缓存：data/qq_slang_cache.json（24 小时）。"
+    }
+  ],
+  "builtin": true
+}

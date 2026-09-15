@@ -120,14 +120,28 @@ def cloud_talk(history: list, user_input: str, role: str):
     # 3. 正常对话历史
     messages.extend(filtered_history)
 
+    # 当前时间（精确到分钟）+ 命中天气提问时注入实时天气：
+    # 模型据此如实回答"现在几点/今天天气"，不再靠猜或含糊其辞
     time_ctx = build_time_context()
+    wx_note = ""
+    try:
+        from tool.weather_utils import weather_note_if_asked
+        wx_note = weather_note_if_asked(user_input) or ""
+    except Exception:
+        pass
     if role != "system":
-        user_input = f"[{time_ctx}]{user_input}"
+        if wx_note:
+            user_input = f"[{time_ctx}]\n{wx_note}\n{user_input}"
+        else:
+            user_input = f"[{time_ctx}]{user_input}"
         history.append({"role": role, "content": user_input})
         messages.append({"role": role, "content": user_input})
     else:
         # system 角色消息改为 user 角色发送，避免被 Qwen 忽略
-        messages.append({"role": "user", "content": f"[{time_ctx}]\n{user_input}"})
+        if wx_note:
+            messages.append({"role": "user", "content": f"[{time_ctx}]\n{wx_note}\n{user_input}"})
+        else:
+            messages.append({"role": "user", "content": f"[{time_ctx}]\n{user_input}"})
 
     payload = {
         "messages": messages,

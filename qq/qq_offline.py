@@ -36,6 +36,17 @@ MAX_FRIEND_PULLS = 30
 FRIEND_PULL_BUDGET = 30
 
 
+def _pet_name() -> str:
+    """当前角色显示名（日志用；以前写死「丛雨」，排查时容易误以为整个 QQ 模块都是丛雨）"""
+    try:
+        from pets.pet_registry import get_active_pet_id, get_pet_config
+        pid = get_active_pet_id()
+        cfg = get_pet_config(pid) or {}
+        return str(cfg.get("display_name") or cfg.get("name") or pid or "角色")
+    except Exception:
+        return "角色"
+
+
 def load_last_exit_time():
     """读取上次退出时间（字符串，无则返回 None）"""
     try:
@@ -249,6 +260,10 @@ def _request_and_wait(ws, action, params=None, timeout=2, label=""):
                     print(f"[QQOffline] recv: echo={data.get('echo')} post_type={data.get('post_type')} → 收集待补处理")
                     stray_events.append(raw)
                     continue
+                if str(data.get("status") or "").lower() == "failed":
+                    print(f"[QQOffline] ⚠ {action} 失败：retcode={data.get('retcode')} "
+                          f"{str(data.get('message') or '')[:120]}")
+                    return None, stray_events
                 return data.get("data"), stray_events
             except websocket.WebSocketTimeoutException:
                 continue
@@ -298,7 +313,7 @@ def _extract_vision_desc(message, ws=None, stray_out=None):
 
 def _process_history(messages, owner_id, self_id, last_exit_time,
                      prev_processed, processed_this_run, out_msgs, default_sender=None,
-                     ws=None, stray_out=None):
+                     ws=None, stray_out=None, private_filter=None):
     """处理一批历史消息（三层防护 + 按真实发送者构造条目）
 
     顺序优化（防浪费）：先做所有无 IO 过滤（自己发的消息 / 窗口外 / 已处理），
@@ -348,6 +363,15 @@ def _process_history(messages, owner_id, self_id, last_exit_time,
         sender_id = msg_user_id or default_sender or owner_id
         if self_id is not None and str(sender_id) == str(self_id):
             sender_id = owner_id
+        # 私信回复范围（设置→QQ：总开关/陌生人/好友/仅主人）——离线补拉同样遵守
+        # （离线只拉主人与好友会话，故 sub_type 一律按 friend 判定）
+        if private_filter is not None:
+            try:
+                if not private_filter(sender_id, "friend"):
+                    print(f"[QQOffline] 🔕 私信不在回复范围，跳过 {sender_id}")
+                    continue
+            except Exception as _e:
+                print(f"[QQOffline] ⚠ 私信范围判定失败（按允许处理）: {_e}")
         out_msgs.append({
             "session_key": f"private_{sender_id}",
             "text": text,
@@ -358,7 +382,7 @@ def _process_history(messages, owner_id, self_id, last_exit_time,
         })
 
 
-def fetch_offline_messages(ws, owner_id, last_exit_time, self_id=None):
+def fetch_offline_messages(ws, owner_id, last_exit_time, self_id=None, private_filter=None):
     """
     离线补拉：
     1. 大号（主人）的聊天历史 get_friend_msg_history
@@ -393,26 +417,45 @@ def fetch_offline_messages(ws, owner_id, last_exit_time, self_id=None):
         window_start = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() - 600))
     print(f"[QQOffline] 离线窗口起点: {window_start}（基线 {last_exit_time or '首次运行'} 放宽 24 小时）")
 
-    # ===== 1. 大号历史 =====
-    data, stray = _request_and_wait(ws, "get_friend_msg_history",
-                                    {"user_id": int(owner_id), "count": 50}, label="history")
-    stray_events.extend(stray)
-    if data is not None:
-        messages = _normalize_messages(data)
-        print(f"[QQOffline] 🔎 大号历史 {len(messages)} 条")
-        _process_history(messages, owner_id, self_id, window_start,
-                         prev_processed, processed_this_run, msgs, default_sender=owner_id,
-                         ws=ws, stray_out=stray_events)
+    # ===== 0. 先拿好友列表 =====
+    # ⚠ 为什么要先做这步：主人号如果不是 bot 的好友，NapCat 的 get_friend_msg_history
+    #   会直接抛错（"记录xxx不存在 / 消息undefined不存在"），每次启动都刷红字，
+    #   看着像故障。所以先取列表，主人不在里面就跳过并说明原因。
+    data2, stray2 = _request_and_wait(ws, "get_friend_list", None, timeout=2, label="friends")
+    stray_events.extend(stray2)
+    friends = _normalize_messages(data2)
+    friend_ids = set()
+    for _f in (friends or []):
+        if isinstance(_f, dict):
+            _p = _f.get("user_id") or _f.get("uin")
+            if _p:
+                friend_ids.add(str(_p))
+    if friends:
+        print(f"[QQOffline] 🔎 好友列表 {len(friends)} 人")
     else:
-        print("[QQOffline] ⚠ 未等到 get_friend_msg_history 响应（NapCat 可能不支持该 API，跳过）")
+        print("[QQOffline] ⚠ 未取到好友列表（NapCat 可能不支持该 API）")
+
+    # ===== 1. 大号历史（主人不是好友时跳过）=====
+    owner_is_friend = (not friend_ids) or (str(owner_id) in friend_ids)
+    if owner_is_friend:
+        data, stray = _request_and_wait(ws, "get_friend_msg_history",
+                                       {"user_id": int(owner_id), "count": 50}, label="history")
+        stray_events.extend(stray)
+        if data is not None:
+            messages = _normalize_messages(data)
+            print(f"[QQOffline] 🔎 大号历史 {len(messages)} 条")
+            _process_history(messages, owner_id, self_id, window_start,
+                             prev_processed, processed_this_run, msgs, default_sender=owner_id,
+                             ws=ws, stray_out=stray_events, private_filter=private_filter)
+        else:
+            print("[QQOffline] ⚠ 未等到 get_friend_msg_history 响应（NapCat 给出的原因见上一行）")
+    else:
+        print(f"[QQOffline] ℹ 主人号 {owner_id} 不在 bot 的好友列表里 → 跳过拉取它的历史"
+              f"（QQ 一般不会把非好友私信送达；想让主人号私聊，两个号需互为好友）")
 
     # ===== 2. 其他好友的离线消息 =====
     # NapCat OneBot11 WS 不支持 get_recent_contacts（报"不支持的API"），
     # 改用 get_friend_list 拿全量好友列表，对每个好友拉历史，靠时间窗口过滤。
-    data2, stray2 = _request_and_wait(ws, "get_friend_list", None, timeout=2, label="friends")
-    stray_events.extend(stray2)
-    friends = _normalize_messages(data2)
-    print(f"[QQOffline] 🔎 好友列表 {len(friends)} 人")
     friend_pulls = 0
     friend_budget_start = time.time()
     for friend in friends[:MAX_FRIEND_PULLS]:
@@ -441,7 +484,7 @@ def fetch_offline_messages(ws, owner_id, last_exit_time, self_id=None):
         print(f"[QQOffline] 🔎 好友 {peer} 历史 {len(messages3)} 条")
         _process_history(messages3, owner_id, self_id, window_start,
                          prev_processed, processed_this_run, msgs, default_sender=peer,
-                         ws=ws, stray_out=stray_events)
+                         ws=ws, stray_out=stray_events, private_filter=private_filter)
 
     # 按时间升序（各次拉取通常是倒序，整体翻转）
     msgs = list(reversed(msgs))
@@ -478,7 +521,7 @@ def _extract_msg_text(message):
     return ""
 
 
-def fetch_before_loop(ws, owner_id, scheduler, self_id=None):
+def fetch_before_loop(ws, owner_id, scheduler, self_id=None, private_filter=None):
     """
     同步拉取离线消息（在 connect() 的 while 循环前调用）。
     单线程 recv，避免与主循环线程竞争 WS 响应。
@@ -486,7 +529,7 @@ def fetch_before_loop(ws, owner_id, scheduler, self_id=None):
     - ws: NapCat WebSocket
     - owner_id: 大号 QQ 号
     - scheduler: MessageScheduler 实例（消息入队）
-    - self_id: 丛雨自己的 QQ 号（可选；若未传则主动请求 get_login_info 获取）
+    - self_id: 机器人自己的 QQ 号（可选；若未传则主动请求 get_login_info 获取）
 
     默认开启（qq_offline_enable=true）；NapCat 不支持 get_friend_msg_history 时可在
     PCL 设置关闭。即便开启，任何请求失败/超时也绝不上抛、极短超时，
@@ -515,12 +558,13 @@ def fetch_before_loop(ws, owner_id, scheduler, self_id=None):
         self_id, login_stray = _fetch_login_info(ws)
         stray_events.extend(login_stray)
         if self_id:
-            print(f"[QQOffline] 主动获取到丛雨 self_id: {self_id}")
-    print(f"[QQOffline] 丛雨 self_id: {self_id or '未知（方向过滤降级）'}")
+            print(f"[QQOffline] 主动获取到 {_pet_name()} self_id: {self_id}")
+    print(f"[QQOffline] {_pet_name()} self_id: {self_id or '未知（方向过滤降级）'}")
 
     seen_ids = set()
     try:
-        offline, history_stray, seen_ids = fetch_offline_messages(ws, owner_id, last, self_id=self_id)
+        offline, history_stray, seen_ids = fetch_offline_messages(
+            ws, owner_id, last, self_id=self_id, private_filter=private_filter)
         stray_events.extend(history_stray)
         if offline:
             print(f"[QQOffline] 🔄 发现 {len(offline)} 条离线消息，逐条补回复...")

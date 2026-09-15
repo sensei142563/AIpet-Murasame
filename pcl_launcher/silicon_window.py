@@ -1,0 +1,1678 @@
+# -*- coding: utf-8 -*-
+"""AIpet 启动器 · Silicon 新版外壳（左侧导航栏 + 卡片内容区，Fluent 风格）。
+
+设计参考 PyQt-SiliconUI 那一类界面语言：
+- 无边框 + 亚克力模糊 + 圆角 + 强调色（silicon_ui 提供）
+- 左侧竖向导航栏（图标 + 文字，选中项强调色高亮 + 左侧指示条）
+- 右侧内容区：卡片式页面，页面之间用 QStackedWidget 切换
+- 顶部自定义标题栏（应用名 + 运行状态点 + 最小化/关闭）
+
+功能对齐旧版启动器（全部保留）：
+总览（启动桌宠/QQ/微信 + 控制面板 + 状态）、桌宠管理（卡片/活动/立绘工坊/设置/新建/删除）、
+设置、记忆、提示词、插件、主题；主题壁纸/背景视频、强调色、NapCat 工具、更新日志、
+打开配置/目录、关窗清理子进程。
+"""
+import os
+import re
+import subprocess
+import sys
+import urllib.request
+
+from PyQt5.QtCore import Qt, QTimer, QSize, QUrl, pyqtSignal
+from PyQt5.QtGui import (QColor, QFont, QIcon, QImage, QPainter, QPainterPath,
+                         QPixmap)
+from PyQt5.QtWidgets import (QScrollArea, QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
+                             QStackedWidget, QFrame, QMessageBox, QSizePolicy,
+                             QGraphicsOpacityEffect, QScrollArea)
+
+from .colors import *          # noqa: F401,F403  (Color1..8 / Gray* / S / THEME_COLORS / btn_radius …)
+from . import silicon_ui
+from .colors import (ACCENT_ID, THEME_COLORS, background_info, btn_radius)
+
+_CONTROL_BASE = "http://localhost:28565/control"
+
+# 导航项（key, 图标, 标题, 副标题）
+NAV = [
+    ("home",    "🏠", "总览",  "启动与状态"),
+    ("pets",    "🐾", "桌宠",  "角色与立绘"),
+    ("memory",  "🧠", "记忆",  "对话与备份"),
+    ("prompt",  "📝", "提示词", "人设微调"),
+    ("plugins", "🧩", "插件",  "功能开关"),
+    ("themes",  "🎨", "主题",  "外观与配色"),
+]
+
+
+def _is_light_theme() -> bool:
+    """当前主题底色是浅色？（千恋万花=浅色，silicon=深色）"""
+    try:
+        return Color8.lightness() > 140
+    except Exception:
+        return False
+
+
+def SF(alpha: float) -> str:
+    """半透明面颜色：深色主题=白透明，浅色主题=黑透明（两边都能看出卡片层次）"""
+    if _is_light_theme():
+        return f"rgba(0,0,0,{max(0.02, min(0.30, alpha)):.3f})"
+    return f"rgba(255,255,255,{max(0.02, min(0.30, alpha)):.3f})"
+
+
+def _app_base_dir() -> str:
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _ensure_src_on_path():
+    """把程序目录加入 sys.path（冻结版兜底）。
+
+    外壳的页面是「字符串动态导入」懒加载的，PyInstaller 静态分析看不到 →
+    万一某个模块没被打进 exe，这里就能用随包的源码导入，而不是整页「加载失败」。
+    （打包时已用 --hidden-import 显式声明；这里是第二道保险。）"""
+    try:
+        base = _app_base_dir()
+        if base and base not in sys.path and os.path.isdir(os.path.join(base, "pcl_launcher")):
+            sys.path.insert(0, base)
+            print(f"[NewUI] 已把程序目录加入导入路径: {base}")
+            return True
+    except Exception as e:
+        print(f"[NewUI] ⚠ 程序目录加入导入路径失败: {e}")
+    return False
+
+
+def _find_python(base: str) -> str:
+    for rel in (os.path.join("runtime", "venv", "Scripts", "python.exe"), "python.exe"):
+        p = os.path.join(base, rel)
+        if os.path.exists(p):
+            return p
+    return sys.executable if not getattr(sys, "frozen", False) else ""
+
+
+def _pet_api_alive() -> bool:
+    try:
+        req = urllib.request.Request(_CONTROL_BASE, method="GET")
+        with urllib.request.urlopen(req, timeout=3) as r:
+            return r.status == 200
+    except Exception:
+        return False
+
+
+def _send_control(feature: str):
+    try:
+        req = urllib.request.Request(f"{_CONTROL_BASE}/{feature}", method="POST", data=b"")
+        with urllib.request.urlopen(req, timeout=5) as r:
+            r.read()
+    except Exception as e:
+        print(f"[NewUI] 控制指令 {feature} 失败: {e}")
+
+
+# ══════════════════════ 小部件 ══════════════════════
+class NavRailButton(QPushButton):
+    """左栏导航按钮：主题有目录图标就用图标，没有就用 emoji
+
+    （千恋万花等主题在 theme.json 的 nav_icons 里声明图标路径，
+      例如 assets/nav/model.png；新外壳直接读取它。）"""
+
+    def __init__(self, icon, title, subtitle="", parent=None, icon_key=None):
+        super().__init__(parent)
+        self.setCheckable(True)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFixedHeight(58)   # 图标放大后按钮同步加高
+        self._title, self._subtitle, self._icon = title, subtitle, icon
+        self._icon_key = icon_key
+        self._accent = THEME_COLORS.get(str(ACCENT_ID), {}).get("title_start", "#2f6fd0")
+        self._pix = None
+        self.reload_theme_icon()
+        self._apply_style()
+
+    def reload_theme_icon(self):
+        """按当前主题重取导航图标（换主题后不用重启 → 图标跟着换）"""
+        self._pix = None
+        try:
+            self.setIcon(QIcon())
+        except Exception:
+            pass
+        if not self._icon_key:
+            return
+        try:
+            from .colors import nav_icon_path
+            art = nav_icon_path(self._icon_key)
+            if art:
+                pm = QPixmap(art)
+                if not pm.isNull():
+                    h = 33            # 目录图标放大 1.5 倍（原 22）
+                    w = max(1, int(pm.width() * h / max(1, pm.height())))
+                    self._pix = pm.scaled(min(w, 40), h, Qt.KeepAspectRatio,
+                                          Qt.SmoothTransformation)
+                    self.setIcon(QIcon(self._pix))
+                    self.setIconSize(self._pix.size())
+        except Exception as e:
+            print(f"[NewUI] ⚠ 主题导航图标加载失败({self._icon_key}): {e}")
+
+    def _apply_style(self):
+        """样式只设一次：选中/悬停交给 QSS 伪状态，避免每次点击都重新解析样式表（卡顿源）"""
+        if self._pix is not None:
+            self.setText(f"   {self._title}")       # 用主题图标，不再叠 emoji
+        else:
+            self.setText(f" {self._icon}   {self._title}")
+        self.setToolTip(self._subtitle or self._title)
+        self.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent; color: {Color1.name()}; border: none; text-align: left;
+                padding: 4px 10px; border-radius: 10px; font-family: "{silicon_ui.M.font}";
+                font-size: 14px; font-weight: 500;
+            }}
+            QPushButton:hover {{ background: {SF(0.12)}; }}
+            QPushButton:checked {{ background: {self._accent}; color: white; font-weight: bold; }}
+        """)
+
+    def _refresh(self):
+        self._apply_style()
+
+    def set_accent(self, hexcolor: str):
+        self._accent = hexcolor
+        self._apply_style()
+
+
+class StatusChip(QLabel):
+    """状态小胶囊：圆点 + 文本（绿=在线/灰=离线）"""
+
+    def __init__(self, text, parent=None):
+        super().__init__(parent)
+        self.set_text(text, False)
+
+    def set_text(self, text, ok: bool):
+        if getattr(self, "_last", None) == (text, ok):
+            return
+        self._last = (text, ok)
+        dot = "#5fd3a0" if ok else "#6d7688"
+        self.setText(f"<span style='color:{dot};'>●</span> {text}")
+        self.setStyleSheet(
+            f"QLabel {{ background: {SF(0.09)}; border: 1px solid {Color5.name()};"
+            f" border-radius: 12px; padding: 4px 12px; color: {Gray2.name()};"
+            f" font-family: '{silicon_ui.M.font}'; font-size: 12px; }}")
+
+
+def Card(parent=None) -> QFrame:
+    """卡片容器（半透明面 + 细描边 + 圆角）"""
+    f = QFrame(parent)
+    f.setStyleSheet(
+        f"QFrame {{ background: {SF(0.07)}; border: 1px solid {Color5.name()};"
+        f" border-radius: {silicon_ui.M.radius_card}px; }}")
+    return f
+
+
+def _accent_btn_qss(accent: str, danger: bool = False) -> str:
+    c1 = "#e03030" if danger else accent
+    c2 = "#f06060" if danger else QColor(accent).lighter(125).name()
+    return f"""
+QPushButton {{
+    background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 {c1}, stop:1 {c2});
+    color: white; border: 1px solid rgba(255,255,255,0.25); border-radius: 10px;
+    padding: 10px 20px; font-size: 14px; font-weight: bold;
+    font-family: "{silicon_ui.M.font}";
+}}
+QPushButton:hover {{ background: {c2}; }}
+QPushButton:pressed {{ background: {c1}; }}
+QPushButton:disabled {{ background: rgba(255,255,255,0.10); color: rgba(255,255,255,0.45);
+    border-color: rgba(255,255,255,0.10); }}
+"""
+
+
+def _ghost_btn_qss() -> str:
+    return f"""
+QPushButton {{
+    background: {SF(0.08)}; color: {Color1.name()};
+    border: 1px solid {Color5.name()}; border-radius: 9px; padding: 9px 16px;
+    font-size: 13px; font-family: "{silicon_ui.M.font}";
+}}
+QPushButton:hover {{ background: {SF(0.16)}; border-color: {Color3.name()}; }}
+"""
+
+
+# ══════════════════════ 总览页 ══════════════════════
+class HomePage(QWidget):
+    """总览：启动/关闭桌宠、QQ、微信 + 控制面板 + 运行状态"""
+
+    _probe_signal = pyqtSignal()
+
+    def __init__(self, shell, parent=None):
+        super().__init__(parent)
+        self.shell = shell
+        # 子进程句柄挂在 shell 上（换肤会重建本页 → 重建后仍能看到「QQ：运行中」）
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(22, 16, 22, 18)
+        outer.setSpacing(14)
+
+        accent = THEME_COLORS.get(str(ACCENT_ID), {}).get("title_start", "#2f6fd0")
+
+        # ── 顶部：标题 + 状态胶囊 ──
+        head = QHBoxLayout()
+        title = QLabel("总览")
+        title.setStyleSheet(f"color: {Color1.name()}; font-size: 22px; font-weight: bold;"
+                            f" font-family: '{silicon_ui.M.font}';")
+        head.addWidget(title)
+        head.addStretch()
+        self.chip_pet = StatusChip("桌宠：未运行")
+        self.chip_qq = StatusChip("QQ：未运行")
+        self.chip_tts = StatusChip("语音服务：未知")
+        for c in (self.chip_pet, self.chip_qq, self.chip_tts):
+            head.addWidget(c)
+        outer.addLayout(head)
+
+        # ── 启动卡片 ──
+        card = Card()
+        cl = QVBoxLayout(card)
+        cl.setContentsMargins(18, 16, 18, 16)
+        cl.setSpacing(12)
+        row = QHBoxLayout()
+        self.btn_pet = QPushButton("  启动 AIpet 桌宠")
+        self.btn_pet.setStyleSheet(_accent_btn_qss(accent))
+        self.btn_pet.setMinimumHeight(46)
+        self.btn_pet.clicked.connect(self.toggle_pet)
+        self.btn_qq = QPushButton("  启动 QQ AIpet")
+        self.btn_qq.setStyleSheet(_ghost_btn_qss())
+        self.btn_qq.setMinimumHeight(46)
+        self.btn_qq.clicked.connect(self.start_qq)
+        self.btn_wx = QPushButton("  启动微信 AIpet")
+        self.btn_wx.setStyleSheet(_ghost_btn_qss())
+        self.btn_wx.setMinimumHeight(46)
+        self.btn_wx.clicked.connect(self.start_wechat)
+        for b in (self.btn_pet, self.btn_qq, self.btn_wx):
+            row.addWidget(b)
+        row.addStretch()
+        cl.addLayout(row)
+
+        tip = QLabel("启动桌宠后可用下方按钮实时控制；QQ 首次使用需扫码登录（需要手机 QQ）。")
+        tip.setStyleSheet(f"color: {Gray2.name()}; font-size: 12px;")
+        cl.addWidget(tip)
+        outer.addWidget(card)
+
+        # ── 控制面板卡片 ──
+        ctl = Card()
+        cl2 = QVBoxLayout(ctl)
+        cl2.setContentsMargins(18, 14, 18, 16)
+        cl2.setSpacing(10)
+        cl2.addWidget(silicon_ui.section_title("桌宠控制面板", accent))
+        grid = QHBoxLayout()
+        for text, feat in (("📝 长文本模式", "longtext"), ("🎭 Live2D", "live2d"),
+                           ("📷 摄像头识别", "camera"), ("🖥 屏幕识别", "screenshot"),
+                           ("🎤 按住说话", "voice")):
+            b = QPushButton(text)
+            b.setStyleSheet(_ghost_btn_qss())
+            b.setMinimumHeight(38)
+            if feat == "voice":
+                b.pressed.connect(lambda: _send_control("voice/start"))
+                b.released.connect(lambda: _send_control("voice/end"))
+            else:
+                b.clicked.connect(lambda _=False, f=feat: _send_control(f))
+            grid.addWidget(b)
+        # 重置桌宠位置：桌宠跑到屏幕外 / 找不到时一键回到屏幕中央
+        self.btn_reset_pos = QPushButton("🎯 重置桌宠位置")
+        self.btn_reset_pos.setStyleSheet(_ghost_btn_qss())
+        self.btn_reset_pos.setMinimumHeight(38)
+        self.btn_reset_pos.setToolTip("把桌宠移回屏幕中央（找不到桌宠时点这里）")
+        self.btn_reset_pos.clicked.connect(self.reset_pet_pos)
+        grid.addWidget(self.btn_reset_pos)
+        grid.addStretch()
+        cl2.addLayout(grid)
+        # 控制面板下面的一行状态提示
+        self.status_lbl = QLabel("")
+        self.status_lbl.setStyleSheet(f"color: {Gray2.name()}; font-size: 12px;")
+        cl2.addWidget(self.status_lbl)
+        outer.addWidget(ctl)
+
+        # ── 快捷工具卡片 ──
+        tools = Card()
+        tl = QVBoxLayout(tools)
+        tl.setContentsMargins(18, 14, 18, 16)
+        tl.setSpacing(10)
+        tl.addWidget(silicon_ui.section_title("快捷工具", accent))
+        tr = QHBoxLayout()
+        for text, slot in (("🎨 立绘工坊", self.open_studio),
+                           ("⚙ 桌宠设置", self.open_pet_settings),
+                           ("🔑 NapCat WebUI", self.open_napcat_webui),
+                           ("📱 重新扫码登录", self.napcat_relogin),
+                           ("📂 打开程序目录", self.open_app_dir),
+                           ("📜 更新日志", self.open_changelog)):
+            b = QPushButton(text)
+            b.setStyleSheet(_ghost_btn_qss())
+            b.clicked.connect(slot)
+            tr.addWidget(b)
+        tr.addStretch()
+        tl.addLayout(tr)
+        outer.addWidget(tools)
+        outer.addStretch()
+
+        self._probe_signal.connect(self._apply_status)
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self.refresh_status)
+        self._timer.start(6000)
+
+    # ── 状态 ──
+    def refresh_status(self):
+        """后台线程探测运行状态（绝不在 UI 线程做网络探测 → 不卡界面）"""
+        if getattr(self, "_probe_busy", False):
+            return
+        self._probe_busy = True
+
+        def _work():
+            alive = _pet_api_alive()
+            tts_ok = False
+            try:
+                import socket
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.settimeout(0.4)
+                    tts_ok = s.connect_ex(("127.0.0.1", 9880)) == 0
+            except Exception:
+                pass
+            self._probe_result = (alive, tts_ok)
+            try:
+                self._probe_signal.emit()
+            except Exception:
+                pass
+
+        import threading
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _apply_status(self):
+        """探测结果回到 UI 线程再更新（信号触发）"""
+        try:
+            alive, tts_ok = getattr(self, "_probe_result", (False, False))
+            self._probe_busy = False
+            self.chip_pet.set_text("桌宠：运行中" if alive else "桌宠：未运行", alive)
+            # 「正在关闭/启动中」期间不要被状态刷新覆盖文案
+            if self.btn_pet.isEnabled():
+                self.btn_pet.setText("  ⏹ 关闭桌宠" if alive else "  启动 AIpet 桌宠")
+            accent = THEME_COLORS.get(str(ACCENT_ID), {}).get("title_start", "#2f6fd0")
+            self.btn_pet.setStyleSheet(_accent_btn_qss(accent, danger=alive))
+            try:
+                self.btn_reset_pos.setEnabled(alive)
+                if self.btn_reset_pos.isEnabled():
+                    self.btn_reset_pos.setText("🎯 重置桌宠位置")
+            except Exception:
+                pass
+            qq_on = self.shell._qq_proc is not None and self.shell._qq_proc.poll() is None
+            self.chip_qq.set_text("QQ：运行中" if qq_on else "QQ：未运行", qq_on)
+            self.chip_tts.set_text("语音服务：在线" if tts_ok else "语音服务：未启动", tts_ok)
+        except Exception as e:
+            print(f"[NewUI] ⚠ 状态更新失败: {e}")
+
+    # ── 启动/关闭 ──
+    # ── 启动/关闭：进行中按钮置灰 + 文案，防止连点 ──
+    def _busy_btn(self, btn, text: str, ms: int = 6000):
+        try:
+            btn.setEnabled(False)
+            btn.setText("  " + text)
+            QTimer.singleShot(ms, lambda: (btn.setEnabled(True), self.refresh_status()))
+        except Exception:
+            pass
+
+    def toggle_pet(self):
+        if _pet_api_alive():
+            # 关闭桌宠：显示「正在关闭中…」并禁用按钮，避免重复点击
+            self._busy_btn(self.btn_pet, "⏳ 正在关闭中…", 8000)
+            self.status_lbl.setText("⏳ 正在关闭桌宠…")
+            QTimer.singleShot(9000, lambda: self.status_lbl.setText(""))
+            print("[NewUI] 正在关闭桌宠…")
+            _send_control("shutdown")
+            # 轮询等它真的退出（最多 12 秒），再刷新状态
+            self._wait_pet_gone(12)
+            return
+        self._busy_btn(self.btn_pet, "⏳ 正在启动中…", 15000)
+        base = _app_base_dir()
+        py = _find_python(base)
+        if not py:
+            QMessageBox.warning(self, "启动失败", "未找到 Python 解释器（runtime/venv）")
+            return
+        try:
+            self.shell._pet_proc = subprocess.Popen([py, os.path.join(base, "run.py")], cwd=base,
+                                                    creationflags=subprocess.CREATE_NEW_CONSOLE)
+            print("[NewUI] 已启动桌宠（run.py）")
+            QTimer.singleShot(6000, self.refresh_status)
+        except Exception as e:
+            QMessageBox.warning(self, "启动失败", str(e))
+
+    def _wait_pet_gone(self, seconds: int):
+        """后台轮询：桌宠真的退出了再恢复按钮（期间保持「正在关闭中…」）"""
+        def _work():
+            import time as _t
+            for _ in range(int(seconds * 2)):
+                _t.sleep(0.5)
+                if not _pet_api_alive():
+                    break
+            try:
+                self._probe_signal.emit()
+            except Exception:
+                pass
+        import threading
+        threading.Thread(target=_work, daemon=True).start()
+
+    def reset_pet_pos(self):
+        """把桌宠移回屏幕中央（找不到桌宠时用）"""
+        if not _pet_api_alive():
+            QMessageBox.information(self, "重置桌宠位置", "桌宠还没启动哦，先点「启动 AIpet 桌宠」。")
+            return
+        self._busy_btn(self.btn_reset_pos, "⏳ 正在移动…", 4000)
+        _send_control("reset_position")
+        self.status_lbl.setText("🎯 让桌宠回到屏幕中央…")
+        QTimer.singleShot(4500, lambda: self.status_lbl.setText(""))
+        print("[NewUI] 已发送「重置桌宠位置」")
+
+    def start_qq(self):
+        base = _app_base_dir()
+        py = _find_python(base)
+        if not py:
+            return
+        self._busy_btn(self.btn_qq, "⏳ 正在启动 QQ…", 12000)
+        try:
+            self.shell._qq_proc = subprocess.Popen([py, os.path.join(base, "run_qq.py")], cwd=base,
+                                                   creationflags=subprocess.CREATE_NEW_CONSOLE)
+            self.refresh_status()
+        except Exception as e:
+            QMessageBox.warning(self, "启动失败", str(e))
+
+    def start_wechat(self):
+        base = _app_base_dir()
+        py = _find_python(base)
+        if not py or not os.path.exists(os.path.join(base, "run_wechat.py")):
+            QMessageBox.information(self, "微信 AIpet", "未找到微信模块（run_wechat.py）")
+            return
+        self._busy_btn(self.btn_wx, "⏳ 正在启动微信…", 12000)
+        try:
+            self.shell._wx_proc = subprocess.Popen([py, os.path.join(base, "run_wechat.py")], cwd=base,
+                                                   creationflags=subprocess.CREATE_NEW_CONSOLE)
+        except Exception as e:
+            QMessageBox.warning(self, "启动失败", str(e))
+
+    # ── 工具 ──
+    def open_studio(self):
+        try:
+            from .portrait_studio import PortraitStudio
+            # 挂在外壳上：换肤重建总览页后仍是同一个工坊实例
+            self._studio = getattr(self.shell, "_portrait_studio", None) or PortraitStudio(self.window())
+            self.shell._portrait_studio = self._studio
+            self._studio.show(); self._studio.raise_(); self._studio.activateWindow()
+        except Exception as e:
+            QMessageBox.warning(self, "立绘工坊", f"打开失败：{e}")
+
+    def open_pet_settings(self):
+        try:
+            from .pet_wizard import PCLPetWizard
+            from pets.pet_registry import get_active_pet_id
+            dlg = PCLPetWizard(get_active_pet_id(), self.window())
+            dlg.show(); dlg.raise_(); dlg.activateWindow()   # 非模态，避免锁住预览窗口
+        except Exception as e:
+            QMessageBox.warning(self, "桌宠设置", f"打开失败：{e}")
+
+    def open_napcat_webui(self):
+        import webbrowser
+        webbrowser.open("http://127.0.0.1:6099")
+        print("[NewUI] 已打开 NapCat WebUI（默认 6099，Token 见 config.json）")
+
+    def napcat_relogin(self):
+        base = _app_base_dir()
+        bat = os.path.join(base, "NapCat.Shell.Windows.OneKey", "NapCat", "launcher-user.bat")
+        if os.path.exists(bat):
+            try:
+                subprocess.Popen([bat], cwd=os.path.dirname(bat),
+                                 creationflags=subprocess.CREATE_NEW_CONSOLE)
+                QMessageBox.information(self, "重新扫码登录",
+                                        "已打开 NapCat 登录窗口，请用手机 QQ 扫描二维码。\n"
+                                        "二维码也已保存到：NapCat.Shell.Windows.OneKey\\NapCat\\cache\\qrcode.png")
+            except Exception as e:
+                QMessageBox.warning(self, "重新登录", str(e))
+        else:
+            QMessageBox.information(self, "重新登录", "未找到 NapCat 启动脚本")
+
+    def open_app_dir(self):
+        try:
+            os.startfile(_app_base_dir())    # noqa
+        except Exception as e:
+            print(f"[NewUI] 打开目录失败: {e}")
+
+    def open_changelog(self):
+        import glob
+        base = _app_base_dir()
+        files = sorted(glob.glob(os.path.join(base, "更新日志", "*")), reverse=True)
+        if not files:
+            QMessageBox.information(self, "更新日志", "未找到更新日志文件")
+            return
+        try:
+            os.startfile(files[0])           # noqa
+        except Exception as e:
+            QMessageBox.information(self, "更新日志", f"打开失败：{e}")
+
+
+# ══════════════════════ 主窗口 ══════════════════════
+class SiliconLauncher(QWidget):
+    """AIpet 启动器 · 新版外壳"""
+
+    def __init__(self):
+        super().__init__()
+        _ensure_src_on_path()        # 冻结版：页面懒加载用得到随包源码
+        self._pet_proc = None
+        self._qq_proc = None
+        self._wx_proc = None
+        self._bg_widget = None
+        self._media = None
+
+        self.setWindowTitle("AIpet 丛雨桌宠 · 启动器")
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.resize(1200, 780)
+        self.setMinimumSize(1000, 680)
+
+        from .colors import current_theme_id
+        self._silicon = current_theme_id() == "silicon"
+        self._accent = THEME_COLORS.get(str(ACCENT_ID), {}).get("title_start", "#2f6fd0")
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(10, 10, 10, 10)
+        root.setSpacing(0)
+
+        self._base_color = QColor(Color8)
+        self.back = _RoundBack(self._base_color, self)
+        root.addWidget(self.back)
+        inner = QVBoxLayout(self.back)
+        inner.setContentsMargins(0, 0, 0, 0)
+        inner.setSpacing(0)
+
+        inner.addWidget(self._build_titlebar())
+
+        body = QHBoxLayout()
+        body.setContentsMargins(10, 8, 10, 10)
+        body.setSpacing(10)
+        body.addWidget(self._build_nav())
+        body.addWidget(self._build_stack(), 1)
+        inner.addLayout(body, 1)
+
+        if self._silicon:
+            QTimer.singleShot(60, self._apply_effects)
+        self._load_background()
+
+    # ── 标题栏 ──
+    def _build_titlebar(self) -> QWidget:
+        bar = QWidget()
+        bar.setFixedHeight(52)
+        lay = QHBoxLayout(bar)
+        lay.setContentsMargins(16, 6, 10, 6)
+        lay.setSpacing(10)
+
+        ico = QLabel()
+        p = os.path.join(_app_base_dir(), "icon.png")
+        if os.path.exists(p):
+            pm = QPixmap(p)
+            if not pm.isNull():
+                ico.setPixmap(pm.scaled(28, 28, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        lay.addWidget(ico)
+        t = QLabel("AIpet 丛雨桌宠 · 启动器")
+        t.setStyleSheet(f"color: {Color1.name()}; font-size: 15px; font-weight: bold;"
+                        f" font-family: '{silicon_ui.M.font}';")
+        lay.addWidget(t)
+        self._title = t
+        lay.addStretch()
+
+        self._chrome_btns = []          # 最小化/关闭（换肤时一起重上样式）
+        for text, slot, tip in (("—", self.showMinimized, "最小化"),
+                                ("✕", self.close, "关闭")):
+            b = QPushButton(text)
+            b.setFixedSize(36, 30)
+            b.setToolTip(tip)
+            b.setCursor(Qt.PointingHandCursor)
+            b.clicked.connect(slot)
+            self._chrome_btns.append((b, text))
+            self._style_chrome_btn(b, text)
+            lay.addWidget(b)
+        # 拖动窗口
+        def _press(e):
+            self._drag = e.globalPos() - self.frameGeometry().topLeft()
+        def _move(e):
+            if getattr(self, "_drag", None) and e.buttons() & Qt.LeftButton:
+                self.move(e.globalPos() - self._drag)
+        def _release(e):
+            self._drag = None
+        bar.mousePressEvent = _press
+        bar.mouseMoveEvent = _move
+        bar.mouseReleaseEvent = _release
+        self._bar = bar
+        return bar
+
+    # ── 左导航栏 ──
+    def _nav_rail_qss(self) -> str:
+        return (f"QFrame {{ background: {SF(0.06)}; border: 1px solid {Color5.name()};"
+                f" border-radius: {silicon_ui.M.radius_card}px; }}")
+
+    def _style_chrome_btn(self, b, text: str):
+        """标题栏按钮样式（抽出来是为了换肤时能重上）"""
+        b.setStyleSheet(f"""
+            QPushButton {{ background: transparent; color: {Color1.name()};
+                border: none; border-radius: 8px; font-size: 14px; }}
+            QPushButton:hover {{ background: {'#e03030' if text == '✕' else SF(0.16)};
+                color: {'white' if text == '✕' else Color1.name()}; }}
+        """)
+
+    def _build_nav(self) -> QWidget:
+        rail = QFrame()
+        rail.setFixedWidth(196)
+        rail.setStyleSheet(self._nav_rail_qss())
+        lay = QVBoxLayout(rail)
+        lay.setContentsMargins(10, 12, 10, 12)
+        lay.setSpacing(6)
+
+        self.nav_btns = {}
+        for key, icon, title, sub in NAV:
+            # 主题图标键：总览复用「模型」图标
+            b = NavRailButton(icon, title, sub, icon_key=("model" if key == "home" else key))
+            b.clicked.connect(lambda _=False, k=key: self._goto(k))
+            self.nav_btns[key] = b
+            lay.addWidget(b)
+        lay.addStretch()
+
+        # ── 左下角：设置入口（按需求放在左下角）+ 版本信息 ──
+        sep = QFrame()
+        sep.setFixedHeight(1)
+        sep.setStyleSheet(f"background: {Color5.name()}; border: none;")
+        lay.addWidget(sep)
+        b_set = NavRailButton("⚙", "设置", "模型与功能", icon_key="settings")
+        b_set.clicked.connect(lambda _=False: self._goto("settings"))
+        self.nav_btns["settings"] = b_set
+        lay.addWidget(b_set)
+        ver = QLabel("Silicon UI · 新版")
+        ver.setStyleSheet(f"color: {Gray3.name()}; font-size: 11px; padding: 2px 8px;")
+        lay.addWidget(ver)
+        self._nav_rail = rail
+        self._nav_sep = sep
+        self._nav_ver = ver
+        return rail
+
+    # ── 内容区 ──
+    def _build_stack(self) -> QWidget:
+        self.stack = QStackedWidget()
+        self.pages = {}
+        self.stack.setStyleSheet("QStackedWidget { background: transparent; }")
+
+        # 总览页立即构建（首屏）；其余页面懒加载（进哪个才建哪个 → 启动不卡）
+        self.pages = {}
+        self._page_factories = {}
+        self._host_page("home", lambda: HomePage(self))
+        self.home = self._ensure_page("home")
+
+        def _mk(mod, cls):
+            def _f():
+                try:
+                    m = __import__(mod, fromlist=[cls])
+                except ImportError:
+                    # 冻结版兜底：该模块可能没进 exe → 用随包源码再试一次
+                    _ensure_src_on_path()
+                    import importlib
+                    m = importlib.import_module(mod)
+                return getattr(m, cls)()
+            return _f
+
+        self._host_page("pets", _mk("pcl_launcher.widgets", "PCLPetManager"))
+        self._host_page("settings", _mk("pcl_launcher.widgets", "PCLSettingsPanel"))
+        self._host_page("memory", _mk("pcl_launcher.widgets", "PCLMemoryManager"))
+        self._host_page("prompt", _mk("pcl_launcher.widgets", "PCLPromptEditor"))
+        self._host_page("plugins", _mk("pcl_launcher.plugins_panel", "PCLPluginsPanel"))
+        self._host_page("themes", _mk("pcl_launcher.themes_panel", "PCLThemesPanel"))
+        return self.stack
+
+    def _host_page(self, key, factory):
+        """登记页面工厂（懒加载：首次进入才真正构建，启动快很多）"""
+        self._page_factories = getattr(self, "_page_factories", {})
+        self._page_factories[key] = factory
+
+    def _ensure_page(self, key):
+        if key in self.pages:
+            return self.pages[key]
+        fac = getattr(self, "_page_factories", {}).get(key)
+        if fac is None:
+            return None
+        try:
+            w = fac()
+            # 让整页（含所有子控件）不再遮挡主题背景：
+            # 1) 取消自动填充；2) 把内联样式里的实心背景改成半透明（保留一点层次，文字仍清晰）
+            try:
+                _make_transparent(w)
+            except Exception as _e:
+                print(f"[NewUI] ⚠ 页面透明化失败({key}): {_e}")
+            # ⚠ 页面会自我刷新（点「设置」→ 桌宠列表 _refresh() / 插件页 _reload()），
+            #   重建出来的卡片带回内联实心背景色 → 又挡住主题壁纸（表现为「点设置后背景被遮挡」）。
+            #   这里挂钩刷新方法：重建后自动再透明化一次。
+            try:
+                _hook_repaint_transparency(w)
+            except Exception as _e:
+                print(f"[NewUI] ⚠ 透明化挂钩失败({key}): {_e}")
+            self.pages[key] = w
+            self.stack.addWidget(w)
+            if key == "home":
+                self.home = w
+            self._wire_page_theme(w)
+            return w
+        except Exception as e:
+            import traceback
+            print(f"[NewUI] ⚠ 页面 {key} 加载失败: {e}\n{traceback.format_exc()[:400]}")
+            err = QLabel(f"页面加载失败：{key}\n{e}")
+            err.setStyleSheet(f"color: {RedLight.name()}; padding: 20px;")
+            self.pages[key] = err
+            self.stack.addWidget(err)
+            return err
+
+    def _wire_page_theme(self, page):
+        """页面若声明了主题信号 → 接到外壳的实时换肤上（切换主题不再重启启动器）"""
+        try:
+            sig = getattr(page, "theme_applied", None)
+            if sig is not None and not getattr(page, "_theme_wired", False):
+                sig.connect(self.apply_theme_live)
+                page._theme_wired = True
+            sig2 = getattr(page, "accent_changed", None)
+            if sig2 is not None and not getattr(page, "_accent_wired", False):
+                sig2.connect(self.apply_accent_live)
+                page._accent_wired = True
+        except Exception as e:
+            print(f"[NewUI] ⚠ 主题信号挂接失败: {e}")
+
+    # ══════════════ 实时换肤（主题 / 强调色，无需重启）══════════════
+    def _current_page_key(self):
+        cur = self.stack.currentWidget()
+        for k, w in self.pages.items():
+            if w is cur:
+                return k
+        return None
+
+    def _restyle_chrome(self):
+        """外壳（标题栏 + 导航栏 + 底板渐变/壁纸）按新配色重上样式"""
+        try:
+            if getattr(self, "_title", None) is not None:
+                self._title.setStyleSheet(
+                    f"color: {Color1.name()}; font-size: 15px; font-weight: bold;"
+                    f" font-family: '{silicon_ui.M.font}';")
+            for b, text in getattr(self, "_chrome_btns", []):
+                self._style_chrome_btn(b, text)
+            rail = getattr(self, "_nav_rail", None)
+            if rail is not None:
+                rail.setStyleSheet(self._nav_rail_qss())
+            if getattr(self, "_nav_sep", None) is not None:
+                self._nav_sep.setStyleSheet(f"background: {Color5.name()}; border: none;")
+            if getattr(self, "_nav_ver", None) is not None:
+                self._nav_ver.setStyleSheet(
+                    f"color: {Gray3.name()}; font-size: 11px; padding: 2px 8px;")
+            self._accent = accent_hex()
+            for b in getattr(self, "nav_btns", {}).values():
+                try:
+                    b.reload_theme_icon()      # 主题自带的目录图标可能变了
+                    b.set_accent(self._accent)
+                except Exception:
+                    pass
+            # 底板：底色 + 主题壁纸（主题可能自带背景图/视频）
+            try:
+                self._base_color = QColor(Color8)
+                self.back.set_color(self._base_color)
+                self.back.set_bg(QPixmap())      # 先清掉旧主题壁纸
+                self.back.update()
+            except Exception:
+                pass
+            self.reload_background()
+        except Exception as e:
+            print(f"[NewUI] ⚠ 外壳重设样式失败: {e}")
+
+    def _discard_other_pages(self, keep_key):
+        """换肤后：除当前页外的已建页面作废（下次进入时按新配色重建 → 省时间不卡）"""
+        for k, w in list(self.pages.items()):
+            if k == keep_key:
+                continue
+            try:
+                w.hide()
+                self.stack.removeWidget(w)
+                w.deleteLater()
+            except Exception:
+                pass
+            self.pages.pop(k, None)
+
+    def _drop_snap(self, snap):
+        """删除页面过渡用的快照控件（幂等）。
+
+        ⚠ 快照是「一张不透明的旧页面位图」叠在内容区上：只要它没被删掉，
+        用户看到的就是「背景/内容被遮挡」。所以除了动画结束删除，再加一道
+        硬超时兜底（动画被打断/特效对象提前释放时也能删掉）。"""
+        try:
+            if snap is None:
+                return
+            snap.hide()
+            snap.setParent(None)
+            snap.deleteLater()
+        except Exception:
+            pass
+
+    def _fade_out_snap(self, snap, dur=210, grow=None):
+        """快照淡出（动画 + 硬超时双保险）→ 保证不留遮挡层"""
+        if snap is None:
+            return None
+        try:
+            from PyQt5.QtWidgets import QGraphicsOpacityEffect
+            from PyQt5.QtCore import QPropertyAnimation, QEasingCurve
+            eff = QGraphicsOpacityEffect(snap)
+            eff.setOpacity(1.0)
+            snap.setGraphicsEffect(eff)
+            anims = []
+            a1 = QPropertyAnimation(eff, b"opacity", snap)
+            a1.setDuration(int(dur))
+            a1.setStartValue(1.0)
+            a1.setEndValue(0.0)
+            a1.setEasingCurve(QEasingCurve.OutCubic)
+            a1.finished.connect(lambda: self._drop_snap(snap))
+            a1.start()
+            anims.append(a1)
+            if grow is not None:
+                a2 = QPropertyAnimation(snap, b"geometry", snap)
+                a2.setDuration(int(dur))
+                a2.setStartValue(grow[0])
+                a2.setEndValue(grow[1])
+                a2.setEasingCurve(QEasingCurve.OutCubic)
+                a2.start()
+                anims.append(a2)
+            QTimer.singleShot(int(dur) + 260, lambda: self._drop_snap(snap))   # 硬兜底
+            return tuple(anims)
+        except Exception as e:
+            print(f"[NewUI] ⚠ 快照淡出失败（直接删除）: {e}")
+            self._drop_snap(snap)
+            return None
+
+    def _rebuild_page_animated(self, key):
+        """重建某一页并做淡入（旧页快照淡出 → 只动一张位图，不卡）"""
+        old = self.pages.pop(key, None)
+        snap = None
+        if old is not None:
+            try:
+                snap = QLabel(self.stack)
+                snap.setPixmap(old.grab())
+                snap.setGeometry(self.stack.rect())
+                snap.setAttribute(Qt.WA_TransparentForMouseEvents)
+                snap.show()
+            except Exception:
+                snap = None
+            try:
+                old.hide()
+                self.stack.removeWidget(old)
+                old.deleteLater()
+            except Exception:
+                pass
+        new = self._ensure_page(key)
+        if new is None:
+            self._drop_snap(snap)
+            return
+        self.stack.setCurrentWidget(new)
+        try:
+            if key == "home":
+                self.home = new
+                if self._current_page_key() == "home":
+                    self.home._timer.start(6000)
+                    self.home.refresh_status()
+        except Exception:
+            pass
+        self._fade_out_snap(snap, 220)
+        for k, b in self.nav_btns.items():
+            b.setChecked(k == key)
+
+    def apply_theme_live(self, theme_id, persist=True):
+        """实时应用主题：色板/全局样式/外壳/页面/背景一次到位（不重启启动器）"""
+        if getattr(self, "_theming", False):
+            return
+        self._theming = True
+        try:
+            theme_id = str(theme_id or "").strip() or "silicon"
+            if persist:
+                try:
+                    from .themes_panel import _load_config, _save_config
+                    cfg = _load_config() or {}
+                    cfg["ui_theme"] = theme_id
+                    _save_config(cfg)
+                except Exception as e:
+                    print(f"[NewUI] ⚠ 主题写入 config 失败: {e}")
+            from . import colors as _C
+            _C.apply_theme_live(theme_id)
+            self._accent = _C.accent_hex()
+            # 全局 QSS + 调色板（主题底色不同 → 文字深浅跟着变）
+            try:
+                from PyQt5.QtWidgets import QApplication
+                app = QApplication.instance()
+                if app is not None:
+                    silicon_ui.install(app, accent=self._accent)
+            except Exception as e:
+                print(f"[NewUI] ⚠ 全局样式重建失败: {e}")
+            self._silicon = theme_id == "silicon"
+            cur_key = self._current_page_key()
+            self._restyle_chrome()
+            self._discard_other_pages(cur_key)
+            # 当前页重建延迟到信号返回之后（避免删除正在发信号的控件）
+            if cur_key:
+                QTimer.singleShot(0, lambda k=cur_key: self._rebuild_page_animated(k))
+            # 已打开的二级窗口跟着换色
+            try:
+                from .silicon_dialog import refresh_all_dialog_colors
+                refresh_all_dialog_colors()
+            except Exception:
+                pass
+            print(f"[NewUI] 主题已实时应用: {theme_id}（当前页 {cur_key} 正在重建）")
+        except Exception as e:
+            print(f"[NewUI] ⚠ 实时应用主题失败: {e}")
+        finally:
+            self._theming = False
+
+    def apply_accent_live(self, accent_key):
+        """实时应用强调色（主题色按钮）"""
+        try:
+            from . import colors as _C
+            self._accent = _C.apply_accent_live(accent_key)
+            try:
+                from PyQt5.QtWidgets import QApplication
+                app = QApplication.instance()
+                if app is not None:
+                    silicon_ui.install(app, accent=self._accent)
+            except Exception:
+                pass
+            for b in getattr(self, "nav_btns", {}).values():
+                try:
+                    b.set_accent(self._accent)
+                except Exception:
+                    pass
+            cur_key = self._current_page_key()
+            if cur_key:
+                QTimer.singleShot(0, lambda k=cur_key: self._rebuild_page_animated(k))
+            try:
+                from .silicon_dialog import refresh_all_dialog_colors
+                refresh_all_dialog_colors()
+            except Exception:
+                pass
+        except Exception as e:
+            print(f"[NewUI] ⚠ 实时应用强调色失败: {e}")
+
+    def _goto(self, key, force=False):
+        if key == "home":
+            self._ensure_page("home")
+        elif key not in self.pages and key not in getattr(self, "_page_factories", {}):
+            return
+        else:
+            self._ensure_page(key)
+        w = self.pages.get(key)
+        if w is None:
+            return
+        # 过渡动画：用「旧页面快照淡出」代替整页透明度特效（后者会让重页面每帧重绘 → 卡）
+        try:
+            from PyQt5.QtGui import QPixmap
+            from PyQt5.QtCore import QPropertyAnimation, QEasingCurve
+            from PyQt5.QtWidgets import QLabel, QGraphicsOpacityEffect
+            snap = QLabel(self.stack)
+            snap.setPixmap(self.stack.grab())
+            snap.setGeometry(self.stack.rect())
+            snap.setAttribute(Qt.WA_TransparentForMouseEvents)
+            snap.setScaledContents(True)
+            snap.show()
+            eff = QGraphicsOpacityEffect(snap)
+            eff.setOpacity(1.0)
+            snap.setGraphicsEffect(eff)
+            self.stack.setCurrentWidget(w)
+            # 旧页淡出 + 轻微放大（只动一张位图 → 不卡）
+            a1 = QPropertyAnimation(eff, b"opacity", snap)
+            a1.setDuration(210)
+            a1.setStartValue(1.0)
+            a1.setEndValue(0.0)
+            a1.setEasingCurve(QEasingCurve.OutCubic)
+            a2 = QPropertyAnimation(snap, b"geometry", snap)
+            g0 = self.stack.rect()
+            g1 = g0.adjusted(-14, -10, 14, 10)
+            a2.setDuration(210)
+            a2.setStartValue(g0)
+            a2.setEndValue(g1)
+            a2.setEasingCurve(QEasingCurve.OutCubic)
+            a1.finished.connect(lambda: self._drop_snap(snap))
+            a1.start()
+            a2.start()
+            # ⚠ 硬兜底：动画被打断/特效对象提前释放时，快照也必须消失
+            #   （否则那张不透明的旧页面位图会一直盖在新页面上 = 「背景被遮挡」）
+            QTimer.singleShot(470, lambda: self._drop_snap(snap))
+            self._page_anim = (a1, a2)
+        except Exception:
+            self.stack.setCurrentWidget(w)
+        try:
+            _make_transparent(w)     # 切到该页时再兜一次（页面可能刚被刷新/重建过）
+        except Exception:
+            pass
+        _ulog(f"切页 → {key}（快照过渡，470ms 内必删）")
+        for k, b in self.nav_btns.items():
+            b.setChecked(k == key)
+        # 状态定时器只在总览页跑（省 CPU）
+        try:
+            home = self.pages.get("home")
+            if home is None:
+                home = self._ensure_page("home")
+            if key == "home":
+                home._timer.start(6000)
+                home.refresh_status()
+            elif home is not None:
+                home._timer.stop()
+        except Exception:
+            pass
+
+    # ── 效果 ──
+    def _apply_effects(self):
+        # ui_acrylic=false 时跳过亚克力（低配/远程桌面下更流畅）
+        try:
+            import json as _json
+            _cfg = _json.load(open(os.path.join(_app_base_dir(), "config.json"), encoding="utf-8"))
+            if str(_cfg.get("ui_acrylic", "true")).strip().lower() in ("false", "0", "off", "no"):
+                # 关掉亚克力（省性能）但依然要圆角 → 只做 DWM 圆角 + 透明窗口
+                try:
+                    self.setAttribute(Qt.WA_TranslucentBackground, True)
+                    silicon_ui.apply_round_corners(self)
+                    self.update()
+                except Exception as _e:
+                    print(f"[NewUI] ⚠ 圆角设置失败: {_e}")
+                print("[NewUI] 亚克力已关闭（保留圆角，更流畅）")
+                return
+        except Exception:
+            pass
+        try:
+            silicon_ui.apply_acrylic(self)
+            print("[NewUI] 亚克力 + 圆角已启用")
+        except Exception as e:
+            print(f"[NewUI] ⚠ 亚克力失败: {e}")
+
+    def _schedule_blur_refresh(self, delay_ms: int = 400):
+        """停手后再做一次（带模糊的）完整重载 —— 重活只做一次"""
+        try:
+            from PyQt5.QtCore import QTimer
+            self._bg_blur_timer = getattr(self, "_bg_blur_timer", None)
+            if self._bg_blur_timer is None:
+                self._bg_blur_timer = QTimer(self)
+                self._bg_blur_timer.setSingleShot(True)
+                self._bg_blur_timer.timeout.connect(self._finish_blur_refresh)
+            self._bg_blur_timer.start(int(delay_ms))
+        except Exception as e:
+            print(f"[NewUI] ⚠ 模糊刷新调度失败: {e}")
+
+    def _finish_blur_refresh(self):
+        self._bg_blur_skip = False
+        self.reload_background()
+
+    def apply_bg_settings(self, values: dict):
+        """实时应用背景设置（内存生效、不写盘；滑块拖动时调用 → 丝滑不卡）
+
+        节流：50ms 内的重复调用直接忽略（拖动会产生大量回调）。"""
+        try:
+            import time as _t
+            self._bg_live = getattr(self, "_bg_live", {})
+            self._bg_live.update({k: v for k, v in (values or {}).items()})
+            now = _t.time()
+            if now - getattr(self, "_bg_last_ts", 0) < 0.05:
+                # 值已记录，等下一次回调再重建（避免每像素都重算模糊）
+                try:
+                    from PyQt5.QtCore import QTimer
+                    QTimer.singleShot(60, self.reload_background)
+                except Exception:
+                    pass
+                return
+            self._bg_last_ts = now
+            # 二级窗口（立绘工坊/新建桌宠…）实时跟随启动器底色
+            try:
+                if "ui_bg_color" in (values or {}):
+                    from .silicon_dialog import refresh_all_dialog_colors
+                    refresh_all_dialog_colors(values.get("ui_bg_color"))
+            except Exception as _e:
+                print(f"[NewUI] ⚠ 同步二级窗口底色失败: {_e}")
+            self._bg_blur_skip = True      # 拖动中：先不做模糊（毫秒级响应）
+            self.reload_background()
+            self._schedule_blur_refresh(400)   # 停手后补上模糊
+        except Exception as e:
+            print(f"[NewUI] ⚠ 实时应用背景设置失败: {e}")
+
+    def _bg_value(self, key: str, default):
+        """优先取内存实时值（滑块拖动中），其次 config.json"""
+        try:
+            live = getattr(self, "_bg_live", {})
+            if key in live:
+                return live[key]
+        except Exception:
+            pass
+        try:
+            import json as _json
+            cfg = _json.load(open(os.path.join(_app_base_dir(), "config.json"), encoding="utf-8"))
+            v = cfg.get(key)
+            return default if v in (None, "") else v
+        except Exception:
+            return default
+
+    def reload_background(self):
+        """实时重建主题背景（透明度/模糊度滑块拖动即生效，无需重启）"""
+        try:
+            if self._media is not None:
+                try:
+                    self._media.stop()
+                except Exception:
+                    pass
+                self._media = None
+            if self._bg_widget is not None:
+                try:
+                    self._bg_widget.hide()
+                    self._bg_widget.deleteLater()
+                except Exception:
+                    pass
+                self._bg_widget = None
+            self._load_background()
+            print("[NewUI] 背景已按新参数重建（实时生效）")
+        except Exception as e:
+            print(f"[NewUI] ⚠ 背景重建失败: {e}")
+
+    def _load_background(self):
+        """主题背景（图片/视频）：铺满整窗，内容叠在上面"""
+        try:
+            # 背景底色：壁纸半透明时透出来的那层（config.ui_bg_color，默认黑）
+            try:
+                _bc = str(self._bg_value("ui_bg_color", "#000000") or "#000000").strip()
+                if _bc:
+                    self._set_base_color(QColor(_bc))
+            except Exception:
+                pass
+            btype, src, opacity = background_info()
+            # 用户在主题页可调：背景透明度 / 模糊度
+            try:
+                _o = self._bg_value("ui_bg_opacity", 100)
+                if _o not in (None, ""):
+                    opacity = max(0.05, min(1.0, float(_o) / 100.0))
+                self._bg_blur = int(self._bg_value("ui_bg_blur", 0) or 0)
+            except Exception:
+                self._bg_blur = 0
+            if not src:
+                return
+            if btype == "image":
+                # 不建独立控件：壁纸交给圆角底板绘制（这样四角才是圆的）
+                self._bg_widget = None
+                _cache = getattr(self, "_bg_src_cache", None)
+                if _cache is not None and _cache[0] == src:
+                    pm = QPixmap(_cache[1])          # 用缓存，免去重复读盘/解码
+                else:
+                    pm = QPixmap(src)
+                    try:
+                        self._bg_src_cache = (src, pm)
+                    except Exception:
+                        pass
+                if pm.isNull():
+                    return
+                # 预乘透明度（一次性绘制）—— 比 QGraphicsOpacityEffect 快很多
+                # 散开的模糊：三趟盒式模糊 ≈ 高斯。
+                # 拖动调节时先跳过（模糊较重），停手 400ms 后再补一次 → 拖动丝滑
+                if getattr(self, "_bg_blur", 0) > 0 and not getattr(self, "_bg_blur_skip", False):
+                    pm = _soft_blur(pm, int(self._bg_blur))
+                if opacity < 0.99:
+                    faded = QPixmap(pm.size())
+                    faded.fill(Qt.transparent)
+                    p = QPainter(faded)
+                    p.setOpacity(max(0.05, min(1.0, float(opacity))))
+                    p.drawPixmap(0, 0, pm)
+                    p.end()
+                    pm = faded
+                try:
+                    self.back.set_bg(pm)
+                    self.back.lower()          # 底板在最底层（内容叠在上面）
+                    self.back.update()
+                except Exception as _e:
+                    print(f"[NewUI] ⚠ 设置圆角壁纸失败: {_e}")
+            elif btype == "video":
+                from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
+                from PyQt5.QtMultimediaWidgets import QVideoWidget
+                self._bg_widget = QVideoWidget(self.back)
+                self._media = QMediaPlayer(self)
+                self._media.setMedia(QMediaContent(QUrl.fromLocalFile(src)))
+                self._media.setVideoOutput(self._bg_widget)
+                self._media.setVolume(0)
+                self._media.play()
+                self._bg_widget.setAttribute(Qt.WA_TransparentForMouseEvents)
+                self._bg_widget.lower()
+                self._bg_widget.show()
+                self._apply_bg_mask()
+                self.resizeEvent(None)
+                print(f"[NewUI] 主题背景视频: {os.path.basename(src)}")
+        except Exception as e:
+            print(f"[NewUI] ⚠ 主题背景加载失败: {e}")
+
+    def reload_background(self):
+        """背景透明度/模糊度实时生效：销毁旧背景图/视频 → 按当前 config 重建"""
+        try:
+            if self._media is not None:
+                try:
+                    self._media.stop()
+                except Exception:
+                    pass
+                self._media = None
+            if self._bg_widget is not None:
+                self._bg_widget.hide()
+                self._bg_widget.deleteLater()
+                self._bg_widget = None
+            self._load_background()
+            print("[NewUI] 背景已按新设置重新加载")
+        except Exception as e:
+            print(f"[NewUI] ⚠ 重载背景失败: {e}")
+
+    def resizeEvent(self, event):
+        try:
+            if self._bg_widget is not None:
+                self._bg_widget.setGeometry(0, 0, self.back.width(), self.back.height())
+        except Exception:
+            pass
+        if event is not None:
+            super().resizeEvent(event)
+
+    def _set_base_color(self, color: QColor):
+        """设置窗口底色（壁纸半透明时透出来的那一层）"""
+        try:
+            self._base_color = color
+            self.back.set_color(color)
+            self.back.update()
+        except Exception as e:
+            print(f"[NewUI] ⚠ 设置底色失败: {e}")
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if self._silicon and not getattr(self, "_fx_done", False):
+            self._fx_done = True
+            QTimer.singleShot(50, self._apply_effects)
+        # 预热重页面：启动空闲时按顺序构建（插件/桌宠/记忆/设置），
+        # 之后点导航就是秒开（以前第一次点插件目录会卡一下 = 现建页面）
+        if not getattr(self, "_prewarm_started", False):
+            self._prewarm_started = True
+            self._prewarm_queue = ["plugins", "pets", "memory", "settings", "prompt", "themes"]
+            QTimer.singleShot(1500, self._prewarm_next)
+
+    def _prewarm_next(self):
+        """逐个预热页面（每个之间留 250ms，绝不影响使用）"""
+        try:
+            q = getattr(self, "_prewarm_queue", [])
+            if not q:
+                print("[NewUI] 页面预热完成")
+                return
+            key = q.pop(0)
+            if key not in self.pages:
+                import time as _t
+                t0 = _t.time()
+                self._ensure_page(key)
+                print(f"[NewUI] 预热 {key}: {( _t.time()-t0)*1000:.0f}ms")
+            QTimer.singleShot(250, self._prewarm_next)
+        except Exception as e:
+            print(f"[NewUI] ⚠ 预热失败: {e}")
+
+    # ── 关闭清理 ──
+    def closeEvent(self, event):
+        try:
+            for proc in (self._qq_proc, self._wx_proc):
+                if proc and proc.poll() is None:
+                    subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                                   capture_output=True,
+                                   creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except Exception:
+            pass
+        self.hide()
+        if self._media is not None:
+            try:
+                self._media.stop()
+            except Exception:
+                pass
+        event.accept()
+        print("[NewUI] 启动器已关闭")
+
+
+def _ulog(msg: str):
+    """外壳关键事件写文件（冻结版没有控制台 → 出问题只能靠日志定位）"""
+    try:
+        import time as _t
+        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if getattr(sys, "frozen", False):
+            base = os.path.dirname(sys.executable)
+        d = os.path.join(base, "tmp")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "launcher_ui.log"), "a", encoding="utf-8") as f:
+            f.write(f"[{_t.strftime('%m-%d %H:%M:%S')}] {msg}\n")
+    except Exception:
+        pass
+
+
+def _hook_repaint_transparency(page):
+    """页面内容会被重建（刷新桌宠列表 / 重扫插件）→ 重建后再次透明化，
+    否则新建出来的卡片带回不透明背景，又把主题壁纸挡住（打开向导后复现的那个问题）。"""
+    targets = [page]
+    try:
+        targets += [w for w in page.findChildren(QWidget) if w is not page]
+    except Exception:
+        pass
+    for tgt in targets:
+        for name in ("_refresh", "_reload"):
+            fn = getattr(tgt, name, None)
+            if not callable(fn) or getattr(fn, "_silicon_hooked", False):
+                continue
+            try:
+                def _wrap(orig, owner=tgt, mname=name):
+                    def _inner(*a, **kw):
+                        r = orig(*a, **kw)
+                        try:
+                            _make_transparent(owner)          # 立即
+                            from PyQt5.QtCore import QTimer   # Qt 可能晚一步重建 → 再补两次
+                            QTimer.singleShot(150, lambda: _make_transparent(owner))
+                            QTimer.singleShot(450, lambda: _make_transparent(owner))
+                            _ulog(f"{owner.__class__.__name__}.{mname} → 已重新透明化（防止卡片遮挡背景）")
+                        except Exception:
+                            pass
+                        return r
+                    _inner._silicon_hooked = True
+                    return _inner
+                setattr(tgt, name, _wrap(fn))
+                print(f"[NewUI] 已挂钩 {tgt.__class__.__name__}.{name}（重建后自动透明化）")
+                _ulog(f"已挂钩 {tgt.__class__.__name__}.{name}（刷新后自动透明化）")
+            except Exception as e:
+                print(f"[NewUI] ⚠ 挂钩 {name} 失败: {e}")
+
+
+def _soft_blur(pm: QPixmap, strength: int) -> QPixmap:
+    """三趟盒式模糊（分离式，numpy 加速）→ 近似高斯的「散开」效果。
+
+    strength 0~100 → 半径 2~48 像素。找不到 numpy 时回退到缩放模糊。
+    """
+    try:
+        r = max(2, int(strength * 0.48))
+        img = pm.toImage().convertToFormat(4)          # QImage.Format_RGB32
+        w, h = img.width(), img.height()
+        ptr = img.bits()
+        ptr.setsize(img.byteCount())
+        import numpy as np
+        a = np.frombuffer(ptr, dtype=np.uint8).reshape((h, w, 4)).astype(np.float32)
+
+        def _box(arr, rad):
+            # 分离式盒式模糊（横向 + 纵向），用累积和做 O(n)
+            if rad < 1:
+                return arr
+            k = 2 * rad + 1
+            pad = np.pad(arr, ((0, 0), (rad, rad), (0, 0)), mode="edge")
+            cs = np.cumsum(pad, axis=1)
+            cs = np.concatenate([np.zeros((h, 1, 4), np.float32), cs], axis=1)
+            arr = (cs[:, k:, :] - cs[:, :-k, :]) / k
+            pad = np.pad(arr, ((rad, rad), (0, 0), (0, 0)), mode="edge")
+            cs = np.cumsum(pad, axis=0)
+            cs = np.concatenate([np.zeros((1, w, 4), np.float32), cs], axis=0)
+            return (cs[k:, :, :] - cs[:-k, :, :]) / k
+
+        for _ in range(3):                             # 三趟 ≈ 高斯
+            a = _box(a, max(1, r // 3))
+        out = np.clip(a, 0, 255).astype(np.uint8)
+        out.setflags(write=True)
+        qimg = QImage(out.data, w, h, w * 4, 4)
+        return QPixmap.fromImage(qimg.copy())
+    except Exception as e:
+        print(f"[NewUI] ⚠ 高斯模糊不可用，回退缩放模糊: {e}")
+        try:
+            f = max(2, int(strength) // 6 + 1)
+            small = pm.scaled(max(1, pm.width() // f), max(1, pm.height() // f),
+                              Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+            return small.scaled(pm.size(), Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+        except Exception:
+            return pm
+
+
+def _make_transparent(root_widget, alpha: float = 0.35, recurse: bool = True):
+    """把控件树里的实心背景改成半透明，让主题壁纸透出来。
+
+    - 只改「有实心背景色」的内联样式（#rrggbb / rgb(...) / 主题色名），改成同色 + 透明度
+    - 纯 transparent / rgba 保持不变；QScrollArea 的视口一并处理，避免白/黑块遮挡
+    - 只做一次（页面构建时调用），运行时零开销
+    """
+    try:
+        root_widget.setAutoFillBackground(False)
+    except Exception:
+        pass
+
+    hex_re = re.compile(r"(background(?:-color)?\s*:\s*)(#[0-9a-fA-F]{6}|#[0-9a-fA-F]{8}|rgba?\([^)]*\))")
+
+    def _translucent(css: str) -> str:
+        def _rep(m):
+            head, col = m.group(1), m.group(2)
+            try:
+                if col.startswith("#"):
+                    c = QColor(col)
+                else:
+                    parts = col[col.find("(") + 1:col.rfind(")")].split(",")
+                    nums = [int(float(x.strip())) for x in parts]
+                    if len(parts) == 4 and nums[3] <= 1:      # rgba 已带透明度 → 不动
+                        return m.group(0)
+                    c = QColor(nums[0], nums[1], nums[2])
+                if not c.isValid():
+                    return m.group(0)
+                return f"{head}rgba({c.red()},{c.green()},{c.blue()},{int(alpha * 255)})"
+            except Exception:
+                return m.group(0)
+        return hex_re.sub(_rep, css)
+
+    widgets = [root_widget] + (root_widget.findChildren(QWidget) if recurse else [])
+    for child in widgets:
+        try:
+            child.setAutoFillBackground(False)
+            css = child.styleSheet()
+            if css and "background" in css:
+                child.setStyleSheet(_translucent(css))
+            # 滚动区视口 / 列表视口：透明
+            if isinstance(child, QScrollArea):
+                vp = child.viewport()
+                if vp is not None:
+                    vp.setAutoFillBackground(False)
+                    vp.setStyleSheet("background: transparent;")
+        except Exception:
+            pass
+
+
+class _RoundBack(QWidget):
+    """启动器自己的底色层：圆角 + 竖向渐变。
+
+    壁纸（背景图/视频）以「背景透明度」叠在它上面 → 半透明时透出下层底色，
+    因为底色是渐变，所以整体呈现出渐变＋壁纸的混合观感（这就是「启动器底色」的作用）。
+    底色可调：config.ui_bg_color（默认 #000000 黑）。
+    """
+
+    def __init__(self, color: QColor, parent=None):
+        super().__init__(parent)
+        self._color = color
+
+    def set_color(self, c: QColor):
+        self._color = c
+        self.update()
+
+    def set_bg(self, pixmap):
+        """设置壁纸（已含透明度/模糊处理）→ 与渐变底色一起在圆角内绘制"""
+        self._bg = pixmap
+        self.update()
+
+    def rounded_path(self):
+        path = QPainterPath()
+        r = silicon_ui.M.radius_win
+        path.addRoundedRect(0, 0, self.width(), self.height(), r, r)
+        return path
+
+    def paintEvent(self, event):
+        try:
+            from PyQt5.QtGui import QLinearGradient
+            p = QPainter(self)
+            p.setRenderHint(QPainter.Antialiasing, True)
+            r = silicon_ui.M.radius_win
+            path = QPainterPath()
+            path.addRoundedRect(0, 0, self.width(), self.height(), r, r)
+            c = QColor(self._color)
+            top = c.lighter(150)          # 上浅
+            bottom = c.darker(135)        # 下深 → 形成柔和渐变
+            grad = QLinearGradient(0, 0, 0, max(1, self.height()))
+            grad.setColorAt(0.0, top)
+            grad.setColorAt(0.55, c)
+            grad.setColorAt(1.0, bottom)
+            p.fillPath(path, grad)
+            # 壁纸也画在圆角里（关键：否则方形的壁纸会把四个角盖成直角）
+            bg = getattr(self, "_bg", None)
+            if bg is not None and not bg.isNull():
+                p.save()
+                p.setClipPath(path)
+                # 按窗口尺寸铺满（保持比例裁剪，避免拉伸变形）
+                sc = bg.scaled(self.size(), Qt.KeepAspectRatioByExpanding,
+                               Qt.SmoothTransformation)
+                x = (self.width() - sc.width()) // 2
+                y = (self.height() - sc.height()) // 2
+                p.drawPixmap(x, y, sc)
+                p.restore()
+            p.end()
+        except Exception:
+            try:
+                p = QPainter(self)
+                p.fillRect(self.rect(), self._color)
+                p.end()
+            except Exception:
+                pass
+
+
+def _opacity_effect(opacity: float):
+    eff = QGraphicsOpacityEffect()
+    try:
+        eff.setOpacity(max(0.05, min(1.0, float(opacity))))
+    except Exception:
+        eff.setOpacity(1.0)
+    return eff
+
+
+class SplashScreen(QWidget):
+    """开屏动画：图标 + 名称 + 进度条，淡入 → 主窗就绪后淡出"""
+
+    def __init__(self):
+        super().__init__()
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.SplashScreen)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setFixedSize(420, 240)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(12, 12, 12, 12)
+        card = _RoundBack(QColor(Color8))
+        card.setStyleSheet(
+            f"QWidget {{ border: 1px solid {Color5.name()};"
+            f" border-radius: {silicon_ui.M.radius_card}px; }}")
+        outer.addWidget(card)
+
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(28, 24, 28, 22)
+        lay.setSpacing(10)
+
+        ico = QLabel()
+        p = os.path.join(_app_base_dir(), "icon.png")
+        if os.path.exists(p):
+            pm = QPixmap(p)
+            if not pm.isNull():
+                ico.setPixmap(pm.scaled(84, 84, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        ico.setAlignment(Qt.AlignCenter)
+        ico.setStyleSheet("border: none; background: transparent;")
+        lay.addWidget(ico)
+
+        t = QLabel("AIpet 丛雨桌宠")
+        t.setAlignment(Qt.AlignCenter)
+        t.setStyleSheet(f"color: {Color1.name()}; font-size: 20px; font-weight: bold;"
+                        f" font-family: '{silicon_ui.M.font}'; border: none; background: transparent;")
+        lay.addWidget(t)
+
+        sub = QLabel("正在启动…")
+        sub.setAlignment(Qt.AlignCenter)
+        sub.setStyleSheet(f"color: {Gray2.name()}; font-size: 12px; border: none;")
+        self._sub = sub
+        lay.addWidget(sub)
+
+        from PyQt5.QtWidgets import QProgressBar
+        bar = QProgressBar()
+        bar.setRange(0, 100)
+        bar.setValue(8)
+        bar.setTextVisible(False)
+        bar.setFixedHeight(6)
+        acc = THEME_COLORS.get(str(ACCENT_ID), {}).get("title_start", "#2f6fd0")
+        bar.setStyleSheet(
+            f"QProgressBar {{ background: rgba(255,255,255,0.12); border: none; border-radius: 3px; }}"
+            f"QProgressBar::chunk {{ background: {acc}; border-radius: 3px; }}")
+        lay.addWidget(bar)
+        self._bar = bar
+
+        # 居中 + 淡入
+        from PyQt5.QtWidgets import QApplication
+        scr = QApplication.primaryScreen().availableGeometry()
+        self.move(scr.center().x() - self.width() // 2, scr.center().y() - self.height() // 2)
+        self.setWindowOpacity(0.0)
+
+    def set_progress(self, v: int, text: str = ""):
+        try:
+            self._bar.setValue(max(0, min(100, int(v))))
+            if text:
+                self._sub.setText(text)
+        except Exception:
+            pass
+
+    def fade(self, to: float, ms: int, then=None):
+        from PyQt5.QtCore import QPropertyAnimation, QEasingCurve
+        a = QPropertyAnimation(self, b"windowOpacity", self)
+        a.setDuration(int(ms))
+        a.setStartValue(self.windowOpacity())
+        a.setEndValue(float(to))
+        a.setEasingCurve(QEasingCurve.OutCubic)
+        if then:
+            a.finished.connect(then)
+        a.start(QPropertyAnimation.DeleteWhenStopped)
+        self._anim = a
+
+
+def launch() -> int:
+    """入口：启动新版启动器"""
+    from PyQt5.QtWidgets import QApplication
+    from . import silicon_ui as _sui
+    from .colors import current_theme_id
+    app = QApplication.instance() or QApplication(sys.argv)
+    try:
+        from . import safety as _safety
+        _safety.install("launcher")
+    except Exception as _e:
+        print(f"[NewUI] ⚠ 全局异常兜底不可用: {_e}")
+    if current_theme_id() == "silicon":
+        _sui.install(app, accent=THEME_COLORS.get(str(ACCENT_ID), {}).get("title_start", "#2f6fd0"))
+    splash = SplashScreen()
+    splash.show()
+    splash.fade(1.0, 260)
+    splash.set_progress(25, "加载界面样式…")
+
+    win = SiliconLauncher()
+
+    def _ready():
+        try:
+            splash.set_progress(100, "准备就绪")
+            win.show()
+            QTimer.singleShot(160, lambda: splash.fade(0.0, 260, splash.close))
+            QTimer.singleShot(120, lambda: _fade_window_in(win))
+        except Exception as e:
+            print(f"[NewUI] ⚠ 开屏收尾失败: {e}")
+            try:
+                win.show()
+                splash.close()
+            except Exception:
+                pass
+
+    QTimer.singleShot(900, _ready)
+    return app.exec_()
+
+
+def _fade_window_in(win):
+    """主窗淡入（窗口级透明度动画，开销很小）"""
+    try:
+        from PyQt5.QtCore import QPropertyAnimation, QEasingCurve
+        win.setWindowOpacity(0.0)
+        a = QPropertyAnimation(win, b"windowOpacity", win)
+        a.setDuration(260)
+        a.setStartValue(0.0)
+        a.setEndValue(1.0)
+        a.setEasingCurve(QEasingCurve.OutCubic)
+        a.start(QPropertyAnimation.DeleteWhenStopped)
+        win._fade_in_anim = a
+    except Exception as e:
+        print(f"[NewUI] ⚠ 主窗淡入失败: {e}")

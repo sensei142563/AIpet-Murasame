@@ -1,0 +1,17 @@
+{
+  "id": "galgame",
+  "name": "Galgame 好感度玩法",
+  "version": "1.1.0",
+  "kind": "feature",
+  "desc": "群内好感度养成：成员可 @ 开启模式，聊天/约会增减好感（0~100），高好感解锁亲密互动；含查看好感度与 60 分钟约会冷却。",
+  "default": true,
+  "config_key": "qq_galgame_enable",
+  "extra_keys": [],
+  "settings": [
+    {
+      "type": "info",
+      "text": "本插件无数字参数。\n口令：开启galgame模式 / 关闭galgame模式 / 查看好感度 / 和我约会吧\n好感数据与约会冷却保存在 data/qq_galgame.json（删除该文件即重置全员好感）。"
+    }
+  ],
+  "builtin": true
+}
