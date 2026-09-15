@@ -1,14 +1,36 @@
-# AIpet-Murasame (old packaged client archive) - ignore rules
-# Privacy / huge dirs / build artifacts are never committed.
+# AIpet-Murasame —— 忽略规则
+# 隐私 / 巨型资源 / 构建产物 一律不入库
 
-# ----- privacy: API keys, QQ ids, face photos, login state -----
+# ----- 隐私：密钥、QQ 号、人脸照片、登录态 -----
 config.json
 data/
 face_shibie/
 NapCat.Shell.Windows.OneKey/
 pets/*/memory/
+QQData/
+credentials*
+nul
 
-# ----- huge runtime resources -----
+# ----- 本地自用资源（第三方模型/素材，版权原因不随仓库分发）-----
+pets/arona/
+pets/hiyori/
+pcl_launcher/themes/senrenbanka_copy/
+pcl_launcher/themes/classic/
+备用资源/
+
+# ----- 编辑器 / 系统 / 本地临时区 -----
+.ssh/
+.idea/
+.vscode/
+.mimosa/
+.zcode/
+_import_tmp/
+_repo_excluded/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ----- 巨型运行时资源 -----
 runtime/
 GPT-SoVITS/
 F5-TTS_Models/
@@ -16,8 +38,9 @@ models/
 reference_voices/*.wav
 reference_voices/*.mp3
 
-# ----- build artifacts / backups -----
+# ----- 构建产物 / 备份 -----
 AIpet-Murasame.exe
+AIpet-Murasame-安装包.exe
 AIPetDbg.spec
 _internal/
 _internal.bak*/
@@ -25,14 +48,20 @@ tmp/
 build/
 dist/
 *.spec
+*.exe
+*.old
+*.bak
+*.bak_*
+*.7z
+*.zip
 
-# ----- venv / python cache -----
+# ----- venv / Python 缓存 -----
 .venv/
 venv/
 __pycache__/
 *.py[cod]
 
-# ----- generic binary / big files -----
+# ----- 通用二进制 / 大文件 -----
 *.wav
 *.mp3
 *.ckpt
@@ -44,22 +73,3 @@ __pycache__/
 *.db
 *.sqlite3
 *.log
-
-# 不进公开仓库：内部开发文档 / 成人模式 / 私有配置（融合交付要求）
-_repo_excluded/
-config.json
-data/
-face_shibie/
-QQData/
-credentials*
-*.db
-nul
-
-# 打包产物 / 备份文件（不入公开仓库）
-*.exe
-*.old
-*.bak
-*.bak_*
-*.7z
-*.zip
-AIpet-Murasame-安装包.exe
