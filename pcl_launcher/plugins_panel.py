@@ -168,11 +168,15 @@ def _time_guard_set(enabled: bool) -> bool:
         if enabled:
             if _tool_running({"id": "time_guard"}):
                 return True
-            pyw = r"C:\Users\Administrator\AppData\Local\Programs\Python\Python310\pythonw.exe"
             base = _app_base_dir()
-            if not os.path.exists(pyw):
-                pyw = os.path.join(base, "runtime", "venv", "Scripts", "pythonw.exe")
-            if not os.path.exists(pyw):
+            # 解释器候选：项目 venv → 当前解释器同目录的 pythonw → 当前解释器（不再硬编码本机路径）
+            _cands = [
+                os.path.join(base, "runtime", "venv", "Scripts", "pythonw.exe"),
+                os.path.join(os.path.dirname(sys.executable), "pythonw.exe"),
+                sys.executable,
+            ]
+            pyw = next((c for c in _cands if c and os.path.exists(c)), "")
+            if not pyw:
                 return False
             subprocess.Popen([pyw, os.path.join(base, "time_sync_guard.py")],
                              cwd=base, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))

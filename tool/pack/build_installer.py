@@ -29,7 +29,7 @@ DIST_APP = os.path.join(BASE, "dist", "AIpet-Murasame")
 PAYLOAD_ZIP = os.path.join(BUILD, "payload.zip")
 INSTALLER_EXE_SRC = os.path.join(BUILD, "installer", "AIpet-Installer.exe")
 OUT_EXE = os.path.join(BASE, "AIpet-Murasame-安装包.exe")
-BASE_PY = r"C:\Users\Administrator\AppData\Local\Programs\Python\Python310"
+BASE_PY = os.environ.get("AIPET_BASE_PY") or sys.base_prefix   # 构建用基础 Python（可用环境变量覆盖）
 
 # 不进入安装包的目录/文件（个人数据、密钥、开发用）
 SKIP_DIRS = {

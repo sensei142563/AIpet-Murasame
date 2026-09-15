@@ -111,7 +111,9 @@ def _qwen_vision(image_b64_url: str, prompt: str) -> str:
     }
 
     try:
-        url = cfg["local_api"]["cloud_api"]
+        # 视觉请求经本机 API 代理转发（模型名/Key 由 vcfg 决定，代理地址固定取 cloud_api）
+        _cfg = get_config("./config.json")
+        url = _cfg["local_api"]["cloud_api"]
         resp = requests.post(url, json={"payload": payload, "headers": headers}, timeout=30)
         data = resp.json()
         if "choices" in data:

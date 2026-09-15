@@ -9,8 +9,9 @@ import time
 ROOT = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(ROOT)          # tmp/ → 项目根
 EXE = os.path.join(ROOT, "AIpet-Murasame-安装包.exe")
-TEST = r"D:\AIpet-安装测试"
-SHORTCUT = os.path.join(r"D:\桌面图标", "AIpet 丛雨桌宠.lnk")   # 本机桌面被重定向到 D:\桌面图标
+import tempfile
+TEST = os.path.join(tempfile.gettempdir(), "AIpet-安装测试")   # 用临时目录，避免硬编码他人盘符
+SHORTCUT = os.path.join(os.path.expanduser("~"), "Desktop", "AIpet 丛雨桌宠.lnk")
 
 print("安装包:", EXE, os.path.getsize(EXE) / 1e9, "GB")
 shutil.rmtree(TEST, ignore_errors=True)

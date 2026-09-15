@@ -221,7 +221,7 @@ def handle(text, msg_ctx=None):
         return (f"已按「{kw}」搜到并保存图片「{item['name']}」"
                 f"（{len(saved.names('images'))}/10），这就发给你看～"), acts
 
-    # ── 搜某个 UP 主/用户的视频（如「搜索申余不是鱼的视频」「看看某某的作品」）──
+    # ── 搜某个 UP 主/用户的视频（如「搜索某某UP的视频」「看看某某的作品」）──
     m = re.search(r"(?:搜索|搜|找|看看|来点)\s*([^\s，。？!！]{2,20}?)\s*的(?:视频|作品)", t)
     if m:
         uname = _strip(m.group(1)).strip()
