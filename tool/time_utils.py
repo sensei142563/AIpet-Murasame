@@ -58,6 +58,12 @@ def get_date_with_weekday_cn(dt: datetime | None = None) -> str:
 
 
 def build_time_context() -> str:
-    """Build a short context string about current date and time segment."""
-    return f"{get_date_with_weekday_cn()}；{get_time_segment_cn()}。"
+    """Build a short context string about current date and exact time.
+
+    形如「2026年09月07日（星期一）21:35（晚上）」，精确到分钟，
+    让模型能如实回答"现在几点/今天星期几/什么日子"，而不是靠猜。
+    """
+    dt = datetime.now()
+    return (f"{get_date_with_weekday_cn(dt)} "
+            f"{dt.hour:02d}:{dt.minute:02d}（{get_time_segment_cn(dt)}）")
 

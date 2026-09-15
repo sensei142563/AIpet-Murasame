@@ -246,8 +246,22 @@ class LongTextStreamThread(QThread):
                 ),
             })
 
+        # 当前时间 + 实时天气事实注入（只影响发给模型的内容）：
+        # 模型据此如实回答"现在几点/今天天气"，不再靠猜或含糊其辞
+        user_content = self.user_input
+        try:
+            from tool.time_utils import build_time_context as _btc3
+            from tool.weather_utils import weather_note_if_asked as _wn3
+            _fact = f"[{_btc3()}]"
+            _wx3 = _wn3(self.user_input)
+            if _wx3:
+                _fact += "\n" + _wx3
+            user_content = _fact + "\n" + self.user_input
+        except Exception:
+            pass
+
         # 当前用户消息
-        messages.append({"role": "user", "content": self.user_input})
+        messages.append({"role": "user", "content": user_content})
 
         headers = {
             "Authorization": f"Bearer {self.api_key}",

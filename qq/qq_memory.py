@@ -16,6 +16,7 @@ QQ 记忆分仓 — 让不同 QQ 号/群拥有独立记忆，互不串味。
 
 import os
 import json
+import re
 import time
 import threading
 
@@ -73,16 +74,14 @@ def _get_lock(key: str):
 
 
 def is_owner(user_id):
-    """判断某个 QQ 号是否为「预设大号」（共享记忆）"""
+    """判断某个 QQ 号是否在「主人白名单」内（qq_owner_id + qq_master_ids，最多 5 个）。
+    白名单内主人在私聊中共享 long_history 记忆；其他 QQ 号走分仓记忆。"""
     if not user_id:
         return False
     try:
-        from qq.qq_config import load_config
-        cfg = load_config()
-        owner = str(cfg.get("qq_owner_id", "")).strip()
-        if not owner:
-            return False
-        return str(user_id) == owner
+        from qq.qq_config import get_qq_config
+        masters = get_qq_config().get("master_ids") or []
+        return str(user_id) in masters
     except Exception:
         return False
 
@@ -109,10 +108,17 @@ def resolve_memory_path(session_key: str) -> str:
             return None  # 大号 → 共享记忆
         return os.path.join(mem_dir, f"{user_id}.json")
 
-    # 群聊
-    if session_key.startswith("group_"):
-        group_id = session_key.split("_", 1)[1]
-        return os.path.join(mem_dir, f"group_{group_id}.json")
+    # 群聊：
+    #   "group_<群号>"           → 公共话题仓（活泼模式接话用，记录群话题流水）
+    #   "group_<群号>_u<QQ号>"   → 按人对话仓（被 @ 回复用：只存该人与 bot 的对话，
+    #                              避免群里不同人的对话互相串味/认错人）
+    m = re.match(r"^group_(\d+)(?:_u(\d+))?$", session_key)
+    if m:
+        gid = m.group(1)
+        uin = m.group(2)
+        if uin:
+            return os.path.join(mem_dir, f"group_{gid}_u{uin}.json")
+        return os.path.join(mem_dir, f"group_{gid}.json")
 
     return None
 

@@ -28,6 +28,20 @@ F5TTS_PID_FILE = data_path("data", "wechat_f5tts.pid")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
+def _f5tts_venv_python():
+    """拉起 F5-TTS 优先使用项目自带 runtime\venv 的 Python：
+    若入口被系统 Python 执行（如无 venv 的旧副本启动器），sys.executable 拉出的
+    f5tts 服务会因缺 f5_tts/torchaudio 修复而卡死并占住 9881。"""
+    try:
+        p = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         "runtime", "venv", "Scripts", "python.exe")
+        if os.path.exists(p):
+            return p
+    except Exception:
+        pass
+    return sys.executable
+
+
 def check_port_open(port, host="127.0.0.1", timeout=1):
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -51,16 +65,6 @@ def _cleanup_f5tts():
         print(f"[WeChatBot] ⚠ 关闭 F5-TTS 失败: {e}")
 
 
-def _f5tts_python():
-    """F5-TTS 子进程解释器：优先项目 runtime\\venv，否则回落 sys.executable
-    （公共实现 tool.paths.venv_python，三入口共用，A 卡调试 §9）。"""
-    try:
-        from tool.paths import venv_python
-        return venv_python()
-    except Exception:
-        return sys.executable
-
-
 def ensure_f5tts(send_voice):
     """语音回复开启时自动拉起 F5-TTS（与 QQ 入口一致）"""
     if not send_voice:
@@ -72,7 +76,7 @@ def ensure_f5tts(send_voice):
     print("[WeChatBot] 正在自动启动 F5-TTS 服务（新控制台，模型加载约 10-45 秒）...")
     try:
         proc = subprocess.Popen(
-            [_f5tts_python(), "-m", "longtext.f5tts_server"],
+            [_f5tts_venv_python(), "-m", "longtext.f5tts_server"],
             cwd=BASE_DIR,
             creationflags=(0x00000010 if os.name == "nt" else 0)
         )
@@ -247,7 +251,7 @@ def main():
 
     bridge = WeChatBridge(
         owner_id=str(cfg.get("wechat_owner_id", "") or "").strip(),
-        bot_agent=str(cfg.get("wechat_bot_agent", "") or "AIpet/1.16.1").strip(),
+        bot_agent=str(cfg.get("wechat_bot_agent", "") or "AIpet/1.15").strip(),
         send_voice=send_voice,
     )
     print("[WeChatBot] 提示：对方发来第一条消息后，日志会显示 from_user_id（xxx@im.wechat），"

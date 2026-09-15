@@ -1,0 +1,17 @@
+{
+  "id": "time_guard",
+  "name": "时间同步守护",
+  "version": "1.1.0",
+  "kind": "tool",
+  "desc": "每 3 分钟检测本地时间偏差，超过 4 秒自动校时——修复 QQ 发送「网络连接异常」与 NapCat [ServerTime] 警告。",
+  "default": true,
+  "config_key": null,
+  "extra_keys": [],
+  "settings": [
+    {
+      "type": "info",
+      "text": "系统工具（非 QQ 对话功能）。\n守护脚本：time_sync_guard.py（主目录）\n计划任务：AIPetTimeSyncGuard——需先以管理员运行主目录的「安装时间同步守护_右键管理员运行.bat」\n日志：data/time_sync_guard.log"
+    }
+  ],
+  "builtin": true
+}

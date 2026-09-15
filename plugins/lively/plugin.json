@@ -1,0 +1,28 @@
+{
+  "id": "lively",
+  "name": "活泼模式（群聊接话）",
+  "version": "1.1.0",
+  "kind": "feature",
+  "desc": "自动读取所在群聊消息，间隔冷却后主动接一句话活跃群气氛（带防刷屏与防二次回复）。关闭=仅在被 @ 时回复群聊。",
+  "default": false,
+  "config_key": "qq_lively_enable",
+  "extra_keys": [
+    "qq_lively_interval"
+  ],
+  "settings": [
+    {
+      "type": "info",
+      "text": "启用后：群聊有新话题且冷却已过时会主动接话。推荐间隔 ≥5 分钟防刷屏。"
+    },
+    {
+      "key": "qq_lively_interval",
+      "label": "活泼接话间隔 (分钟)",
+      "type": "spin",
+      "min": 1,
+      "max": 120,
+      "step": 1,
+      "default": 15
+    }
+  ],
+  "builtin": true
+}

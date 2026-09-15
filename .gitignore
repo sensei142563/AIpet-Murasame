@@ -1,51 +1,65 @@
-# --- Private / secrets (NEVER commit) ---
-config.json
-.ssh/
-.idea/
-.vscode/
+# AIpet-Murasame (old packaged client archive) - ignore rules
+# Privacy / huge dirs / build artifacts are never committed.
 
-# --- Chat memory + face photos (privacy) ---
+# ----- privacy: API keys, QQ ids, face photos, login state -----
+config.json
 data/
 face_shibie/
+NapCat.Shell.Windows.OneKey/
 pets/*/memory/
 
-# --- 本地自用角色包（第三方模型，版权原因不随仓库/绿色版分发） ---
-pets/arona/
-pets/hiyori/
-
-# --- QQ bot environment ---
-NapCat.Shell.Windows.OneKey/
-
-# --- Large models (distribute separately) ---
-F5-TTS_Models/
-GPT-SoVITS/
-models/
-
-# --- Python cache / temp ---
-__pycache__/
-*.pyc
-.venv/
+# ----- huge runtime resources -----
 runtime/
-tmp/
-*.wav
-*.mp3
+GPT-SoVITS/
+F5-TTS_Models/
+models/
+reference_voices/*.wav
+reference_voices/*.mp3
 
-# --- Build artifacts (green-version & PyInstaller cache) ---
-dist/
+# ----- build artifacts / backups -----
+AIpet-Murasame.exe
+AIPetDbg.spec
+_internal/
+_internal.bak*/
+tmp/
 build/
+dist/
 *.spec
 
-# --- 备用资源（参考素材，他人项目代码/模型，不提交） ---
-备用资源/
+# ----- venv / python cache -----
+.venv/
+venv/
+__pycache__/
+*.py[cod]
 
-# --- 临时导入区（素材归集，用完移出项目） ---
-_import_tmp/
+# ----- generic binary / big files -----
+*.wav
+*.mp3
+*.ckpt
+*.pth
+*.pt
+*.onnx
+*.safetensors
+*.pkl
+*.db
+*.sqlite3
+*.log
 
-# --- 本地 Agent 审计/计划产物（不入库） ---
-.mimosa/
-.zcode/
+# 不进公开仓库：内部开发文档 / 成人模式 / 私有配置（融合交付要求）
+_repo_excluded/
+config.json
+data/
+face_shibie/
+QQData/
+credentials*
+*.db
+nul
 
-# --- System files ---
-.DS_Store
-Thumbs.db
-desktop.ini
+# 打包产物 / 备份文件（不入公开仓库）
+*.exe
+*.old
+*.bak
+*.bak_*
+*.7z
+*.zip
+AIpet-Murasame-安装包.exe

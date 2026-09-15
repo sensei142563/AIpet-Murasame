@@ -1,0 +1,28 @@
+{
+  "id": "auto_offline",
+  "name": "空闲自动离线",
+  "version": "1.1.0",
+  "kind": "feature",
+  "desc": "QQ 空闲超过设定分钟数后自动切换为「离开」状态并暂停自动回复；主人发消息立即恢复在线。关闭=始终活跃不自动离线。",
+  "default": false,
+  "config_key": "qq_auto_offline_enable",
+  "extra_keys": [
+    "qq_auto_offline_minutes"
+  ],
+  "settings": [
+    {
+      "type": "info",
+      "text": "启用后：空闲超过下方分钟数自动离线；关闭则始终活跃。"
+    },
+    {
+      "key": "qq_auto_offline_minutes",
+      "label": "空闲离线等待 (分钟)",
+      "type": "spin",
+      "min": 1,
+      "max": 180,
+      "step": 1,
+      "default": 30
+    }
+  ],
+  "builtin": true
+}

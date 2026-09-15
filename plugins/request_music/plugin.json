@@ -1,0 +1,15 @@
+{
+  "id": "request_music",
+  "name": "点歌（网易云语音点歌）",
+  "version": "1.0.0",
+  "kind": "feature",
+  "desc": "说「点歌 歌名」(歌名支持模糊) 即可从网易云搜索并把歌曲作为 QQ 语音消息发出来。",
+  "default": true,
+  "config_key": "qq_music_enable",
+  "extra_keys": [],
+  "settings": [
+    { "type": "info",
+      "text": "点歌玩法：对我说「点歌 晴天」/「点歌 周杰伦 晴天」等即可，歌名可模糊(网易云模糊搜索取最匹配一首并直接发送语音)。\n也可说「放首歌」「来首歌 歌名」。\n音频在网易云公开接口搜索下载，仅在你点歌时进行。" }
+  ],
+  "builtin": true
+}

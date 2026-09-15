@@ -4,17 +4,97 @@ import sys
 import os
 import json
 import time
+
+
+# ⚠ 第一件事：确保用的是**项目自带解释器**（runtime/venv）。
+#   用系统 Python 跑本项目会缺依赖 → 直接崩（Windows 事件日志里的 MSVCP140 访问违规），
+#   而且会和正常桌宠抢 28565 端口 → 云端代理一断，桌宠就"没有任何回复"。
+#   这里检测到解释器不对就自动用 venv 重新执行自己（os.execv，不会留下多份进程）。
+def _ensure_project_python():
+    try:
+        if os.environ.get("AIPET_REEXEC") == "1":
+            return
+        _base = os.path.dirname(os.path.abspath(__file__))
+        _venv = os.path.join(_base, "runtime", "venv", "Scripts", "python.exe")
+        if not os.path.exists(_venv):
+            return
+        # 已经在用项目解释器（按路径字符串判断，避免"转发器"导致的误判循环）
+        if os.path.normcase(str(_venv)) in os.path.normcase(sys.executable or ""):
+            return
+        if os.path.normcase(os.path.abspath(sys.executable)) == os.path.normcase(os.path.abspath(_venv)):
+            return
+        print(f"[AIpet] 当前解释器不是项目自带的（{sys.executable}）→ 改用 {_venv} 重新启动", flush=True)
+        _env = dict(os.environ)
+        _env["AIPET_REEXEC"] = "1"
+        # ⚠ 不用 os.execv（Windows 上换解释器实测会 segfault）：拉起子进程后本进程退出
+        subprocess.Popen([_venv, os.path.abspath(__file__)] + sys.argv[1:],
+                         cwd=_base, env=_env)
+        sys.exit(0)
+    except Exception as _e:
+        print(f"[AIpet] ⚠ 切换项目解释器失败（继续用当前解释器）: {_e}")
+
+
+_ensure_project_python()
+
 from tool.config import get_config
+
+TORCH_OK = False        # 是否成功加载了 torch（云端模式不加载也能跑）
 
 SUPPORTED_CLOUD_MODEL_TYPES = ("deepseek", "qwen")
 
 # Live2D 依赖检测（包名 live2d-py，import 为 live2d）
+# ⚠ 配置里关掉 Live2D 时**不导入**：个别显卡/驱动下 Cubism 原生库导入即崩进程
+#   （表现：桌宠启动/运行一两分钟后突然消失，控制台没有任何报错）
 LIVE2D_SKIP = False
-try:
-    import live2d.v3
-    import OpenGL.GL
-except ImportError:
+def _live2d_enabled_in_cfg() -> bool:
+    try:
+        import json as _j
+        with open("./config.json", "r", encoding="utf-8") as f:
+            return str((_j.load(f) or {}).get("live2d_enabled", "false")).lower() == "true"
+    except Exception:
+        return False
+
+if not _live2d_enabled_in_cfg():
     LIVE2D_SKIP = True
+    print("[AIpet] 配置 live2d_enabled=false → 跳过 Live2D 依赖检测（避免个别驱动下崩溃）")
+else:
+    try:
+        import live2d.v3
+        import OpenGL.GL
+    except ImportError:
+        LIVE2D_SKIP = True
+
+
+def _project_python() -> str:
+    """跑本项目子进程（main.py / pip 等）一律用「项目自带解释器」。
+
+    ⚠ 直接用 sys.executable 不可靠：venv 的 Scripts\\python.exe 在 Windows 上常常是
+    一个"转发器"，进程内 sys.executable 会指向**基础 Python**（没有项目依赖）→
+    拉起的 main.py 会直接崩（事件日志里的 MSVCP140 访问违规），还会和正常桌宠抢
+    28565 端口；云端代理一断，桌宠就"一句话都不回"。
+    """
+    try:
+        p = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         "runtime", "venv", "Scripts", "python.exe")
+        if os.path.exists(p):
+            return p
+    except Exception:
+        pass
+    return sys.executable
+
+
+def _f5tts_venv_python():
+    """拉起 F5-TTS 优先使用项目自带 runtime\venv 的 Python：
+    若入口被系统 Python 执行（如无 venv 的旧副本启动器），sys.executable 拉出的
+    f5tts 服务会因缺 f5_tts/torchaudio 修复而卡死并占住 9881。"""
+    try:
+        p = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         "runtime", "venv", "Scripts", "python.exe")
+        if os.path.exists(p):
+            return p
+    except Exception:
+        pass
+    return sys.executable
 
 
 def log(msg, level="INFO"):
@@ -59,15 +139,15 @@ def should_check_hardware(cfg):
 
     if config_enabled(cfg.get("force_gpu_check", False)):
         log("检测到 force_gpu_check = true，将强制执行显卡检查。", "INFO")
-        return True
+        return False
 
     if model_type == "local":
         log("检测到 model_type = local，需要检查本机显卡。", "INFO")
-        return True
+        return False
 
     if tts_type == "local":
         log("检测到 tts_type = local，需要检查本机显卡。", "INFO")
-        return True
+        return False
 
     log("检测到对话与 TTS 均为云端模式，跳过本机显卡检查。", "INFO")
     return False
@@ -105,12 +185,11 @@ def check_hardware():
     # Step 3️⃣ 判断显卡类型
     gpu_lower = gpu_name.lower()
     if "nvidia" not in gpu_lower:
-        # A 卡/核显（AMD/Intel）：本机无 CUDA，本地 GPU 推理不可用，
-        # 但对话/QQ/微信走云端 API、F5-TTS 走 CPU，均不受影响 → 提示后走 CPU，不退出
+        # 如果未找到NVIDIA显卡，允许使用CPU模式
         if any(bad in gpu_lower for bad in ("amd", "radeon", "intel", "iris", "arc")):
-            log("检测到 AMD/Intel 显卡（无 NVIDIA/CUDA），本地 GPU 推理不可用。", "WARN")
-            log("已自动切换 CPU 模式：对话/QQ/微信走云端不受影响；本地语音/TTS 合成较慢属正常。", "INFO")
-            return "cpu"
+            log("当前显卡不受支持：仅支持 NVIDIA 显卡。", "ERROR")
+            log("请使用带 NVIDIA GPU 的电脑，或切换到云端模式。", "INFO")
+            sys.exit(1)
         else:
             log("未检测到 NVIDIA 显卡，系统将运行在 CPU 模式。", "INFO")
             # 继续执行，允许使用CPU
@@ -159,7 +238,7 @@ def install_requirements():
     log("正在安装缺失依赖，请稍候...")
     try:
         subprocess.run(
-            [sys.executable, "-m", "pip", "install", "-r", req_path, "--no-warn-script-location"],
+            [_project_python(), "-m", "pip", "install", "-r", req_path, "--no-warn-script-location"],
             check=True
         )
         log("依赖安装完成。", "SUCCESS")
@@ -172,31 +251,45 @@ def install_requirements():
 def ensure_cpu_torch():
     """
     确保存在可用的 torch（CPU 版即可）。
-    说明：即使 model_type=qwen/deepseek 云端模式，main.py 顶层仍会 import torch，
-    所以必须保证 torch 可用，否则程序在 import 阶段直接崩溃。
+    说明：本地模式需要 torch；云端模式（deepseek/qwen）只是 main.py 会 import 一下，
+    而 main.py 现在是容错导入 → 所以这里**任何失败都不再退出程序**。
+    （以前 torch 的 DLL 加载失败会让桌宠直接启动失败，用户看到的就是「启动桌宠失败」。）
     """
+    global TORCH_OK
     try:
         import torch
         log(f"已检测到 PyTorch {torch.__version__} (CUDA {torch.version.cuda or 'CPU'})", "SUCCESS")
-        return
+        TORCH_OK = True
+        return True
     except ImportError:
-        pass
+        TORCH_OK = False
+    except Exception as e:
+        # DLL 初始化失败等：重装也修不好，直接放行（云端模式不需要它）
+        TORCH_OK = False
+        log(f"PyTorch 加载失败（{e}）", "WARN")
+        log("→ 云端模式不受影响，继续启动；本地模型 / 本地语音功能将不可用。", "INFO")
+        return False
 
-    log("未检测到 PyTorch，安装 CPU 版本（云端模式也必需，main.py 顶层会 import）。", "INFO")
+    log("未检测到 PyTorch，尝试安装 CPU 版本（云端模式其实不需要，本地模式必需）。", "INFO")
     try:
         subprocess.run([
-            sys.executable, "-m", "pip", "install",
+            _project_python(), "-m", "pip", "install",
             "torch", "torchvision", "torchaudio",
             "--index-url", "https://download.pytorch.org/whl/cpu",
             "--no-warn-script-location"
-        ], check=True)
+        ], check=True, timeout=1800)
         import torch
         log(f"成功安装 PyTorch {torch.__version__} (CPU)", "SUCCESS")
-    except subprocess.CalledProcessError:
-        log("PyTorch 安装失败！请检查网络连接。", "ERROR")
-        log("可尝试手动运行：", "INFO")
-        log("    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu", "INFO")
-        sys.exit(1)
+        TORCH_OK = True
+        return True
+    except Exception as e:
+        # ⚠ 以前这里 sys.exit(1)：离线/网络受限时桌宠完全起不来。现在降级继续。
+        TORCH_OK = False
+        log(f"PyTorch 安装/加载失败：{e}", "WARN")
+        log("→ 继续以「无 torch」方式启动（云端模式可用；本地模型不可用）。", "INFO")
+        log("  需要本地模型时手动执行：pip install torch torchvision torchaudio "
+            "--index-url https://download.pytorch.org/whl/cpu", "INFO")
+        return False
 
 
 def setup_runtime_and_pytorch(config_path="config.json", cfg=None, hardware_type=None):
@@ -311,7 +404,7 @@ def setup_runtime_and_pytorch(config_path="config.json", cfg=None, hardware_type
         if mismatch:
             log("开始安装与当前 CUDA 版本匹配的 PyTorch...", "INFO")
             subprocess.run([
-                sys.executable, "-m", "pip", "install", "-U",
+                _project_python(), "-m", "pip", "install", "-U",
                 "torch", "torchvision", "torchaudio",
                 "--index-url", torch_url,
                 "--no-warn-script-location"
@@ -325,7 +418,7 @@ def setup_runtime_and_pytorch(config_path="config.json", cfg=None, hardware_type
         log("未检测到 PyTorch，开始安装...", "INFO")
         try:
             subprocess.run([
-                sys.executable, "-m", "pip", "install",
+                _project_python(), "-m", "pip", "install",
                 "torch", "torchvision", "torchaudio",
                 "--index-url", torch_url,
                 "--no-warn-script-location"
@@ -350,46 +443,15 @@ def run_download():
 
         log(f"正在运行模型下载脚本：{script_path}", "INFO")
         try:
-            subprocess.run(["python", "download.py"],)
+            # ⚠ 这里以前用裸 "python"（PATH 里的系统 Python）：系统 Python 没有本项目的
+            #   依赖，跑 download.py 会直接崩（事件日志里的 MSVCP140 访问违规就是这么来的）。
+            #   统一用项目解释器：优先 runtime venv。
+            subprocess.run([_f5tts_venv_python(), "download.py"],)
             log("模型下载完成。", "SUCCESS")
         except subprocess.CalledProcessError as e:
             log(f"下载脚本运行失败: {e}", "ERROR")
     elif tts_type == "cloud":
         log("检测到 tts_type = cloud, 跳过模型下载", "INFO")
-
-def _f5tts_python_candidates():
-    """F5-TTS 解释器候选列表（按优先级）：runtime\\venv → 当前解释器。"""
-    cands = []
-    try:
-        from tool.paths import venv_python
-        p = venv_python()
-        if p and p not in cands:
-            cands.append(p)
-    except Exception:
-        pass
-    if sys.executable not in cands:
-        cands.append(sys.executable)
-    return cands
-
-
-def _find_f5tts_python():
-    """多候选探测：谁装了 f5_tts 用谁（N 卡调试 §3.5）。
-
-    只按"venv 目录存在"选解释器，会在 venv 缺可选库时架空已装好库的系统 Python。
-    这里逐个候选跑 `import f5_tts`，返回第一个可用的解释器；都没有返回 None。
-    """
-    for cand in _f5tts_python_candidates():
-        try:
-            _probe = subprocess.run(
-                [cand, "-c", "import f5_tts"],
-                capture_output=True, timeout=30,
-            )
-            if _probe.returncode == 0:
-                return cand
-        except Exception:
-            continue
-    return None
-
 
 def start_f5tts_api():
     """启动 F5-TTS HTTP 服务（端口 9881，长文本模式中文语音合成）"""
@@ -398,17 +460,18 @@ def start_f5tts_api():
         log("长文本模式已关闭，跳过 F5-TTS 服务启动。", "INFO")
         return None
 
-    # F5-TTS 为可选语音库：多候选探测（runtime\venv → 系统 Python），谁有 f5_tts 用谁。
-    f5_py = _find_f5tts_python()
-    if f5_py is None:
-        log("未检测到 f5_tts 库（venv 与系统 Python 均未安装），长文本语音不可用。", "WARN")
-        log("如需语音功能：安装 f5-tts 后重试（推荐在 runtime\\venv 内安装）。", "INFO")
+    # F5-TTS 为可选语音库，缺失时仅提示，不阻塞程序
+    try:
+        import f5_tts  # noqa: F401
+    except ImportError:
+        log("未检测到 f5_tts 库，长文本语音不可用。", "WARN")
+        log("如需语音功能，请参考 README 安装 F5-TTS。", "INFO")
         return None
 
     log("检测到长文本模式已开启，启动 F5-TTS 服务（新控制台）...", "INFO")
     try:
         proc = subprocess.Popen(
-            [f5_py, "-m", "longtext.f5tts_server"],
+            [_f5tts_venv_python(), "-m", "longtext.f5tts_server"],
             cwd=os.path.dirname(os.path.abspath(__file__)),
             creationflags=(0x00000010 if os.name == "nt" else 0)
         )
@@ -481,13 +544,41 @@ def run_main():
 
     log(f"正在运行主程序：{script_path}", "INFO")
     try:
-        subprocess.run([sys.executable, "main.py"],)
+        subprocess.run([_project_python(), "main.py"],)
     except subprocess.CalledProcessError as e:
         log(f"桌宠启动失败: {e}", "ERROR")
 
+def _already_running() -> bool:
+    """单实例保护：桌宠 API 端口已被占用 → 说明已经有一个桌宠在跑。
+
+    不做这个检查的话，第二个实例的 API 会报
+    "ERROR: [Errno 10048] error while attempting to bind ... 28565"
+    （端口只能被一个进程监听），而且会出现两只桌宠同时说话。
+    """
+    import socket
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(0.6)
+            return s.connect_ex(("127.0.0.1", 28565)) == 0
+    except Exception:
+        return False
+
+
 if __name__ == "__main__":
+    if _already_running():
+        log("检测到桌宠已在运行（API 端口 28565 已被占用）。", "WARN")
+        log("为避免出现两只桌宠 / 端口冲突报错，本次启动已自动退出。", "INFO")
+        log("・想切换角色：在启动器里「关闭桌宠」后再启动即可", "INFO")
+        log("・确实要开第二个（不推荐）：先关闭当前桌宠窗口", "INFO")
+        try:
+            import time as _t
+            _t.sleep(2.2)
+        except Exception:
+            pass
+        sys.exit(0)
     cfg = load_runtime_config()
-    hardware_type = check_hardware() if should_check_hardware(cfg) else None
+    # 强制使用 CPU 模式，跳过所有显卡检测
+    hardware_type = "cpu"
     check_python()
     install_requirements()
     setup_runtime_and_pytorch(cfg=cfg, hardware_type=hardware_type)
