@@ -169,7 +169,7 @@ def _set_of(set_name=None) -> str:
 # ══════════ 本地场景背景（替代联网搜背景）══════════
 # 场景素材默认放在项目目录内的「场景素材」文件夹（随安装包一起分发，开箱即用）
 # 想换位置：config.json 里设置 portrait_scene_dir 指向自己的文件夹
-_SCENE_DIR_FALLBACK = r"D:\下载\AI桌宠\场景"     # 旧版素材来源（项目内目录不存在时兜底）
+_SCENE_DIR_FALLBACK = ""   # 旧版素材兜底已移除；以 config.portrait_scene_dir / 项目内「场景素材」为准
 
 
 def _project_scene_dir() -> str:

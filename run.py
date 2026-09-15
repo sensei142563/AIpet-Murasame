@@ -185,11 +185,12 @@ def check_hardware():
     # Step 3️⃣ 判断显卡类型
     gpu_lower = gpu_name.lower()
     if "nvidia" not in gpu_lower:
-        # 如果未找到NVIDIA显卡，允许使用CPU模式
+        # A 卡/核显（AMD/Intel）：本机无 CUDA，本地 GPU 推理不可用，
+        # 但对话/QQ/微信走云端 API、F5-TTS 走 CPU，均不受影响 → 提示后走 CPU，不退出
         if any(bad in gpu_lower for bad in ("amd", "radeon", "intel", "iris", "arc")):
-            log("当前显卡不受支持：仅支持 NVIDIA 显卡。", "ERROR")
-            log("请使用带 NVIDIA GPU 的电脑，或切换到云端模式。", "INFO")
-            sys.exit(1)
+            log("检测到 AMD/Intel 显卡（无 NVIDIA/CUDA），本地 GPU 推理不可用。", "WARN")
+            log("已自动切换 CPU 模式：对话/QQ/微信走云端不受影响；本地语音/TTS 合成较慢属正常。", "INFO")
+            return "cpu"
         else:
             log("未检测到 NVIDIA 显卡，系统将运行在 CPU 模式。", "INFO")
             # 继续执行，允许使用CPU
@@ -453,6 +454,40 @@ def run_download():
     elif tts_type == "cloud":
         log("检测到 tts_type = cloud, 跳过模型下载", "INFO")
 
+def _f5tts_python_candidates():
+    """F5-TTS 解释器候选列表（按优先级）：runtime\\venv → 当前解释器。"""
+    cands = []
+    try:
+        from tool.paths import venv_python
+        p = venv_python()
+        if p and p not in cands:
+            cands.append(p)
+    except Exception:
+        pass
+    if sys.executable not in cands:
+        cands.append(sys.executable)
+    return cands
+
+
+def _find_f5tts_python():
+    """多候选探测：谁装了 f5_tts 用谁（N 卡调试 §3.5）。
+
+    只按"venv 目录存在"选解释器，会在 venv 缺可选库时架空已装好库的系统 Python。
+    这里逐个候选跑 `import f5_tts`，返回第一个可用的解释器；都没有返回 None。
+    """
+    for cand in _f5tts_python_candidates():
+        try:
+            _probe = subprocess.run(
+                [cand, "-c", "import f5_tts"],
+                capture_output=True, timeout=30,
+            )
+            if _probe.returncode == 0:
+                return cand
+        except Exception:
+            continue
+    return None
+
+
 def start_f5tts_api():
     """启动 F5-TTS HTTP 服务（端口 9881，长文本模式中文语音合成）"""
     cfg = get_config("./config.json")
@@ -460,18 +495,17 @@ def start_f5tts_api():
         log("长文本模式已关闭，跳过 F5-TTS 服务启动。", "INFO")
         return None
 
-    # F5-TTS 为可选语音库，缺失时仅提示，不阻塞程序
-    try:
-        import f5_tts  # noqa: F401
-    except ImportError:
-        log("未检测到 f5_tts 库，长文本语音不可用。", "WARN")
-        log("如需语音功能，请参考 README 安装 F5-TTS。", "INFO")
+    # F5-TTS 为可选语音库：多候选探测（runtime\venv → 系统 Python），谁有 f5_tts 用谁。
+    f5_py = _find_f5tts_python()
+    if f5_py is None:
+        log("未检测到 f5_tts 库（venv 与系统 Python 均未安装），长文本语音不可用。", "WARN")
+        log("如需语音功能：安装 f5-tts 后重试（推荐在 runtime\\venv 内安装）。", "INFO")
         return None
 
     log("检测到长文本模式已开启，启动 F5-TTS 服务（新控制台）...", "INFO")
     try:
         proc = subprocess.Popen(
-            [_f5tts_venv_python(), "-m", "longtext.f5tts_server"],
+            [f5_py, "-m", "longtext.f5tts_server"],
             cwd=os.path.dirname(os.path.abspath(__file__)),
             creationflags=(0x00000010 if os.name == "nt" else 0)
         )

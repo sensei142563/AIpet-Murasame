@@ -20,12 +20,20 @@ except Exception as _torch_err:
     print(f"[AIpet] ⚠ PyTorch 不可用（{_torch_err}）→ 云端模式可正常使用；"
           f"本地模型 / 本地语音相关功能将不可用")
 
+# ===== Qt 平台插件路径修复（中文/非 ASCII 安装路径）=====
+# 必须放在 QApplication 构造之前；放 torch import 之后（避免 PyQt5 DLL 先于 torch 加载）
+try:
+    from tool.paths import ensure_qt_plugin_path
+    ensure_qt_plugin_path()
+except Exception:
+    pass
+
 import sys
 import threading
 import json
 
 # ── Qt 平台插件路径修复 ──────────────────────────────
-# 项目位于中文/非 ASCII 路径（如 D:\下载\...）时，Qt 5.15 内部会把插件目录
+# 项目位于中文/非 ASCII 路径时，Qt 5.15 内部会把插件目录
 # 转成 "??"，找不到 qwindows 平台插件 → "qt.qpa.plugin: Could not find the Qt
 # platform plugin" 崩溃。在创建 QApplication 前显式指定真实插件目录即可绕过
 # （PyQt5 自带插件位于 <site-packages>\PyQt5\Qt5\plugins）。
@@ -182,6 +190,14 @@ if __name__ == "__main__":
 
     # 后台启动本地 API 服务（FastAPI + Uvicorn）
     def _run_api_server():
+        # Windows Proactor 下客户端断开会产生无害的 "WinError 10054" 噪音 traceback
+        # （HTTP 短连接常见）。切 Selector 事件循环消除（标准解法，功能无影响）。
+        try:
+            import asyncio
+            if sys.platform == "win32":
+                asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        except Exception:
+            pass
         config = uvicorn.Config(api_app, host="127.0.0.1", port=28565, log_level="info")
         server = uvicorn.Server(config)
         server.run()

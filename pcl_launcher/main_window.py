@@ -1535,7 +1535,7 @@ class PCLMainWindow(QWidget):
                 ["powershell", "-NoProfile", "-Command",
                  "Get-CimInstance Win32_Process | Where-Object { "
                  "$_.Name -eq 'NapCatWinBootMain.exe' -or "
-                 "($_.Name -eq 'QQ.exe' -and $_.ExecutablePath -like 'D:\QQ\*') } | "
+                 "($_.Name -eq 'QQ.exe' -and $_.CommandLine -like '*NapCat*') } | "
                  "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"],
                 capture_output=True, timeout=25,
                 creationflags=getattr(_sp, "CREATE_NO_WINDOW", 0))

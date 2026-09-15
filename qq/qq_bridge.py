@@ -361,6 +361,7 @@ class QQBotBridge:
     def __init__(self):
         self.cfg = get_qq_config()
         self.ws_url = self.cfg["ws_url"]
+        self.napcat_token = self.cfg.get("napcat_token", "")
         self.ws = None
         self.running = False
         self.self_id = None  # 登录的 QQ 号（识别是否自己发的消息）
@@ -368,6 +369,7 @@ class QQBotBridge:
         self._lock = threading.Lock()
         self._send_fail_count = 0  # 断线窗口内发送失败计数（重连成功后清零）
         self._stt_warm_started = False  # 语音模型预热只做一次（重连循环避免反复下载/刷屏）
+        self._napcat_diagnosed = False  # NapCat 环境诊断只提示一次（connect/重连共用）
 
         # 消息调度器：FIFO 队列 + 串行处理 + 会话合并
         self.scheduler = MessageScheduler(handler=self._handle_queued_message)
@@ -414,6 +416,13 @@ class QQBotBridge:
         # ===== 主人昵称学习（识别"有人喊主人的 QQ 名字"场景，防认不出主人）=====
         self._master_nicks_lock = threading.Lock()
         self._master_nicks = {}            # str(QQ号) -> {昵称/群名片, ...}
+    @staticmethod
+    def _ws_auth_headers(token=""):
+        """NapCat OneBot11 WS 鉴权头；token 为空返回 None（不鉴权，兼容旧 NapCat）"""
+        token = (token or "").strip()
+        if not token:
+            return None
+        return [f"Authorization: Bearer {token}"]
 
     def connect(self):
         """建立 WebSocket 连接并进入事件循环（阻塞）。
@@ -430,9 +439,54 @@ class QQBotBridge:
                              name="QQBackgroundWatcher").start()
         host, port = self._ws_url_parts()
         if port and not self._napcat_ready(port, host=host):
-            print(f"[QQBridge] ⏳ 等待 NapCat 就绪（{host}:{port}）..."
-                  "若一直卡在这里，说明 NapCat 未正常启动/扫码，请运行 start_napcat.bat 并扫码登录。")
+            print(f"[QQBridge] ⏳ 等待 NapCat 就绪（{host}:{port}）...")
+            self._napcat_diagnosed = True  # connect 已诊断 → 重连循环不再重复打印
+            self._diagnose_napcat(host, port)
         self._reconnect_loop()
+
+    @staticmethod
+    def _napcat_process_running() -> bool:
+        """NapCat 相关进程是否在运行（QQ.exe / NapCat 注入进程，tasklist 探测）。"""
+        try:
+            import subprocess as _sp
+            out = _sp.run(["tasklist", "/FO", "CSV", "/NH"],
+                          capture_output=True, text=True, timeout=10,
+                          encoding="utf-8", errors="replace").stdout.lower()
+            return any(k in out for k in ("qq.exe", "napcatwinbootmain"))
+        except Exception:
+            return False  # 探测失败不误报
+
+    @staticmethod
+    def _diagnose_napcat(host, port):
+        """NapCat 端口就绪超时后的环境诊断（纯提示，不阻塞、不改配置）。
+
+        区分三种情况（A 卡真机实测，onebot 配置被重置属高频坑）：
+        1. NapCat 进程都没跑 → 提示启动 start_napcat.bat 扫码
+        2. 进程在跑但 3001 不通 → 极可能 onebot11_<uin>.json 的 websocketServers
+           被重置/清空（NapCat 在线收消息但 bot 连不上的"割裂"正是此因）
+        3. 其他 → 通用提示
+        """
+        import socket as _sock
+        # 再快速确认一次端口
+        try:
+            with _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM) as s:
+                s.settimeout(2)
+                if s.connect_ex((host, port)) == 0:
+                    return  # 已就绪，无需提示
+        except Exception:
+            pass
+
+        if QQBotBridge._napcat_process_running():
+            print(f"[QQBridge] 🔍 检测到 NapCat 进程在运行，但 {host}:{port} 未监听。")
+            print("[QQBridge]   这通常是 NapCat 的 onebot 配置文件被重置/清空所致：")
+            print("[QQBridge]   请检查 NapCat 目录下 NapCat\\config\\onebot11_<QQ号>.json")
+            print("[QQBridge]   的 network.websocketServers 是否含正向 WS（host=127.0.0.1, port=3001）。")
+            print("[QQBridge]   为空则 NapCat 虽在线却不提供 WS 端口 → 需要补回该段并重启 NapCat。")
+            print("[QQBridge]   （NapCat WebUI 或异常退出可能重置此文件）")
+        else:
+            print("[QQBridge] ⚠ 未检测到 NapCat 进程，或启动异常。")
+            print("[QQBridge]   请运行 NapCat.Shell.Windows.OneKey\\start_napcat.bat 并扫码登录，")
+            print("[QQBridge]   确认控制台出现 WebSocket服务: 127.0.0.1:3001 已启动。")
 
     @staticmethod
     def _ws_url_parts():
@@ -518,13 +572,20 @@ class QQBotBridge:
     def _reconnect_loop(self):
         """断开后自动重连（不退出），给用户 NapCat 就绪时间窗口"""
         delay = 5
+        fail_count = 0
         while self.running:
             try:
                 print(f"[QQBridge] 连接 NapCat: {self.ws_url}")
-                self.ws = websocket.create_connection(
-                    self.ws_url, timeout=30, enable_multithread=True,
-                    header=self._ws_auth_headers(),
-                )
+                _header = self._ws_auth_headers(self.napcat_token)
+                if _header:
+                    self.ws = websocket.create_connection(
+                        self.ws_url, timeout=30, enable_multithread=True, header=_header
+                    )
+                else:
+                    self.ws = websocket.create_connection(
+                        self.ws_url, timeout=30, enable_multithread=True
+                    )
+                fail_count = 0  # 连上即清零
                 self._on_connected()   # 内部处理 login_info + 离线补拉 + 进入事件循环（阻塞）
                 # 正常走到这里说明事件循环因断开退出 → 重置 delay 后重连
                 if not self.running:
@@ -533,7 +594,14 @@ class QQBotBridge:
                 delay = 5
                 time.sleep(delay)
             except Exception as e:
+                fail_count += 1
                 print(f"[QQBridge] ⚠ 连接失败: {e}")
+                # 持续失败（可能 NapCat 中途退出/配置被重置）→ 提示一次环境诊断，不刷屏
+                # 注意：connect() 若已因初始未就绪诊断过（_napcat_diagnosed=True），此处不再重复
+                if fail_count == 3 and not getattr(self, "_napcat_diagnosed", False):
+                    self._napcat_diagnosed = True
+                    host, port = self._ws_url_parts()
+                    self._diagnose_napcat(host, port)
                 if not self._sleep(delay):
                     break
                 # 指数退避，最多 30 秒
@@ -575,7 +643,7 @@ class QQBotBridge:
 
     def _master_mention_note(self, text):
         """消息文本里提到主人昵称时给出对照注记（防认不出主人）。
-        返回如：『（注：「申余不是鱼」是主人 QQ 1851959578 的名字，提到 ta 就是在说你的主人）』"""
+        返回如：『（注：「示例昵称」是主人 QQ 123456789 的名字，提到 ta 就是在说你的主人）』"""
         try:
             t = str(text or "")
             if not t:
@@ -1346,7 +1414,7 @@ class QQBotBridge:
                 ["powershell", "-NoProfile", "-Command",
                  "Get-CimInstance Win32_Process | Where-Object { "
                  "$_.Name -eq 'NapCatWinBootMain.exe' -or "
-                 "($_.Name -eq 'QQ.exe' -and $_.ExecutablePath -like 'D:\QQ\*') } | "
+                 "($_.Name -eq 'QQ.exe' -and $_.CommandLine -like '*NapCat*') } | "
                  "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"],
                 capture_output=True, timeout=20,
                 creationflags=getattr(_sp, "CREATE_NO_WINDOW", 0))
@@ -1742,15 +1810,25 @@ class QQBotBridge:
         print("[QQBridge] 连接已断开（将由重连循环自动恢复）")
 
     def _warm_stt(self):
-        """后台预热 faster-whisper 模型（进程级单例，只加载一次）"""
+        """后台预热 faster-whisper 模型。
+
+        重连循环每次进入 _on_connected 都会调到这里；为避免"下载失败机器每次重连都刷
+        一次注定失败的联网下载"，成功才置完成标志；失败最多重试 3 次（warmup 返回 bool）。
+        """
+        if getattr(self, "_stt_warm_done", False):
+            return
+        self._stt_warm_tries = getattr(self, "_stt_warm_tries", 0) + 1
+        if self._stt_warm_tries > 3:
+            return
         try:
             # 模型已本地缓存（首次由镜像下载）：离线模式加载，避免每次联网探测
             # huggingface.co（本机不可达）导致预热失败
             os.environ.setdefault("HF_HUB_OFFLINE", "1")
             from tool.stt import warmup
-            warmup()
+            if warmup():
+                self._stt_warm_done = True
         except Exception as e:
-            print(f"[QQBridge] ⚠ 语音识别模型预热失败: {e}")
+            print(f"[QQBridge] ⚠ 语音识别模型预热异常（第 {self._stt_warm_tries} 次）: {e}")
 
     def _handle(self, raw: str):
         """处理一条 WS 消息（JSON）"""
