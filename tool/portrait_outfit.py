@@ -853,7 +853,12 @@ def normalize_layers(layers, set_name, pet_id=None):
                                 continue
                         continue
                     _c = "body"
-                if _c in ("body", "hair", "emotion"):
+                if _c == "expr":
+                    _c = "face"            # ★ 表情层的真实类目名是 expr（以前只认 emotion，
+                                           #   导致多个表情全部保留 → 几张脸叠着画，用户反馈的重叠）
+                elif _c == "emotion":
+                    _c = "face"
+                if _c in ("body", "hair", "face"):
                     if _c in _cats:
                         if _c == "body":
                             # 身体类目：后者优先（AI 的顺序是 基础人物 -> 动作，
@@ -965,6 +970,15 @@ def apply_outfit(layers, set_name=None, outfit=None, fallback_body=0, fallback_e
             _fe = int(fallback_expr or 0)
         except Exception:
             _fe = 0
+        # ★ AI 已经给了表情就不再补：否则会多出一张脸（几张表情叠着画 = 用户反馈的重叠）
+        try:
+            from tool.generate import _category_of as _c5
+            for _x in out:
+                if _c5(_x, str(set_name or s or 'a')[-1:] or 'a', pet_id) in ('expr', 'emotion'):
+                    _fe = 0
+                    break
+        except Exception:
+            pass
         if _fe and _fe not in out:
             _emos = set()
             try:
