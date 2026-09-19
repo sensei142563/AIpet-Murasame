@@ -1,4 +1,18 @@
 """
+
+# 本机地址绕过系统代理（挂加速器/梯子时代理会连 127.0.0.1 一起劫持 → "信号不正常"）
+try:
+    # 冻结版 exe 里程序目录还没进 sys.path → 先补上再导入（否则这段修复会被静默跳过，
+    # 表现为"桌宠明明在运行，启动器却显示未运行/无法关闭"）
+    import sys as _sys2, os as _os2
+    _b2 = _os2.path.dirname(_os2.path.abspath(__file__))
+    if _b2 not in _sys2.path:
+        _sys2.path.insert(0, _b2)
+    from tool.net_env import bypass_proxy_for_local as _bpfl
+    _bpfl()
+except Exception as _e2:
+    print(f"[Launcher] 本机代理绕过设置失败（不影响启动）: {_e2}")
+
 PCL 风格 AIpet 启动器入口
 双击 run_launcher.py 或运行: python run_launcher.py
 """

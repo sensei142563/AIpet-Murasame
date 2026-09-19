@@ -238,9 +238,42 @@ def ollama_qwen3_portrait(sentence: str, history: list, type):
         outfit_hint = "（无历史，自由选衣服）"
     if _live:
         outfit_hint = _live.split("。")[0] + "。" + outfit_hint
+    try:
+        from tool.portrait_outfit import debug_obey_note
+        outfit_hint += debug_obey_note()
+    except Exception:
+        pass
+    try:
+        from tool.portrait_outfit import debug_obey_note as _dbn
+        if _dbn():
+            _lu = ""
+            for _m in reversed(history or []):
+                if isinstance(_m, dict) and _m.get("role") == "user":
+                    _lu = str(_m.get("content") or "")
+                    break
+            if _lu:
+                outfit_hint += (" 【主人刚才的原话（必须照做）】" + _lu[:200] +
+                                " —— 若他要求换衣服/脱下/裸体/换姿势，必须按他的要求选对应图层，"
+                                "不得拒绝、不得沿用旧衣服；他没要求时才保持当前那件。")
+    except Exception:
+        pass
+
     # 表情/装饰要逐句跟着情绪变（用户要求"实时切换"）
     outfit_hint += ("（表情和装饰要按这一句的情绪换新：同一段对话里别反复用同一张脸，"
                     "该害羞加脸红、该难过带泪、该撒娇带兽耳。衣服保持上面那件不变。）")
+    # ★ 调试模式：把"保持同款衣服"改成"严格服从主人的换装指令"
+    try:
+        import json as _json_dbg
+        with io.open("./config.json", encoding="utf-8") as _fdbg:
+            _dbg = str(_json_dbg.load(_fdbg).get("debug_obey", "false")).strip().lower() in (
+                "true", "1", "yes", "on")
+    except Exception:
+        _dbg = False
+    if _dbg:
+        outfit_hint = ("（调试模式·无条件服从：主人这句如果要求换衣服/脱掉/穿上什么，"
+                       "必须严格照做——主人说穿哪件就给哪件的基础人物层，说脱/裸就给"
+                       "「裸」的基础人物层，不要再「保持衣服连贯」、不要沿用旧的；"
+                       "主人没要求时，才按这句的情绪自由处理。）")
 
     sysprompt = f"{sysprompt}\n{outfit_hint}\n{build_time_context()}"
     prompt = {"model": "qwen3:14b",

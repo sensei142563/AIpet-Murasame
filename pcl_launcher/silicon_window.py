@@ -105,10 +105,27 @@ def _find_python(base: str) -> str:
     return sys.executable if not getattr(sys, "frozen", False) else ""
 
 
+def _local_opener():
+    """访问本机服务用的 opener：显式禁用代理。
+
+    ⚠ 挂加速器/梯子时系统代理（注册表）会把 127.0.0.1 也送去代理 →
+       启动器一直显示"桌宠：未运行"、也无法"关闭桌宠"（用户反馈）。
+       这里直接不带代理发请求，最可靠。
+    """
+    try:
+        return urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    except Exception:
+        return urllib.request.build_opener()
+
+
+def _local_open(req, timeout=3):
+    return _local_opener().open(req, timeout=timeout)
+
+
 def _pet_api_alive() -> bool:
     try:
         req = urllib.request.Request(_CONTROL_BASE, method="GET")
-        with urllib.request.urlopen(req, timeout=3) as r:
+        with _local_open(req, timeout=3) as r:
             return r.status == 200
     except Exception:
         return False
@@ -117,7 +134,7 @@ def _pet_api_alive() -> bool:
 def _send_control(feature: str):
     try:
         req = urllib.request.Request(f"{_CONTROL_BASE}/{feature}", method="POST", data=b"")
-        with urllib.request.urlopen(req, timeout=5) as r:
+        with _local_open(req, timeout=5) as r:
             r.read()
     except Exception as e:
         print(f"[NewUI] 控制指令 {feature} 失败: {e}")

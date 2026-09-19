@@ -234,15 +234,6 @@ class LongTextStreamThread(QThread):
                 continue  # 低权重消息完全过滤
             messages.append(msg)
 
-        # 你现在穿的是什么（桌宠窗口每次重画立绘都会记下来）
-        try:
-            from tool.portrait_outfit import current_look_note
-            _look = current_look_note()
-            if _look:
-                messages.append({"role": "system", "content": _look})
-        except Exception:
-            pass
-
         # 高权重「最近的观察」强注入（仅本轮有高权重）
         if high_observations:
             obs_text = "\n".join(f"- {obs}" for obs in high_observations[-5:])
@@ -254,6 +245,20 @@ class LongTextStreamThread(QThread):
                     f"{obs_text}"
                 ),
             })
+
+        # ★ "当前穿着"放在最后（模型对最后一条 system 记忆最深）：
+        #   之前它排在屏幕观察之前，模型常按"她穿着衣服"来答（用户反馈"明明是裸体却说自己穿了衣服"）。
+        try:
+            from tool.portrait_outfit import current_look_note
+            _look = current_look_note()
+            if _look:
+                messages.append({"role": "system", "content": "【务必记住】" + _look})
+            from tool.portrait_outfit import debug_obey_note
+            _dbg = debug_obey_note()
+            if _dbg:
+                messages.append({"role": "system", "content": _dbg})
+        except Exception:
+            pass
 
         # 当前时间 + 实时天气事实注入（只影响发给模型的内容）：
         # 模型据此如实回答"现在几点/今天天气"，不再靠猜或含糊其辞

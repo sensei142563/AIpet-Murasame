@@ -1,5 +1,13 @@
 # -*- coding: utf-8 -*-
 """
+
+# 本机地址绕过系统代理（挂加速器/梯子时代理会连 127.0.0.1 一起劫持 → "信号不正常"）
+try:
+    from tool.net_env import bypass_proxy_for_local as _bpfl
+    _bpfl()
+except Exception:
+    pass
+
 微信 ClawBot 桌宠入口：首次扫码登录（凭据持久化，重启免扫码）→ 长轮询桥。
 
 用法：python run_wechat.py（或双击 启动微信.bat）

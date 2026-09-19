@@ -64,6 +64,11 @@ def build_time_context() -> str:
     让模型能如实回答"现在几点/今天星期几/什么日子"，而不是靠猜。
     """
     dt = datetime.now()
-    return (f"{get_date_with_weekday_cn(dt)} "
-            f"{dt.hour:02d}:{dt.minute:02d}（{get_time_segment_cn(dt)}）")
+    _t = (f"{get_date_with_weekday_cn(dt)} "
+          f"{dt.hour:02d}:{dt.minute:02d}（{get_time_segment_cn(dt)}）")
+    # ⚠ 只给"背景信息"，不主动报时间：以前直接丢一行时间给模型，
+    #   结果它每句都要提一句"现在几点啦"（用户反馈"老是提时间"）。
+    return ("【当前时间（仅背景信息）】" + _t +
+            "\n（除非主人问起时间/日期、或话题本身与时间有关，否则不要主动提时间；"
+            "更不要在每句回复里报时。）")
 

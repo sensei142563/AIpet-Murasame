@@ -10,6 +10,14 @@ import time
 #   用系统 Python 跑本项目会缺依赖 → 直接崩（Windows 事件日志里的 MSVCP140 访问违规），
 #   而且会和正常桌宠抢 28565 端口 → 云端代理一断，桌宠就"没有任何回复"。
 #   这里检测到解释器不对就自动用 venv 重新执行自己（os.execv，不会留下多份进程）。
+
+# 本机地址绕过系统代理（挂加速器/梯子时代理会连 127.0.0.1 一起劫持 → "信号不正常"）
+try:
+    from tool.net_env import bypass_proxy_for_local as _bpfl
+    _bpfl()
+except Exception:
+    pass
+
 def _ensure_project_python():
     try:
         if os.environ.get("AIPET_REEXEC") == "1":

@@ -7,6 +7,14 @@ import socket
 import signal
 import subprocess
 
+
+# 本机地址绕过系统代理（挂加速器/梯子时代理会连 127.0.0.1 一起劫持 → "信号不正常"）
+try:
+    from tool.net_env import bypass_proxy_for_local as _bpfl
+    _bpfl()
+except Exception:
+    pass
+
 def _f5_console_flags() -> int:
     """纯净模式（config.json: quiet_mode）下不弹 F5-TTS 的终端窗口"""
     if os.name != "nt":

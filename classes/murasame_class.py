@@ -1,3 +1,4 @@
+import io
 import json
 import os
 import time
@@ -177,7 +178,7 @@ class Murasame(QLabel):
         self.input_buffer = ""  # 输入模式下已确认的文字
         self.preedit_text = ""  # 输入模式下的拼音/候选
         self.setFocusPolicy(Qt.StrongFocus)  # 接收键盘焦点
-        self.setAttribute(Qt.WA_InputMethodEnabled, True)  # 开启输入法支持
+        self.setAttribute(Qt.WA_InputMethodEnabled, False)  # 输入法只在输入模式里开启（见 _set_ime）
         self.setFocus()
         # 鼠标事件
         self.touch_head = False  # 兼容旧字段（头部区域 = 触摸区域之一）
@@ -223,6 +224,12 @@ class Murasame(QLabel):
         self.setWindowFlags(
             Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
         )  # 去掉标题栏和边框，窗口总在最前面，任务栏不单独显示图标
+        # Qt 默认只在按住鼠标键时才送 mouseMoveEvent，不打开这一项，
+        # 「鼠标移到对话框上给提示」永远不会触发（用户反馈没提示）
+        try:
+            self.setMouseTracking(True)
+        except Exception:
+            pass
         self.setAttribute(Qt.WA_TranslucentBackground, True)  # 让整个窗口支持透明区域
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)  # Live2D 文字层显示时不抢键盘焦点
         from pets.pet_registry import get_portrait_prompts
@@ -619,7 +626,7 @@ class Murasame(QLabel):
         # 标记对话进行中
         self._talking = True
         self._stream_playing = True
-        self._show_thinking()          # 对话框显示"思考中..."
+        self._show_thinking(role == "user")   # 只有主人发起才显示"思考中"
         self._ai_finished = False
         self._pending_clauses = []
         self._first_clause_shown = False
@@ -758,9 +765,16 @@ class Murasame(QLabel):
         """Live2D 模式下触发输入模式（点击下半身直接开始键盘输入）"""
         if self.is_busy_reply():          # 她还在思考/说话 → 不接受新的对话
             self._show_thinking()
+            self._set_ime(False)
             print("[桌宠] ⏳ 她还在思考/说话，先别插话（已忽略这次点击）")
             return
+        if self.input_mode:
+            # 已经在打字了：再点一下只是重新聚焦，别清掉已经打的字（用户反馈）
+            self.setFocus()
+            self.update()
+            return
         self.input_mode = True
+        self._set_ime(True)
         self.input_buffer = ""
         self.preedit_text = ""
         self.display_text = f"【{self.user_name}】\n  ..."
@@ -1381,19 +1395,62 @@ class Murasame(QLabel):
             pass
         return bool(getattr(self, "_talking", False) or getattr(self, "_stream_playing", False))
 
-    def _show_thinking(self):
-        """在对话框里显示「思考中...」（她自己正在想下一句的时候）"""
+    def _set_ime(self, on: bool):
+        """输入法只在"真正等主人打字"时开启。
+
+        ⚠ 以前启动就把 WA_InputMethodEnabled 打开 → 点一下窗口（哪怕她正在说话、
+          根本不能输入）系统也会切到中文输入状态（用户反馈）。
+        """
         try:
+            self.setAttribute(Qt.WA_InputMethodEnabled, bool(on))
+        except Exception:
+            pass
+
+    def _clear_thinking_if_stuck(self):
+        """「思考中」卡住时恢复上一句（网络失败时回复永远不来）"""
+        try:
+            if getattr(self, "_thinking_on", False) and self.display_text == "思考中...":
+                self.display_text = getattr(self, "_last_real_text", "") or ""
+                self._thinking_on = False
+                print("[桌宠] ⏱ 思考提示超时 → 恢复上一句显示")
+                self.update()
+        except Exception:
+            pass
+
+    def _show_thinking(self, user_asked: bool = True):
+        """在对话框里显示「思考中...」
+
+        只有主人主动找她时才显示；屏幕评论 / 空闲搭话这类自动回复不刷这个提示，
+        否则对话框会一直停在"思考中"（用户反馈"老是进入思考中"）。
+        """
+        if not user_asked:
+            return
+        try:
+            self._thinking_on = True
             self.display_text = "思考中..."
             self.update()
+            # 兜底：万一回复始终没来（请求失败/被拦），90 秒后自动恢复上一句，
+            # 免得对话框一直停在"思考中"（用户反馈"没思考也显示思考中"）
+            QTimer.singleShot(90000, self._clear_thinking_if_stuck)
         except Exception:
             pass
 
     def start_thread(self, text, role, t=False):
+        # ★ 主人正在打字时，系统自动接话（打招呼/空闲搭话/触摸）一律不发起：
+        #   一起话就会把她切到"思考/说话"状态，正在打的字就被吃掉（用户反馈）。
+        try:
+            if role == "system" and getattr(self, "input_mode", False):
+                print("[桌宠] ⌨ 主人正在打字 → 暂不接话（避免打断输入）")
+                return
+        except Exception:
+            pass
         # ★ 她正在思考或正在说的时候，新消息先排队，等这一轮说完再回
         #   （用户反馈：对话会被另一段回复打断；"对话没说完之前不允许和桌宠对话"）。
         try:
             _busy = self.is_busy_reply()
+            if _busy and role == "user" and self._debug_obey():
+                print("[桌宠] 🛠 调试模式：主人优先 → 立即打断当前回复")
+                _busy = False
             if _busy:
                 if role == "user":
                     _q = getattr(self, "_pending_msgs", None)
@@ -1455,7 +1512,7 @@ class Murasame(QLabel):
 
         # 标记对话进行中
         self._talking = True
-        self._show_thinking()          # 对话框显示"思考中..."
+        self._show_thinking(role == "user")   # 只有主人发起才显示"思考中"
 
         # 启动新线程
         if model_type == "local":
@@ -1472,7 +1529,31 @@ class Murasame(QLabel):
 
     # 鼠标按下事件
     def mousePressEvent(self, event):
+        # ★ 她正在思考 / 正在说话时，鼠标整体不响应：
+        #   点对话框（文字区）会命中"触摸互动"→ 触发一段反应，看起来就像插话；
+        #   点下半身会进键盘输入。这两种都在她说的时候禁掉，只保留"思考中..."。
+        if event.button() == Qt.LeftButton and self.is_busy_reply():
+            self._show_thinking()
+            self._touch_hit = None
+            self._touch_fired = True          # 标记已处理，松开时不再触发
+            print("[桌宠] ⏳ 她还在思考/说话，先别插话（本次点击已忽略）")
+            return
         if event.button() == Qt.LeftButton:
+            # ⓪ 点在对话框上 → 直接进打字模式（不算触摸身体，避免"想打字却触发了反应/思考"）
+            if self._in_text_box(event.x(), event.y()):
+                if self.is_busy_reply():
+                    self._show_thinking()
+                    self._set_ime(False)
+                    print("[桌宠] ⏳ 她还在思考/说话，先别插话（点击对话框已忽略）")
+                else:
+                    self.input_mode = True
+                    self._set_ime(True)
+                    self.input_buffer = ""
+                    self.preedit_text = ""
+                    self.display_text = f"【{self.user_name}】" + chr(10) + "  ..."
+                    self.setFocus()
+                    self.update()
+                return
             # ① 先做「触摸区域」命中判定（头 / 胸口 / 小腹 / 下体 / 腿 / 脚 / 胳膊 / 手掌）
             _area = self._touch_area_at(event.x(), event.y())
             if _area:
@@ -1494,13 +1575,19 @@ class Murasame(QLabel):
             elif event.y() > 280:  # 下半身区域 -> 输入模式
                 if self.is_busy_reply():      # 她还在思考/说话 → 不接受新的对话
                     self._show_thinking()
+                    self._set_ime(False)      # 输入法也别切过来
                     print("[桌宠] ⏳ 她还在思考/说话，先别插话（已忽略这次点击）")
+                elif self.input_mode:
+                    # 已经在打字 → 只重新聚焦，不清空已打的字（否则会"消失重置"）
+                    self.setFocus()
+                    self.update()
                 else:
                     self.input_mode = True
-                self.input_buffer = ""
-                self.preedit_text = ""
-                self.display_text = f"【{self.user_name}】\n  ..."
-                self.update()
+                    self._set_ime(True)
+                    self.input_buffer = ""
+                    self.preedit_text = ""
+                    self.display_text = f"【{self.user_name}】\n  ..."
+                    self.update()
             else:
                 # 其他地方，什么也不做
                 self.touch_head = False
@@ -1643,6 +1730,14 @@ class Murasame(QLabel):
                     act = sub.addAction(label)
                     act.triggered.connect(lambda checked=False, ss=s: self._switch_portrait_set(ss))
                 # 自动切换立绘类型 开关（写入 config.json，立即生效）
+                # 调试模式：无条件服从（仅开发版显示；正式版不提供）
+                act_dbg = menu.addAction("🛠 调试模式（无条件服从）") if self._debug_available() else None
+                if act_dbg is not None:
+                    act_dbg.setCheckable(True)
+                    act_dbg.setChecked(self._debug_obey())
+                    act_dbg.setToolTip("开启后她无条件听你的：换装不再要求明确指令、AI 挑的服装与姿势一律照做、不再保持同款连贯。仅调试用。")
+                    act_dbg.triggered.connect(self._toggle_debug_obey)
+                    menu.addSeparator()
                 act_auto = menu.addAction("🔁 自动切换立绘类型")
                 act_auto.setCheckable(True)
                 act_auto.setChecked(self._auto_switch_enabled())
@@ -1884,6 +1979,48 @@ class Murasame(QLabel):
                 self.update_portrait(self.portrait_target, list(layers))
         except Exception as e:
             print(f"[桌宠] ⚠ 切换动作失败: {e}")
+
+    def _debug_available(self) -> bool:
+        """调试模式是否可用：**只有开发版有**。
+
+        判定方式：正式版已移除剧情（story/ 目录不存在），开发版保留 → 用它当版本标记。
+        """
+        try:
+            import os as _os
+            _b = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+            return _os.path.isdir(_os.path.join(_b, "story"))
+        except Exception:
+            return False
+
+    def _debug_obey(self) -> bool:
+        """调试模式：无条件服从（换装不需要"明确指令"、AI 选什么就是什么）
+
+        ⚠ 直接读 config.json 文件（不走任何封装/缓存）——菜单里一勾选就立即生效。
+        ⚠ 正式版没有调试模式（_debug_available() 为假时一律按关闭处理）。
+        """
+        if not self._debug_available():
+            return False
+        try:
+            import json as _json
+            with io.open("./config.json", encoding="utf-8") as f:
+                return str(_json.load(f).get("debug_obey", "false")).strip().lower() in (
+                    "true", "1", "yes", "on")
+        except Exception:
+            return False
+
+    def _toggle_debug_obey(self, checked=None):
+        """右键菜单切换到调试模式（写回 config.json，立即生效）"""
+        try:
+            from tool.config import get_config
+            cfg = get_config("./config.json")
+            want = (not self._debug_obey()) if checked is None else bool(checked)
+            cfg["debug_obey"] = "true" if want else "false"
+            import json as _json
+            with io.open("./config.json", "w", encoding="utf-8") as f:
+                _json.dump(cfg, f, ensure_ascii=False, indent=2)
+            print(f"[桌宠] 🛠 调试模式：{'开启（无条件服从）' if want else '关闭'}")
+        except Exception as e:
+            print(f"[桌宠] ⚠ 切换调试模式失败: {e}")
 
     def _toggle_auto_switch(self, checked=None):
         """右键菜单：切换「自动切换立绘类型」并写入 config.json（立即生效）"""
@@ -2154,6 +2291,9 @@ class Murasame(QLabel):
         便服"）。现在一律以主人的要求为准：没提换衣服，就一直穿着身上这件。
         """
         try:
+            # 调试模式：无条件服从（换装不再要求明确指令）
+            if self._debug_obey():
+                return True
             txt = ""
             for m in reversed(getattr(self, "history", []) or []):
                 if isinstance(m, dict) and m.get("role") == "user":
@@ -2168,7 +2308,81 @@ class Murasame(QLabel):
         except Exception:
             return False
 
+    # 主人点名要的衣服（调试模式下必须照做）
+    _CMD_CLOTH = (
+        ("睡衣", ("睡衣", "睡袍", "寝衣", "寝間着", "睡衣裤", "睡衣吧")),
+        ("制服", ("制服", "校服")),
+        ("私服", ("私服", "便服", "便衣")),
+        ("刀服", ("刀服", "刀装", "和装")),
+        ("裸", ("裸", "全裸", "脱光", "脱掉", "脱了", "别穿", "不穿", "无衣着")),
+    )
+
+    def _commanded_cloth(self):
+        """返回主人这句点名的服装在【当前这套】里的 (名字, 身体层id)，没点名返回 ("", 0)"""
+        try:
+            txt = ""
+            for m in reversed(getattr(self, "history", []) or []):
+                if isinstance(m, dict) and m.get("role") == "user":
+                    txt = str(m.get("content") or "")
+                    break
+            if not txt:
+                return ("", 0)
+            from tool.portrait_outfit import clothes_of, body_layers_of, load_outfit
+            s = self._current_set()
+            tbl = {str(n): int(c) for n, c, _h in clothes_of(s)}
+            bodies = set(body_layers_of(s))
+            for canon, keys in self._CMD_CLOTH:
+                if not any(k in txt for k in keys):
+                    continue
+                if canon == "裸":                       # 裸体：找不带衣服的那层
+                    for lid in sorted(bodies):
+                        try:
+                            from tool.portrait_outfit import describe_layers
+                            d = describe_layers([lid], s, getattr(self, "_pet_id", None)) or ""
+                        except Exception:
+                            d = ""
+                        if any(k in d for k in ("裸", "无衣着", "下着", "内衣")):
+                            return ("裸", int(lid))
+                    return ("", 0)
+                for name, cid in tbl.items():
+                    if canon in name or name in canon:
+                        return (name, int(cid))
+            return ("", 0)
+        except Exception as e:
+            print(f"[桌宠] ⚠ 解析主人点名的服装失败: {e}")
+            return ("", 0)
+
     def _sticky_outfit(self, target, layers):
+        try:
+            if self._debug_obey():
+                # ★ 主人点名的衣服 → 直接换上（不依赖 AI 是否挑对）
+                try:
+                    _cname, _cid = self._commanded_cloth()
+                    if _cid:
+                        from tool.portrait_outfit import (apply_outfit, load_outfit, swap_body,
+                                                          save_outfit)
+                        _s = str(target or "")[-1:]
+                        _s = _s if _s in ("a", "b") else self._current_set()
+                        _out = swap_body(list(layers or []), _s, _cid)
+                        print(f"[桌宠] 🛠 调试模式：按主人命令换装 → {_cname}({_cid})")
+                        try:
+                            save_outfit(_cname, set_name=_s)
+                        except Exception:
+                            pass
+                        self._last_outfit_ts = time.time() if hasattr(self, "_last_outfit_ts") else 0
+                        return _out
+                except Exception as _ce:
+                    print(f"[桌宠] ⚠ 调试模式按命令换装失败（走 AI 选择）: {_ce}")
+            if self._debug_obey():            # 调试模式：AI 挑什么穿什么（不再强制同款连贯）
+                print("[桌宠] 🛠 调试模式：按 AI 给的图层显示（不强制同款）")
+                from tool.portrait_outfit import apply_outfit, load_outfit
+                _s = str(target or "")[-1:]
+                _s = _s if _s in ("a", "b") else self._current_set()
+                return apply_outfit(layers, _s, load_outfit(_s),
+                                    fallback_body=self._current_body_layer(_s),
+                                    fallback_expr=self._current_expr_layer(_s))
+        except Exception as _e:
+            print(f"[桌宠] ⚠ 调试模式换装失败（走常规逻辑）: {_e}")
         """同一段对话里衣服不要突然变：AI 每句都可能挑不同的服装，
         只有「主人要求 / 它自己说要换 / 隔了很久」才真的换，否则沿用当前这件
         （表情、动作、装饰照旧随情绪变）。"""
@@ -2282,7 +2496,58 @@ class Murasame(QLabel):
             print(f"[桌宠] ⚠ 打开立绘素材位置失败: {e}")
 
     # 鼠标移动事件
+    def _in_text_box(self, x, y) -> bool:
+        """这个点是不是落在对话框（文字区）里"""
+        try:
+            return self._text_rect().contains(int(x), int(y))
+        except Exception:
+            return False
+
+    def _set_hover_box(self, on: bool):
+        """切换"鼠标在对话框上"的状态（提示画在框里，不只靠 tooltip）"""
+        try:
+            if bool(on) == bool(getattr(self, "_hover_box", False)):
+                return
+            self._hover_box = bool(on)
+            if on:
+                self.setCursor(Qt.IBeamCursor)
+                self.setToolTip("点这里打字（可以直接和我说话）")
+            else:
+                self.setCursor(Qt.ArrowCursor)
+                self.setToolTip("")
+            self.update()
+        except Exception:
+            pass
+
+    def enterEvent(self, event):
+        # 从别的窗口移回来也要重新判断（否则提示会一直不显示）
+        try:
+            super().enterEvent(event)
+        except Exception:
+            pass
+        try:
+            _p = self.mapFromGlobal(self.cursor().pos())
+            if not self.is_busy_reply() and self._in_text_box(_p.x(), _p.y()):
+                self._set_hover_box(True)
+        except Exception:
+            pass
+
+    def leaveEvent(self, event):
+        try:
+            super().leaveEvent(event)
+        except Exception:
+            pass
+        self._set_hover_box(False)
+
     def mouseMoveEvent(self, event):
+        # ⓪ 悬停在对话框上 → 提示"这里是打字的地方"（否则老是点到身体区域，
+        #    触发了摸头/摸身反应、把她带进"思考"状态 —— 用户反馈）
+        try:
+            self._set_hover_box(not self.is_busy_reply() and
+                                self._in_text_box(event.x(), event.y()))
+        except Exception:
+            pass
+
         # ① 触摸区域：按住拖动超过阈值 → 判定为“抚摸”，触发一次反应
         if self._touch_hit and self._touch_press is not None and not self._touch_fired:
             _dx = abs(event.x() - self._touch_press[0])
@@ -2304,6 +2569,16 @@ class Murasame(QLabel):
 
     # 鼠标释放事件
     def mouseReleaseEvent(self, event):
+        # 她还在思考/说话 → 松开也不触发任何触摸反应（避免"点了就有反应"）
+        try:
+            if self.is_busy_reply():
+                self._touch_hit = None
+                self._touch_fired = True
+                self.touch_head = False
+                self.setCursor(Qt.ArrowCursor)
+                return
+        except Exception:
+            pass
         if event.button() == Qt.LeftButton:
             # 触摸区域：按住没怎么动 → 判定为“轻点”
             if self._touch_hit and not self._touch_fired:
@@ -2377,6 +2652,13 @@ class Murasame(QLabel):
             print(f"[桌宠] ⚠ Live2D 触摸松开处理失败: {e}")
 
     def _fire_touch(self, key, gesture):
+        # 她正忙时一律不反应（点哪里都不算）
+        try:
+            if self.is_busy_reply():
+                print(f"[桌宠] ⏳ 她还在思考/说话，忽略触摸 {key}({gesture})")
+                return
+        except Exception:
+            pass
         """触发触摸反应：把「主人摸了摸你的XX」交给模型（与摸头同一条通路）"""
         try:
             from tool.touch_areas import reaction
@@ -2479,6 +2761,29 @@ class Murasame(QLabel):
         super().paintEvent(event)
 
         # 2. 再叠加绘制文字
+        # 记录最后一句真实文字（"思考中"卡住时用来恢复）；并清掉思考标记
+        try:
+            _t = str(getattr(self, "display_text", "") or "")
+            if _t == "思考中...":
+                pass
+            elif _t.strip():
+                self._last_real_text = _t
+                self._thinking_on = False
+        except Exception:
+            pass
+        # 悬停提示：画在文字区底部一行（不覆盖正文；移开即消失）
+        try:
+            if getattr(self, "_hover_box", False):
+                _tr = self._text_rect()
+                _f = QFont(self.text_font)
+                _f.setPointSize(max(7, int(self.text_font.pointSize() * 0.85)))
+                painter.setFont(_f)
+                painter.setPen(QColor(255, 255, 255, 210))
+                painter.drawText(_tr.adjusted(2, 0, -6, -2),
+                                 Qt.AlignRight | Qt.AlignBottom, "点这里打字 ▸")
+                painter.setFont(self.text_font)
+        except Exception:
+            pass
         if self.display_text:  # 过滤掉空字符串和 None
             # 设置绘图环境
             painter = QPainter(self)  # 在这个控件上绘制
@@ -2740,7 +3045,11 @@ class Murasame(QLabel):
         #   窗口要是跟着缩，对话框（按窗口宽高归一化）就会忽大忽小 ——
         #   用户看到的"说话时对话框变小"就是它。固定画布后窗口尺寸不变，文字框也就稳了。
         try:
-            key = (str(getattr(self, "_last_portrait_target", "") or ""), int(target_height))
+            # ★ 画布在 a/b 两套之间共用（只按目标高度记一份）：
+            #   两套的立绘宽高比略有差异，各存一份的话切换类型时窗口尺寸会变
+            #   → 对话框位置/字号跟着跳，文字还可能被挤出去（用户反馈）。
+            #   共用后切换只多出透明边，窗口和对话框完全不动。
+            key = ("canvas", int(target_height))
             stab = getattr(self, "_stable_canvas", None) or {}
             if not isinstance(stab, dict):
                 stab = {}
@@ -2818,10 +3127,12 @@ class Murasame(QLabel):
                         try:
                             from tool.portrait_geom import canvas_size_for
                             _extra_ids = [int(x) for x in _extra if str(x).strip().isdigit()]
-                            _cw, _ = canvas_size_for(getattr(self, "_pet_id", None), _tgt[-1:], target_height,
-                                                     _extra_ids)
-                            if _cw > _mx:
-                                _mx = int(_cw)
+                            # a / b 两套都比一遍，取最宽（共用一个画布）
+                            for _sn in ("a", "b"):
+                                _cw, _ = canvas_size_for(getattr(self, "_pet_id", None), _sn,
+                                                         target_height, _extra_ids)
+                                if _cw > _mx:
+                                    _mx = int(_cw)
                         except Exception as _ge:
                             print(f"[桌宠] ⚠ 画布宽度计算失败: {_ge}")
                     if _mx > _w:
@@ -3113,6 +3424,17 @@ class Murasame(QLabel):
 
     # 键盘事件
     def keyPressEvent(self, event):
+        # ★ 她正在思考 / 正在说话：键盘输入也不接受（否则"点不了、但打出来的字还显示"）
+        try:
+            if self.is_busy_reply():
+                self.input_buffer = ""
+                self.preedit_text = ""
+                self.input_mode = False
+                self._set_ime(False)
+                self._show_thinking()
+                return
+        except Exception:
+            pass
         if not self.input_mode:
             # 如果没进入输入模式，交给父类 QLabel 处理
             return super().keyPressEvent(event)
@@ -3121,6 +3443,7 @@ class Murasame(QLabel):
         if event.key() == Qt.Key_Escape:
             # Esc 取消输入（退出输入模式，恢复 Live2D 点击穿透）
             self.input_mode = False
+            self._set_ime(False)      # 退出输入模式 → 关掉输入法
             self.input_buffer = ""
             self.preedit_text = ""
             self.display_text = ""
@@ -3131,6 +3454,7 @@ class Murasame(QLabel):
         if event.key() in (Qt.Key_Return, Qt.Key_Enter):
             text = self.input_buffer.strip()
             self.input_mode = False
+            self._set_ime(False)      # 退出输入模式 → 关掉输入法
             # 提交后恢复 Live2D 点击穿透（不再拦截鼠标）
             if self._live2d_mode:
                 self._set_overlay_click_through(True)

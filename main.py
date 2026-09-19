@@ -2,6 +2,14 @@ import os
 import sys
 import site
 
+
+# 本机地址绕过系统代理（挂加速器/梯子时代理会连 127.0.0.1 一起劫持 → "信号不正常"）
+try:
+    from tool.net_env import bypass_proxy_for_local as _bpfl
+    _bpfl()
+except Exception:
+    pass
+
 torch_path = os.path.join(site.getsitepackages()[0], 'torch', 'lib')
 if os.path.exists(torch_path):
     os.add_dll_directory(torch_path)
