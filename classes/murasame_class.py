@@ -2509,6 +2509,8 @@ class Murasame(QLabel):
             if bool(on) == bool(getattr(self, "_hover_box", False)):
                 return
             self._hover_box = bool(on)
+            print("[桌宠] " + ("🖱 鼠标在对话框上 → 提示「点这里打字」"
+                              if on else "🖱 鼠标离开对话框 → 恢复显示对话内容"))
             if on:
                 self.setCursor(Qt.IBeamCursor)
                 self.setToolTip("点这里打字（可以直接和我说话）")

@@ -1321,6 +1321,15 @@ def debug_obey_note() -> str:
     放在系统提示的最后，让模型也"照主人说的做"（程序侧的限制已在上层放行，
     这一句是让话术与动作不拧着来）。
     """
+    # 正式版没有调试模式：以"有没有剧情模块（story/）"当版本标记，
+    # 和桌宠里的 _debug_available() 同一个判定 —— 免得正式版配置里残留 true 就注入了。
+    try:
+        import os as _os
+        _b = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+        if not _os.path.isdir(_os.path.join(_b, "story")):
+            return ""
+    except Exception:
+        pass
     try:
         import json as _json
         with open("./config.json", encoding="utf-8") as f:
