@@ -230,6 +230,16 @@ class Murasame(QLabel):
             self.setMouseTracking(True)
         except Exception:
             pass
+        # 悬停提示改用"全局轮询光标位置"：本窗口是 Tool + 半透明分层窗口，
+        # 非激活状态下鼠标事件不可靠（用户反馈"必须先点一下桌宠才提示"）。
+        # 轮询 QCursor.pos() 与窗口激活无关，任何时候都能提示。
+        try:
+            self._hover_timer = QTimer(self)
+            self._hover_timer.setInterval(300)
+            self._hover_timer.timeout.connect(self._poll_hover)
+            self._hover_timer.start()
+        except Exception:
+            pass
         self.setAttribute(Qt.WA_TranslucentBackground, True)  # 让整个窗口支持透明区域
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)  # Live2D 文字层显示时不抢键盘焦点
         from pets.pet_registry import get_portrait_prompts
@@ -764,7 +774,7 @@ class Murasame(QLabel):
     def _trigger_input_mode(self):
         """Live2D 模式下触发输入模式（点击下半身直接开始键盘输入）"""
         if self.is_busy_reply():          # 她还在思考/说话 → 不接受新的对话
-            self._show_thinking()
+            self._show_busy_hint()
             self._set_ime(False)
             print("[桌宠] ⏳ 她还在思考/说话，先别插话（已忽略这次点击）")
             return
@@ -777,7 +787,7 @@ class Murasame(QLabel):
         self._set_ime(True)
         self.input_buffer = ""
         self.preedit_text = ""
-        self.display_text = f"【{self.user_name}】\n  ..."
+        self.display_text = ("【" + str(self.user_name) + "】\n可以直接打字了，输入后按回车发送（Esc 取消）")
 
         if self._live2d_mode and self._live2d_widget:
             # 先走统一覆盖层逻辑：位置/尺寸/字号缩放（修复"刚打开时字大"）
@@ -1406,10 +1416,21 @@ class Murasame(QLabel):
         except Exception:
             pass
 
+    def _show_busy_hint(self):
+        """她正在说话/思考时，主人点对话框/身体 → **静默忽略**。
+
+        不动对话框内容、不弹提示（用户要求"直接不让点击，不要有提示"）；
+        只在日志里记一行，方便排查。
+        """
+        try:
+            print("[桌宠] 她还在说话/思考 → 本次点击已静默忽略（不改对话框）")
+        except Exception:
+            pass
+
     def _clear_thinking_if_stuck(self):
         """「思考中」卡住时恢复上一句（网络失败时回复永远不来）"""
         try:
-            if getattr(self, "_thinking_on", False) and self.display_text == "思考中...":
+            if getattr(self, "_thinking_on", False) and "思考中" in str(self.display_text or ""):
                 self.display_text = getattr(self, "_last_real_text", "") or ""
                 self._thinking_on = False
                 print("[桌宠] ⏱ 思考提示超时 → 恢复上一句显示")
@@ -1427,7 +1448,8 @@ class Murasame(QLabel):
             return
         try:
             self._thinking_on = True
-            self.display_text = "思考中..."
+            _nm = str(getattr(self, "pet_name", "") or "桌宠")
+            self.display_text = "【" + _nm + "】" + "\n" + "思考中..."
             self.update()
             # 兜底：万一回复始终没来（请求失败/被拦），90 秒后自动恢复上一句，
             # 免得对话框一直停在"思考中"（用户反馈"没思考也显示思考中"）
@@ -1533,7 +1555,7 @@ class Murasame(QLabel):
         #   点对话框（文字区）会命中"触摸互动"→ 触发一段反应，看起来就像插话；
         #   点下半身会进键盘输入。这两种都在她说的时候禁掉，只保留"思考中..."。
         if event.button() == Qt.LeftButton and self.is_busy_reply():
-            self._show_thinking()
+            self._show_busy_hint()
             self._touch_hit = None
             self._touch_fired = True          # 标记已处理，松开时不再触发
             print("[桌宠] ⏳ 她还在思考/说话，先别插话（本次点击已忽略）")
@@ -1542,7 +1564,7 @@ class Murasame(QLabel):
             # ⓪ 点在对话框上 → 直接进打字模式（不算触摸身体，避免"想打字却触发了反应/思考"）
             if self._in_text_box(event.x(), event.y()):
                 if self.is_busy_reply():
-                    self._show_thinking()
+                    self._show_busy_hint()
                     self._set_ime(False)
                     print("[桌宠] ⏳ 她还在思考/说话，先别插话（点击对话框已忽略）")
                 else:
@@ -1550,7 +1572,8 @@ class Murasame(QLabel):
                     self._set_ime(True)
                     self.input_buffer = ""
                     self.preedit_text = ""
-                    self.display_text = f"【{self.user_name}】" + chr(10) + "  ..."
+                    self.display_text = ("【" + str(self.user_name) +
+                                          "\n可以直接打字了，输入后按回车发送（Esc 取消）")
                     self.setFocus()
                     self.update()
                 return
@@ -1574,7 +1597,7 @@ class Murasame(QLabel):
                 self.setCursor(Qt.OpenHandCursor)
             elif event.y() > 280:  # 下半身区域 -> 输入模式
                 if self.is_busy_reply():      # 她还在思考/说话 → 不接受新的对话
-                    self._show_thinking()
+                    self._show_busy_hint()
                     self._set_ime(False)      # 输入法也别切过来
                     print("[桌宠] ⏳ 她还在思考/说话，先别插话（已忽略这次点击）")
                 elif self.input_mode:
@@ -1586,7 +1609,7 @@ class Murasame(QLabel):
                     self._set_ime(True)
                     self.input_buffer = ""
                     self.preedit_text = ""
-                    self.display_text = f"【{self.user_name}】\n  ..."
+                    self.display_text = ("【" + str(self.user_name) + "】\n可以直接打字了，输入后按回车发送（Esc 取消）")
                     self.update()
             else:
                 # 其他地方，什么也不做
@@ -2503,6 +2526,16 @@ class Murasame(QLabel):
         except Exception:
             return False
 
+    def _poll_hover(self):
+        """轮询光标是否落在对话框上（与窗口是否激活无关）"""
+        try:
+            from PyQt5.QtGui import QCursor as _QC
+            pos = self.mapFromGlobal(_QC.pos())
+            inside = self.rect().contains(pos) and self._in_text_box(pos.x(), pos.y())
+            self._set_hover_box(bool(inside))
+        except Exception:
+            pass
+
     def _set_hover_box(self, on: bool):
         """切换"鼠标在对话框上"的状态（提示画在框里，不只靠 tooltip）"""
         try:
@@ -2763,30 +2796,25 @@ class Murasame(QLabel):
         super().paintEvent(event)
 
         # 2. 再叠加绘制文字
-        # 记录最后一句真实文字（"思考中"卡住时用来恢复）；并清掉思考标记
+        # 记录最后一句真实文字；并做状态自检：
+        # 只要文字是思考中而她其实并不忙（思考已结束 / 回复失败没产生文字），
+        # 就立刻恢复上一句 —— 不管是哪条代码路径写进去的，都不会一直卡着。
         try:
             _t = str(getattr(self, "display_text", "") or "")
-            if _t == "思考中...":
-                pass
-            elif _t.strip():
+            if ("思考中" in _t) or getattr(self, "_busy_hint_on", False):
+                if not self.is_busy_reply():
+                    self.display_text = getattr(self, "_last_real_text", "") or ""
+                    self._thinking_on = False
+                    self._busy_hint_on = False
+                    print("[桌宠] 并不在思考 -> 自动恢复上一句（思考提示自愈）")
+                    self.update()
+            elif _t.strip() and "思考中" not in _t:
                 self._last_real_text = _t
                 self._thinking_on = False
         except Exception:
             pass
-        # 悬停提示：画在文字区底部一行（不覆盖正文；移开即消失）
-        try:
-            if getattr(self, "_hover_box", False):
-                _tr = self._text_rect()
-                _f = QFont(self.text_font)
-                _f.setPointSize(max(7, int(self.text_font.pointSize() * 0.85)))
-                painter.setFont(_f)
-                painter.setPen(QColor(255, 255, 255, 210))
-                painter.drawText(_tr.adjusted(2, 0, -6, -2),
-                                 Qt.AlignRight | Qt.AlignBottom, "点这里打字 ▸")
-                painter.setFont(self.text_font)
-        except Exception:
-            pass
-        if self.display_text:  # 过滤掉空字符串和 None
+        _draw_text = str(getattr(self, "display_text", "") or "")
+        if _draw_text:  # 过滤掉空字符串和 None
             # 设置绘图环境
             painter = QPainter(self)  # 在这个控件上绘制
             painter.setRenderHint(QPainter.Antialiasing, True)  # 抗锯齿
@@ -2797,9 +2825,9 @@ class Murasame(QLabel):
 
             # 如果有换行就靠左对齐，否则居中
             if "\n" in self.display_text:
-                align_flag = Qt.AlignLeft | Qt.AlignBottom
+                align_flag = Qt.AlignLeft | Qt.AlignBottom | Qt.TextWordWrap
             else:
-                align_flag = Qt.AlignHCenter | Qt.AlignBottom
+                align_flag = Qt.AlignHCenter | Qt.AlignBottom | Qt.TextWordWrap
 
             # 文字描边（黑色）：细笔画描边 —— 小字号只用 1px 笔 + 4 方向，
             # 否则 8 次偏移会把小字糊成一圈「糊边」
@@ -2810,15 +2838,15 @@ class Murasame(QLabel):
             for _k in _offs:
                 _o = max(1, int(round(border_size * (1.0 if _k == 1 else 0.6))))
                 for dx, dy in ((-_o, 0), (_o, 0), (0, -_o), (0, _o)):
-                    painter.drawText(text_rect.translated(dx, dy), align_flag, self.display_text)
+                    painter.drawText(text_rect.translated(dx, dy), align_flag, _draw_text)
             if _px >= 26:
                 for dx, dy in ((-border_size, -border_size), (border_size, -border_size),
                                (-border_size, border_size), (border_size, border_size)):
-                    painter.drawText(text_rect.translated(dx, dy), align_flag, self.display_text)
+                    painter.drawText(text_rect.translated(dx, dy), align_flag, _draw_text)
 
             # 文字正体（白色）
             painter.setPen(Qt.white)
-            painter.drawText(text_rect, align_flag, self.display_text)
+            painter.drawText(text_rect, align_flag, _draw_text)
 
             painter.end()
 
@@ -3433,7 +3461,7 @@ class Murasame(QLabel):
                 self.preedit_text = ""
                 self.input_mode = False
                 self._set_ime(False)
-                self._show_thinking()
+                self._show_busy_hint()
                 return
         except Exception:
             pass
