@@ -234,6 +234,15 @@ class LongTextStreamThread(QThread):
                 continue  # 低权重消息完全过滤
             messages.append(msg)
 
+        # 你现在穿的是什么（桌宠窗口每次重画立绘都会记下来）
+        try:
+            from tool.portrait_outfit import current_look_note
+            _look = current_look_note()
+            if _look:
+                messages.append({"role": "system", "content": _look})
+        except Exception:
+            pass
+
         # 高权重「最近的观察」强注入（仅本轮有高权重）
         if high_observations:
             obs_text = "\n".join(f"- {obs}" for obs in high_observations[-5:])

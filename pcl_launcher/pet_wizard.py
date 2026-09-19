@@ -11,7 +11,7 @@
       A 每个表情一张整图（简单，适合手绘单图）
       B 多图层拼合（像丛雨那样：表情/服装/发型/装饰分别一张图，拼成一张立绘）
   4 Live2D 模型（选 .model3.json，自动复制进角色包）
-  5 语音（短语音=日语参考音频 GPT-SoVITS；长语音=中文参考音频 F5-TTS；可选默认模型）
+  5 语音（日语语音=日语参考音频 GPT-SoVITS；汉语语音=中文参考音频；可选默认模型）
   6 人设（短文本=桌宠 / 长文本=QQ；与「提示词」页同一份文件，双向同步）
   7 完成
 
@@ -462,7 +462,16 @@ def build_pet_json(spec: dict, existing: dict = None) -> dict:
         v["default_emotion"] = spec["default_emotion"]
     cfg["voices"] = v
     if spec.get("portrait"):
-        cfg["portrait"] = spec["portrait"]
+        _new_pt = dict(spec["portrait"])
+        _old_pt = existing.get("portrait") if isinstance(existing, dict) else None
+        if isinstance(_old_pt, dict):
+            # 动作（手臂姿势）与「按套分别存的表情/装饰表」向导界面里没有，
+            # 编辑已有角色时必须原样带过去，否则一进向导一保存就把它们清空了。
+            if _old_pt.get("actions") and not _new_pt.get("actions"):
+                _new_pt["actions"] = _old_pt["actions"]
+            if isinstance(_old_pt.get("sets"), dict) and not isinstance(_new_pt.get("sets"), dict):
+                _new_pt["sets"] = _old_pt["sets"]
+        cfg["portrait"] = _new_pt
     return cfg
 
 
@@ -579,23 +588,23 @@ def create_or_update_pet(spec: dict, log=print) -> tuple:
     if spec.get("short_voice_dir"):
         emos, err = copy_short_voice_pack(spec["short_voice_dir"], os.path.join(dst, "voices"))
         spec["short_emotions"] = emos
-        notes.append(f"短语音(日语)：导入 {len(emos)} 个情绪" + (f"（{err}）" if err else ""))
+        notes.append(f"日语语音：导入 {len(emos)} 个情绪" + (f"（{err}）" if err else ""))
     elif spec.get("short_voice_single"):
         emos, err = copy_short_voice_single(spec["short_voice_single"],
                                             spec.get("short_voice_text", ""),
                                             os.path.join(dst, "voices"),
                                             spec.get("short_voice_emotions"))
         spec["short_emotions"] = emos
-        notes.append(f"短语音(日语)：单一音色导入 {len(emos)} 个情绪" + (f"（{err}）" if err else ""))
+        notes.append(f"日语语音：单一音色导入 {len(emos)} 个情绪" + (f"（{err}）" if err else ""))
     if spec.get("long_ref_src"):
         try:
             os.makedirs(os.path.join(dst, "voices", "long"), exist_ok=True)
             tgt = os.path.join(dst, "voices", "long", os.path.basename(spec["long_ref_src"]))
             _safe_copy(spec["long_ref_src"], tgt)
             spec["long_ref_audio"] = f"voices/long/{os.path.basename(spec['long_ref_src'])}"
-            notes.append("长语音(中文)：参考音频已导入")
+            notes.append("汉语语音：参考音频已导入")
         except Exception as e:
-            notes.append(f"⚠ 长语音参考音频复制失败: {e}")
+            notes.append(f"⚠ 汉语语音参考音频复制失败: {e}")
 
     # 头像：没给就尝试用立绘第一张图替代
     if spec.get("avatar_src") and os.path.exists(spec["avatar_src"]):
@@ -654,6 +663,7 @@ class DisplayPreview(QWidget):
         self.font_scale = 1.0            # 对话框字号系数（框内文字大小随之变化）
         self.width_ratio = None          # Live2D 的窗口宽高比（None = 跟随立绘比例）
         self.pix = QPixmap()
+        self.canvas_wh = None            # 稳定画布（这套最宽外观）的宽高，None=按立绘比例
         self.mode = "2d"                 # 2d / live2d
         self._drag = None
         self.setCursor(Qt.OpenHandCursor)
@@ -669,6 +679,15 @@ class DisplayPreview(QWidget):
             self.bw = max(0.05, min(1.0, float(w)))
         if h is not None:
             self.bh = max(0.05, min(1.0, float(h)))
+        self.update()
+
+    def set_canvas_wh(self, cw, ch):
+        """告诉预览"稳定画布"的宽高（桌面真实窗口就是这个比例）。
+        ★ 不设的话预览按当前立绘的宽高比画 → 比真实窗口窄，框的位置就跟桌面不一致。"""
+        try:
+            self.canvas_wh = (int(cw), int(ch)) if cw and ch else None
+        except Exception:
+            self.canvas_wh = None
         self.update()
 
     def set_params(self, values: dict, pixmap: QPixmap):
@@ -712,6 +731,9 @@ class DisplayPreview(QWidget):
         if self.mode == "live2d" and self.width_ratio:
             # Live2D：窗口按角色的宽高比（模型本身是方的/半身的都常见）
             w = max(30, int(h * float(self.width_ratio)))
+        elif self.canvas_wh and self.canvas_wh[1] > 0:
+            # 与桌面窗口一致：用稳定画布宽高比（最宽的那种外观）
+            w = max(30, int(h * self.canvas_wh[0] / float(self.canvas_wh[1])))
         elif self.pix is not None and not self.pix.isNull() and self.pix.height() > 0:
             w = max(30, int(h * self.pix.width() / float(self.pix.height())))
         w = min(w, s.width())
@@ -2270,6 +2292,22 @@ class PCLPetWizard(SiliconDialog):
             self.disp_preview.set_mode(mode)
             # 几何类调节走缓存（不重新合成 → 丝滑）；只有内容变化才重合成
             self.disp_preview.set_params(v, self._cached_preview() if mode == "2d" else QPixmap())
+            # 桌宠窗口的真实宽度 = 稳定画布（这套里最宽的那种外观）→ 同步给预览
+            try:
+                from tool.portrait_geom import canvas_size_for
+                from pets.pet_registry import get_active_pet_id
+                _pid = getattr(self, "pet_id", None) or getattr(self, "_pet_id", None) or get_active_pet_id()
+                _set = str(getattr(self, "sets", None) and (self.sets[0] if self.sets else "a") or "a")[-1:]
+                _th = int(1080 * (float(v.get("height_ratio") or 0.45)))
+                _extra = []
+                for _k in ("hair", "emotion"):
+                    _val = v.get(_k)
+                    if str(_val or "").strip().isdigit():
+                        _extra.append(int(_val))
+                _cw, _ch = canvas_size_for(_pid, _set, max(120, _th), _extra)
+                self.disp_preview.set_canvas_wh(_cw, _ch)
+            except Exception as _e:
+                print(f"[Wizard] ⚠ 预览画布尺寸计算失败: {_e}")
             cloths = self._cloth_options()
             try:
                 self.gb_wiz_cloth.setVisible(bool(cloths) and mode == "2d")
@@ -2390,9 +2428,9 @@ class PCLPetWizard(SiliconDialog):
         w = QWidget()
         lay = QVBoxLayout(w)
 
-        g1 = QGroupBox("短语音（日语 · GPT-SoVITS 逐句短句 · 音色=参考音频，语气=情绪）")
+        g1 = QGroupBox("日语语音（GPT-SoVITS 逐句合成 · 音色=日语参考音频 · 语气=情绪）")
         l1 = QVBoxLayout(g1)
-        self.chk_short = QCheckBox("启用短语音（桌宠说话发声）")
+        self.chk_short = QCheckBox("启用日语语音（桌宠说话发声）")
         l1.addWidget(self.chk_short)
         r1 = QHBoxLayout()
         self.ed_short_dir = QLineEdit()
@@ -2416,9 +2454,9 @@ class PCLPetWizard(SiliconDialog):
         l1.addWidget(QLabel("不填则使用角色自带/默认（无参考音频时不会发声，不影响文字聊天）"))
         lay.addWidget(g1)
 
-        g2 = QGroupBox("长语音（中文 · F5-TTS 长文本朗读 · 音色=参考音频）")
+        g2 = QGroupBox("汉语语音（中文参考音频 · 音色=参考音频）")
         l2 = QVBoxLayout(g2)
-        self.chk_long = QCheckBox("启用长语音（长文本模式 / 大段朗读）")
+        self.chk_long = QCheckBox("启用汉语语音（中文录音当音色参考）")
         l2.addWidget(self.chk_long)
         r3 = QHBoxLayout()
         self.ed_long_ref = QLineEdit()
@@ -2434,8 +2472,8 @@ class PCLPetWizard(SiliconDialog):
         l2.addWidget(self.ed_long_text)
         lay.addWidget(g2)
 
-        tip = QLabel("说明：短语音合成的是【日语】（推理时用日语参考音频，情绪按台词语气切换）；\n"
-                     "长语音合成的是【中文】（长文本模式整段朗读）。两者都可以不配，随时在设置里改。")
+        tip = QLabel("说明：两种模式念的都是【中文】，区别只是用哪套录音当音色参考；"
+                     "日语语音=日语原声（更接近原作），汉语语音=中文录音。随时可在设置里切换。")
         tip.setStyleSheet("color:#888;font-size:12px;")
         lay.addWidget(tip)
         lay.addStretch()
@@ -2532,9 +2570,9 @@ class PCLPetWizard(SiliconDialog):
                                    f"前缀 {s.get('fgimages_prefix') or '（未填）'}"))
         else:
             rows.append(("Live2D 模型", os.path.basename(s.get("live2d_src") or "（未选）")))
-        rows.append(("短语音(日语)", f"启用，{len(s.get('short_voice_emotions') or []) or ('单一音色' if s.get('short_voice_single') else 0)} 个情绪"
+        rows.append(("日语语音", f"启用，{len(s.get('short_voice_emotions') or []) or ('单一音色' if s.get('short_voice_single') else 0)} 个情绪"
                                  if (s.get("short_voice_dir") or s.get("short_voice_single")) else "未配置"))
-        rows.append(("长语音(中文)", "使用自定义参考音频" if s.get("long_ref_src") else "使用默认参考音频"))
+        rows.append(("汉语语音", "使用自定义参考音频" if s.get("long_ref_src") else "使用默认参考音频"))
         rows.append(("人设字数", f"短 {len(s.get('prompt_short') or '')} 字 / 长 {len(s.get('prompt_long') or '')} 字"))
         html = "<b>即将创建/保存：</b><br>" + "<br>".join(f"· {k}：{v}" for k, v in rows)
         self.lbl_summary.setText(html)

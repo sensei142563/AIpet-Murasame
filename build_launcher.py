@@ -28,6 +28,22 @@ except Exception:
 # 确保在项目根目录
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
+# 铁律：打包启动器必须用"装了 PyQt5"的解释器（桌宠自带 runtime\venv\Scripts\python.exe）。
+# 用错解释器时 PyInstaller 不报错、照样出 exe，但产物里整个 PyQt5 都会缺掉 →
+# 用户双击 exe 弹 "Failed to execute script 'run_launcher' ... DLL load failed while
+# importing QtWidgets"。宁可在这里直接停住。
+try:
+    import PyQt5  # noqa: F401
+    _ = PyQt5.__file__
+except Exception as _e:
+    print("=" * 60)
+    print("[中断] 当前解释器没有 PyQt5，打出来的启动器会打不开！")
+    print(f"       解释器: {sys.executable}")
+    print(f"       原因  : {_e}")
+    print(r"       请改用: runtime\venv\Scripts\python.exe build_launcher.py")
+    print("=" * 60)
+    raise SystemExit(2)
+
 # 自动选择虚拟环境的 Python（优先 .venv）
 python_exe = sys.executable
 venv_python = os.path.join(os.path.dirname(__file__), ".venv", "Scripts", "python.exe")
@@ -80,7 +96,13 @@ cmd = [
     # 注意：不要加 websocket —— 壳内已删除 import websocket 自检，
     #       websocket 由子进程 run_qq.py 的解释器环境提供，壳不需要。
     "--hidden-import", "OpenGL.GL",
+    "--hidden-import", "pygame",
+    "--hidden-import", "PyQt5.QtMultimedia",
     "--hidden-import", "live2d.v3",
+    # 剧情里的 Live2D 立绘要用桌面端这套运行时（live2d_ui 里 import wave 等标准库）
+    "--hidden-import", "wave",
+    "--hidden-import", "audioop",
+    "--hidden-import", "Live2d.live2d_ui",
     # ===== 页面模块：壳里用「字符串动态导入」懒加载（__import__("pcl_launcher.widgets")）=====
     # PyInstaller 静态分析看不到这种导入 → 必须显式 hidden-import，
     # 否则桌宠/记忆/提示词/设置（widgets.py）与插件（plugins_panel.py）页面会「加载失败」。
@@ -93,6 +115,17 @@ cmd = [
     "--hidden-import", "pcl_launcher.silicon_ui",
     "--hidden-import", "pcl_launcher.live2d_preview",
     "--hidden-import", "pcl_launcher.safety",
+    "--hidden-import", "story",
+    "--hidden-import", "story.store",
+    "--hidden-import", "story.plot",
+    "--hidden-import", "story.generator",
+    "--hidden-import", "story.characters",
+    "--hidden-import", "story.assets",
+    "--hidden-import", "story.server",
+    "--hidden-import", "story.launch",
+    "--hidden-import", "story.i18n",
+    "--hidden-import", "story.config",
+    "--hidden-import", "story.modelcfg",
     "--hidden-import", "pcl_launcher.touch_editor",
     "--hidden-import", "tool.touch_areas",
     # ===== 排除：桌宠本体的重依赖（走子进程 venv，绝不进壳）=====
@@ -114,7 +147,6 @@ cmd = [
     "--exclude-module", "rich",
     "--exclude-module", "sounddevice",
     "--exclude-module", "pynput",
-    "--exclude-module", "pygame",
     "--exclude-module", "soundfile",
     "--exclude-module", "aiohttp",
     "--exclude-module", "fastapi",
@@ -134,7 +166,32 @@ print("=" * 60)
 print()
 print("命令:", " ".join(cmd))
 print()
-subprocess.run(cmd, check=True)
+
+# 中文/非 ASCII 路径修正：PyQt5 在 Python 侧把 Qt 路径按 latin-1 解码成乱码
+# （D:/ÏÂÔØ/...），PyInstaller 收集 Qt 插件时会判"目录不存在"→ 打包失败或产物缺 PyQt5
+# （exe 双击打不开）。用 PYTHONPATH 注入 tool/pyinstaller_qtfix 还原路径，不动 site-packages。
+_env = None
+try:
+    if any(ord(_c) > 127 for _c in os.getcwd()):
+        _fix_dir = os.path.join(os.getcwd(), "tool", "pyinstaller_qtfix")
+        if os.path.isfile(os.path.join(_fix_dir, "sitecustomize.py")):
+            _env = dict(os.environ)
+            _env["PYTHONPATH"] = _fix_dir + os.pathsep + _env.get("PYTHONPATH", "")
+            _env["AIPET_QT_PATHFIX"] = "1"
+            print("[修正] 项目路径含非 ASCII 字符 → 启用 PyQt5 路径还原补丁（否则收集不到 Qt 插件）")
+except Exception as _e:
+    print(f"[修正] 路径补丁启用失败（继续尝试打包）: {_e}")
+
+try:
+    subprocess.run(cmd, check=True, env=_env)
+except subprocess.CalledProcessError:
+    print()
+    print("=" * 60)
+    print("[失败] PyInstaller 打包启动器壳失败，常见原因：")
+    print("  · 项目路径含中文，且上面的 [修正] 没生效（产物会缺 PyQt5 → exe 打不开）")
+    print(r"  · 用了没装 PyQt5 的解释器（应使用 runtime\venv\Scripts\python.exe）")
+    print("=" * 60)
+    raise SystemExit(1)
 
 out_dir = os.path.join("dist", "AIpet-Murasame")
 
@@ -178,11 +235,27 @@ if os.path.isdir(_internal):
     else:
         print("[补齐] _internal/cv2 完整 ✓")
 
+    # ===== PyQt5：启动器界面的命根子 =====
+    # 缺了它 exe 双击只会弹 "DLL load failed while importing QtWidgets"（用户看不到界面）。
+    # 构建解释器里没装 PyQt5 时 PyInstaller 静默漏收 → 这里从运行环境补齐，补不上就停。
+    if not os.path.isdir(os.path.join(_internal, "PyQt5")):
+        print("[补齐] 检测到 _internal 缺少 PyQt5（PyInstaller 收集失败）→ 从运行环境同步")
+        _sync_pkg("PyQt5", _internal)
+    if not os.path.isdir(os.path.join(_internal, "PyQt5")):
+        print("=" * 60)
+        print("[中断] _internal/PyQt5 补不齐 → 装出来的启动器会打不开，停止打包。")
+        print(r"       请用 runtime\venv\Scripts\python.exe build_launcher.py 重打。")
+        print("=" * 60)
+        raise SystemExit(3)
+    print("[补齐] _internal/PyQt5 完整 ✓")
+
     # ===== 启动器界面自己用到的第三方运行库 =====
     # 这些不在打包 venv 里（PyInstaller 收集不到），但界面代码会 import →
     # 缺了就会在界面上弹「No module named 'xxx'」（例如：记忆页微信凭据请求 requests、
     # 解密凭据 Crypto、图片处理 cv2）。统一从 runtime/venv 同步进 _internal。
-    for _pkg in ("requests", "urllib3", "certifi", "charset_normalizer", "idna", "Crypto"):
+    for _pkg in ("requests", "urllib3", "certifi", "charset_normalizer", "idna", "Crypto",
+                 # 剧情模式的手柄用 pygame（打包 venv 里没有它 → 必须从运行环境同步）
+                 "pygame"):
         if os.path.isdir(os.path.join(_internal, _pkg)):
             continue
         _sync_pkg(_pkg, _internal)
@@ -225,6 +298,7 @@ if files is None:
         "思源黑体Bold.otf", "启动QQ.bat", "启动桌宠.bat",
         "biaoqingbao", "classes", "fgimages", "Live2d", "longtext",
         "pcl_launcher", "pets", "qq", "reference_voices", "tool", "场景素材",
+        "story", "剧情素材",
     ]
     files = []
     for item in top_items:
@@ -276,6 +350,9 @@ for rel in files:
         continue
     # 跳过不随包分发的本地自用角色包
     if any(rel.startswith(p) for p in _SKIP_PET_DIRS):
+        continue
+    # 跳过打码 CG 备份（用户本地留着以备恢复，占 97MB，没必要塞进安装包）
+    if rel.startswith("剧情素材/打码CG备份") or rel.startswith("剧情素材\\打码CG备份"):
         continue
     # 跳过过时/调试文件
     if os.path.basename(rel) in _SKIP_FILES:

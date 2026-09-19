@@ -9,7 +9,7 @@ from pathlib import Path
 
 import cv2
 from PyQt5.QtCore import QTimer, pyqtSignal
-from PyQt5.QtCore import Qt, QRect
+from PyQt5.QtCore import Qt, QRect, QSize
 from PyQt5.QtGui import QGuiApplication, QImage
 from PyQt5.QtGui import QPainter, QColor, QFont, QPixmap, QFontMetrics
 from PyQt5.QtMultimedia import QSound
@@ -100,6 +100,11 @@ class Murasame(QLabel):
         except Exception:
             self._fgimages_prefix = _pet_cfg.get("model", {}).get("fgimages_prefix", "")
         self._fgimages_sets = _pet_cfg.get("model", {}).get("fgimages_sets", [])
+        try:      # 自己的角色 ID（右键菜单/换装都按这个角色取选项表）
+            from pets.pet_registry import get_active_pet_id as _self_pid
+            self._pet_id = _self_pid()
+        except Exception:
+            self._pet_id = ""
         # 立绘类型：single（每个表情一张整图）/ layers（多图层合成，如丛雨）
         try:
             from pets.pet_registry import get_portrait_mode, get_portrait_default_layers
@@ -248,6 +253,16 @@ class Murasame(QLabel):
             self._sync_config_portrait(_disp)
         _set_pp = self._portrait_sets.get(_disp, {})
         self.first_portrait = _set_pp.get("first_portrait", [1715, 1306, 1719])
+        # ★ 启动优先用「立绘工坊保存的那套装扮」（服装/动作/装饰/表情都算），
+        #   拿不到才退回角色包的 first_portrait（那只是素材里的第一件衣服，芦花会变成内衣）
+        try:
+            from tool.portrait_outfit import saved_layer_list
+            _saved_layers = saved_layer_list(_disp, self._pet_id)
+            if _saved_layers:
+                print(f"[桌宠] 👗 启动立绘 = 保存的装扮 {_saved_layers}")
+                self.first_portrait = list(_saved_layers)
+        except Exception as _e:
+            print(f"[桌宠] ⚠ 读取保存的装扮失败: {_e}")
         if self._portrait_mode == "single" and self._single_default_layers:
             # 单图模式（每个表情一张整图）：启动就显示角色的默认表情整图，
             # 不能用丛雨的 first_portrait（那些图层 ID 在新角色包里不存在 → 空白）
@@ -257,6 +272,7 @@ class Murasame(QLabel):
         self._display_set = _disp
         self._fade_id = 0
         self._fade_state = None
+        self._portrait_ready = not self._has_fgimages   # 无 2D 素材（纯 Live2D）直接算就绪
         # 纯 Live2D 角色（无 fgimages 立绘图层面板）跳过 2D 立绘生成，避免空画布
         if self._has_fgimages:
             self.update_portrait(self.portrait_target, self.first_portrait)
@@ -410,6 +426,12 @@ class Murasame(QLabel):
         w = self._live2d_widget
         w.lower()
         self.move(w.pos())
+        # 2D 立绘模式下锁过窗口尺寸 → 进 Live2D 前解开，否则这里 resize 不动
+        try:
+            self.setMinimumSize(0, 0)
+            self.setMaximumSize(16777215, 16777215)
+        except Exception:
+            pass
         self.resize(w.size())
         # 字号随模型窗口尺寸 + 角色 font_scale 缩放（修复"字体大得离谱"）
         try:
@@ -597,6 +619,7 @@ class Murasame(QLabel):
         # 标记对话进行中
         self._talking = True
         self._stream_playing = True
+        self._show_thinking()          # 对话框显示"思考中..."
         self._ai_finished = False
         self._pending_clauses = []
         self._first_clause_shown = False
@@ -733,6 +756,10 @@ class Murasame(QLabel):
 
     def _trigger_input_mode(self):
         """Live2D 模式下触发输入模式（点击下半身直接开始键盘输入）"""
+        if self.is_busy_reply():          # 她还在思考/说话 → 不接受新的对话
+            self._show_thinking()
+            print("[桌宠] ⏳ 她还在思考/说话，先别插话（已忽略这次点击）")
+            return
         self.input_mode = True
         self.input_buffer = ""
         self.preedit_text = ""
@@ -1091,6 +1118,7 @@ class Murasame(QLabel):
                         "=== 屏幕内容描述开始 ===\n"
                         f"{desc}\n"
                         "=== 屏幕内容描述结束 ===\n"
+                        f"（截图里那个桌宠窗口就是你本人，不是别人。）"
                         f"请以{self.pet_name}的身份，自然地观察并评论主人正在做什么。你的回复必须紧密围绕上述描述，"
                         "可以表达关心、好奇、或撒娇——但要让人感觉你真的看到了主人的屏幕。"
                     )
@@ -1240,6 +1268,10 @@ class Murasame(QLabel):
         except Exception:
             self._reply_gen = 1
         _gen = self._reply_gen
+        try:      # 记下这轮说了什么（判断"它自己说要换衣服"用）
+            self._last_reply_text = " ".join(str(x) for x in (reply or []))
+        except Exception:
+            self._last_reply_text = ""
 
         def show_next_sentence(index=0):
             if _gen != getattr(self, "_reply_gen", _gen):
@@ -1322,6 +1354,16 @@ class Murasame(QLabel):
         show_next_sentence(index=0)
         self.worker = None  # 线程结束后清空引用
 
+        # 这一轮播完了 → 继续处理排队中的消息
+        try:
+            _q2 = getattr(self, "_pending_msgs", None) or []
+            if _q2:
+                _t2, _r2 = _q2.pop(0)
+                print(f"[桌宠] ▶ 这一轮说完了，继续回排队的消息（剩 {len(_q2)}）：{str(_t2)[:20]}")
+                QTimer.singleShot(400, lambda: self.start_thread(_t2, _r2))
+        except Exception as _e:
+            print(f"[桌宠] ⚠ 处理排队消息失败: {_e}")
+
         # 说话/回复时的灵动效果：按概率在两套立绘之间切换（透明渐变过渡）
         self._maybe_crossfade_set()
 
@@ -1330,7 +1372,42 @@ class Murasame(QLabel):
             self._demote_all_high()
 
     # 启动一个新线程（安全版，打断旧线程）
+    def is_busy_reply(self) -> bool:
+        """她是不是正在思考 / 正在说话（这期间不接受新的对话）"""
+        try:
+            if self.worker is not None and self.worker.isRunning():
+                return True
+        except Exception:
+            pass
+        return bool(getattr(self, "_talking", False) or getattr(self, "_stream_playing", False))
+
+    def _show_thinking(self):
+        """在对话框里显示「思考中...」（她自己正在想下一句的时候）"""
+        try:
+            self.display_text = "思考中..."
+            self.update()
+        except Exception:
+            pass
+
     def start_thread(self, text, role, t=False):
+        # ★ 她正在思考或正在说的时候，新消息先排队，等这一轮说完再回
+        #   （用户反馈：对话会被另一段回复打断；"对话没说完之前不允许和桌宠对话"）。
+        try:
+            _busy = self.is_busy_reply()
+            if _busy:
+                if role == "user":
+                    _q = getattr(self, "_pending_msgs", None)
+                    if _q is None:
+                        _q = []
+                        self._pending_msgs = _q
+                    if len(_q) < 8:
+                        _q.append((text, role))
+                        print(f"[桌宠] ⏳ 她还在说话/思考，这条先排队（队列 {len(_q)}）：{str(text)[:20]}")
+                else:
+                    print(f"[桌宠] ⏭ 她正忙，跳过这条系统观察：{str(text)[:20]}")
+                return
+        except Exception as _e:
+            print(f"[桌宠] ⚠ 排队判断失败（照常继续）: {_e}")
         # 长文本模式下：识别触发（t=True）在流式输出中自动跳过，空闲时走长文本流式
         if self.long_text_mode:
             if t:
@@ -1378,6 +1455,7 @@ class Murasame(QLabel):
 
         # 标记对话进行中
         self._talking = True
+        self._show_thinking()          # 对话框显示"思考中..."
 
         # 启动新线程
         if model_type == "local":
@@ -1414,7 +1492,11 @@ class Murasame(QLabel):
                 self.head_press_x = event.x()
                 self.setCursor(Qt.OpenHandCursor)
             elif event.y() > 280:  # 下半身区域 -> 输入模式
-                self.input_mode = True
+                if self.is_busy_reply():      # 她还在思考/说话 → 不接受新的对话
+                    self._show_thinking()
+                    print("[桌宠] ⏳ 她还在思考/说话，先别插话（已忽略这次点击）")
+                else:
+                    self.input_mode = True
                 self.input_buffer = ""
                 self.preedit_text = ""
                 self.display_text = f"【{self.user_name}】\n  ..."
@@ -1435,33 +1517,128 @@ class Murasame(QLabel):
             self._show_outfit_menu(event.globalPos())
 
     def _show_outfit_menu(self, global_pos):
-        """右键菜单：切换服装（写共享配置 → QQ 立绘与桌宠同时生效并持久化）。
-        a / b 两套立绘素材各自独立，菜单里改的是【当前显示那套】的衣服。
+        """右键菜单：切换服装 / 动作（写共享配置 → QQ 立绘与桌宠同时生效并持久化）。"""
+        try:
+            menu = self._build_outfit_menu()
+            if menu is None or menu.isEmpty():
+                return
+            menu.exec_(global_pos)
+        except Exception as e:
+            print(f"[桌宠] ⚠ 打开换装菜单失败: {e}")
 
-        ⚠ 没有服装素材的角色（例如新建的「每个表情一张整图」角色）不显示换装项。"""
+    def _build_outfit_menu(self):
+        """构造右键换装菜单（单独拆出来便于测试）。
+
+        a / b 两套立绘素材各自独立，菜单里改的是【当前显示那套】；
+        服装/动作按【当前桌宠自己的选项表】取，不会串到别的角色。
+        没有服装素材的角色（例如「每个表情一张整图」）不显示换装项。"""
         try:
             from PyQt5.QtWidgets import QMenu
-            from tool.portrait_outfit import SETS, clothes_of, load_outfit
+            from tool.portrait_outfit import SETS, load_outfit
+            # ⚠ 服装/动作必须按【这个桌宠自己的表】取：以前这里用的是内置的丛雨表，
+            #   于是任何角色右键看到的都是丛雨的 制服/睡衣/私服/刀服。
+            from qq.qq_portrait import clothes_for, actions_for
+            _pid = self._pet_id or None
             cur_set = self._current_set()
             cur = load_outfit(cur_set)
-            cur_name = cur.get("cloth") or "制服"
+            cur_name = cur.get("cloth") or ""
+            cur_act = cur.get("action") or ""
+            # ★ 菜单必须"跟着画面走"：优先用身上这件（实时图层）的名字，保存值只做兜底。
+            #   否则 AI 换过衣服后菜单还显示上一件（用户反馈"菜单没跟随变动"）。
             try:
-                cloths = list(clothes_of(cur_set))
+                from tool.portrait_outfit import (cloth_name as _cn2, resolve_cloth as _rc2,
+                                                  describe_layers as _dl2)
+                _live2 = int(self._current_body_layer(cur_set) or 0)
+                if _live2:
+                    _ln, _la = str(_cn2(_live2) or ""), ""
+                    for _n, _a, _o in actions_for(cur_set, _pid):
+                        if int(_a or 0) == _live2:
+                            _la = str(_n)
+                            _ln = _ln or str(_rc2(_n) or "")
+                            break
+                    if not _ln or not _la:
+                        _d2 = _dl2([_live2], cur_set, _pid) or ""
+                        if not _ln and "衣服：" in _d2:
+                            _ln = _d2.split("衣服：")[-1].split("；")[0].strip()
+                        if not _la and "姿势：" in _d2:
+                            _la = _d2.split("姿势：")[-1].strip()
+                    if _ln:
+                        cur_name = _ln
+                    if _la:
+                        cur_act = _la
+            except Exception as _e:
+                print(f"[桌宠] ⚠ 菜单当前穿着读取失败: {_e}")
+            try:
+                cloths = [(n, int(c), int(h)) for n, c, h in clothes_for(cur_set, _pid)]
             except Exception:
                 cloths = []
+            # ★ 素材被删掉的衣服不列出来（正式版删了裸体素材，但表里可能还留着）：
+            #   否则点了会合成出空图 → 桌宠变透明（用户反馈过）。
+            try:
+                from pets.pet_registry import get_fgimages_dir, get_fgimages_prefix
+                _fg = get_fgimages_dir(_pid)
+                if _fg:
+                    _pfx = get_fgimages_prefix(_pid)
+                    _keep = []
+                    for _n, _c, _h in cloths:
+                        _png = os.path.join(_fg, "%s%s_%d.png" % (_pfx, cur_set, _c))
+                        if os.path.exists(_png):
+                            _keep.append((_n, _c, _h))
+                        else:
+                            print(f"[桌宠] 服装「{_n}」素材不存在 → 菜单里不显示")
+                    cloths = _keep
+            except Exception as _e:
+                print(f"[桌宠] ⚠ 服装可用性检查失败: {_e}")
+            try:
+                acts = [(n, int(a), int(b)) for n, a, b in actions_for(cur_set, _pid)]
+                # 只列当前这件衣服的姿势
+                _cur_cid = int(cur.get("cloth_id") or 0)
+                cur_acts = [x for x in acts if not _cur_cid or x[2] == _cur_cid]
+            except Exception:
+                cur_acts = []
             menu = QMenu(self)
             if cloths:
                 title = menu.addAction(f"👗 切换服装（{cur_set} 立绘 · 当前：{cur_name}）")
                 title.setEnabled(False)
                 menu.addSeparator()
                 for name, cid, _h in cloths:
-                    act = menu.addAction(("✅ " if name == cur_name else "　　") + name)
+                    # 勾号要能对上：菜单名和"当前穿着"可能一个叫"刀装"一个叫"刀服"，
+                    # 先各自归一化再比（用户反馈勾号不见了）
+                    try:
+                        from tool.portrait_outfit import resolve_cloth as _rc
+                        _same = (_rc(name) or name) == (_rc(cur_name) or cur_name)
+                    except Exception:
+                        _same = (name == cur_name)
+                    act = menu.addAction(("✅ " if _same else "　　") + name)
                     act.triggered.connect(lambda checked=False, n=name: self._switch_cloth(n))
-            if len([s for s in SETS]) > 1 and self._has_fgimages_set(SETS[1] if len(SETS) > 1 else "b"):
+            if cur_acts:
+                menu.addSeparator()
+                sub = menu.addMenu("🤸 切换动作（手臂姿势）")
+                act0 = sub.addAction(("✅ " if not cur_act else "　　") + "默认姿势")
+                act0.triggered.connect(lambda checked=False: self._switch_action(0))
+                for name, aid, _b in cur_acts:
+                    a2 = sub.addAction(("✅ " if name == cur_act else "　　") + name)
+                    a2.triggered.connect(lambda checked=False, n=name: self._switch_action(n))
+            # 装饰：单独一页（可滚动）——装饰多了不会把菜单撑得满屏
+            try:
+                from qq.qq_portrait import decors_for
+                _decs = [(str(n), int(i)) for n, i in decors_for(cur_set, _pid)]
+            except Exception:
+                _decs = []
+            if _decs:
+                menu.addSeparator()
+                sub = menu.addMenu("🎀 装饰（可多选）")
+                self._fill_decor_menu(sub, cur_set, _decs, cur)
+
+            # a / b 切换：只有这个角色确实有两套素材时才给
+            _avail = [x for x in SETS if self._has_fgimages_set(x)]
+            if len(_avail) >= 2:
                 if cloths:
                     menu.addSeparator()
                 sub = menu.addMenu("🧩 切换立绘类型（a / b）")
                 for s in SETS:
+                    if s not in _avail:
+                        continue
                     label = f"{'✅ ' if s == cur_set else '　　'}{s} 立绘"
                     act = sub.addAction(label)
                     act.triggered.connect(lambda checked=False, ss=s: self._switch_portrait_set(ss))
@@ -1470,11 +1647,10 @@ class Murasame(QLabel):
                 act_auto.setCheckable(True)
                 act_auto.setChecked(self._auto_switch_enabled())
                 act_auto.triggered.connect(self._toggle_auto_switch)
-            if menu.isEmpty():
-                return
-            menu.exec_(global_pos)
+            return menu
         except Exception as e:
-            print(f"[桌宠] ⚠ 打开换装菜单失败: {e}")
+            print(f"[桌宠] ⚠ 构造换装菜单失败: {e}")
+            return None
 
     def _has_fgimages_set(self, set_name: str) -> bool:
         """角色是否有某套立绘素材（决定要不要给「切换立绘类型」入口）"""
@@ -1531,19 +1707,183 @@ class Murasame(QLabel):
             pass
         return list(self.first_portrait or [])
 
+    def _current_body_layer(self, set_name=None) -> int:
+        """当前正穿着的身体层（服装或换臂动作）——AI 某句没给身体层时沿用它"""
+        try:
+            s = set_name if set_name in ("a", "b") else self._current_set()
+            from tool.portrait_outfit import body_layers_of
+            body = body_layers_of(s)
+            for x in (getattr(self, "_last_portrait_layers", None) or []):
+                try:
+                    xi = int(x)
+                except Exception:
+                    continue
+                if xi in body:
+                    return xi
+            # 实时图层里找不到身体层（AI 那句只给了表情/装饰）→ 按保存的装扮兜底，
+            # 与实际显示的兜底逻辑一致，避免上层拿到 0 之后误判"现在没穿衣服"。
+            try:
+                from tool.portrait_outfit import load_outfit
+                _of = load_outfit(s)
+                _b = int(_of.get("action_id") or 0) or int(_of.get("cloth_id") or 0)
+                if _b:
+                    return _b
+            except Exception:
+                pass
+        except Exception:
+            pass
+        return 0
+
+    def _current_expr_layer(self, set_name=None) -> int:
+        """当前正显示的表情层——AI 某句没给表情时沿用它，免得这张脸突然变回基础脸"""
+        try:
+            s = set_name if set_name in ("a", "b") else self._current_set()
+            from tool.portrait_outfit import _tables_for
+            emos = set(int(v) for v in _tables_for(s, getattr(self, "_pet_id", None))["emotion"].keys())
+            body = set()
+            try:
+                from tool.portrait_outfit import body_layers_of, _decor_ids_of
+                body = body_layers_of(s) | _decor_ids_of(s)
+            except Exception:
+                pass
+            for x in reversed(list(getattr(self, "_last_portrait_layers", None) or [])):
+                try:
+                    xi = int(x)
+                except Exception:
+                    continue
+                if xi in emos and xi not in body:
+                    return xi
+        except Exception:
+            pass
+        return 0
+
     def _switch_cloth(self, cloth_name):
         """换装：保存到【当前显示那套】的配置（QQ/桌宠共用）→ 立即重新合成桌宠立绘"""
         try:
-            from tool.portrait_outfit import save_outfit
+            from tool.portrait_outfit import save_outfit, clothes_of
             cur_set = self._current_set()
+            # ★ 先确认这件衣服的素材还在：缺失就直接拒绝（否则会合成空图 → 桌宠透明）
+            try:
+                from pets.pet_registry import get_fgimages_dir, get_fgimages_prefix
+                _fg = get_fgimages_dir(self._pet_id)
+                _cid = next((int(c) for n, c, _h in clothes_of(cur_set) if n == cloth_name), 0)
+                if _fg and _cid:
+                    _png = os.path.join(_fg, "%s%s_%d.png" % (get_fgimages_prefix(self._pet_id),
+                                                              cur_set, _cid))
+                    if not os.path.exists(_png):
+                        print(f"[桌宠] ⚠ 「{cloth_name}」的立绘素材不存在（正式版已移除）→ 保持当前服装")
+                        return
+            except Exception as _e:
+                print(f"[桌宠] ⚠ 换装素材检查失败（继续尝试）: {_e}")
             if not save_outfit(cloth_name, set_name=cur_set):
                 return
             print(f"[桌宠] 👗 {cur_set} 立绘已换装: {cloth_name}（QQ 立绘同步生效）")
+            from tool.portrait_outfit import swap_body, load_outfit
+            _of = load_outfit(cur_set)
             layers = getattr(self, "_last_portrait_layers", None) or self._first_portrait_for(cur_set)
+            layers = swap_body(layers, cur_set, _of.get("cloth_id") or 0)   # 立刻换成新衣服
+            # ⚠ 先把"当前图层"设成新图层：这是主人主动换的，
+            #   不然 update_portrait 里的「服装粘性」会把它当成 AI 乱换而改回去
+            self._last_portrait_layers = list(layers)
+            self._last_outfit_ts = time.time()
             if self._has_fgimages:
                 self.update_portrait(self.portrait_target, list(layers))
         except Exception as e:
             print(f"[桌宠] ⚠ 换装失败: {e}")
+
+    def _fill_decor_menu(self, sub, cur_set, decs, cur):
+        """把「装饰」放进一个可滚动的页面：装饰多时限制高度、支持滚轮，不会撑大菜单"""
+        try:
+            from PyQt5.QtWidgets import (QScrollArea, QWidget, QVBoxLayout, QCheckBox,
+                                         QWidgetAction, QLabel)
+            from PyQt5.QtCore import Qt
+            box = QWidget()
+            lay = QVBoxLayout(box)
+            lay.setContentsMargins(8, 6, 8, 6)
+            lay.setSpacing(4)
+            chosen = set(int(x) for x in (cur.get("decor") or []))
+            for name, did in decs:
+                cb = QCheckBox(name)
+                cb.setChecked(did in chosen)
+                cb.stateChanged.connect(
+                    lambda _s, d=did, c=cb: self._toggle_decor(d, c.isChecked()))
+                lay.addWidget(cb)
+            btn_row = QWidget()
+            from PyQt5.QtWidgets import QHBoxLayout, QPushButton
+            br = QHBoxLayout(btn_row)
+            br.setContentsMargins(0, 0, 0, 0)
+            b_clear = QPushButton("全部取消")
+            b_clear.clicked.connect(lambda: self._toggle_decor(0, False, clear_all=True))
+            br.addWidget(b_clear)
+            lay.addWidget(btn_row)
+            area = QScrollArea()
+            area.setWidgetResizable(True)
+            area.setFrameShape(QScrollArea.NoFrame)
+            area.setWidget(box)
+            area.setMinimumWidth(240)
+            # 高度上限：装饰再多也只显示这么高，用滚轮看剩下的
+            area.setMaximumHeight(min(300, 34 + 26 * max(1, len(decs))))
+            area.setMinimumHeight(min(120, area.maximumHeight()))
+            area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            wa = QWidgetAction(sub)
+            wa.setDefaultWidget(area)
+            sub.addAction(wa)
+            sub.addSeparator()
+            sub.addAction("↑↓ 用滚轮查看全部装饰").setEnabled(False)
+        except Exception as e:
+            print(f"[桌宠] ⚠ 构造装饰页失败: {e}")
+            for name, did in decs:      # 兜底：退化成普通勾选项
+                act = sub.addAction(name)
+                act.setCheckable(True)
+                act.setChecked(int(did) in set(int(x) for x in (cur.get("decor") or [])))
+                act.triggered.connect(lambda checked=False, d=did: self._toggle_decor(d, checked))
+
+    def _toggle_decor(self, decor_id, checked, clear_all=False):
+        """勾选/取消装饰：写共享配置并立刻重画（装饰不改变衣服，按情绪随时增减）"""
+        try:
+            from tool.portrait_outfit import save_outfit, load_outfit
+            cur_set = self._current_set()
+            cur = set(int(x) for x in (load_outfit(cur_set).get("decor") or []))
+            if clear_all:
+                cur = set()
+            elif decor_id:
+                cur.add(int(decor_id)) if checked else cur.discard(int(decor_id))
+            if not save_outfit(None, set_name=cur_set, decor=sorted(cur)):
+                return
+            print(f"[桌宠] 🎀 {cur_set} 装饰已更新: {sorted(cur)}")
+            from tool.portrait_outfit import swap_body
+            layers = list(getattr(self, "_last_portrait_layers", None) or [])
+            if not layers:
+                layers = self._first_portrait_for(cur_set)
+            from tool.portrait_outfit import _decor_ids_of
+            dec_ids = _decor_ids_of(cur_set)
+            layers = [x for x in layers if int(x) not in dec_ids] + sorted(cur)
+            self._last_portrait_layers = list(layers)
+            if self._has_fgimages:
+                self.update_portrait(self.portrait_target, layers)
+        except Exception as e:
+            print(f"[桌宠] ⚠ 切换装饰失败: {e}")
+
+    def _switch_action(self, action_name):
+        """换动作（手臂姿势）：保存到当前那套的配置 → 立即重新合成"""
+        try:
+            from tool.portrait_outfit import save_outfit
+            cur_set = self._current_set()
+            if not save_outfit(None, set_name=cur_set,
+                               action=action_name if action_name else 0):
+                return
+            print(f"[桌宠] 🤸 {cur_set} 立绘动作已切换: {action_name or '默认姿势'}")
+            from tool.portrait_outfit import swap_body, load_outfit
+            _of = load_outfit(cur_set)
+            layers = getattr(self, "_last_portrait_layers", None) or self._first_portrait_for(cur_set)
+            layers = swap_body(layers, cur_set, _of.get("action_id") or _of.get("cloth_id") or 0)
+            self._last_portrait_layers = list(layers)
+            self._last_outfit_ts = time.time()
+            if self._has_fgimages:
+                self.update_portrait(self.portrait_target, list(layers))
+        except Exception as e:
+            print(f"[桌宠] ⚠ 切换动作失败: {e}")
 
     def _toggle_auto_switch(self, checked=None):
         """右键菜单：切换「自动切换立绘类型」并写入 config.json（立即生效）"""
@@ -1563,15 +1903,24 @@ class Murasame(QLabel):
             print(f"[桌宠] ⚠ 保存自动切换开关失败: {e}")
 
     def _switch_portrait_set(self, new_set):
-        """手动切换立绘体系（a/b）：持久保存 + 透明过渡动画"""
+        """手动切换立绘体系（a/b）：持久保存 + 透明过渡动画。
+
+        ⚠ 只换画法，不换衣服：把当前装扮（服装/动作/装饰）按名字搬到目标套，
+          否则 b 套会用自己那套默认装扮 → 看起来像"切类型把衣服换了"。"""
         try:
             if new_set == self._current_set():
                 return
             try:
-                from tool.portrait_outfit import set_active
+                from tool.portrait_outfit import set_active, carry_layers, carry_outfit
+                # 优先按【画面上正穿着的】搬；没有画面记录才退回"存档那套"
+                _cur = list(getattr(self, "_last_portrait_layers", None) or [])
+                _moved = carry_layers(self._current_set(), new_set, _cur,
+                                      getattr(self, "_pet_id", None)) if _cur else []
+                if not _moved:
+                    carry_outfit(self._current_set(), new_set, getattr(self, "_pet_id", None))
                 set_active(new_set)
-            except Exception:
-                pass
+            except Exception as _e:
+                print(f"[桌宠] ⚠ 搬运装扮失败: {_e}")
             self._sync_config_portrait(new_set)
             self._crossfade_to(new_set)
         except Exception as e:
@@ -1593,25 +1942,124 @@ class Murasame(QLabel):
             if getattr(self, "_fade_state", None):
                 return
             import random
-            from tool.portrait_outfit import load_outfit, common_cloths
+            from tool.portrait_outfit import (load_outfit, common_cloths, resolve_cloth,
+                                               carry_layers, actions_of)
             cur = self._current_set()
             other = "b" if cur == "a" else "a"
-            if load_outfit(cur).get("cloth") not in common_cloths():
+            # ⚠ 存下来的衣服名可能是别名（"刀装"/"刀装（换臂姿势）"），共通表里写的是"刀服" →
+            #   不归一化就永远判"两套没有同款" → 这个功能一直是死的（用户反馈"从没见过"）。
+            _cloth = str((load_outfit(cur) or {}).get("cloth") or "")
+            try:
+                _cloth = resolve_cloth(_cloth) or _cloth
+            except Exception:
+                pass
+            if _cloth not in common_cloths():
+                return
+            # 能不能"换套不换衣服"：先按当前装扮整套搬过去；
+            # 搬不过去（最常见的是"换臂姿势"另一套没有同款）就退一步，
+            # 只搬「衣服+发型+表情」，丢掉手臂姿势层 —— 衣服保持不变，只换立绘视角/姿势。
+            _cur_layers = list(getattr(self, "_last_portrait_layers", None) or [])
+            _carried = []
+            try:
+                if _cur_layers:
+                    _carried = carry_layers(cur, other, _cur_layers,
+                                            getattr(self, "_pet_id", None), save=False) or []
+                if not _carried and _cur_layers:
+                    # ⚠ 必须按"衣服名字"找这一套里的身体层，不能用动作层自己的
+                    #   "所属服装层"字段：裸（无衣着）标的是 1948，压根不在服装表里，
+                    #   拿去搬运会被兜底成便服 → 裸体一换视角就穿上便衣（实测踩过）。
+                    #   名字不在表里（裸体 / 内衣这类）→ 直接不切，保持原样。
+                    from tool.portrait_outfit import clothes_of
+                    _body_cur = 0
+                    try:
+                        _tb = {n: c for n, c, _h in clothes_of(cur)}
+                        _body_cur = int(_tb.get(_cloth) or 0)
+                    except Exception:
+                        _body_cur = 0
+                    # 她现在是不是裸体/内衣这类"非常规衣服"？是的话一律不换视角：
+                    # b 套没有裸体层，一换就会被兜底穿上便服（用户反馈的问题）。
+                    _nude_now = False
+                    try:
+                        from tool.portrait_outfit import describe_layers as _dl
+                        _live_body = int(self._current_body_layer(cur) or 0)
+                        _dd = _dl([_live_body], cur, getattr(self, "_pet_id", None)) if _live_body else ""
+                        _nude_now = any(k in (_dd or "") for k in ("裸", "内衣", "无衣着"))
+                    except Exception:
+                        _nude_now = False
+                    if _body_cur and not _nude_now:
+                        _acts_cur = {int(a) for _n, a, _o in
+                                     actions_of(cur, getattr(self, "_pet_id", None)) if a}
+                        _plain, _seen = [], set()
+                        for x in _cur_layers:
+                            _v = int(x) if str(x).isdigit() else None
+                            _v2 = _body_cur if (_v is not None and _v in _acts_cur) else _v
+                            if _v2 is not None:
+                                if _v2 in _seen:
+                                    continue
+                                _seen.add(_v2)
+                            _plain.append(_v2 if _v2 is not None else x)
+                        if _plain and _plain != _cur_layers:
+                            _carried = carry_layers(cur, other, _plain,
+                                                    getattr(self, "_pet_id", None), save=False) or []
+                            if _carried:
+                                print("[桌宠] 🧩 自动切换：手臂姿势另一套没有 → 只换视角，衣服不变")
+            except Exception as _e:
+                print(f"[桌宠] ⚠ 自动切换的装扮搬运失败: {_e}")
+                _carried = []
+            if not _carried:
                 return
             if random.random() > self._CROSSFADE_PROB:
                 return
-            self._crossfade_to(other)
+            self._crossfade_to(other, layers=_carried)
         except Exception as e:
             print(f"[桌宠] ⚠ 立绘灵动切换失败: {e}")
 
-    def _crossfade_to(self, new_set, ms=320, steps=8):
+    def _start_layer_fade(self, new_pm, target, ms=320, steps=8):
+        """同一套立绘内换衣服：旧图渐隐 → 新图渐显（复用 _fade_tick 的动画）"""
+        try:
+            old = QPixmap(self.pixmap())
+            from PyQt5.QtCore import QSize
+            w = max(old.width(), new_pm.width(), 1)
+            h = max(old.height(), new_pm.height(), 1)
+            canvas = QSize(w, h)
+            self._fade_id += 1
+            self._fade_state = {"id": self._fade_id,
+                                "pm_out": self._pad_pixmap(old, canvas),
+                                "pm_in": self._pad_pixmap(new_pm, canvas),
+                                "target": str(target or ""),
+                                "n": max(1, int(steps)), "i": 0,
+                                "step_ms": max(16, int(ms) // (2 * max(1, int(steps))))}
+            self._fade_tick()
+        except Exception as e:
+            print(f"[桌宠] ⚠ 换装渐隐失败（直接切换）: {e}")
+            try:
+                self.setPixmap(new_pm)
+            except Exception:
+                pass
+
+    def _crossfade_to(self, new_set, ms=320, steps=8, layers=None):
         """透明过渡切换立绘体系：先渐隐当前立绘 → 再渐显新立绘（窗口透明，透出桌面）"""
         try:
             # 注意：QLabel.pixmap() 返回的是内部对象的包装（非独立副本），
             # 直接跨帧持有会在下一次 setPixmap 后变成悬空对象 → 必须先深拷贝
             old = QPixmap(self.pixmap())
             target = self._target_for(new_set)
-            new_pm = self._compose_pixmap(target, self._first_portrait_for(new_set))
+            # 用「这套保存的装扮」（已按名字从另一套搬好）→ 换类型不换衣服
+            try:
+                from tool.portrait_outfit import carry_layers, saved_layer_list
+                _cur = list(getattr(self, "_last_portrait_layers", None) or [])
+                _layers = list(layers or [])
+                if not _layers:
+                    _layers = carry_layers(self._current_set(), new_set, _cur,
+                                           getattr(self, "_pet_id", None), save=False) if _cur else []
+                if not _layers:
+                    _layers = saved_layer_list(new_set, getattr(self, "_pet_id", None),
+                                               like_layers=_cur)
+            except Exception:
+                _layers = []
+            if not _layers:
+                _layers = self._first_portrait_for(new_set)
+            new_pm = self._compose_pixmap(target, _layers)
             if new_pm is None or new_pm.isNull():
                 return
             # ★ 两套立绘尺寸不同：统一到同一画布（小的补透明），并把窗口先调到该尺寸，
@@ -1628,6 +2076,7 @@ class Murasame(QLabel):
                 pass
             self._display_set = new_set
             self.portrait_target = target
+            self._last_portrait_layers = list(_layers)
             self.first_portrait = self._first_portrait_for(new_set)
             print(f"[桌宠] 🧩 立绘类型切换 → {new_set} 套（透明过渡）")
             self._fade_id += 1
@@ -1669,8 +2118,11 @@ class Murasame(QLabel):
             print(f"[桌宠] ⚠ 立绘渐变帧失败: {e}")
 
     @staticmethod
-    def _pad_pixmap(pm, size):
-        """把 pixmap 画到指定尺寸的透明画布上（左上对齐），尺寸已一致则原样返回"""
+    def _pad_pixmap(pm, size, center_x=False):
+        """把 pixmap 画到指定尺寸的透明画布上，尺寸已一致则原样返回。
+
+        默认左上对齐；center_x=True 时水平居中 —— 用于"同一套立绘只放宽不放窄"：
+        角色保持在中间，不会被补出来的透明边挤到一边。"""
         try:
             if pm is None or pm.isNull():
                 return pm
@@ -1680,20 +2132,122 @@ class Murasame(QLabel):
             out.fill(Qt.transparent)
             p = QPainter(out)
             if p.isActive():
-                p.drawPixmap(0, 0, pm)
+                _dx = int((size.width() - pm.width()) / 2) if center_x else 0
+                p.drawPixmap(max(0, _dx), 0, pm)
                 p.end()
             return out
         except Exception:
             return pm
 
+    # 换装的"正当理由"关键词（主人这句话里出现 → 允许换衣服）
+    _FIT_KW = ("换衣", "换件", "换套", "换上", "换了", "换身", "穿上", "脱", "睡衣", "睡袍", "寝衣",
+               "校服", "制服", "便服", "私服", "巫女服", "和服", "刀服", "泳装", "体操服", "裸",
+               "洗澡", "去睡", "该睡", "睡觉", "出门", "祭典", "下雨", "太热", "好冷")
+    _FIT_COOLDOWN = 900          # 秒：距上次换装不足这个时间，就不因为"时间流逝"自己换
+
+    def _outfit_change_allowed(self) -> bool:
+        """现在允许换衣服吗：**只有主人这条消息里明确要求**才允许。
+
+        ⚠ 以前还有两条"自己换"的口子：① 距上次换装超过 15 分钟（_FIT_COOLDOWN）
+          就放行「时间流逝自然换衣」；② 进程刚启动时 _last_outfit_ts 为 0 也一路放行。
+        结果就是主人正常聊天时，桌宠自己换上便服/便衣（用户反馈"对话时还是会变成
+        便服"）。现在一律以主人的要求为准：没提换衣服，就一直穿着身上这件。
+        """
+        try:
+            txt = ""
+            for m in reversed(getattr(self, "history", []) or []):
+                if isinstance(m, dict) and m.get("role") == "user":
+                    txt = str(m.get("content") or "")
+                    break
+            # ★ 必须是"明确的换装指令"才算：光提到衣服、天气、出门、睡觉不算。
+            #   否则主人正常聊天（"今天好冷""我出门了""该睡了"）AI 就会顺手换一身
+            #   ——用户反馈的"还是会突然变成便服"就是这么来的。
+            _VERBS = ("换衣", "换件", "换套", "换上", "换了", "换身", "换个衣", "去换", "给我换",
+                      "穿上", "穿件", "脱掉", "脱了", "脱下来", "脱", "裸", "别穿了", "别穿")
+            return any(v in txt for v in _VERBS)
+        except Exception:
+            return False
+
+    def _sticky_outfit(self, target, layers):
+        """同一段对话里衣服不要突然变：AI 每句都可能挑不同的服装，
+        只有「主人要求 / 它自己说要换 / 隔了很久」才真的换，否则沿用当前这件
+        （表情、动作、装饰照旧随情绪变）。"""
+        try:
+            s = str(target or "")[-1:]
+            s = s if s in ("a", "b") else self._current_set()
+            from tool.portrait_outfit import body_layers_of, swap_body
+            body = body_layers_of(s)
+            if not body:
+                return layers
+            _ids = [int(x) for x in (layers or [])
+                    if str(x).strip().lstrip("-").isdigit()]
+            new_body = next((x for x in _ids if x in body), 0)
+            cur = [int(x) for x in (getattr(self, "_last_portrait_layers", None) or [])
+                   if str(x).strip().lstrip("-").isdigit()]
+            if not cur:
+                # 首帧（还没有"当前衣服"）：直接用 AI 给的，并记下时间戳，
+                # 免得紧接着的第一句又无理由换一次（那就是"衣服突然变了"）
+                if new_body:
+                    self._last_outfit_ts = time.time()
+                return layers
+            cur_body = next((x for x in cur if x in body), 0)
+            if not cur_body or not new_body or cur_body == new_body:
+                if new_body and new_body != cur_body:
+                    self._last_outfit_ts = time.time()
+                return layers
+            if self._outfit_change_allowed():
+                self._last_outfit_ts = time.time()
+                print(f"[桌宠] 👗 换装：{new_body}")
+                # ★ 把这次换装写回"保存的装扮"。不写回会连环出错：
+                #   ① 右键菜单的「当前：X」和勾选读的是保存值 → 换装后菜单还显示上一件
+                #     （用户反馈"便装后右键菜单却还是显示裸体"）；
+                #   ② 之后某句 AI 没给身体层时的兜底、a/b 换视角的搬运也读保存值
+                #     → 裸体聊两句就被兜底穿回便服（用户反馈"裸体对话还是会变成便服"）。
+                try:
+                    from tool.portrait_outfit import (save_outfit, cloth_name,
+                                                      resolve_cloth, describe_layers, actions_of)
+                    _nm, _act_name = "", ""
+                    try:
+                        _nm = str(cloth_name(int(new_body)) or "")
+                    except Exception:
+                        _nm = ""
+                    try:
+                        for _n, _a, _o in actions_of(s, getattr(self, "_pet_id", None)):
+                            if int(_a or 0) == int(new_body):
+                                _act_name = str(_n)
+                                _nm = _nm or str(resolve_cloth(_n) or "")
+                                break
+                    except Exception:
+                        pass
+                    if not _nm:
+                        _d = describe_layers([int(new_body)], s, getattr(self, "_pet_id", None)) or ""
+                        if "衣服：" in _d:
+                            _nm = _d.split("衣服：")[-1].split("；")[0].strip()
+                    if _nm:
+                        save_outfit(_nm, set_name=s, action=_act_name or 0)
+                        print(f"[桌宠] 👗 已记录当前穿着：{_nm}{(' · ' + _act_name) if _act_name else ''}")
+                except Exception as _e:
+                    print(f"[桌宠] ⚠ 记录换装失败（不影响显示）: {_e}")
+                return layers
+            print(f"[桌宠] 👗 保持当前服装（本句想换 {new_body} → 沿用 {cur_body}）")
+            return swap_body(layers, s, cur_body)
+        except Exception as e:
+            print(f"[桌宠] ⚠ 服装粘性处理失败: {e}")
+            return layers
+
     def _auto_switch_enabled(self) -> bool:
-        """立绘类型自动切换开关（config.json: portrait_auto_switch，默认开）"""
+        """立绘类型自动切换开关（config.json: portrait_auto_switch）
+
+        ⚠ 默认必须与启动器界面一致（界面默认「开」）。之前这里写的 "false"，
+          而界面滑块默认 "true"、配置里又常常没这个键 → 界面显示开着、实际不生效，
+          用户反馈「从没见过 a/b 自动切换」就是这个。
+          不想要这个效果：设置里关掉，或右键菜单取消勾选「自动切换立绘类型」。"""
         try:
             from tool.config import get_config
             v = get_config("./config.json").get("portrait_auto_switch", "true")
-            return str(v).strip().lower() not in ("false", "0", "off", "no")
+            return str(v).strip().lower() in ("true", "1", "on", "yes")
         except Exception:
-            return True
+            return False
 
     @staticmethod
     def _alpha_pixmap(pm, alpha):
@@ -1968,15 +2522,50 @@ class Murasame(QLabel):
             self.setPixmap(QPixmap())
             return
 
-        # 记录本次图层（右键换装时用它立即重新合成）
+        # 先过「服装粘性」：AI 每句可能挑不同的衣服，无理由时沿用当前这件
+        try:
+            layers = self._sticky_outfit(target, layers)
+        except Exception as _e:
+            print(f"[桌宠] ⚠ 服装粘性处理失败: {_e}")
+        # ⚠ 这里必须记【实际显示】的图层（不是 AI 请求的）：粘性判断、右键换装重画、
+        #   以及给模型的"我现在穿什么"都以它为准。
         try:
             self._last_portrait_layers = list(layers or [])
         except Exception:
             pass
-
+        try:
+            from tool.portrait_outfit import (describe_layers, set_current_look,
+                                              set_current_body, load_outfit)
+            # 记录"身上这件"给提示词用（AI 没给身体层时按保存的兜底，与实际显示一致）
+            try:
+                _b = self._current_body_layer(target)
+                if not _b:
+                    _of2 = load_outfit(str(target or "")[-1:] or None)
+                    _b = int(_of2.get("action_id") or 0) or int(_of2.get("cloth_id") or 0)
+                set_current_body(_b)
+            except Exception:
+                pass
+            _st = str(target or "")[-1:]
+            _desc = describe_layers(layers, _st if _st in ("a", "b") else None,
+                                    getattr(self, "_pet_id", None))
+            set_current_look(_desc)
+            # 每次外观变化打一行日志：万一还有"表情消失"，日志里能直接看出那一句的图层
+            if _desc and _desc != getattr(self, "_last_look_desc", ""):
+                self._last_look_desc = _desc
+                print(f"[桌宠] 👀 当前立绘：{_desc}（图层 {list(layers or [])}）")
+        except Exception as _e:
+            print(f"[桌宠] ⚠ 记录外观失败: {_e}")
         pixmap = self._compose_pixmap(target, layers)
         if pixmap is None or pixmap.isNull():
             return
+        # ★ 兜底：素材全缺时合成出来的是一张极小的空画布 → 直接保留上一帧，
+        #   绝不把桌宠刷成透明（用户反馈"点了裸体后桌宠变透明"）。
+        try:
+            if pixmap.width() < 8 or pixmap.height() < 8:
+                print(f"[桌宠] ⚠ 立绘素材缺失（合成结果 {pixmap.width()}x{pixmap.height()}）→ 保留当前立绘")
+                return
+        except Exception:
+            pass
         # 渐变过渡进行中：把新立绘接到"渐显"阶段，动画不中断（做完自动定格）
         st = getattr(self, "_fade_state", None)
         if st and st.get("id") == self._fade_id:
@@ -1990,10 +2579,32 @@ class Murasame(QLabel):
                 self._fade_state = None
             except Exception:
                 pass
+        # ★ 换衣服也要透明渐变（用户要求）：身体层变了就走和 a/b 切换同一套渐隐渐显，
+        #   而不是"啪"地硬切。表情/装饰变化仍然即时切换（它们本来就是逐句在变的）。
+        try:
+            from tool.portrait_outfit import body_layers_of
+            _bs = str(target or "")[-1:]
+            _bs = _bs if _bs in ("a", "b") else self._current_set()
+            _bodies = set(body_layers_of(_bs))
+            _new_b = next((int(x) for x in (layers or [])
+                           if str(x).strip().isdigit() and int(x) in _bodies), 0)
+            _old_b = int(getattr(self, "_shown_body", 0) or 0)
+            if _new_b and _old_b and _new_b != _old_b:
+                self._shown_body = _new_b
+                self._last_portrait_layers = list(layers or [])
+                self._start_layer_fade(pixmap, str(target or ""))
+                return
+            if _new_b:
+                self._shown_body = _new_b
+        except Exception as _e:
+            print(f"[桌宠] ⚠ 换装渐隐判断失败（改为直接切换）: {_e}")
+
         # 5. Attach to the QLabel and request a repaint
         self.setPixmap(pixmap)
         self.resize(pixmap.size())
         self.update()
+        # 立绘就绪（main.py 等这个标记再显示窗口：服装没加载出来之前不露脸）
+        self._portrait_ready = True
 
     def _compose_pixmap(self, target, layers):
         """按目标立绘体系合成 QPixmap：
@@ -2006,7 +2617,8 @@ class Murasame(QLabel):
             if t[-1:] in ("a", "b"):
                 s = t[-1]
             layers = normalize_layers(layers, s)
-            layers = apply_outfit(layers, s)
+            layers = apply_outfit(layers, s, fallback_body=self._current_body_layer(s),
+                                  fallback_expr=self._current_expr_layer(s))
         except Exception:
             pass
 
@@ -2034,7 +2646,20 @@ class Murasame(QLabel):
 
         # 4. Convert to QPixmap and apply adaptive scaling
         pixmap = QPixmap.fromImage(qimg)
+        self._last_portrait_target = str(target or "")      # 供缩放函数认"哪一套"的画布
         return self._scale_portrait_pixmap(pixmap)
+
+    def resizeEvent(self, event):
+        """窗口尺寸一变就重算字号：字号是按文字区宽度算的，
+        不重算就会出现"改过尺寸后字还是旧的"（含首次显示的那一帧）。"""
+        try:
+            super().resizeEvent(event)
+        except Exception:
+            pass
+        try:
+            self._update_text_scaling()
+        except Exception:
+            pass
 
     def _scale_portrait_pixmap(self, pixmap: QPixmap) -> QPixmap:
         """
@@ -2109,7 +2734,107 @@ class Murasame(QLabel):
         self._current_scale = max(scale_factor, 0.1)
         self._update_text_scaling()
 
-        return pixmap.scaledToHeight(target_height, Qt.SmoothTransformation)
+        out = pixmap.scaledToHeight(target_height, Qt.SmoothTransformation)
+        # ★ 稳定画布：同一套立绘 + 同一目标高度下，画布宽度"只增不减"。
+        #   合成图宽度 = 当前图层（表情/动作/服装）的包围盒宽度，换一次表情就变一次；
+        #   窗口要是跟着缩，对话框（按窗口宽高归一化）就会忽大忽小 ——
+        #   用户看到的"说话时对话框变小"就是它。固定画布后窗口尺寸不变，文字框也就稳了。
+        try:
+            key = (str(getattr(self, "_last_portrait_target", "") or ""), int(target_height))
+            stab = getattr(self, "_stable_canvas", None) or {}
+            if not isinstance(stab, dict):
+                stab = {}
+            cur = stab.get(key) or 0
+            if out.width() > cur:
+                stab[key] = int(out.width())
+            if len(stab) > 6:                      # 换配置/换屏会攒新 key，留最近几份就够
+                stab = dict(list(stab.items())[-6:])
+            self._stable_canvas = stab
+            _w = stab.get(key) or out.width()
+            # ★ 尺寸锁死：立绘画布一旦定下来，就把窗口固定成"画布尺寸"。
+            #   否则 Qt 会按标签（文字+图）的 sizeHint 把窗口撑大（实测启动时 581，
+            #   而立绘画布只要 465 → 用户看到"刚出现时大了一圈，对话一次后变小"）。
+            #   锁死后：露面那一刻就是最终尺寸，之后一直不变。
+            try:
+                _lock = self._pad_pixmap(out, QSize(int(_w), out.height()), center_x=True)
+                self.setFixedSize(_lock.size())
+                # ★ 锁定尺寸后必须按"最终窗口宽度"重算字号：
+                #   字号是按文字区宽度算的，而首帧时窗口还是临时尺寸（比最终大一截），
+                #   不重算就会出现"刚出现的字比对话一次后大一圈"（用户反馈）。
+                self._update_text_scaling()
+            except Exception:
+                pass
+            # ★ 会话内不回缩：同一个目标高度下，窗口宽度只增不减。
+            #   原因：a/b 两套的画布宽度不同（实测 484 / 465），换套那一瞬间窗口会
+            #   缩一圈 —— 用户看到的就是"刚出现时比对话一次后大一圈"。
+            #   宁可多留透明边，也要保证对话框尺寸自始至终一致。
+            #   （改显示比例 / 换屏 → 目标高度变了 → 重新量，不影响正常调整。）
+            try:
+                _floor_h = int(getattr(self, "_canvas_floor_h", 0) or 0)
+                _floor = int(getattr(self, "_canvas_floor", 0) or 0)
+                if _floor_h != int(target_height):
+                    _floor = 0
+                # 第一次算画布时不要参考"当前窗口宽度"：那一刻窗口还是 Qt 按标签算的
+                # 临时尺寸（实测 581，而立绘只要 465）→ 会把临时尺寸当成标准永久沿用。
+                _nw = max(_w, _floor)
+                if getattr(self, "_canvas_locked", False):
+                    _nw = max(_nw, int(self.width() or 0))
+                # 夹一层上限：万一窗口曾被别的东西撑得很大（背景/首帧），
+                # 也不能把它当成"标准宽度"永久沿用（最多放宽 25%）
+                _cap = int(round(max(_w, _floor or 0) * 1.25))
+                if _cap > 0:
+                    _nw = min(_nw, _cap)
+                if _nw != _w:
+                    print("[桌宠] 📐 画布宽度不回缩：%d → %d（避免对话框变小）" % (_w, _nw))
+                _w = _nw
+                self._canvas_floor = _nw
+                self._canvas_floor_h = int(target_height)
+                self._canvas_locked = True
+            except Exception:
+                pass
+            # 启动第一次算画布时，顺手把"这套里其它衣服/姿势"的宽度也量一遍，
+            # 直接取最宽 —— 否则第一句对话换了姿势画布会"长大一次"，
+            # 用户看到的就是"没对话前和对话一次后对话框大小不一样"。
+            if not stab.get(key + ("primed",)):
+                try:
+                    stab[key + ("primed",)] = True
+                    _mx = _w
+                    from tool.portrait_outfit import clothes_of, actions_of
+                    _ids = set()
+                    for _n, _c, _h in clothes_of(str(getattr(self, "_last_portrait_target", "") or "")[-1:] or "a"):
+                        _ids.add(int(_c))
+                    try:
+                        for _n, _a, _o in actions_of(str(getattr(self, "_last_portrait_target", "") or "")[-1:] or "a",
+                                                     getattr(self, "_pet_id", None)):
+                            if _a:
+                                _ids.add(int(_a))
+                    except Exception:
+                        pass
+                    _tgt = str(getattr(self, "_last_portrait_target", "") or "")
+                    if _tgt and _ids:
+                        _extra = [x for x in (list(getattr(self, "_last_portrait_layers", None) or []))
+                                  if (not str(x).isdigit()) or int(x) not in _ids]
+                        # 用公共几何函数（与"显示与对话框"预览同一套算法）算最宽
+                        try:
+                            from tool.portrait_geom import canvas_size_for
+                            _extra_ids = [int(x) for x in _extra if str(x).strip().isdigit()]
+                            _cw, _ = canvas_size_for(getattr(self, "_pet_id", None), _tgt[-1:], target_height,
+                                                     _extra_ids)
+                            if _cw > _mx:
+                                _mx = int(_cw)
+                        except Exception as _ge:
+                            print(f"[桌宠] ⚠ 画布宽度计算失败: {_ge}")
+                    if _mx > _w:
+                        stab[key] = int(_mx)
+                        _w = int(_mx)
+                        print("[桌宠] 📐 立绘画布预量：最宽 %dpx（避免对话后对话框变大）" % _w)
+                except Exception as _e:
+                    print(f"[桌宠] ⚠ 画布预量失败（不影响显示）: {_e}")
+            if _w > out.width():
+                out = self._pad_pixmap(out, QSize(_w, out.height()), center_x=True)
+        except Exception as _e:
+            print(f"[桌宠] ⚠ 稳定画布计算失败（不影响显示）: {_e}")
+        return out
 
     def _display_cfg_2d(self) -> dict:
         """2D 立绘的显示设置（pet.json model.display_2d；兼容旧的 display.* 键）。

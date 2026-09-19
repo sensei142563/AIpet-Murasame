@@ -198,7 +198,21 @@ if __name__ == "__main__":
     app.aboutToQuit.connect(lambda: save_screen_type(pet))
     # 退出时记录桌宠位置（下次启动回到原位置；配合启动器「重置桌宠位置」按钮）
     app.aboutToQuit.connect(lambda: save_window_pos(pet))
-    pet.show()  # 显示窗口
+    # 显示窗口：等第一帧立绘（服装）合成好再显示，避免先露出"没穿好衣服"的样子；
+    # 最多等 5 秒（合成失败/纯 Live2D 时也要把窗口显示出来）
+    def _show_when_ready(waited=0):
+        try:
+            if getattr(pet, "_portrait_ready", False) or waited >= 5000:
+                pet.show()
+                if waited >= 5000:
+                    print("[桌宠] ⚠ 立绘合成较慢，先显示窗口（稍后会自行补上）")
+                return
+        except Exception:
+            pet.show()
+            return
+        QTimer.singleShot(80, lambda: _show_when_ready(waited + 80))
+
+    QTimer.singleShot(0, _show_when_ready)
 
     # ===== Live2D 初始化 =====
     live2d_widget = None
@@ -502,7 +516,8 @@ if __name__ == "__main__":
             )
             if has_master:
                 prompt += (
-                    f"请以{pet.pet_name}的身份，自然地观察并评论你看到的主人。"
+                    f"（截图里那个桌宠窗口就是你本人，不是别人。）"
+                        f"请以{pet.pet_name}的身份，自然地观察并评论你看到的主人。"
                     "可以表达关心、好奇、或撒娇——但要让人感觉你真的看到了主人。回答不超过两句话。"
                 )
             else:

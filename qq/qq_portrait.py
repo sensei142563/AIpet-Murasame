@@ -18,6 +18,14 @@ import numpy as np
 
 from pets.pet_registry import get_fgimages_dir, get_active_pet_id, get_pet_config
 
+def _cn_name(n):
+    """日文层名 → 中文显示名（立绘工坊/桌宠设置里的下拉用）"""
+    try:
+        from tool.jp_names import translate
+        return translate(n)
+    except Exception:
+        return str(n)
+
 _lock = threading.Lock()
 
 # ── 情绪 → (表情层ID, 可选装饰层ID) ──────────────────────────
@@ -59,39 +67,136 @@ DECORS = [("脸红（頬）", 1958), ("叹气（息）", 1940)]                 
 
 
 
-def pet_portrait_cfg() -> dict:
-    """当前活动角色的 portrait 配置块（向导创建的新角色用；老角色返回 {}）"""
+def pet_portrait_cfg(pet_id=None) -> dict:
+    """角色（默认当前活动角色）的 portrait 配置块；老角色没有则返回 {}"""
     try:
         from pets.pet_registry import get_pet_config
-        pt = (get_pet_config() or {}).get("portrait") or {}
+        pt = (get_pet_config(pet_id) or {}).get("portrait") or {}
         return pt if isinstance(pt, dict) and pt else {}
     except Exception:
         return {}
 
 
-def clothes_for(set_name=None):
+def _pt_block(pt, set_name=None):
+    """角色 portrait 配置里「某一套」的选项表。
+
+    新角色会分别给出 a/b 两套（portrait.sets.a / .b），层号完全不同（如芳乃 a 套校服 1860、
+    b 套校服 1997）——一定要按当前套取，否则切到 b 套会拿着 a 套的层号去合成（等于没换衣服）。
+    没有分套表时退回顶层（老配置兼容；向导写过 portrait.sets=["a"] 这种列表形式，也要认）。"""
+    s = _set_of(set_name)
+    sets = pt.get("sets")
+    blk = (sets.get(s) or {}) if isinstance(sets, dict) else {}
+    if blk:
+        return blk
+    return {k: pt.get(k) or {} for k in ("clothes", "emotions", "decors", "actions")}
+
+
+def clothes_for(set_name=None, pet_id=None):
     """某套的服装选项 → [(显示名, 身体层 id, 发型层 id)]
 
     新角色（pet.json 有 portrait 块）：直接用角色自己的服装表；
     老角色：走内置表（行为不变）。"""
-    pt = pet_portrait_cfg()
+    pt = pet_portrait_cfg(pet_id)
     if pt:      # 新角色：以角色配置为准（没有服装就是空，不回退到内置表）
+        blk = _pt_block(pt, set_name)
         return [(str(n), int((c or {}).get("cloth") or 0), int((c or {}).get("hair") or 0))
-                for n, c in (pt.get("clothes") or {}).items()]
+                for n, c in (blk.get("clothes") or {}).items()]
     from tool.portrait_outfit import clothes_of
     pretty = {"制服": "制服（校服）", "睡衣": "寝間着（睡衣）",
               "私服": "私服（便服）", "刀服": "刀服（和装）"}
     return [(pretty.get(n, n), c, h) for n, c, h in clothes_of(set_name)]
 
 
-def decors_for(set_name=None):
+def decors_for(set_name=None, pet_id=None):
     """某套的装饰选项 → [(显示名, 层 id)]"""
-    pt = pet_portrait_cfg()
+    pt = pet_portrait_cfg(pet_id)
     if pt:
-        return [(str(n), int(i)) for n, i in (pt.get("decors") or {}).items()
+        blk = _pt_block(pt, set_name)
+        return [(str(n), int(i)) for n, i in (blk.get("decors") or {}).items()
                 if str(i).strip().isdigit()]
     from tool.portrait_outfit import decors_of
     return [((n + "（頬）") if n == "脸红" else n, i) for n, i in decors_of(set_name)]
+
+
+def _pick_emotion_name(emo, emos):
+    """模型给的情绪词（开心 / 害羞 / 生气…）→ 该角色表情表里最接近的一项。
+
+    新角色（芳乃她们）的表情名是素材原样翻过来的（微笑 1 / 含羞的笑 / 平常 1…），
+    跟 EMOTION_MAP 的中文情绪词并不一一对应；这里做一次语义就近匹配，
+    否则桌宠/QQ 立绘只会在「默认表情」上不动。
+    """
+    if not emo or not emos:
+        return ""
+    if emo in emos:
+        return emo
+
+    def _find(subs):
+        """命中多个时取「名字最短」的——基础表情比组合表情更像一张正常的情绪脸"""
+        best = ""
+        for sub in subs:
+            for k in emos:
+                if sub in k and (not best or len(k) < len(best)):
+                    best = k
+            if best:
+                return best
+        return best
+
+    for kws, subs in _EMO_HINT:
+        if any(k in emo for k in kws):
+            got = _find(subs)
+            if got:
+                return got
+    return ""
+
+
+_EMO_HINT = (
+    (("开心", "高兴", "笑", "嘿嘿", "得意", "俏皮", "高兴"),
+     ("微笑", "笑容", "浅笑", "含笑", "坏笑", "笑")),
+    (("害羞", "羞涩", "脸红", "腼腆", "撒娇", "不好意思"),
+     ("害羞", "脸红", "含羞", "垂头", "娇")),
+    (("生气", "愤怒", "不满", "怒", "凶", "瞪"),
+     ("生气", "不满", "怒气", "怒", "鼓脸", "气鼓鼓", "可怕")),
+    (("难过", "伤心", "委屈", "哭", "寂寞", "悲", "失落"),
+     ("泪水", "悲伤", "寂寞", "垂头", "哭脸", "忧愁")),
+    (("惊讶", "震惊", "惊奇", "意外", "吃惊"),
+     ("惊讶", "睁大", "瞪大", "发愣")),
+    (("思考", "疑惑", "困惑", "疑问", "沉思"),
+     ("沉思", "疑惑", "狐疑", "解说")),
+    (("紧张", "着急", "焦急", "慌", "急"),
+     ("紧张", "慌张", "着急", "慌")),
+    (("平静", "普通", "正常", "冷静", "安心"),
+     ("基础", "平常", "平静", "从容", "浅笑")),
+    (("困", "睡", "累"),
+     ("困倦", "睡眼", "困")),
+    (("无奈", "叹气", "叹气", "苦"),
+     ("无奈", "叹气", "基础", "平常")),
+)
+
+
+_PLAIN_HINT = ("微笑", "笑容", "浅笑", "含笑", "平常", "基础", "平静", "从容", "认真", "发愣")
+
+
+def _plain_emotion(emos) -> str:
+    """表情表里的「基础那张脸」：优先 微笑/平常/基础 这类中性表情，再退而求最短的非组合表情"""
+    plain = [k for k in emos if "组合表情" not in k] or list(emos)
+    if not plain:
+        return ""
+    for hint in _PLAIN_HINT:
+        hit = [k for k in plain if hint in k]
+        if hit:
+            return min(hit, key=len)
+    return min(plain, key=len)
+
+
+def actions_for(set_name=None, pet_id=None):
+    """某套的动作（手臂姿势）选项 → [(显示名, 动作层 id, 所属服装层 id)]
+
+    动作 = 同一件衣服的另一种手臂姿势（素材里的「腕差分」）。"""
+    try:
+        from tool.portrait_outfit import actions_of
+        return [(str(n), int(a), int(b)) for n, a, b in actions_of(_set_of(set_name), pet_id)]
+    except Exception:
+        return []
 
 
 def cross_set_layers(layers, dst_set) -> list:
@@ -120,11 +225,15 @@ def load_choice(set_name=None) -> dict:
                 "hair": _HAIR, "decor": []}
 
 
-def save_choice(cloth, hair=None, decor=None, set_name=None) -> bool:
-    """保存装扮（转发统一模块；桌宠模式与 QQ 立绘共用同一份配置）"""
+def save_choice(cloth, hair=None, decor=None, set_name=None, action=None, scene=None,
+                emotion=None) -> bool:
+    """保存装扮（转发统一模块；桌宠模式与 QQ 立绘共用同一份配置）
+
+    action：动作（手臂姿势）名或层号；None = 保持原样，0 = 回到默认姿势。"""
     try:
         from tool.portrait_outfit import save_outfit
-        return save_outfit(cloth, hair, decor, set_name=set_name)
+        return save_outfit(cloth, hair, decor, set_name=set_name, action=action,
+                           scene=scene, emotion=emotion)
     except Exception as e:
         print(f"[QQPortrait] ⚠ 保存立绘装扮失败: {e}", file=sys.stderr)
         return False
@@ -267,10 +376,11 @@ def expression_choices(set_name=None):
     s = _set_of(set_name)
     out = []
     seen_ids = set()
-    # 新角色：表情选项来自角色自己的 portrait 配置
+    # 新角色：表情选项来自角色自己的 portrait 配置（按当前套取，a/b 层号不同）
     pt = pet_portrait_cfg()
-    if pt.get("emotions"):
-        for cn, lid in pt["emotions"].items():
+    _em = (pt.get("emotions") or {}) if not pt.get("sets") else _pt_block(pt, s).get("emotions")
+    if _em:
+        for cn, lid in _em.items():
             try:
                 lid = int(lid)
             except Exception:
@@ -299,11 +409,24 @@ def expression_choices(set_name=None):
                 if lid in seen_ids:
                     continue
                 seen_ids.add(lid)
-                nm = (x[1].strip() or f"表情{lid}")[:12]
-                out.append((nm, lid))
+                nm = _cn_name(x[1].strip() or f"表情{lid}")
+                out.append((_uniq_name(out, nm[:18], lid), lid))
     except Exception:
         pass
     return out
+
+
+def _uniq_name(pairs, name, lid) -> str:
+    """下拉显示名去重：同名时补上层号，避免两个选项看起来一模一样"""
+    used = {str(n) for n, _i in pairs}
+    if name not in used:
+        return name
+    cand = f"{name}（{lid}）"
+    i = 2
+    while cand in used:
+        cand = f"{name}（{lid}-{i}）"
+        i += 1
+    return cand
 
 
 def compose_custom(cloth, hair, expr, decors=None, out_name="qq_portrait_studio.png",
@@ -545,23 +668,25 @@ def build_portrait(emotion: str = "", bg_kw: str = "",
     try:
         s = _set_of(set_name)
         emo = (emotion or "").strip()
-        # 新角色：情绪→图层的映射来自 pet.json 的 portrait 块
+        # 新角色：情绪→图层的映射来自 pet.json 的 portrait 块（按当前套取，a/b 层号不同）
         _pt = pet_portrait_cfg()
-        if _pt.get("emotions"):
-            _emos = {str(k): v for k, v in _pt["emotions"].items()}
-            _dflt = str(_pt.get("default_emotion") or "平静")
-            _lid = _emos.get(emo) or _emos.get(_dflt) or next(iter(_emos.values()), 0)
+        _has_pt = bool(_pt.get("emotions") or _pt.get("sets"))
+        if _has_pt:
+            _emos = {str(k): v for k, v in ((_pt_block(_pt, s).get("emotions")) or {}).items()}
+            _nm = _pick_emotion_name(emo, _emos)
+            _lid = (_emos.get(_nm) or _emos.get(str(_pt.get("default_emotion") or ""))
+                    or _emos.get(_plain_emotion(_emos)) or next(iter(_emos.values()), 0))
             try:
-                emo_id, decor_id = int(_lid), None
+                emo_id, decor_id = int(_lid or 0), None
             except Exception:
                 emo_id, decor_id = 0, None
         else:
             emo_id, decor_id = EMOTION_MAP.get(emo, EMOTION_MAP.get("平静", (1292, None)))
-        if s != "a":
-            from tool.portrait_outfit import translate_layers
-            _tr = translate_layers([x for x in (emo_id, decor_id) if x], "a", s)
-            emo_id = _tr[0] if _tr else 0
-            decor_id = _tr[1] if decor_id and len(_tr) > 1 else None
+            if s != "a":           # 老角色：a 套层号 → b 套层号（新角色两套各有一套表，不用换算）
+                from tool.portrait_outfit import translate_layers
+                _tr = translate_layers([x for x in (emo_id, decor_id) if x], "a", s)
+                emo_id = _tr[0] if _tr else 0
+                decor_id = _tr[1] if decor_id and len(_tr) > 1 else None
         info = _load_index(s)
         fg_dir, prefix = info["dir"], info["prefix"]
         infos = info["infos"]
@@ -570,9 +695,11 @@ def build_portrait(emotion: str = "", bg_kw: str = "",
         if _pt.get("mode") == "single" and _layers is None:
             _layers = [int(x) for x in ([emo_id] if emo_id else []) if int(x or 0) > 0]
         if _layers is None:
-            # 该套保存的装扮（服装+配套发型+装饰） + 当前情绪表情
+            # 该套保存的装扮（服装+动作+配套发型+装饰） + 当前情绪表情
             ch = load_choice(s)
-            layers = [ch["cloth_id"], emo_id, ch["hair"]]
+            # 选了动作（换臂姿势）就用动作层当身体层；它是同一件衣服的另一种手臂姿势
+            body_id = int(ch.get("action_id") or 0) or int(ch["cloth_id"])
+            layers = [body_id, emo_id, ch["hair"]]
             if decor_id:
                 layers.append(decor_id)
             for d in ch["decor"]:
@@ -581,11 +708,15 @@ def build_portrait(emotion: str = "", bg_kw: str = "",
         else:
             layers = list(_layers)
         # 防御：传入的图层若是另一套的 ID → 自动换算到本套（历史图层/AI 越界复用不崩）
-        try:
-            from tool.portrait_outfit import normalize_layers
-            layers = normalize_layers(layers, s)
-        except Exception:
-            pass
+        # 但两套的层号是可能重复的（如蕾娜 a/b 都有 304），只要本套索引里能找到这个层号，
+        # 就说明它本来就是本套的层，绝不能再去「翻译」（否则会翻成空层 → 合成空白）。
+        _missing = [l for l in layers if l and l not in infos]
+        if _missing:
+            try:
+                from tool.portrait_outfit import normalize_layers
+                layers = normalize_layers(layers, s)
+            except Exception:
+                pass
         canvas = np.zeros((_CANVAS_H, _CANVAS_W, 4), dtype=np.uint8)
         # 图层微调（防穿模）：网页版/QQ 立绘与桌面立绘共用同一份设置
         try:
@@ -601,7 +732,17 @@ def build_portrait(emotion: str = "", bg_kw: str = "",
         alpha = canvas[..., 3]
         ys, xs = np.where(alpha > 0)
         if len(xs) == 0:
-            print(f"[QQPortrait] ⚠ 合成结果为空（情绪 {emo} / {s} 套）", file=sys.stderr)
+            # 自己把原因写清楚：少了哪个图层、素材目录/前缀对不对，省得只知道「合成失败」
+            try:
+                _miss = [l for l in layers if l not in infos]
+                _nofile = [l for l in layers if infos.get(l) and
+                           not os.path.exists(os.path.join(fg_dir, f"{prefix}{s}_{l}.png"))]
+                print(f"[QQPortrait] ⚠ 合成结果为空（情绪 {emo} / {s} 套）"
+                      f" | 素材目录={fg_dir} | 前缀={prefix!r} | 索引层数={len(infos)}"
+                      f" | 请求图层={layers} | 索引里没有的={_miss} | 有索引但没图片的={_nofile}",
+                      file=sys.stderr)
+            except Exception:
+                print(f"[QQPortrait] ⚠ 合成结果为空（情绪 {emo} / {s} 套）图层={layers}", file=sys.stderr)
             return ""
         x0, x1, y0, y1 = xs.min(), xs.max(), ys.min(), ys.max()
         full = canvas[y0:y1 + 1, x0:x1 + 1]

@@ -98,6 +98,7 @@ def _f5tts_venv_python():
 
 
 def log(msg, level="INFO"):
+    """打印日志；纯净模式下控制台被隐藏 → 同时追加到 data/pet_run.log，方便事后排查"""
     levels = {
         "INFO": "[AIpet]",
         "WARN": "⚠️ [警告]",
@@ -106,6 +107,17 @@ def log(msg, level="INFO"):
     }
     prefix = levels.get(level, "[AIpet]")
     print(f"{prefix} {msg}")
+    try:
+        if quiet_mode():
+            import os as _os
+            _lp = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "data", "pet_run.log")
+            _os.makedirs(_os.path.dirname(_lp), exist_ok=True)
+            if _os.path.isfile(_lp) and _os.path.getsize(_lp) > 2 * 1024 * 1024:
+                _os.remove(_lp)
+            with open(_lp, "a", encoding="utf-8") as _f:
+                _f.write("%s %s %s\n" % (__import__("time").strftime("%Y-%m-%d %H:%M:%S"), prefix, msg))
+    except Exception:
+        pass
 
 
 def load_runtime_config(config_path="config.json"):
@@ -239,7 +251,7 @@ def install_requirements():
     try:
         subprocess.run(
             [_project_python(), "-m", "pip", "install", "-r", req_path, "--no-warn-script-location"],
-            check=True
+            check=True, creationflags=_console_flags()
         )
         log("依赖安装完成。", "SUCCESS")
     except subprocess.CalledProcessError:
@@ -277,7 +289,7 @@ def ensure_cpu_torch():
             "torch", "torchvision", "torchaudio",
             "--index-url", "https://download.pytorch.org/whl/cpu",
             "--no-warn-script-location"
-        ], check=True, timeout=1800)
+        ], check=True, timeout=1800, creationflags=_console_flags())
         import torch
         log(f"成功安装 PyTorch {torch.__version__} (CPU)", "SUCCESS")
         TORCH_OK = True
@@ -408,7 +420,7 @@ def setup_runtime_and_pytorch(config_path="config.json", cfg=None, hardware_type
                 "torch", "torchvision", "torchaudio",
                 "--index-url", torch_url,
                 "--no-warn-script-location"
-            ], check=True)
+            ], check=True, creationflags=_console_flags())
             import torch
             log("已安装与当前 CUDA 匹配的 PyTorch 版本。", "SUCCESS")
             log("⚠️⚠️请关闭并重新运行程序，以加载新的 PyTorch 版本。⚠️⚠️", "INFO")
@@ -422,7 +434,7 @@ def setup_runtime_and_pytorch(config_path="config.json", cfg=None, hardware_type
                 "torch", "torchvision", "torchaudio",
                 "--index-url", torch_url,
                 "--no-warn-script-location"
-            ], check=True)
+            ], check=True, creationflags=_console_flags())
             import torch
             log(f"成功安装 PyTorch {torch.__version__} (CUDA {torch.version.cuda or 'CPU'})", "SUCCESS")
         except subprocess.CalledProcessError:
@@ -446,12 +458,35 @@ def run_download():
             # ⚠ 这里以前用裸 "python"（PATH 里的系统 Python）：系统 Python 没有本项目的
             #   依赖，跑 download.py 会直接崩（事件日志里的 MSVCP140 访问违规就是这么来的）。
             #   统一用项目解释器：优先 runtime venv。
-            subprocess.run([_f5tts_venv_python(), "download.py"],)
+            subprocess.run([_f5tts_venv_python(), "download.py"],
+                           creationflags=_console_flags())
             log("模型下载完成。", "SUCCESS")
         except subprocess.CalledProcessError as e:
             log(f"下载脚本运行失败: {e}", "ERROR")
     elif tts_type == "cloud":
         log("检测到 tts_type = cloud, 跳过模型下载", "INFO")
+
+def quiet_mode() -> bool:
+    """纯净模式（设置 → 其他配置）：启动桌宠时不弹终端窗口。
+
+    这些服务进程本身照常运行，只是不给它们开控制台窗口，
+    想排查问题时在设置里关掉纯净模式即可看到日志。
+    """
+    try:
+        return str(get_config("./config.json").get("quiet_mode", "false")).strip().lower() in (
+            "true", "1", "yes", "on")
+    except Exception:
+        return False
+
+
+def _console_flags(quiet: bool = None) -> int:
+    """子进程窗口标志：纯净模式用 CREATE_NO_WINDOW(0x08000000)，否则开新控制台(0x10)"""
+    if os.name != "nt":
+        return 0
+    if quiet is None:
+        quiet = quiet_mode()
+    return 0x08000000 if quiet else 0x00000010
+
 
 def start_f5tts_api():
     """启动 F5-TTS HTTP 服务（端口 9881，长文本模式中文语音合成）"""
@@ -468,19 +503,170 @@ def start_f5tts_api():
         log("如需语音功能，请参考 README 安装 F5-TTS。", "INFO")
         return None
 
-    log("检测到长文本模式已开启，启动 F5-TTS 服务（新控制台）...", "INFO")
+    log("检测到长文本模式已开启，启动 F5-TTS 服务%s..." % ("" if quiet_mode() else "（新控制台）"), "INFO")
     try:
         proc = subprocess.Popen(
             [_f5tts_venv_python(), "-m", "longtext.f5tts_server"],
             cwd=os.path.dirname(os.path.abspath(__file__)),
-            creationflags=(0x00000010 if os.name == "nt" else 0)
+            creationflags=_console_flags()
         )
         time.sleep(3)
-        log("F5-TTS 服务已在新控制台启动（端口 9881）。")
+        log("F5-TTS 服务已启动%s（端口 9881）。" % ("" if quiet_mode() else "（新控制台）"))
         return proc
     except Exception as e:
         log(f"启动 F5-TTS 失败: {e}", "ERROR")
         return None
+
+
+# ── TTS 运行目录：都在 D 盘（不使用 C 盘）──
+def _tts_dirs():
+    """返回 (日语字典目录, MIOpen 缓存目录)，ASCII 路径，必要时创建"""
+    base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # 项目所在的盘
+    drive = (os.path.splitdrive(os.path.abspath(base))[0] or "D:") + os.sep
+    dic_dir = os.path.join(drive, "aipet_tts", "jtalk_dic")
+    mio_dir = os.path.join(drive, "aipet_tts", "miopen")
+    return dic_dir, mio_dir
+
+
+def _ascii_path(path: str) -> str:
+    """尽量把路径变成纯 ASCII：优先 8.3 短路径（不复制文件）"""
+    try:
+        path.encode("ascii")
+        return path                      # 本来就是 ASCII
+    except Exception:
+        pass
+    try:
+        import ctypes
+        buf = ctypes.create_unicode_buffer(1024)
+        n = ctypes.windll.kernel32.GetShortPathNameW(path, buf, 1024)
+        if n and buf.value:
+            buf.value.encode("ascii")
+            return buf.value             # 例：D:\XIAZAI~1\...
+    except Exception:
+        pass
+    return ""
+
+
+def prepare_tts_env(python_exe: str) -> dict:
+    """准备好日语字典与 MIOpen 目录，返回要传给子进程的环境变量"""
+    env = {}
+    try:
+        # ① 日语字典：先在"当前环境自带的 pyopenjtalk 包里"找
+        site = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(python_exe))),
+                            "lib", "site-packages")
+        pkg = os.path.join(site, "pyopenjtalk")
+        cands = []
+        if os.path.isdir(pkg):
+            for d in os.listdir(pkg):
+                if d.lower().startswith("open_jtalk_dic"):
+                    cands.append(os.path.join(pkg, d))
+        # ② 自带 runtime(3.9) 的字典做兜底
+        alt = os.path.join(os.path.dirname(os.path.abspath(python_exe)), "..", "..",
+                           "runtime", "Lib", "site-packages", "pyopenjtalk")
+        if os.path.isdir(alt):
+            for d in os.listdir(alt):
+                if d.lower().startswith("open_jtalk_dic"):
+                    cands.append(os.path.join(os.path.abspath(alt), d))
+        dic_src = next((c for c in cands if os.path.isdir(c)), "")
+        if dic_src:
+            # 优先用 8.3 短路径指向原位置（不复制）；不行再复制到 D:\aipet_tts\jtalk_dic
+            ascii_now = _ascii_path(dic_src)
+            if ascii_now:
+                env["AIPET_JTALK_DIC"] = ascii_now
+            else:
+                dic_dir, _ = _tts_dirs()
+                if not os.path.isdir(os.path.join(dic_dir, "char.bin")):
+                    os.makedirs(dic_dir, exist_ok=True)
+                    import shutil
+                    for f in os.listdir(dic_src):
+                        s0 = os.path.join(dic_src, f)
+                        d0 = os.path.join(dic_dir, f)
+                        try:
+                            if os.path.isdir(s0):
+                                if not os.path.isdir(d0):
+                                    shutil.copytree(s0, d0)
+                            else:
+                                shutil.copy2(s0, d0)
+                        except Exception:
+                            pass
+                env["AIPET_JTALK_DIC"] = dic_dir
+        # ③ MIOpen 求解器缓存
+        _, mio_dir = _tts_dirs()
+        os.makedirs(mio_dir, exist_ok=True)
+        env["AIPET_MIOPEN_DIR"] = mio_dir
+        env["MIOPEN_USER_DB_PATH"] = mio_dir          # 运行时直接读这个
+        # ④ nltk 数据：句子里的英文/数字要靠它做分词和音素（"下载了 3 个文件"这种）
+        #    新 nltk(≥3.9) 要 averaged_perceptron_tagger_eng，而且自带 pathsec 沙箱，
+        #    只允许读 NLTK_DATA 指定目录内的文件 —— 不指就会在合成中途抛异常，
+        #    客户端表现为 "Response ended prematurely"（听起来就是"这句没声音"）。
+        for _nd in (os.path.join(os.path.dirname(os.path.abspath(__file__)), "tool", "nltk_data"),
+                    os.path.join(_tts_dirs()[0], "..", "nltk_data"),
+                    os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                 "GPT-SoVITS", "runtime", "nltk_data")):
+            if os.path.isdir(_nd):
+                env["NLTK_DATA"] = os.path.abspath(_nd)
+                break
+    except Exception as e:
+        log(f"TTS 运行目录准备失败（不影响启动）：{e}", "WARN")
+    return env
+
+
+def _probe_gpu(py: str) -> bool:
+    """探测这个环境能不能用 GPU（导入 torch 并查 cuda 可用性）"""
+    try:
+        r = subprocess.run([py, "-c", "import torch;print('1' if torch.cuda.is_available() else '0')"],
+                           capture_output=True, text=True, timeout=120,
+                           creationflags=(0x08000000 if os.name == "nt" else 0))
+        return r.stdout.strip().endswith("1")
+    except Exception:
+        return False
+
+
+def _runtime_py(root: str) -> str:
+    """取 GPT-SoVITS 运行时里的解释器。
+
+    两种布局都要认：自带 runtime 是便携版（python.exe 在根下），
+    runtime_rocm 是 venv 版（Scripts\\python.exe）—— 写死一种会让另一种"找不到环境"。
+    """
+    for rel in ("python.exe", os.path.join("Scripts", "python.exe")):
+        p = os.path.join(root, rel)
+        if os.path.exists(p):
+            return p
+    return os.path.join(root, "Scripts", "python.exe")
+
+
+def pick_tts_env():
+    """返回 (python 路径, 是否用 A 卡 ROCm)。任何异常都回退到自带 runtime。"""
+    base = os.path.dirname(os.path.abspath(__file__))
+    cpu_py = _runtime_py(os.path.join(base, "GPT-SoVITS", "runtime"))
+    rocm_py = _runtime_py(os.path.join(base, "GPT-SoVITS", "runtime_rocm"))
+    want = None
+    try:
+        cfg = get_config("./config.json")
+        if "gsv_use_rocm" in cfg:
+            want = str(cfg.get("gsv_use_rocm")).lower() in ("true", "1", "yes")
+    except Exception:
+        want = None
+    if want is True:                       # 明确要求 A 卡
+        if os.path.exists(rocm_py):
+            return rocm_py, True
+        log("配置要求用 A 卡（gsv_use_rocm=true），但没找到 runtime_rocm → 回退 CPU。", "WARN")
+    elif want is False:                    # 明确要求不用 A 卡
+        if os.path.exists(cpu_py):
+            return cpu_py, False
+        if os.path.exists(rocm_py):
+            return rocm_py, True
+        return None, False
+    # 没配置 → 自动挑：优先能跑 GPU 的
+    for py, is_rocm in ((rocm_py, True), (cpu_py, False)):
+        if os.path.exists(py) and _probe_gpu(py):
+            log(f"自动选择 TTS 环境：{'A 卡(ROCm)' if is_rocm else '自带环境'}（检测到可用 GPU）", "INFO")
+            return py, is_rocm
+    if os.path.exists(cpu_py):
+        return cpu_py, False
+    if os.path.exists(rocm_py):
+        return rocm_py, True
+    return None, False
 
 
 def start_tts_api():
@@ -488,25 +674,101 @@ def start_tts_api():
     tts_type = get_config("./config.json")["tts_type"]
     if tts_type == "local":
         log("检测到 tts_type = local", "INFO")
-        python_path = os.path.abspath(r".\GPT-SoVITS\runtime\python.exe")
-        script_path = os.path.abspath(r".\GPT-SoVITS\api_v2.py")
+        # 用哪个 Python 环境跑 TTS 交给 pick_tts_env()：
+        #   config.json 写了 gsv_use_rocm → 按写的来
+        #   没写 → 自动探测（有 runtime_rocm 且能用 GPU 就用 A 卡，否则自带 runtime）
+        python_path, _rocm = pick_tts_env()
+        if python_path is None:
+            log("未找到可用的 TTS Python 环境（runtime/runtime_rocm），短语音不可用。", "WARN")
+            return None
+        # 模型版本（CPU 实测，同一句话）：
+        #   v2 基座 → 约 4.5 秒（默认，音质现代、速度可接受）
+        #   v4 基座 → 约 60 秒；v4 微调（桌宠本人权重）→ 约 100 秒
+        # 用 config.json 的 gsv_model_version 切换：v2 / v4 / finetuned
+        try:
+            _mv = str(get_config("./config.json").get("gsv_model_version", "v2")).strip().lower()
+        except Exception:
+            _mv = "v2"
+        _gsv = os.path.abspath(r".\GPT-SoVITS")
+        _pm = os.path.join(_gsv, "GPT_SoVITS", "pretrained_models")
+        _extra = []
+        # A 卡（ROCm）必需的一组参数：MIOpen 求解器缓存 + HIP 分配器展开段 + 关 SDMA，
+        # 不加这些会退化成"比 CPU 还慢"（实测 RTF 3.8 → 0.33，比 CPU 的 1.7 还快）
+        # 目录本身由 prepare_tts_env() 建好并返回 MIOPEN_USER_DB_PATH
+        _rocm_env = {}
+        if _rocm:
+            _rocm_env = {
+                "is_half": "false",
+                "MIOPEN_FIND_MODE": "FAST",
+                "PYTORCH_HIP_ALLOC_CONF": "expandable_segments:True",
+                "HSA_ENABLE_SDMA": "0",
+            }
+        if _mv in ("v4", "finetuned"):
+            _script = os.path.join(_gsv, "api_v2.py")
+            if _mv == "finetuned":
+                _extra = []
+            else:
+                _extra = ["-s", os.path.join(_pm, "gsv-v4-pretrained", "s2Gv4.pth"),
+                          "-g", os.path.join(_pm, "s1v3.ckpt")]
+        else:
+            _script = os.path.join(_gsv, "api.py")
+            _extra = ["-s", os.path.join(_pm, "gsv-v2final-pretrained", "s2G2333k.pth"),
+                      "-g", os.path.join(_pm, "gsv-v2final-pretrained",
+                                         "s1bert25hz-5kh-longer-epoch=12-step=369668.ckpt")]
+        script_path = _script
         work_dir = r".\GPT-SoVITS"
 
         if not os.path.exists(os.path.join(work_dir, script_path)):
-            log("未找到 GPT-SoVITS 整合包（api_v2.py），短文本日语语音不可用。", "WARN")
+            log("未找到 GPT-SoVITS 整合包（api.py / api_v2.py），短文本语音不可用。", "WARN")
             log("提示：将 GPT-SoVITS 整合包放入项目根目录，或 config 中 tts_type 改用 cloud。", "INFO")
             return None
 
-        log(f"使用解释器 {python_path} 启动 TTS 服务（新控制台）...")
+        log("使用解释器 %s 启动 TTS 服务%s..." % (python_path, "" if quiet_mode() else "（新控制台）"))
 
         try:
+            _pop_env = dict(os.environ)
+            _pop_env.update(_rocm_env)
+            if _rocm:                      # 只有 A 卡环境需要（中文路径下的字典问题）
+                _pop_env.update(prepare_tts_env(python_path))
             proc = subprocess.Popen(
-                [python_path, script_path],
+                [python_path, script_path] + _extra,
                 cwd=work_dir,
-                creationflags=(0x00000010 if os.name == "nt" else 0)
+                env=_pop_env,
+                creationflags=_console_flags()
             )
             time.sleep(5)
-            log("TTS 服务已在新控制台启动。")
+            log("TTS 服务已启动%s。" % ("" if quiet_mode() else "（新控制台）"))
+
+            def _warm():
+                """服务就绪后先合成一句短的：模型预热，避免第一句等十来秒（失败无所谓）"""
+                import threading
+
+                def _run():
+                    try:
+                        import requests as _rq
+                    except Exception:
+                        return
+                    ref = os.path.abspath(os.path.join("reference_voices", "long_chinese", "953244.wav"))
+                    for _ in range(60):                 # 最多等 10 分钟（模型加载慢）
+                        try:
+                            if _rq.get("http://127.0.0.1:9880/docs", timeout=3).status_code == 200:
+                                break
+                        except Exception:
+                            pass
+                        time.sleep(10)
+                    for _i in range(2):                # 第一次编译/调优内核，第二次才到全速
+                        try:
+                            _rq.get("http://127.0.0.1:9880/", params={
+                                "refer_wav_path": ref, "prompt_text": "能和老师在一起，我真的，好高兴！",
+                                "prompt_language": "zh", "text": "你好。", "text_language": "zh",
+                                "sample_steps": 16, "if_sr": "false", "speed": 1.0}, timeout=(8, 300))
+                        except Exception:
+                            break
+                    log("TTS 已预热完成（第一句不会再等冷启动）。")
+
+                threading.Thread(target=_run, daemon=True).start()
+
+            _warm()
             return proc
         except Exception as e:
             log(f"启动 TTS 失败: {e}", "ERROR")
@@ -516,10 +778,10 @@ def start_tts_api():
         try:
             proc = subprocess.Popen(
                   ["ssh", "aipet", "-t", "bash -lc 'bash run.sh; bash'"],
-                  creationflags=(0x00000010 if os.name == "nt" else 0)
+                  creationflags=_console_flags()
             )
             time.sleep(5)
-            log("TTS 服务已在新控制台启动。")
+            log("TTS 服务已启动%s。" % ("" if quiet_mode() else "（新控制台）"))
             return proc
         except Exception as e:
             log(f"启动 TTS 失败: {e}", "ERROR")
@@ -544,7 +806,17 @@ def run_main():
 
     log(f"正在运行主程序：{script_path}", "INFO")
     try:
-        subprocess.run([_project_python(), "main.py"],)
+        # 纯净模式下没有终端窗口，主程序的输出会全部丢掉（出问题没法查）→ 追加到同一份日志
+        _kw = {}
+        if quiet_mode():
+            try:
+                _lp = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "pet_run.log")
+                os.makedirs(os.path.dirname(_lp), exist_ok=True)
+                _fo = open(_lp, "a", encoding="utf-8", errors="replace")
+                _kw = {"stdout": _fo, "stderr": subprocess.STDOUT}
+            except Exception:
+                _kw = {}
+        subprocess.run([_project_python(), "main.py"], creationflags=_console_flags(), **_kw)
     except subprocess.CalledProcessError as e:
         log(f"桌宠启动失败: {e}", "ERROR")
 

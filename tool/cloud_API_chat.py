@@ -105,6 +105,15 @@ def cloud_talk(history: list, user_input: str, role: str):
     else:
         messages.append({"role": "system", "content": identity_default})
 
+    # 你现在穿的是什么（桌宠窗口每次重画立绘都会记下来）——主人问起穿着时按这个答
+    try:
+        from tool.portrait_outfit import current_look_note
+        _look = current_look_note()
+        if _look:
+            messages.append({"role": "system", "content": _look})
+    except Exception:
+        pass
+
     # 2. 高权重「最近的观察」（识别触发的内容，仅本轮有高权重）
     if high_observations:
         obs_text = "\n".join(f"- {obs}" for obs in high_observations[-5:])  # 最多注入最近 5 条
@@ -191,7 +200,37 @@ def cloud_portrait(sentence: str, history: list, type: str):
             if m:
                 outfit_id = m.group(1)  # reply 形如 [[基础人物, 表情, ...], ...]，首个数字即基础人物
                 break
-    outfit_hint = f"（保持衣服连贯：上次使用的基础人物 ID 为 {outfit_id}，本次请沿用同款衣服）" if outfit_id else "(本轮无历史，自由选衣服)"
+    _cloth_name = ""
+    try:
+        from tool.portrait_outfit import current_look_note, cloth_name, current_body_id
+        # ★ 用"身上这件"覆盖历史编号：历史可能停在上一件，会把 AI 引到错衣服上
+        try:
+            _live_b = int(current_body_id() or 0)
+            if _live_b:
+                outfit_id = str(_live_b)
+        except Exception:
+            pass
+        if outfit_id:
+            _m2 = _re.search(r"%s\s*[：:]\s*([^；;，,\s]+)" % outfit_id,
+                             str(set_cfg.get("layers_desc", "")))
+            if _m2:
+                _cloth_name = _m2.group(1)
+            if not _cloth_name:
+                _cloth_name = str(cloth_name(int(outfit_id)) or "")
+        _live = current_look_note()
+    except Exception:
+        _live = ""
+    if outfit_id:
+        outfit_hint = ("（保持衣服连贯：你现在穿着「%s」（基础人物 ID %s）。"
+                       "本次请沿用同款衣服，除非主人明确要求换衣服。）"
+                       % (_cloth_name or "未知", outfit_id))
+    else:
+        outfit_hint = "(本轮无历史，自由选衣服)"
+    if _live:
+        outfit_hint = _live.split("。")[0] + "。" + outfit_hint
+    # 表情/装饰要逐句跟着情绪变（用户要求"实时切换"）
+    outfit_hint += ("（表情和装饰要按这一句的情绪换新：同一段对话里别反复用同一张脸，"
+                    "该害羞加脸红、该难过带泪、该撒娇带兽耳。衣服保持上面那件不变。）")
 
     identity = f"{identity}\n{outfit_hint}"
     identity = f"{identity}\n{build_time_context()}"
@@ -272,7 +311,19 @@ def cloud_vl(image_path: str):
     vcfg = get_vision_model_config()
     if not vcfg:
         return "（未配置视觉模型 API Key）"
-    identity = "你是一个AI桌宠的助手，你应该可以在屏幕上看到这个桌宠角色，是一个绿色头发的动漫人物。你需要简要描述用户正在做的事与使用的软件。我会将你的描述以system消息提供给另外一个处理语言的AI模型。只输出描述内容，且不要描述桌宠。"
+    # ⚠ 桌宠自己就画在屏幕上：必须说清"那个桌宠窗口就是说话人本人"，
+    #   否则视觉模型会把它当成"屏幕里的另一个动漫角色"，对话模型就以为还有别人。
+    _pn = ""
+    try:
+        from pets.pet_registry import get_pet_config
+        _pn = str((get_pet_config().get("name") or "")).strip()
+    except Exception:
+        _pn = ""
+    identity = ("你是一个AI桌宠的助手。屏幕上有一个桌宠窗口，里面是%s本人（也就是正在跟你说话的这个桌宠，"
+                "她的人像/立绘就画在那个窗口里）—— 那是「说话人自己」，不是你之外的第三者。"
+                "你可以看到这个桌宠角色。你需要简要描述用户正在做的事与使用的软件。"
+                "我会将你的描述以system消息提供给另外一个处理语言的AI模型。"
+                "只输出描述内容，且不要描述桌宠。" % (_pn or "桌宠"))
     with open(image_path, "rb") as f:
         img_b64 = base64.b64encode(f.read()).decode()
 

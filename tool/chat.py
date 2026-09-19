@@ -2,6 +2,7 @@ import base64
 import json
 import hashlib
 import os
+import re
 from datetime import datetime
 
 import requests
@@ -9,6 +10,11 @@ import requests
 from tool.config import get_config
 from tool.time_utils import build_time_context
 from pets.pet_registry import get_short_emotion_dirs, get_short_voices_dir, get_short_emotions
+
+# 合成逻辑/参数一变就把它加一：旧缓存自动作废。
+# （曾经踩过：改了发音语言但缓存键没带语言 → 旧的中文-按日文念的音频继续被复用，
+#   听着就像"改了没效果/还在用别的语音包"。）
+CACHE_VER = "4"
 
 
 def now_time():
@@ -18,7 +24,8 @@ def now_time():
 ollama_url = get_config("./config.json")["local_api"]["ollama"]
 qwen3_lora_url = get_config("./config.json")["local_api"]["qwen3_lora"]
 gpt_sovits_tts_url = get_config("./config.json")["local_api"]["gpt_sovits_tts"]
-_TTS_HINT_SHOWN = False   # 语音服务未就绪的提示只打一次（防刷屏）
+_TTS_HINT_SHOWN = False
+_GSV_MODEL_OK = False   # 语音服务未就绪的提示只打一次（防刷屏）
 tts_type = get_config("./config.json")["tts_type"]
 
 
@@ -101,6 +108,15 @@ def qwen3_lora(history, user_input, role):
         messages.append(identity_msg)
     else:
         messages.append({"role": "system", "content": identity})
+
+    # 你现在穿的是什么（桌宠窗口每次重画立绘都会记下来）——主人问起穿着时按这个答
+    try:
+        from tool.portrait_outfit import current_look_note
+        _look = current_look_note()
+        if _look:
+            messages.append({"role": "system", "content": _look})
+    except Exception:
+        pass
 
     # 2. 高权重「最近的观察」（识别触发的内容，仅本轮有高权重）
     if high_observations:
@@ -191,7 +207,40 @@ def ollama_qwen3_portrait(sentence: str, history: list, type):
             if m:
                 outfit_id = m.group(1)  # reply 首个数字即基础人物 ID
                 break
-    outfit_hint = f"（保持衣服连贯：上次使用的基础人物 ID 为 {outfit_id}，本次请沿用同款衣服）" if outfit_id else "（无历史，自由选衣服）"
+    # 让 AI 知道自己穿的是什么：说名字，而不是只给一个编号。
+    # 名字优先从「它自己看到的图层清单」里取（避免两套叫法打架），取不到再用衣服表。
+    _cloth_name = ""
+    try:
+        from tool.portrait_outfit import current_look_note, cloth_name, current_body_id
+        # ★ 用"身上这件"覆盖历史编号：历史可能停在上一件，会把 AI 引到错衣服上
+        try:
+            _live_b = int(current_body_id() or 0)
+            if _live_b:
+                outfit_id = str(_live_b)
+        except Exception:
+            pass
+        if outfit_id:
+            # 权威表优先（表里的名字才是画面上那件），清单名字只作兜底
+            _cloth_name = str(cloth_name(int(outfit_id)) or "")
+            if not _cloth_name:
+                _m2 = _re.search(r"%s\s*[：:]\s*([^；;，,\s]+)" % outfit_id,
+                                 str(set_cfg.get("layers_desc", "")))
+                if _m2:
+                    _cloth_name = _m2.group(1)
+        _live = current_look_note()          # 桌宠窗口当前真实打扮（每次重画都记）
+    except Exception:
+        _live = ""
+    if outfit_id:
+        outfit_hint = ("（保持衣服连贯：你现在穿着「%s」（基础人物 ID %s）。"
+                       "本次请沿用同款衣服，除非主人明确要求换衣服。）"
+                       % (_cloth_name or "未知", outfit_id))
+    else:
+        outfit_hint = "（无历史，自由选衣服）"
+    if _live:
+        outfit_hint = _live.split("。")[0] + "。" + outfit_hint
+    # 表情/装饰要逐句跟着情绪变（用户要求"实时切换"）
+    outfit_hint += ("（表情和装饰要按这一句的情绪换新：同一段对话里别反复用同一张脸，"
+                    "该害羞加脸红、该难过带泪、该撒娇带兽耳。衣服保持上面那件不变。）")
 
     sysprompt = f"{sysprompt}\n{outfit_hint}\n{build_time_context()}"
     prompt = {"model": "qwen3:14b",
@@ -261,7 +310,25 @@ def ollama_qwen3_emotion(history: list):
     return reply
 
 def ollama_qwen25vl(image_path: str):
-    identity = "你现在要担任一个AI桌宠的视觉识别助手，我会向你提供用户此时的屏幕截图和历史记录，你要详细描述屏幕内容与使用的软件，描述页面主题。我会将你的描述以system消息提供给另外一个处理语言的AI模型。   "
+    # ⚠ 必须说明"屏幕上那个桌宠窗口就是你自己"：
+    #   否则视觉模型会把桌面上的立绘描述成"一个动漫角色/另一个人"，
+    #   对话模型读到后就会以为屏幕里还有别人（用户反馈"把屏幕上的自己识别成别人"）。
+    _self = ""
+    try:
+        import json as _j
+        with open("./config.json", encoding="utf-8") as _f:
+            _c = _j.load(_f)
+        from pets.pet_registry import get_pet_config
+        _nm = str((get_pet_config().get("name") or _c.get("pet_name") or "")).strip()
+        _self = ("【重要】屏幕上那个桌宠窗口（也就是你自己，%s）的人就是「你」，"
+                 "她是说话人本身，不是你以外的角色；不要把她描述成陌生人、其他动漫角色或别人。"
+                 % (_nm or "AI 桌宠"))
+    except Exception:
+        _self = ("【重要】屏幕上那个桌宠窗口里的人是「你自己」，"
+                 "不要把她描述成陌生人、其他动漫角色或别人。")
+    identity = ("你现在要担任一个AI桌宠的视觉识别助手，我会向你提供用户此时的屏幕截图和历史记录，"
+                "你要详细描述屏幕内容与使用的软件，描述页面主题。我会将你的描述以system消息提供给"
+                "另外一个处理语言的AI模型。" + _self)
     with open(image_path, "rb") as f:
         img_b64 = base64.b64encode(f.read()).decode()
 
@@ -293,17 +360,18 @@ def _gpt_sovits_service_ready(timeout: float = 1.0) -> bool:
                 s.settimeout(timeout)
                 return s.connect_ex((host, port)) == 0
 
-        u = urlparse(gpt_sovits_tts_url)
-        if not _port_open(u.hostname or "127.0.0.1", u.port or 9880):
-            return False
-        # local 模式：本体端口也要通（cloud 模式在本机没有 9880，跳过该检查）
+        # local 模式：只要本机 GPT-SoVITS（9880）在就行 —— 我们直连它，不依赖那个本地代理。
+        # （以前要求"代理 + 本体都通"，代理没开就被判定未就绪 → 每句语音都被跳过，只出字不出声）
         try:
             from tool.config import get_config as _gc
-            if str(_gc("./config.json").get("tts_type") or "local").lower() == "local":
-                return _port_open("127.0.0.1", 9880)
+            _t = str(_gc("./config.json").get("tts_type") or "local").lower()
         except Exception:
-            pass
-        return True
+            _t = "local"
+        if _t == "local":
+            return _port_open("127.0.0.1", 9880)
+        # cloud / 代理模式：代理端口通即可
+        u = urlparse(gpt_sovits_tts_url)
+        return _port_open(u.hostname or "127.0.0.1", u.port or 9880)
     except Exception:
         return False
 
@@ -328,6 +396,121 @@ def _prepare_ref_audio(src_path: str) -> str:
         print(f"[gpt-sovits-tts] ⚠ 参考音频 {os.path.basename(src_path)} 时长 {dur:.2f}s 不在 3~10 秒内，跳过语音合成")
         return None
     return os.path.abspath(src_path)
+
+
+def _gsv_ensure_pet_model() -> None:
+    """确认本机 GPT-SoVITS 加载的是本桌宠的微调权重（否则音色不是她本人）
+
+    launcher 启动的 api_v2 默认就会加载（tts_infer.yaml 的 custom 段），
+    但万一被别的实例/别的模型占着 9880，这里补一次 /set_model。
+    """
+    global _GSV_MODEL_OK
+    if _GSV_MODEL_OK:
+        return
+    _GSV_MODEL_OK = True
+    # 默认什么都不做：launcher 启动的 api_v2 本来就会加载桌宠微调权重；
+    # 而 /set_model 一旦被调用会重新加载模型（实测一次 100 秒左右），得不偿失。
+    # 需要强制指定时才设环境变量 GSV_FORCE_SET_MODEL=1。
+    if os.environ.get("GSV_FORCE_SET_MODEL", "").strip() not in ("1", "true", "yes"):
+        return
+    try:
+        from pets.pet_registry import get_pet_config
+        v = (get_pet_config().get("voices") or {})
+        gpt_rel = str(v.get("gpt_weights") or "").strip()
+        sovits_rel = str(v.get("sovits_weights") or "").strip()
+        if not (gpt_rel and sovits_rel):
+            gpt_rel = "GPT_weights/murasame-gpt.ckpt"
+            sovits_rel = "SoVITS_weights/murasame-sovits.pth"
+        base = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "GPT-SoVITS")
+        gpt = os.path.abspath(os.path.join(base, gpt_rel))
+        sovits = os.path.abspath(os.path.join(base, sovits_rel))
+        if not (os.path.isfile(gpt) and os.path.isfile(sovits)):
+            return
+        r = requests.get("http://127.0.0.1:9880/set_model", timeout=6)
+        cur = r.text if r.status_code == 200 else ""
+        if "murasame" in cur:
+            print(f"[{now_time()}] [gpt-sovits-tts] ℹ 已确认加载桌宠微调权重：{os.path.basename(cur[:120])}")
+            return
+        r2 = requests.get("http://127.0.0.1:9880/set_model",
+                          params={"gpt_path": gpt, "sovits_path": sovits}, timeout=180)
+        print(f"[{now_time()}] [gpt-sovits-tts] ℹ 指定桌宠微调权重 → HTTP {r2.status_code}")
+    except Exception as e:
+        print(f"[{now_time()}] [gpt-sovits-tts] ℹ 权重确认跳过：{str(e)[:80]}")
+
+
+def _gsv_local_direct(text: str, ref_audio: str, prompt_text: str, speed: float, out_path: str) -> bool:
+    """直接调用本机 GPT-SoVITS（127.0.0.1:9880），用**旧版参数名**。
+
+    为什么要走这条：配置文件里的 gpt_sovits_tts 是"本地代理"地址，
+    而代理不在（或与新版 api.py 参数对不上）时会返回非音频 → 表现为"只出字不出声"。
+    本机 api.py 认的是 refer_wav_path / prompt_text / prompt_language / text / text_language。
+    """
+    import re as _re
+    try:
+        steps = int(get_config("./config.json").get("gsv_sample_steps", 16))
+    except Exception:
+        steps = 16
+
+    def _lang_of(t) -> str:
+        """按文本自身判断语言：带假名 → 日语；其余（中文/英文/数字）按中文前端走"""
+        return "ja" if _re.search(r"[\u3040-\u30ff]", str(t or "")) else "zh"
+    # ⚠ 两个语言必须分开判断：参考音频是日语 ≠ 要念的句子是日语。
+    #   之前两者共用"参考音频的语言" → 中文台词被当日文念（"今天下午" → コンテン…），
+    #   音色虽然还是她，但发音全错，听着就像"换了个人/用错语音包"。
+    #   跨语言合成本来就是 GPT-SoVITS 的正常用法：prompt_lang=ja（定音色）+ text_lang=zh（定内容）。
+    prompt_lang = _lang_of(prompt_text)
+    text_lang = _lang_of(text)
+    params = {
+        "refer_wav_path": ref_audio,
+        "prompt_text": prompt_text or ("こんにちは。" if prompt_lang == "ja" else "你好。"),
+        "prompt_language": prompt_lang,
+        "text": text,
+        "text_language": text_lang,
+        "top_k": 15, "top_p": 1, "temperature": 1,
+        "speed": speed,
+        "sample_steps": steps,
+        "if_sr": "false",
+    }
+    import time as _t
+    t0 = _t.time()
+    _gsv_ensure_pet_model()                  # 确保是她的微调权重
+    data = None
+    # ① api_v2：POST /tts（新参数名）—— launcher 启的就是这个
+    try:
+        p2 = {"text": text, "text_lang": text_lang, "ref_audio_path": ref_audio,
+              "prompt_text": params["prompt_text"], "prompt_lang": prompt_lang,
+              "top_k": 15, "top_p": 1, "temperature": 1, "text_split_method": "cut0",
+              "batch_size": 1, "speed_factor": speed, "streaming_mode": False,
+              "parallel_infer": True, "repetition_penalty": 1.35,
+              "sample_steps": steps, "super_sampling": False, "media_type": "wav"}
+        r = requests.post("http://127.0.0.1:9880/tts", json=p2, timeout=(8, 300))
+        if r.status_code == 200 and r.content[:4] == b"RIFF":
+            data = r.content
+        else:
+            print(f"[{now_time()}] [gpt-sovits-tts] ℹ /tts 返回 HTTP {r.status_code}")
+    except Exception as e:
+        print(f"[{now_time()}] [gpt-sovits-tts] ℹ /tts 失败（{str(e)[:50]}）")
+    # ② api.py：GET /（旧参数名）
+    if data is None:
+        try:
+            r = requests.get("http://127.0.0.1:9880/", params=params, timeout=(8, 300))
+            if r.status_code == 200 and r.content[:4] == b"RIFF":
+                data = r.content
+            else:
+                print(f"[{now_time()}] [gpt-sovits-tts] ℹ 旧接口返回 HTTP {r.status_code}")
+        except Exception as e:
+            print(f"[{now_time()}] [gpt-sovits-tts] ℹ 旧接口失败（{str(e)[:50]}）")
+    if data:
+        try:
+            from tool.audio_polish import polish_wav_bytes
+            data = polish_wav_bytes(data)              # 统一响度 + 偏闷时提亮
+        except Exception:
+            pass
+        with open(out_path, "wb") as f:
+            f.write(data)
+        print(f"[{now_time()}] [gpt-sovits-tts] ✅ 本机 GPT-SoVITS 合成成功（{_t.time() - t0:.1f}s）")
+        return True
+    return False
 
 
 def gpt_sovits_tts(sentence: str, emotion: str, aux_ref_audio_paths: list = []):
@@ -374,6 +557,21 @@ def gpt_sovits_tts(sentence: str, emotion: str, aux_ref_audio_paths: list = []):
             emotion = emotion_dirs[0]
         print(f"[gpt-sovits-tts] ℹ️ 情绪标签不可用 → 按人设使用「{emotion}」参考音频")
 
+    # 情绪是否换"参考录音"：默认换（更有情绪）；想彻底统一音色就把 gsv_emotion_refs 设为 false，
+    # 这样永远用同一个参考，只靠语速体现情绪。
+    try:
+        _use_emo_ref = str(get_config("./config.json").get("gsv_emotion_refs", True)).lower() not in ("false", "0", "no")
+    except Exception:
+        _use_emo_ref = True
+    if not _use_emo_ref:
+        _dflt = str((pet_cfg.get("voices", {}) or {}).get("default_emotion") or "").strip()
+        if _dflt and _dflt in emotion_dirs:
+            emotion = _dflt
+        elif "平静" in emotion_dirs:
+            emotion = "平静"
+        elif emotion_dirs:
+            emotion = emotion_dirs[0]
+
     emotion_path = os.path.join(voices_dir, emotion)
     if not os.path.isdir(emotion_path):
         print(f"[{now_time()}] [gpt-sovits-tts] ⚠ 情感目录不存在: {emotion_path}，跳过语音合成")
@@ -397,6 +595,7 @@ def gpt_sovits_tts(sentence: str, emotion: str, aux_ref_audio_paths: list = []):
         path = f"/root/reference_voices/{emotion}/{audio[0]}"
     with open(os.path.join(emotion_path, "asr.txt"), "r", encoding="utf-8") as f:
         ref = f.read().strip()
+
     # 语速按情绪微调（活泼人设：高兴/着急说得快一点更有元气；害羞稍慢）
     # 角色包 pet.json 的 voices.emotion_speed 可覆盖默认值
     _SPEED_DEFAULT = {"高兴": 1.08, "着急": 1.10, "惊讶": 1.06,
@@ -410,11 +609,11 @@ def gpt_sovits_tts(sentence: str, emotion: str, aux_ref_audio_paths: list = []):
     _speed = float(_speed_map.get(emotion, 1.0))
     params = {
         "text": sentence,
-        "text_lang": "ja",
+        "text_lang": "ja" if re.search(r"[\u3040-\u30ff]", str(sentence or "")) else "zh",
         "ref_audio_path": path,
         "aux_ref_audio_paths": aux_ref_audio_paths,
         "prompt_text": ref,
-        "prompt_lang": "ja",
+        "prompt_lang": "ja" if re.search(r"[\u3040-\u30ff]", str(ref or "")) else "zh",
         "top_k": 15,
         "top_p": 1,
         "temperature": 1,
@@ -430,6 +629,65 @@ def gpt_sovits_tts(sentence: str, emotion: str, aux_ref_audio_paths: list = []):
         "sample_steps": 32,
         "super_sampling": False
     }
+
+    # 本地模式：优先直连本机 GPT-SoVITS（旧版参数名）—— 代理不在时这是唯一能出声的路径
+    if tts_type == "local":
+        import hashlib as _hl
+        # 缓存指纹里带上"参考音频的指纹 + 当前模型名"：换了音色/模型，旧缓存自动作废
+        _fp = ""
+        try:
+            _st = os.stat(path)
+            _fp = "%d_%d" % (int(_st.st_mtime), int(_st.st_size))
+        except Exception:
+            pass
+        _model = ""
+        try:
+            # 只读本地权重文件的指纹（绝不调 /set_model —— 那会重新加载模型，一次上百秒）
+            from pets.pet_registry import get_pet_config
+            _v = (get_pet_config().get("voices") or {})
+            _gsv = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "GPT-SoVITS")
+            for _rel in (str(_v.get("gpt_weights") or "GPT_weights/murasame-gpt.ckpt"),
+                         str(_v.get("sovits_weights") or "SoVITS_weights/murasame-sovits.pth")):
+                _fp2 = os.path.abspath(os.path.join(_gsv, _rel))
+                if os.path.isfile(_fp2):
+                    _st2 = os.stat(_fp2)
+                    _model += "%s@%d_%d;" % (os.path.basename(_fp2), int(_st2.st_mtime), int(_st2.st_size))
+        except Exception:
+            pass
+        # 缓存键必须包含"一切影响音频的参数"：参考音频、情绪、语速、模型……
+        # 以及**合成语言**和 CACHE_VER。少了语言这一项时，改语言参数后旧音频仍被复用，
+        # 表现为"明明修好了，听着还是老样子"（中文台词照旧是日文念的）。
+        _lang_key = "ja" if re.search(r"[\u3040-\u30ff]", str(sentence or "")) else "zh"
+        _key = _hl.md5(("%s|%s|%s|%.2f|%s|%s|%s|%s"
+                        % (sentence, path, emotion, _speed, _fp, _model,
+                           _lang_key, CACHE_VER)).encode("utf-8")).hexdigest()
+        os.makedirs("./tmp", exist_ok=True)
+        _cache = os.path.join("./tmp", "tts_cache", _key + ".wav")
+        _out = os.path.join("./tmp", _key + ".wav")
+        try:
+            if os.path.isfile(_cache) and os.path.getsize(_cache) > 1000:
+                import shutil as _sh
+                _sh.copy2(_cache, _out)          # 同一句重复说 → 直接复用，0 延迟
+                print(f"[{now_time()}] [gpt-sovits-tts] ⚡ 命中缓存（{emotion}）")
+                return _key
+        except Exception:
+            pass
+        if _gsv_local_direct(sentence, path, ref, _speed, _out):
+            try:
+                import shutil as _sh
+                os.makedirs(os.path.dirname(_cache), exist_ok=True)
+                _sh.copy2(_out, _cache)
+                _cd = os.path.dirname(_cache)
+                for _f in os.listdir(_cd):       # 缓存别无限涨：3 天前的删掉
+                    _fp = os.path.join(_cd, _f)
+                    try:
+                        if os.path.getmtime(_fp) < time.time() - 86400 * 3:
+                            os.remove(_fp)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            return _key
 
     try:
         # 显式超时：TTS 合成可能较慢（音频生成），但绝不能无限挂起阻塞线程

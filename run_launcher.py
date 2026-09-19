@@ -6,6 +6,18 @@ PCL 风格 AIpet 启动器入口
 import os
 import sys
 
+# 日志/重定向时 stdout 可能是 GBK，打印 ⚠ 之类的字符会抛 UnicodeEncodeError 把程序带崩
+try:
+    for _s in (sys.stdout, sys.stderr):
+        try:
+            _s.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+    os.environ.setdefault("PYTHONIOENCODING", "utf-8")   # 子进程也安全
+    os.environ.setdefault("PYTHONUTF8", "1")
+except Exception:
+    pass
+
 # 添加父目录到 sys.path，确保能导入 pcl_launcher
 base_dir = os.path.dirname(os.path.abspath(__file__))
 if base_dir not in sys.path:

@@ -456,6 +456,7 @@ class PCLSettingsPanel(QWidget):
         outer.setSpacing(0)
 
         self._widgets = {}
+        self._slider_labels = {}
         self._config_path = None
 
         # 可滚动内容区（样式与原 QScrollArea 一致：透明、无边框）
@@ -517,7 +518,7 @@ class PCLSettingsPanel(QWidget):
         self._section("对话模型与推理", "🤖")
         self._add_slider("model_type", "对话模型", ["local", "deepseek", "qwen"], "qwen")
         self._add_model_combo(
-            "short_model_name", "短文本模型名",
+            "short_model_name", "短回复模型名",
             ["qwen-plus", "qwen3.7-plus", "qwen3.7-flash", "qwen3.6-flash", "qwen3.5-flash",
              "deepseek-v4-flash", "deepseek-v4-pro", "deepseek-chat"],
             "qwen-plus",
@@ -527,11 +528,13 @@ class PCLSettingsPanel(QWidget):
         self._add_slider("force_gpu_check", "强制 GPU 检查", ["false", "true"], "false")
 
         # ===== ③ 长文本输出 =====
-        self._section("长文本输出", "📝")
-        self._add_slider("longtext_enabled", "长文本输出模式", ["false", "true"], "true")
-        self._add_slider("longtext_model", "长文本对话模型", ["qwen", "deepseek"], "deepseek")
+        self._section("汉语模式（长回复 + 汉语语音）", "📝")
+        self._add_slider("longtext_enabled", "语言模式", ["false", "true"], "true",
+                         labels=["日语模式（短回复）", "汉语模式（长回复）"],
+                         hint="日语的短语音包 / 汉语的长语音包，随这个开关一起切。")
+        self._add_slider("longtext_model", "长回复对话模型", ["qwen", "deepseek"], "deepseek")
         self._add_model_combo(
-            "longtext_model_name", "长文本模型名",
+            "longtext_model_name", "长回复模型名",
             ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-chat",
              "qwen-plus", "qwen3.7-plus", "qwen3.7-flash", "qwen3.6-flash"],
             "deepseek-v4-flash",
@@ -650,8 +653,13 @@ class PCLSettingsPanel(QWidget):
         # Live2D 显示调参面板（PCL → 桌宠 API 实时应用/保存）
         self._cur_layout.addWidget(PCLLive2DTunePanel())
 
-        # ===== 「其他」分类：更新日志（查看 / 导出 / 打开目录）=====
+        # ===== 「其他」分类：启动与运行 / 更新日志（查看 / 导出 / 打开目录）=====
         self._open_box(("all", "other"))
+        self._section("启动与运行", "🧹")
+        self._add_slider("quiet_mode", "纯净模式", ["false", "true"], "false",
+                         labels=["关（显示终端日志）", "开（不弹终端窗口）"],
+                         hint="开启后：启动桌宠 / 语音服务时不再弹出黑色终端窗口，界面干净。\n"
+                              "排查问题时临时关掉即可看到详细日志。")
         log_label = QLabel("  📜 更新日志")
         log_label.setFont(QFont("Microsoft YaHei", int(13 * S), QFont.Bold))
         log_label.setStyleSheet(f"color: {Color1.name()}; margin-top: {int(16*S)}px;")
@@ -815,9 +823,12 @@ class PCLSettingsPanel(QWidget):
         obj.setFocusPolicy(Qt.StrongFocus)
         obj.wheelEvent = lambda e: e.ignore()
 
-    def _add_slider(self, key, label, options, default, hint=None):
+    def _add_slider(self, key, label, options, default, hint=None, labels=None):
+        # labels: 界面显示用的中文标签（例如值 "ja"/"zh" 显示成「日语语音」/「汉语语音」）。
+        # 存进配置的仍是 options 里的原始值，保持向后兼容。
+        disp = list(labels) if labels else list(options)
         row = QHBoxLayout()
-        lbl = QLabel(f"{label}：{default}")
+        lbl = QLabel(f"{label}：{disp[options.index(default) if default in options else 0]}")
         lbl.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(14*S)}px; min-width: 120px;")
         row.addWidget(lbl)
         slider = QSlider(Qt.Horizontal)
@@ -833,11 +844,15 @@ class PCLSettingsPanel(QWidget):
         if hint:
             slider.setToolTip(hint)
             lbl.setToolTip(hint)
-        slider.valueChanged.connect(lambda v: lbl.setText(f"{label}：{options[v]}"))
+        slider.valueChanged.connect(lambda v: lbl.setText(f"{label}：{disp[v]}"))
         row.addWidget(slider)
         row.addStretch()
         self._cur_layout.addLayout(row)
         self._widgets[key] = (slider, options, lbl)
+        try:
+            self._slider_labels[key] = disp
+        except Exception:
+            pass
 
     def _add_spin(self, key, label, min_val, max_val, default, hint=None):
         row = QHBoxLayout()
@@ -907,6 +922,7 @@ class PCLSettingsPanel(QWidget):
             self._set_slider("model_type", cfg.get("model_type", "qwen"))
             self._set_if("short_model_name", cfg.get("short_model_name", "qwen-plus"))
             self._set_slider("tts_type", cfg.get("tts_type", "local"))
+            self._set_slider("quiet_mode", cfg.get("quiet_mode", "false"))
             self._set_slider("voice_synthesis_enable", cfg.get("voice_synthesis_enable", "true"))
             self._set_slider("portrait_auto_switch", cfg.get("portrait_auto_switch", "true"))
             self._set_slider("portrait", cfg.get("portrait", "b"))
@@ -961,7 +977,8 @@ class PCLSettingsPanel(QWidget):
             slider, options, lbl = entry
             idx = options.index(val) if val in options else 0
             slider.setValue(idx)
-            lbl.setText(lbl.text().split("：")[0] + f"：{options[idx]}")
+            disp = getattr(self, "_slider_labels", {}).get(key) or options
+            lbl.setText(lbl.text().split("：")[0] + f"：{disp[idx]}")
 
     def _save_config(self):
         try:
@@ -977,6 +994,7 @@ class PCLSettingsPanel(QWidget):
             cfg["model_type"] = self._get_slider("model_type")
             cfg["short_model_name"] = self._get_combo("short_model_name")
             cfg["tts_type"] = self._get_slider("tts_type")
+            cfg["quiet_mode"] = self._get_slider("quiet_mode")
             cfg["portrait"] = self._get_slider("portrait")
             cfg["screen_type"] = self._get_slider("screen_type")
             cfg["voice_trigger"] = self._get_slider("voice_trigger")
@@ -2004,9 +2022,9 @@ class PCLPetManager(QScrollArea):
         if caps.get("has_live2d"):
             badges.append(("Live2D", "#d4a020"))
         if caps.get("short_tts"):
-            badges.append(("短语音", "#30a030"))
+            badges.append(("日语语音", "#30a030"))
         if caps.get("long_tts"):
-            badges.append(("长语音", "#30a030"))
+            badges.append(("汉语语音", "#30a030"))
         if caps.get("has_fgimages") is False and not caps.get("has_live2d"):
             badges.append(("纯文本", "#808080"))
         if badges:

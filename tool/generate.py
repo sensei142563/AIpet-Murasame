@@ -56,7 +56,41 @@ def _category_of(layer_id, set_name: str, pet_id: str) -> str:
     except Exception:
         return "base"
     s = str(set_name or "a")
-    # 表情：新角色用 portrait.emotions，老角色用内置情绪表
+    # 新角色（pet.json 有 portrait.sets）：服装/发型/装饰/表情都用它自己的表判类
+    try:
+        _pt = (get_pet_config(pet_id).get("portrait") or {})
+        _sets = _pt.get("sets")
+        _blk = (_sets.get(s) or {}) if isinstance(_sets, dict) else {
+            k: _pt.get(k) or {} for k in ("clothes", "emotions", "decors", "actions")}
+        _emo_ids = {int(v) for v in (_blk.get("emotions") or {}).values()
+                    if str(v).strip().isdigit()}
+        _body_ids, _hair_ids = set(), set()
+        for _n, _c in (_blk.get("clothes") or {}).items():
+            _body_ids.add(int((_c or {}).get("cloth") or 0))
+            _hair_ids.add(int((_c or {}).get("hair") or 0))
+        _dec_ids = {int(v) for v in (_blk.get("decors") or {}).values()
+                    if str(v).strip().isdigit()}
+        if lid in _emo_ids:
+            return "expr"
+        if lid in _body_ids:
+            return "cloth"
+        if lid in _hair_ids:
+            return "hair"
+        if lid in _dec_ids:
+            return "decor"
+        for _v in (_blk.get("actions") or {}).values():
+            if isinstance(_v, dict) and int(_v.get("layer") or 0) == lid:
+                return "cloth"
+    except Exception:
+        pass
+    try:      # 老角色（丛雨）：手臂姿势动作也是身体层
+        from tool.portrait_outfit import ACTIONS_BY_SET
+        for _k, _v in (ACTIONS_BY_SET.get(s) or {}).items():
+            if lid == int(_v[0]):
+                return "cloth"
+    except Exception:
+        pass
+    # 老角色：内置情绪表 / 内置服装表
     try:
         from pets.pet_registry import get_portrait_emotions
         if lid in set(get_portrait_emotions(pet_id).values()):
@@ -157,6 +191,37 @@ def generate_fgimage(target, embeddings_layers, pet_id: str = None):
             valid_layers.append(name)
         else:
             print(f"[generate] ⚠ 跳过缺失图层: {target}_{name}.png（AI 跨服装/越界返回了不存在的 ID）")
+    # ===== 动作（手臂姿势）与基础人物的一致性 =====
+    # AI 可能选出「A 衣服 + B 衣服的手臂姿势」→ 手臂和身体不是同一件衣服，看着会错位。
+    # 这里以动作为准：去掉不匹配的其它身体层。
+    # ⚠ 换臂姿势层本身就是**整张身体**（实测覆盖基础身体 96~98% 的像素）：
+    #   以前"再把基础服装层补回来"→ 两张身体叠着画 → 手臂重叠、动作打架。
+    #   现在只留换臂层（它自带身体+衣服）。
+    try:
+        from tool.portrait_outfit import actions_of
+        _acts = {int(a): int(b) for _n, a, b in actions_of(target[-1:] or "a", pet_id=pet_id)}
+        for name in list(valid_layers):
+            base = _acts.get(int(name))
+            if not base:
+                continue
+            # 去掉身体层（保留表情/头发/装饰）
+            for other in list(valid_layers):
+                if other == name:
+                    continue
+                try:
+                    oi = int(other)
+                except Exception:
+                    continue
+                if _category_of(oi, target[-1:] or "a", pet_id) == "cloth" and oi != base:
+                    valid_layers.remove(other)
+                    print(f"[generate] 🔄 动作 {name} → 移除不匹配的身体层 {other}")
+            if str(base) in [str(x) for x in valid_layers]:
+                valid_layers.remove(base)
+                print(f"[generate] 🔄 动作 {name} 自带身体 → 移除基础服装层 {base}（避免手臂重叠）")
+            break
+    except Exception as _e:
+        print(f"[generate] ⚠ 动作一致性处理跳过: {_e}")
+
     # ===== 兜底（一）：所有图层都缺 → 单图模式退回角色默认表情整图 =====
     # ⚠ 必须放在「所有图层均缺失就返回空画布」之前：single 模式（每个表情一张整图）
     #   的角色，AI 很容易返回别的角色（丛雨）的图层 ID → 全缺 → 桌宠就变成空白/1x1 窗。
@@ -188,13 +253,25 @@ def generate_fgimage(target, embeddings_layers, pet_id: str = None):
             _has_expr = any(_category_of(l, str(target)[-1:] or "a", pet_id) == "expr"
                             for l in valid_layers)
             if not _has_expr:
-                _emo_ids = set()
+                # 优先用【这个角色自己的】默认表情；老角色才退回丛雨的情绪表
+                # （以前一律用 EMOTION_MAP → 新角色补出来的 1292 在它包里不存在 → 脸就没了）
+                _dflt = None
                 try:
-                    from qq.qq_portrait import EMOTION_MAP
-                    _emo_ids = {v[0] for v in EMOTION_MAP.values() if v}
+                    from pets.pet_registry import get_pet_config as _gpc
+                    _pt = (_gpc(pet_id).get("portrait") or {})
+                    _blk = ((_pt.get("sets") or {}).get(str(target)[-1:]) or {}) if isinstance(_pt.get("sets"), dict) else _pt
+                    _emos = {str(k): v for k, v in (_blk.get("emotions") or {}).items()}
+                    _d = str(_pt.get("default_emotion") or "")
+                    _dflt = int(_emos.get(_d) or (_emos and list(_emos.values())[0]) or 0) or None
                 except Exception:
-                    pass
-                _dflt = EMOTION_MAP.get("平静", (1292, None))[0] if _emo_ids else None
+                    _dflt = None
+                if not _dflt:
+                    try:
+                        from qq.qq_portrait import EMOTION_MAP
+                        _emo_ids = {v[0] for v in EMOTION_MAP.values() if v}
+                        _dflt = EMOTION_MAP.get("平静", (1292, None))[0] if _emo_ids else None
+                    except Exception:
+                        _dflt = None
                 if _dflt and os.path.exists(os.path.join(fg_dir, f"{target}_{_dflt}.png")):
                     print(f"[generate] ℹ 图层里没有表情 → 补默认表情 {_dflt}")
                     valid_layers.append(_dflt)
@@ -231,15 +308,21 @@ def generate_fgimage(target, embeddings_layers, pet_id: str = None):
                 continue
         return out
 
-    # 基准图层（用于求画布原点偏移）：
-    # - 丛雨索引里是固定的行区间（57:65 / 47:51）
-    # - 其它角色包（新建的「每个表情一张图」）索引没有那么长 → 用索引里全部行兜底，
-    #   否则 min() 空序列会直接 ValueError（新建角色启动不显示的第二个原因）
-    all_base = _pos_rows(infos[57:65] if target == "ムラサメa" else infos[47:51])
-    if not all_base:
-        all_base = _pos_rows(infos)
-    base_x = min(p[0] for p in all_base) if all_base else 0
-    base_y = min(p[1] for p in all_base) if all_base else 0
+    # 画布原点偏移：一律用「这些图层的左上角」当锚点。
+    # ⚠ 原来这里写死了丛雨索引的行号（57:65 / 47:51）→ 别的角色（如茉子）索引行数、
+    #   排列都不同，取到的是无关图层的坐标，整个画面被平移 → 人物左上角（头/肩）
+    #   被裁到画布外，表现就是「立绘显示不全」。改成按所选图层求锚点后，
+    #   任何角色都不会被裁，也不需要按角色维护行号。
+    all_base = _pos_rows(infos[57:65] if target == "ムラサメa" else [])
+    if all_base:
+        _bx = [min(p[0] for p in all_base)]
+        _by = [min(p[1] for p in all_base)]
+        # 丛雨索引里基准行给出的原点是"人物站立位置"，与所选图层取较小者，保证不裁
+        base_x = min([_bx[0]] + [p[0] for p in all_positions])
+        base_y = min([_by[0]] + [p[1] for p in all_positions])
+    else:
+        base_x = min((p[0] for p in all_positions), default=0)
+        base_y = min((p[1] for p in all_positions), default=0)
 
     all_positions = [(pos[0] - base_x, pos[1] - base_y, pos[2], pos[3])
                      for pos in all_positions]

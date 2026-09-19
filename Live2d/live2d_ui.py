@@ -292,6 +292,7 @@ class Live2DWidget(QOpenGLWidget):
             traceback.print_exc()
 
     def paintGL(self):
+        self._paint_count = int(getattr(self, "_paint_count", 0)) + 1
         if not self._render_ready or self._failed:
             return
         try:

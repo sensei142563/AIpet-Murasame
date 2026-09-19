@@ -54,3 +54,14 @@ QQData/
 credentials*
 *.db
 nul
+
+# 打包产物/备份/临时（不进公开仓库）
+AIpet-Murasame.exe.old
+*.exe.old
+AIpet-Murasame-安装包.exe
+*.bak_namelist
+*.bak_*
+# 成人向插件（按仓库政策不进公开仓库；本地版本保留）
+plugins/adult_mode/
+qq/qq_adult.py
+# 开发期临时文件

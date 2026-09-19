@@ -32,7 +32,7 @@ if BASE not in sys.path:
 def cmd_list():
     """当前角色的立绘信息：类型（layers/single/live2d）+ 两套素材的服装/装饰/表情 + 已保存装扮"""
     from qq.qq_portrait import (clothes_for, decors_for, expression_choices,
-                                load_choice)
+                                actions_for, load_choice)
     from tool.portrait_outfit import SETS, active_set
     from pets.pet_registry import (get_active_pet_id, get_pet_config, get_fgimages_dir,
                                    get_fgimages_prefix, get_portrait_mode,
@@ -46,7 +46,7 @@ def cmd_list():
     out = {
         "sets": list(SETS),
         "active": active_set(),
-        "clothes": {}, "decors": {}, "expressions": {}, "saved": {},
+        "clothes": {}, "actions": {}, "decors": {}, "expressions": {}, "saved": {},
         # ===== 角色立绘类型（立绘工坊据此自适应）=====
         "pet": {"id": pid, "name": cfg.get("name") or pid,
                 "display_name": cfg.get("display_name") or ""},
@@ -60,6 +60,7 @@ def cmd_list():
     }
     for s in SETS:
         out["clothes"][s] = [[str(n), int(c), int(h)] for n, c, h in clothes_for(s)]
+        out["actions"][s] = [[str(n), int(a), int(b)] for n, a, b in actions_for(s)]
         out["decors"][s] = [[str(n), int(d)] for n, d in decors_for(s)]
         out["expressions"][s] = [[str(n), int(i)] for n, i in expression_choices(s)]
         out["saved"][s] = load_choice(s)
@@ -129,43 +130,14 @@ def cmd_preview_full(argv):
     """preview_full [SET] [表情] → 全身 + 透明背景的立绘预览（桌宠设置 / 触摸区域调节用）
 
     与 compose / preview_single 的区别：不裁上半身、不贴场景背景。
-    立绘工坊仍然用带背景的半身合成（那条链路没动）。
+    统一走 build_portrait：它自己会取「该套已保存的装扮 + 情绪层」（新角色按各自的表情表
+    就近匹配情绪词），单图整图角色也走同一条路——不必在这里再写一套丛雨的兜底层号。
     """
-    import json as _json
-    from qq.qq_portrait import compose_custom, build_portrait
+    from qq.qq_portrait import build_portrait
     set_name = argv[0] if len(argv) > 0 and argv[0].strip() else None
     emo = argv[1] if len(argv) > 1 and argv[1].strip() else ""
-    out_name = "preview_full.png"
-    # 先问一下这个角色是「拼合」还是「单图整图」
-    import os as _os
-    from pets.pet_registry import get_pet_config
-    try:
-        _pt = (get_pet_config() or {}).get("portrait") or {}
-        _single = str(_pt.get("mode") or "").lower() == "single"
-    except Exception:
-        _single = False
-    if _single:
-        p = build_portrait(emo, "", out_name=out_name, full_body=True, no_bg=True,
-                           set_name=set_name or "a")
-    else:
-        # 用该套保存的装扮（服装/发型/表情/装饰）——和桌宠身上那套一致
-        from qq.qq_portrait import load_choice, _set_of, pet_portrait_cfg
-        try:
-            ch = load_choice(_set_of(set_name))
-            cloth, hair = int(ch["cloth_id"]), int(ch["hair"])
-            decors = list(ch.get("decor") or [])
-            expr = int(((pet_portrait_cfg().get("emotions") or {}).get(emo)
-                        or (pet_portrait_cfg().get("emotions") or {}).get("平静") or 0))
-        except Exception:
-            cloth, hair, decors, expr = 1952, 1959, [], 0
-        if not expr:
-            try:
-                from qq.qq_portrait import EMOTION_MAP
-                expr = int(EMOTION_MAP.get(emo, EMOTION_MAP.get("平静", (1292, None)))[0])
-            except Exception:
-                expr = 1292
-        p = compose_custom(cloth, hair, expr, decors, out_name=out_name,
-                           scene=None, set_name=set_name, full_body=True, no_bg=True)
+    p = build_portrait(emo, "", out_name="preview_full.png", full_body=True, no_bg=True,
+                       set_name=set_name or "a")
     print(p or "")
 
 
@@ -194,14 +166,24 @@ def cmd_scenes():
 
 
 def cmd_save(argv):
-    """保存装扮：python portrait_cli.py save SET CLOTH [decor1,decor2]"""
+    """保存装扮：python portrait_cli.py save SET CLOTH [decor1,decor2] [动作名或层号]
+
+    动作（手臂姿势）：留空 = 保持原样，传 "-" = 回到默认姿势，传动作名/层号 = 换臂姿势。"""
     from qq.qq_portrait import save_choice
     set_name = argv[0] if len(argv) > 0 and argv[0].strip() else "a"
     cloth = argv[1] if len(argv) > 1 and argv[1].strip() else "制服"
     decors = []
     if len(argv) > 2 and argv[2].strip():
         decors = [int(x) for x in argv[2].split(",") if x.strip().isdigit()]
-    ok = save_choice(cloth, None, decors, set_name=set_name)
+    action = None
+    if len(argv) > 3 and argv[3].strip():
+        action = 0 if argv[3].strip() == "-" else argv[3].strip()
+    scene = argv[4].strip() if len(argv) > 4 and argv[4].strip() else None
+    emo = None
+    if len(argv) > 5 and argv[5].strip():
+        emo = argv[5].strip() if not argv[5].strip().isdigit() else int(argv[5].strip())
+    ok = save_choice(cloth, None, decors, set_name=set_name, action=action, scene=scene,
+                     emotion=emo)
     if ok:
         try:
             from tool.portrait_outfit import set_active

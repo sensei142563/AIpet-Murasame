@@ -80,6 +80,23 @@ def _ensure_src_on_path():
     return False
 
 
+def _quiet_mode() -> bool:
+    """纯净模式（设置 → 其他配置）：启动桌宠 / QQ / 微信时不弹终端窗口"""
+    try:
+        import json as _j
+        with open(os.path.join(_app_base_dir(), "config.json"), encoding="utf-8") as f:
+            return str(_j.load(f).get("quiet_mode", "false")).strip().lower() in ("true", "1", "yes", "on")
+    except Exception:
+        return False
+
+
+def _spawn_flags() -> int:
+    """子进程窗口标志：纯净模式 = CREATE_NO_WINDOW，否则开新控制台（方便看日志）"""
+    if os.name != "nt":
+        return 0
+    return getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if _quiet_mode()         else subprocess.CREATE_NEW_CONSOLE
+
+
 def _find_python(base: str) -> str:
     for rel in (os.path.join("runtime", "venv", "Scripts", "python.exe"), "python.exe"):
         p = os.path.join(base, rel)
@@ -279,7 +296,16 @@ class HomePage(QWidget):
         self.btn_wx.setStyleSheet(_ghost_btn_qss())
         self.btn_wx.setMinimumHeight(46)
         self.btn_wx.clicked.connect(self.start_wechat)
-        for b in (self.btn_pet, self.btn_qq, self.btn_wx):
+        # 预载语音服务：提前把 TTS 启动+预热好，之后再启动桌宠，第一句话不用等冷启动
+        self.btn_preload = QPushButton("  预载语音服务")
+        self.btn_preload.setStyleSheet(_ghost_btn_qss())
+        self.btn_preload.setMinimumHeight(46)
+        self.btn_preload.setToolTip(
+            "提前启动并预热语音服务（GPT-SoVITS）：\n"
+            "首次加载模型要 1~2 分钟，预热后桌宠开口几乎不用等。\n"
+            "预载完成后按钮显示「预载完成」。")
+        self.btn_preload.clicked.connect(self.preload_tts)
+        for b in (self.btn_pet, self.btn_qq, self.btn_wx, self.btn_preload):
             row.addWidget(b)
         row.addStretch()
         cl.addLayout(row)
@@ -289,6 +315,29 @@ class HomePage(QWidget):
         cl.addWidget(tip)
         outer.addWidget(card)
 
+        # ── 剧情模式（Galgame）入口：只放一个按钮 ──
+        # 正式版没有剧情模块（story/ 被移除）→ 直接不显示这个入口，免得点了报错
+        _has_story = os.path.isdir(os.path.join(_app_base_dir(), "story"))
+        for _f in ("剧情素材", "story"):
+            if not os.path.exists(os.path.join(_app_base_dir(), _f)):
+                _has_story = False
+                break
+        if not _has_story:
+            print("[NewUI] 未包含剧情模块 → 隐藏「剧情模式」入口（正式版）")
+        st_row = QHBoxLayout()
+        b_story = QPushButton("  剧情模式")
+        b_story.setStyleSheet(_accent_btn_qss(accent))
+        b_story.setMinimumHeight(52)
+        f = b_story.font()
+        f.setPointSize(max(11, f.pointSize() + 2))
+        f.setBold(True)
+        b_story.setFont(f)
+        b_story.setToolTip("进入 Galgame 风格的剧情玩法（独立窗口）")
+        b_story.clicked.connect(self._open_story)
+        st_row.addWidget(b_story, 1)
+        if _has_story:
+            outer.addLayout(st_row)
+
         # ── 控制面板卡片 ──
         ctl = Card()
         cl2 = QVBoxLayout(ctl)
@@ -296,7 +345,7 @@ class HomePage(QWidget):
         cl2.setSpacing(10)
         cl2.addWidget(silicon_ui.section_title("桌宠控制面板", accent))
         grid = QHBoxLayout()
-        for text, feat in (("📝 长文本模式", "longtext"), ("🎭 Live2D", "live2d"),
+        for text, feat in (("📝 汉语模式", "longtext"), ("🎭 Live2D", "live2d"),
                            ("📷 摄像头识别", "camera"), ("🖥 屏幕识别", "screenshot"),
                            ("🎤 按住说话", "voice")):
             b = QPushButton(text)
@@ -409,6 +458,49 @@ class HomePage(QWidget):
         except Exception:
             pass
 
+    def _open_story(self, hash_q: str = ""):
+        """打开剧情模式：起本地服务 + 浏览器内核的独立窗口（像 galgame 本体）"""
+        try:
+            from story import launch as story_launch
+            url = ""
+            if hash_q:
+                try:
+                    s = story_launch.srv.ensure_server()
+                    url = s.url + hash_q
+                except Exception:
+                    url = ""
+            story_launch.open_story_window(url)
+            if not getattr(self, "_story_timer", None):
+                self._story_timer = QTimer(self)
+                self._story_timer.setInterval(1000)
+                self._story_timer.timeout.connect(story_launch.tick)
+                self._story_timer.start()
+            return None
+        except Exception as e:
+            print(f"[UI] ⚠ 打开剧情窗口失败: {e}")
+            return None
+
+    def _story_continue(self):
+        try:
+            from story import store as story_store
+            ss = story_store.list_stories()
+            self._open_story(("#play=" + str(ss[0]["id"])) if ss else "")
+        except Exception:
+            self._open_story()
+
+    def _story_flow(self):
+        try:
+            import urllib.parse
+
+            from story import store as story_store
+            ss = story_store.list_stories()
+            if ss:
+                self._open_story("#screen=flow&sid=" + urllib.parse.quote(str(ss[0]["id"])))
+            else:
+                self._open_story()
+        except Exception:
+            self._open_story()
+
     def toggle_pet(self):
         if _pet_api_alive():
             # 关闭桌宠：显示「正在关闭中…」并禁用按钮，避免重复点击
@@ -428,7 +520,7 @@ class HomePage(QWidget):
             return
         try:
             self.shell._pet_proc = subprocess.Popen([py, os.path.join(base, "run.py")], cwd=base,
-                                                    creationflags=subprocess.CREATE_NEW_CONSOLE)
+                                                    creationflags=_spawn_flags())
             print("[NewUI] 已启动桌宠（run.py）")
             QTimer.singleShot(6000, self.refresh_status)
         except Exception as e:
@@ -468,7 +560,7 @@ class HomePage(QWidget):
         self._busy_btn(self.btn_qq, "⏳ 正在启动 QQ…", 12000)
         try:
             self.shell._qq_proc = subprocess.Popen([py, os.path.join(base, "run_qq.py")], cwd=base,
-                                                   creationflags=subprocess.CREATE_NEW_CONSOLE)
+                                                   creationflags=_spawn_flags())
             self.refresh_status()
         except Exception as e:
             QMessageBox.warning(self, "启动失败", str(e))
@@ -482,9 +574,79 @@ class HomePage(QWidget):
         self._busy_btn(self.btn_wx, "⏳ 正在启动微信…", 12000)
         try:
             self.shell._wx_proc = subprocess.Popen([py, os.path.join(base, "run_wechat.py")], cwd=base,
-                                                   creationflags=subprocess.CREATE_NEW_CONSOLE)
+                                                   creationflags=_spawn_flags())
         except Exception as e:
             QMessageBox.warning(self, "启动失败", str(e))
+
+    def preload_tts(self):
+        """预载语音服务：启动 + 预热，过程直接显示在按钮上。
+
+        线程只负责读子进程输出（纯数据），界面更新一律走主线程的 QTimer 轮询 ——
+        Qt 不允许在别的线程里动控件（跨线程 QTimer.singleShot 不会生效，按钮会一直卡在"预载中"）。
+        """
+        import threading
+        base = _app_base_dir()
+        py = _find_python(base)
+        script = os.path.join(base, "tool", "tts_service.py")
+        if not py or not os.path.exists(script):
+            QMessageBox.information(self, "预载语音服务", "未找到语音服务脚本（tool/tts_service.py）")
+            return
+        self.btn_preload.setEnabled(False)
+        self.btn_preload.setText("  预载中…")
+        self._preload_steps = []
+        try:
+            # 输出自己读（按钮上显示进度）→ 一律不弹控制台窗口
+            self.shell._tts_proc = subprocess.Popen(
+                [py, script, "preload"], cwd=base,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, encoding="utf-8", errors="replace",
+                creationflags=(subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0))
+        except Exception as e:
+            self._preload_done(False, str(e))
+            return
+
+        def _reader():
+            try:
+                for line in iter(self.shell._tts_proc.stdout.readline, ""):
+                    line = (line or "").strip()
+                    if line:
+                        self._preload_steps.append(line)      # 只放数据，不碰界面
+            except Exception:
+                pass
+
+        threading.Thread(target=_reader, daemon=True).start()
+
+        # 主线程轮询：更新按钮文字 / 结束时收尾
+        self._preload_timer = QTimer(self)
+        self._preload_timer.setInterval(500)
+
+        def _tick():
+            proc = getattr(self.shell, "_tts_proc", None)
+            if self._preload_steps:
+                msg = self._preload_steps[-1].replace("[预载]", "").strip()
+                if not self.btn_preload.text().endswith(msg[:14] + "…"):
+                    self.btn_preload.setText(f"  {msg[:14]}…")
+            if proc is None or proc.poll() is not None:
+                self._preload_timer.stop()
+                self._preload_done(proc is not None and proc.returncode == 0, "")
+
+        self._preload_timer.timeout.connect(_tick)
+        self._preload_timer.start()
+
+    def _preload_done(self, ok, err=""):
+        self.btn_preload.setEnabled(True)
+        if ok:
+            self.btn_preload.setText("  预载完成")
+            QTimer.singleShot(10000, lambda: self.btn_preload.setText("  预载语音服务"))
+        else:
+            self.btn_preload.setText("  预载失败（可重试）")
+            QTimer.singleShot(10000, lambda: self.btn_preload.setText("  预载语音服务"))
+            if err:
+                print(f"[NewUI] ⚠ 语音预载失败: {err}")
+        try:
+            self.refresh_status()
+        except Exception:
+            pass
 
     # ── 工具 ──
     def open_studio(self):
@@ -517,7 +679,7 @@ class HomePage(QWidget):
         if os.path.exists(bat):
             try:
                 subprocess.Popen([bat], cwd=os.path.dirname(bat),
-                                 creationflags=subprocess.CREATE_NEW_CONSOLE)
+                                 creationflags=_spawn_flags())
                 QMessageBox.information(self, "重新扫码登录",
                                         "已打开 NapCat 登录窗口，请用手机 QQ 扫描二维码。\n"
                                         "二维码也已保存到：NapCat.Shell.Windows.OneKey\\NapCat\\cache\\qrcode.png")

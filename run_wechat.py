@@ -13,6 +13,21 @@ import socket
 import signal
 import subprocess
 
+def _f5_console_flags() -> int:
+    """纯净模式（config.json: quiet_mode）下不弹 F5-TTS 的终端窗口"""
+    if os.name != "nt":
+        return 0
+    try:
+        import json
+        with open(os.path.join(BASE_DIR, "config.json"), encoding="utf-8") as fh:
+            if str(json.load(fh).get("quiet_mode", "false")).strip().lower() in (
+                    "true", "1", "yes", "on"):
+                return getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+    except Exception:
+        pass
+    return 0x00000010
+
+
 # 控制台 UTF-8（GBK 控制台下打印 emoji 会崩线程）
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -78,7 +93,7 @@ def ensure_f5tts(send_voice):
         proc = subprocess.Popen(
             [_f5tts_venv_python(), "-m", "longtext.f5tts_server"],
             cwd=BASE_DIR,
-            creationflags=(0x00000010 if os.name == "nt" else 0)
+            creationflags=_f5_console_flags()
         )
         os.makedirs(os.path.dirname(F5TTS_PID_FILE), exist_ok=True)
         with open(F5TTS_PID_FILE, "w", encoding="utf-8") as f:

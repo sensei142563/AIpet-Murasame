@@ -20,7 +20,7 @@ from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
                              QCheckBox, QPushButton, QGroupBox, QWidget,
-                             QStackedLayout)
+                             QStackedLayout, QScrollArea)
 
 
 def _studio_log(msg: str):
@@ -357,9 +357,24 @@ class PortraitStudio(SiliconDialog):
         g1 = QVBoxLayout(gb1)
         self.cloth_combo = QComboBox()
         self.cloth_combo.setStyleSheet("padding:6px; font-size:13px;")
-        self.cloth_combo.currentIndexChanged.connect(self._schedule)
+        self.cloth_combo.currentIndexChanged.connect(self._on_cloth_changed)
         g1.addWidget(self.cloth_combo)
         right.addWidget(gb1)
+
+        # 动作（手臂姿势 = 素材里的「腕差分」）
+        # ⚠ 这类层以前被当成「服装」列在下拉里（校服/校服·手臂替换件…），
+        #   其实它们是同一件衣服的另一种手臂姿势 → 单独做成「动作」。
+        self.gb_act = QGroupBox("动作（手臂姿势 · 随对话自动切换）")
+        _gb_act_lay = QVBoxLayout(self.gb_act)
+        self.act_combo = QComboBox()
+        self.act_combo.setStyleSheet("padding:6px; font-size:13px;")
+        self.act_combo.currentIndexChanged.connect(self._on_action_changed)
+        _gb_act_lay.addWidget(self.act_combo)
+        self._act_hint = QLabel("")
+        self._act_hint.setWordWrap(True)
+        self._act_hint.setStyleSheet("color:#888; font-size:11px;")
+        _gb_act_lay.addWidget(self._act_hint)
+        right.addWidget(self.gb_act)
 
         # 表情
         gb2 = QGroupBox("表情（保存后仍随对话情绪自动变化，这里用于预览）")
@@ -371,8 +386,28 @@ class PortraitStudio(SiliconDialog):
         right.addWidget(gb2)
 
         # 装饰
-        self.gb3 = QGroupBox("附加装饰")
-        self.g3 = QVBoxLayout(self.gb3)
+        # ⚠ 装饰可能很多（例如芳乃 a 套 69 项）：以前直接堆进纵向布局 →
+        #   窗口被撑到占满屏幕、内容还显示不全（要拖动窗口）。改为「固定高度 + 滚动」。
+        self.gb3 = QGroupBox("附加装饰（可滚动，装饰多也不会撑大窗口）")
+        _gb3_lay = QVBoxLayout(self.gb3)
+        self._decor_scroll = QScrollArea()
+        self._decor_scroll.setWidgetResizable(True)
+        self._decor_scroll.setFrameShape(QScrollArea.NoFrame)
+        self._decor_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._decor_scroll.setStyleSheet(
+            "QScrollArea{background:transparent;border:none;}"
+            "QScrollArea > QWidget > QWidget{background:transparent;}")
+        _decor_holder = QWidget()
+        self.g3 = QVBoxLayout(_decor_holder)
+        self.g3.setContentsMargins(2, 2, 2, 2)
+        self.g3.setSpacing(4)
+        self._decor_scroll.setWidget(_decor_holder)
+        try:
+            self._decor_scroll.setMinimumHeight(110)
+            self._decor_scroll.setMaximumHeight(180)     # 超出就在框内滚动，窗口尺寸不再变化
+        except Exception:
+            pass
+        _gb3_lay.addWidget(self._decor_scroll)
         self.decor_boxes = []
         right.addWidget(self.gb3)
 
@@ -438,8 +473,18 @@ class PortraitStudio(SiliconDialog):
 
         holder = QWidget()
         holder.setLayout(right)
-        holder.setFixedWidth(340)
-        root.addWidget(holder)
+        # ⚠ 右侧控制列整体放进滚动区：装饰/表情等选项再多，也只在这条列里滚动，
+        #   不会再被撑高到占满屏幕（用户反馈"拖一下窗口就变得特别大、还没法看全"）。
+        self._right_scroll = QScrollArea()
+        self._right_scroll.setWidgetResizable(True)
+        self._right_scroll.setFrameShape(QScrollArea.NoFrame)
+        self._right_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._right_scroll.setWidget(holder)
+        self._right_scroll.setFixedWidth(352)
+        self._right_scroll.setStyleSheet(
+            "QScrollArea{background:transparent;border:none;}"
+            "QScrollArea > QWidget > QWidget{background:transparent;}")
+        root.addWidget(self._right_scroll)
         self._right_col = right          # 右侧控制栏（Live2D 按钮挂这里，不挤主布局）
 
     # ── 选项应用 ────────────────────────────────────────
@@ -449,6 +494,62 @@ class PortraitStudio(SiliconDialog):
         if isinstance(v, dict):
             return v.get(set_name) or []
         return v or []
+
+    def _fill_actions(self, set_name, saved=None):
+        """填「动作」下拉：当前服装的换臂姿势 + 默认姿势"""
+        try:
+            self.act_combo.blockSignals(True)
+            self.act_combo.clear()
+            cur_cid = int(self.cloth_combo.currentData() or 0)
+            cur_name = str(self.cloth_combo.currentText() or "")
+            acts = self._set_opts("actions", set_name)
+            mine = [a for a in acts if int(a[2]) == cur_cid or not cur_cid]
+            self.act_combo.addItem("（默认姿势）", 0)
+            for nm, aid, base in mine:
+                self.act_combo.addItem(str(nm), int(aid))
+            want = str((saved or {}).get("action") or "")
+            want_id = int((saved or {}).get("action_id") or 0)
+            idx = 0
+            for i in range(self.act_combo.count()):
+                if want_id and int(self.act_combo.itemData(i) or 0) == want_id:
+                    idx = i
+                    break
+                if want and want in self.act_combo.itemText(i):
+                    idx = i
+                    break
+            self.act_combo.setCurrentIndex(idx)
+            self.act_combo.blockSignals(False)
+            if self.act_combo.count() > 1:
+                self._act_hint.setText(f"「{cur_name}」有 {self.act_combo.count() - 1} 种手臂姿势；"
+                                       f"桌宠会按对话情绪自动切换。")
+            else:
+                self._act_hint.setText("这套素材没有换臂姿势（半身立绘通常没有）。")
+            self._relayout_right_col()
+        except Exception as e:
+            print(f"[PortraitStudio] ⚠ 填充动作失败: {e}")
+
+    def _on_cloth_changed(self, *_):
+        """换衣服：动作列表跟着换（动作是「某件衣服的手臂姿势」，不能跨衣服选）"""
+        try:
+            self._fill_actions(self._cur_set, {})
+        except Exception:
+            pass
+        self._schedule()
+
+    def _on_action_changed(self, *_):
+        """换动作：立刻重排 + 重新预览"""
+        try:
+            self._relayout_right_col()
+        except Exception:
+            pass
+        self._schedule()
+
+    def _action_layer(self) -> int:
+        """当前选中的动作层（0 = 默认姿势）"""
+        try:
+            return int(self.act_combo.currentData() or 0)
+        except Exception:
+            return 0
 
     def _saved_of(self, set_name):
         sv = (self._data or {}).get("saved") or {}
@@ -466,25 +567,50 @@ class PortraitStudio(SiliconDialog):
         self.cloth_combo.clear()
         self._clothes = self._set_opts("clothes", set_name)
         cur_idx = 0
+        want_name = str(saved.get("cloth") or "")
+        want_id = int(saved.get("cloth_id") or 0)
         for i, item in enumerate(self._clothes):
             name, cid = str(item[0]), int(item[1])
             self.cloth_combo.addItem(name, cid)
-            if str(saved.get("cloth") or "") and str(saved.get("cloth")) in name:
+            if want_id and want_id == cid:
                 cur_idx = i
-            if int(saved.get("cloth_id") or -1) == cid:
+            elif want_name and want_name == name:
                 cur_idx = i
         self.cloth_combo.setCurrentIndex(cur_idx)
         self.cloth_combo.blockSignals(False)
+
+        # 动作：只列当前这件衣服的换臂姿势（没选出服装时列全部）
+        self._fill_actions(set_name, saved)
 
         # 表情
         self.exp_combo.blockSignals(True)
         self.exp_combo.clear()
         for item in self._set_opts("expressions", set_name):
             self.exp_combo.addItem(str(item[0]), int(item[1]))
-        for i in range(self.exp_combo.count()):
-            if self.exp_combo.itemText(i) in ("平静", "普通"):
-                self.exp_combo.setCurrentIndex(i)
-                break
+        # 打开时优先还原「上次保存的那张表情」，其次角色自己的默认表情，
+        # 都不行才退回列表第一项（往往是「泪水变体」，看着就像每次打开都换了张脸）
+        _idx = -1
+        _saved_emo = int((saved or {}).get("emotion") or 0)
+        if _saved_emo:
+            for i in range(self.exp_combo.count()):
+                if int(self.exp_combo.itemData(i) or 0) == _saved_emo:
+                    _idx = i
+                    break
+        if _idx < 0:
+            _want = [str(((self._data or {}).get("portrait") or {}).get("default_emotion") or ""),
+                     "平静", "普通", "基础", "平常", "微笑", "微笑 1"]
+            for w in _want:
+                if not w:
+                    continue
+                for i in range(self.exp_combo.count()):
+                    txt = self.exp_combo.itemText(i)
+                    if txt == w or (w.startswith("微笑") and txt.startswith("微笑")) or \
+                            (w in ("基础", "平常") and txt.startswith(w)):
+                        _idx = i
+                        break
+                if _idx >= 0:
+                    break
+        self.exp_combo.setCurrentIndex(_idx if _idx >= 0 else 0)
         self.exp_combo.blockSignals(False)
 
         # 装饰复选框
@@ -528,7 +654,8 @@ class PortraitStudio(SiliconDialog):
             rc = getattr(self, "_right_col", None)
             if rc is not None:
                 holder = rc.parentWidget()
-            for w in (holder, getattr(self, "gb3", None), getattr(self, "preview_box", None)):
+            for w in (holder, getattr(self, "gb3", None), getattr(self, "gb_act", None),
+                      getattr(self, "preview_box", None)):
                 if w is not None:
                     w.updateGeometry()
                     w.update()
@@ -607,6 +734,25 @@ class PortraitStudio(SiliconDialog):
                 self.scene_combo.addItem("🎲 随机场景", "")
                 for sp in (data.get("scenes") or []):
                     self.scene_combo.addItem(os.path.basename(str(sp)), str(sp))
+                # 打开就按「上次保存的那张场景」显示（以前默认随机 → 每次打开立绘都不一样）
+                _sv = (data.get("saved") or {})
+                _want_scene = ""
+                for _s in (data.get("sets") or ("a", "b")):
+                    _ent = _sv.get(_s) if isinstance(_sv, dict) else None
+                    if isinstance(_ent, dict) and str(_ent.get("scene") or "").strip():
+                        _want_scene = str(_ent["scene"]).strip()
+                        break
+                _si = 0
+                if _want_scene:
+                    _base = os.path.basename(_want_scene)
+                    for i in range(self.scene_combo.count()):
+                        _d = str(self.scene_combo.itemData(i) or "")
+                        if _d == _want_scene or (_d and os.path.basename(_d) == _base):
+                            _si = i
+                            break
+                elif self.scene_combo.count() > 1:
+                    _si = 1          # 没存过 → 用第一张场景（固定），想随机要手动选
+                self.scene_combo.setCurrentIndex(_si)
                 self.scene_combo.blockSignals(False)
             except Exception:
                 pass
@@ -670,8 +816,9 @@ class PortraitStudio(SiliconDialog):
             self.gb_display.setVisible(has_l2d and bool(d.get("has_fgimages")))   # 两种素材都有才给切换
             self.btn_def_emo.setVisible(mode == "single" and not is_l2d)
             for w in (self.set_combo.parentWidget(), self.cloth_combo.parentWidget(),
-                      self.gb3):
-                w.setVisible(mode == "layers" and not is_l2d)
+                      self.gb3, getattr(self, "gb_act", None)):
+                if w is not None:
+                    w.setVisible(mode == "layers" and not is_l2d)
             self.exp_combo.parentWidget().setVisible(not is_l2d)
             self.scene_combo.parentWidget().setVisible(not is_l2d)
             # 单图模式下「随机换装」没意义（没有服装/装饰可随机）
@@ -930,11 +1077,15 @@ class PortraitStudio(SiliconDialog):
     def _current(self):
         cloth = int(self.cloth_combo.currentData() or 1952)
         expr = int(self.exp_combo.currentData() or 1292)
-        hair = 1959
+        # 发型要按「服装层」查（动作层是换臂姿势，不在服装表里）——查错会拿到别的角色的发型
+        hair = 0
         for item in getattr(self, "_clothes", []):
             if int(item[1]) == cloth:
                 hair = int(item[2])
                 break
+        act = self._action_layer()
+        if act:                      # 选了换臂姿势 → 用动作层当身体层
+            cloth = act
         decors = [int(cb.property("layer_id")) for cb in self.decor_boxes if cb.isChecked()]
         try:
             scene = str(self.scene_combo.currentData() or "")
@@ -1133,22 +1284,42 @@ class PortraitStudio(SiliconDialog):
             self._on_set_default_emotion()
             return
         if getattr(self, "_is_l2d_show", False):
-            self.status_lbl.setText("ℹ Live2D 角色不需要保存立绘装扮")
-            return
+            # 纯 Live2D 角色没有 2D 立绘可存；丛雨这种「Live2D + 2D 都有」的要继续存 2D 装扮
+            _has2d = False
+            try:
+                from pets.pet_registry import get_fgimages_dir
+                _has2d = bool(self._pet_id and get_fgimages_dir(self._pet_id))
+            except Exception:
+                _has2d = False
+            if not _has2d:
+                self.status_lbl.setText("ℹ Live2D 角色不需要保存立绘装扮")
+                return
         try:
             set_name, cloth, _hair, _expr, decors, _scene = self._current()
             name = self.cloth_combo.currentText()
+            act_name = ""
+            if self._action_layer():
+                act_name = str(self.act_combo.currentText() or "")
+            _scene = str(self.scene_combo.currentData() or "")
+            _emo = int(self.exp_combo.currentData() or 0)
             out, err = self._cli(["save", set_name, name,
-                                      ",".join(str(d) for d in decors)],
+                                      ",".join(str(d) for d in decors),
+                                      act_name or "-", _scene,
+                                      str(_emo) if _emo else "-"],
                                      pet_id=getattr(self, "_pet_id", None))
             ok = (out.splitlines()[-1].strip() == "OK") if out else False
             if ok:
                 if isinstance(self._data.get("saved"), dict):
                     self._data["saved"][set_name] = {
-                        "cloth": name, "cloth_id": cloth, "decor": decors}
+                        "cloth": name, "cloth_id": cloth, "decor": decors,
+                        "action": act_name, "scene": _scene, "emotion": _emo}
                 self._data["active"] = set_name
-                self.status_lbl.setText(
-                    f"✅ 已保存 {set_name} 立绘（{name}）——QQ 与桌宠都将使用该套装扮")
+                _pose = act_name.split("（", 1)[1].rstrip("）") if "（" in act_name else act_name
+                _msg = (f"✅ 已保存 {set_name} 立绘（{name}"
+                        f"{'·' + _pose if _pose else '·默认姿势'}）——QQ 与桌宠都将使用该套装扮")
+                self.status_lbl.setText(_msg)
+                # 排队的刷新可能紧接着改写状态栏（Live2D 贴图提示等）→ 延迟再写一次，保证看得见
+                QTimer.singleShot(600, lambda m=_msg: self.status_lbl.setText(m))
             else:
                 self.status_lbl.setText(f"❌ 保存失败 {err[:80]}")
         except Exception as e:
