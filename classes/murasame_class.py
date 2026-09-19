@@ -1561,22 +1561,6 @@ class Murasame(QLabel):
             print("[桌宠] ⏳ 她还在思考/说话，先别插话（本次点击已忽略）")
             return
         if event.button() == Qt.LeftButton:
-            # ⓪ 点在对话框上 → 直接进打字模式（不算触摸身体，避免"想打字却触发了反应/思考"）
-            if self._in_text_box(event.x(), event.y()):
-                if self.is_busy_reply():
-                    self._show_busy_hint()
-                    self._set_ime(False)
-                    print("[桌宠] ⏳ 她还在思考/说话，先别插话（点击对话框已忽略）")
-                else:
-                    self.input_mode = True
-                    self._set_ime(True)
-                    self.input_buffer = ""
-                    self.preedit_text = ""
-                    self.display_text = ("【" + str(self.user_name) +
-                                          "\n可以直接打字了，输入后按回车发送（Esc 取消）")
-                    self.setFocus()
-                    self.update()
-                return
             # ① 先做「触摸区域」命中判定（头 / 胸口 / 小腹 / 下体 / 腿 / 脚 / 胳膊 / 手掌）
             _area = self._touch_area_at(event.x(), event.y())
             if _area:
@@ -1610,6 +1594,23 @@ class Murasame(QLabel):
                     self.input_buffer = ""
                     self.preedit_text = ""
                     self.display_text = ("【" + str(self.user_name) + "】\n可以直接打字了，输入后按回车发送（Esc 取消）")
+                    self.update()
+            # ③ 兜底：点在对话框上 → 进入打字模式
+            #    触摸区域 / 摸头 / 下半身键盘输入都优先，所以放最后。
+            #    放最前面会挡住摸头摸身，导致触摸不触发对话。
+            elif self._in_text_box(event.x(), event.y()):
+                if self.is_busy_reply():
+                    self._show_busy_hint()
+                    self._set_ime(False)
+                    print("[桌宠] 她还在思考/说话，点击对话框已忽略")
+                else:
+                    self.input_mode = True
+                    self._set_ime(True)
+                    self.input_buffer = ""
+                    self.preedit_text = ""
+                    self.display_text = ("【" + str(self.user_name) +
+                                         "\n可以直接打字了，输入后按回车发送（Esc 取消）")
+                    self.setFocus()
                     self.update()
             else:
                 # 其他地方，什么也不做
@@ -2687,11 +2688,10 @@ class Murasame(QLabel):
             print(f"[桌宠] ⚠ Live2D 触摸松开处理失败: {e}")
 
     def _fire_touch(self, key, gesture):
-        # 她正忙时一律不反应（点哪里都不算）
+        # 注意：这里**不再**因为她正忙就不反应 —— 触摸是主人的动作，应当照常有反应，
+        # 她的接话由 start_thread 的队列负责（说完再回），所以没必要把触摸丢掉。
         try:
-            if self.is_busy_reply():
-                print(f"[桌宠] ⏳ 她还在思考/说话，忽略触摸 {key}({gesture})")
-                return
+            pass
         except Exception:
             pass
         """触发触摸反应：把「主人摸了摸你的XX」交给模型（与摸头同一条通路）"""
@@ -2703,7 +2703,9 @@ class Murasame(QLabel):
                 return
             print(f"[桌宠] 👆 触摸 {key}({gesture}) → {line}")
             # 只走模型的正式回应（对话框显示的就是云端生成的那句话）
-            self.start_thread(line, role="system")
+            # 触摸是主人的动作 → 按"主人发起"处理：
+            # 会显示「思考中…」、忙碌时会排队（而不是被当作系统观察直接跳过）
+            self.start_thread(line, role="user")
         except Exception as e:
             print(f"[桌宠] ⚠ 触摸反应失败: {e}")
 
