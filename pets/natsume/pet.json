@@ -1,0 +1,140 @@
+{
+ "id": "natsume",
+ "name": "夏目",
+ "display_name": "四季夏目",
+ "intro": "来自《星光咖啡馆与死神之蝶》的四季夏目（2D 立绘 · 由游戏成品图重建）",
+ "avatar": "avatar.png",
+ "model": {
+  "has_fgimages": true,
+  "has_live2d": false,
+  "fgimages_prefix": "ナツメ",
+  "fgimages_sets": [
+   "a"
+  ],
+  "sets_available": [
+   "a"
+  ],
+  "display": "2d",
+  "default": "2d"
+ },
+ "portrait": {
+  "mode": "layers",
+  "clothes": {
+   "服装01（包裹严实）": {
+    "cloth": 50304,
+    "hair": 0
+   },
+   "服装02": {
+    "cloth": 50305,
+    "hair": 0
+   },
+   "服装03（裸露较多）": {
+    "cloth": 50333,
+    "hair": 0
+   },
+   "服装04": {
+    "cloth": 50335,
+    "hair": 0
+   },
+   "服装05（裸露较多）": {
+    "cloth": 50374,
+    "hair": 0
+   },
+   "服装06": {
+    "cloth": 50375,
+    "hair": 0
+   },
+   "服装07（包裹严实）": {
+    "cloth": 50376,
+    "hair": 0
+   },
+   "服装08": {
+    "cloth": 50377,
+    "hair": 0
+   },
+   "服装09": {
+    "cloth": 50378,
+    "hair": 0
+   },
+   "服装10": {
+    "cloth": 50379,
+    "hair": 0
+   },
+   "服装11": {
+    "cloth": 50380,
+    "hair": 0
+   },
+   "服装12": {
+    "cloth": 50381,
+    "hair": 0
+   }
+  },
+  "actions": {},
+  "emotions": {},
+  "decors": {},
+  "sets": {
+   "a": {
+    "clothes": {
+     "服装01（包裹严实）": {
+      "cloth": 50304,
+      "hair": 0
+     },
+     "服装02": {
+      "cloth": 50305,
+      "hair": 0
+     },
+     "服装03（裸露较多）": {
+      "cloth": 50333,
+      "hair": 0
+     },
+     "服装04": {
+      "cloth": 50335,
+      "hair": 0
+     },
+     "服装05（裸露较多）": {
+      "cloth": 50374,
+      "hair": 0
+     },
+     "服装06": {
+      "cloth": 50375,
+      "hair": 0
+     },
+     "服装07（包裹严实）": {
+      "cloth": 50376,
+      "hair": 0
+     },
+     "服装08": {
+      "cloth": 50377,
+      "hair": 0
+     },
+     "服装09": {
+      "cloth": 50378,
+      "hair": 0
+     },
+     "服装10": {
+      "cloth": 50379,
+      "hair": 0
+     },
+     "服装11": {
+      "cloth": 50380,
+      "hair": 0
+     },
+     "服装12": {
+      "cloth": 50381,
+      "hair": 0
+     }
+    },
+    "actions": {},
+    "emotions": {},
+    "decors": {}
+   }
+  },
+  "default_cloth": "服装01（包裹严实）"
+ },
+ "self_ref": "我",
+ "chat_style": "清冷毒舌、话少而犀利，嘴硬心软；被真心夸到会别过脸小声嘟囔",
+ "interaction": {},
+ "touch": {
+  "enabled": true
+ }
+}
