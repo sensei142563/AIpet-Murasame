@@ -76,7 +76,7 @@ def install(tag: str = "launcher") -> bool:
         print(f"[Safety] 已启用全局异常兜底（异常写入 tmp/{_LOG_NAME}，不再直接终止进程）")
         return True
     except Exception as e:
-        print(f"[Safety] ⚠ 兜底安装失败: {e}")
+        print(f"[Safety]  兜底安装失败: {e}")
         return False
 
 

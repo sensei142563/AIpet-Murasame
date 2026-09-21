@@ -792,7 +792,7 @@ class PCLMainWindow(QWidget):
                 self._silicon_applied = True
                 self._apply_silicon_ui()
         except Exception as _e:
-            print(f"[PCL] ⚠ Silicon 界面应用异常: {_e}")
+            print(f"[PCL]  Silicon 界面应用异常: {_e}")
         self._apply_round_mask()
         if self._model_queue and self._preview_widget is None:
             pet_id, path = self._model_queue.pop(0)
@@ -956,7 +956,7 @@ class PCLMainWindow(QWidget):
                     _b.setVisible(False)
                 print("[PCL] SiliconUI 布局：左侧竖向导航栏已启用")
         except Exception as _e:
-            print(f"[PCL] ⚠ 竖向导航栏创建失败（回退顶部导航）: {_e}")
+            print(f"[PCL]  竖向导航栏创建失败（回退顶部导航）: {_e}")
             self.nav_rail = None
 
         self.sidebar = PCLSidebar()
@@ -989,7 +989,7 @@ class PCLMainWindow(QWidget):
 
         # QQ 按钮（config qq_enabled="true" 才显示）
         qq_enabled = str(self._config.get("qq_enabled", "false")).lower() == "true"
-        self.qq_btn = QPushButton("  💬 启动 QQ AIpet")
+        self.qq_btn = QPushButton("   启动 QQ AIpet")
         self.qq_btn.setToolTip("启动 QQ 聊天模块（自动启动 NapCat，首次需扫码登录）")
         self.qq_btn.setStyleSheet(f"""
             QPushButton {{ background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
@@ -1006,7 +1006,7 @@ class PCLMainWindow(QWidget):
 
         # 微信按钮（config wechat_enabled="true" 才显示）
         wechat_enabled = str(self._config.get("wechat_enabled", "false")).lower() == "true"
-        self.wechat_btn = QPushButton("  💬 启动微信 AIpet")
+        self.wechat_btn = QPushButton("   启动微信 AIpet")
         self.wechat_btn.setToolTip("启动微信 ClawBot 聊天模块（首次需扫码登录）")
         self._wechat_btn_styled(False)
         self.wechat_btn.setFixedHeight(int(48 * S))
@@ -1027,13 +1027,13 @@ class PCLMainWindow(QWidget):
                 font-family: 'Microsoft YaHei'; border-radius: {btn_radius()}px; }}
             QPushButton:hover {{ background: {Color4.name()}; color: white; }}
         """
-        self.qq_relogin_btn = QPushButton("  🔄 重新扫码登录 NapCat")
+        self.qq_relogin_btn = QPushButton("   重新扫码登录 NapCat")
         self.qq_relogin_btn.setToolTip("QQ 被平台下线/登录失效时，强制重启 NapCat；如需授权会弹出二维码")
         self.qq_relogin_btn.setCursor(Qt.PointingHandCursor)
         self.qq_relogin_btn.setStyleSheet(qq_tool_style)
         self.qq_relogin_btn.clicked.connect(self._on_napcat_relogin)
         qq_tools_lay.addWidget(self.qq_relogin_btn)
-        self.qq_webui_btn = QPushButton("  🌐 NapCat 配置")
+        self.qq_webui_btn = QPushButton("   NapCat 配置")
         self.qq_webui_btn.setToolTip("打开 NapCat 配置界面（浏览器）")
         self.qq_webui_btn.setCursor(Qt.PointingHandCursor)
         self.qq_webui_btn.setStyleSheet(qq_tool_style)
@@ -1046,7 +1046,7 @@ class PCLMainWindow(QWidget):
         tok_lay = QHBoxLayout(self.qq_token_row)
         tok_lay.setContentsMargins(0, 0, 0, 0)
         tok_lay.addStretch(1)
-        self.qq_token_btn = QPushButton("  📋 复制 NapCat Token")
+        self.qq_token_btn = QPushButton("   复制 NapCat Token")
         self.qq_token_btn.setToolTip("点击复制 WebUI Token 到剪贴板（配置页要求输入时粘贴即可）")
         self.qq_token_btn.setCursor(Qt.PointingHandCursor)
         self.qq_token_btn.setStyleSheet(qq_tool_style)
@@ -1058,7 +1058,7 @@ class PCLMainWindow(QWidget):
         self.preview_layout.addWidget(self.qq_token_row)
         self.preview_layout.addWidget(self.qq_tools_row)
         self.preview_layout.addLayout(btn_row)
-        # 立绘相关入口在「🐾 桌宠管理」页的角色卡片上（🎨 立绘工坊 / 📂 打开文件夹）
+        # 立绘相关入口在「 桌宠管理」页的角色卡片上（ 立绘工坊 /  打开文件夹）
         self._qq_btn_visible = qq_enabled
         # 恢复逻辑在按钮事件 connect 之后注册一次(在 __init__ 后段或事件处)
         self.napcat_relogin_done.connect(self._on_napcat_relogin_done)
@@ -1087,7 +1087,7 @@ class PCLMainWindow(QWidget):
                 border: 1px solid {Color3.name()};
             }}
         """
-        self.btn_voice = QPushButton("🎤 按住说话")
+        self.btn_voice = QPushButton(" 按住说话")
         self.btn_voice.setToolTip("长按按钮录音，松开发送语音对话")
         self.btn_voice.setStyleSheet(ctrl_btn)
         # 长按录音交互：按下 → 开始录音 / 松开 → 停止并识别
@@ -1100,22 +1100,22 @@ class PCLMainWindow(QWidget):
             _send_control_raw("http://localhost:28565/voice/end")
         ))
 
-        self.btn_screenshot = QPushButton("🖥️ 屏幕识别")
+        self.btn_screenshot = QPushButton(" 屏幕识别")
         self.btn_screenshot.setToolTip("立即进行屏幕截图识别")
         self.btn_screenshot.setStyleSheet(ctrl_btn)
         self.btn_screenshot.clicked.connect(lambda: _send_control("screenshot"))
 
-        self.btn_camera = QPushButton("📷 摄像头识别")
+        self.btn_camera = QPushButton(" 摄像头识别")
         self.btn_camera.setToolTip("触发摄像头拍照")
         self.btn_camera.setStyleSheet(ctrl_btn)
         self.btn_camera.clicked.connect(lambda: _send_control("camera"))
 
-        self.btn_live2d = QPushButton("🎭 Live2D")
+        self.btn_live2d = QPushButton(" Live2D")
         self.btn_live2d.setToolTip("切换 Live2D 模式")
         self.btn_live2d.setStyleSheet(ctrl_btn)
         self.btn_live2d.clicked.connect(lambda: _send_control("live2d"))
 
-        self.btn_longtext = QPushButton("📝 长文本模式")
+        self.btn_longtext = QPushButton(" 长文本模式")
         self.btn_longtext.setToolTip("切换长/短文本输出模式")
         self.btn_longtext.setStyleSheet(ctrl_btn)
         self.btn_longtext.clicked.connect(lambda: _send_control("longtext"))
@@ -1215,7 +1215,7 @@ class PCLMainWindow(QWidget):
             except Exception as _e:
                 print(f"[PCL] 导航胶囊化失败: {_e}")
         except Exception as e:
-            print(f"[PCL] ⚠ Silicon 界面应用失败: {e}")
+            print(f"[PCL]  Silicon 界面应用失败: {e}")
 
     def _place_corner_decor(self):
         """角落装饰贴右下（内容层之上）"""
@@ -1328,7 +1328,7 @@ class PCLMainWindow(QWidget):
         if set_active_pet_id(pet_id):
             print(f"[PCL] 已设为活动桌宠: {name} ({pet_id})，启动 AIpet / QQ 将使用该角色")
         else:
-            print(f"[PCL] ⚠ 设为活动失败: {pet_id}")
+            print(f"[PCL]  设为活动失败: {pet_id}")
         self._selected_pet_id = pet_id
         self._preview_pet(pet_id, model_path)
         self._sync_qq_button_hint()
@@ -1392,14 +1392,14 @@ class PCLMainWindow(QWidget):
         try:
             self._ensure_vision_service(base)
         except Exception as e:
-            print(f"[PCL] ⚠ 启动视觉服务失败: {e}")
+            print(f"[PCL]  启动视觉服务失败: {e}")
         self._pet_process = subprocess.Popen(
             [py, os.path.join(base, "run.py")],
             cwd=base,
             creationflags=subprocess.CREATE_NEW_CONSOLE
         )
         self.control_panel.show()
-        self.launch_btn.setText("  ⏹ 关闭桌宠")
+        self.launch_btn.setText("   关闭桌宠")
         self.launch_btn.setStyleSheet(f"""
             QPushButton {{ background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
                 stop:0 #e03030,stop:1 #f06060);
@@ -1450,11 +1450,11 @@ class PCLMainWindow(QWidget):
             py2 = os.path.join(base, "GPT-SoVITS", "runtime", "python.exe")
             py = py2 if os.path.isfile(py2) else ""
         if not py:
-            print("[PCL] ⚠ 找不到 GPT-SoVITS 运行时，无法启动本地视觉服务")
+            print("[PCL]  找不到 GPT-SoVITS 运行时，无法启动本地视觉服务")
             return False
         script = os.path.join(base, "tool", "vision_service.py")
         if not os.path.isfile(script):
-            print("[PCL] ⚠ 缺少 tool/vision_service.py")
+            print("[PCL]  缺少 tool/vision_service.py")
             return False
         log = os.path.join(base, "data", "vision_service.log")
         try:
@@ -1530,9 +1530,9 @@ class PCLMainWindow(QWidget):
                 tok = "6bb2d3cc74ea"
             from PyQt5.QtWidgets import QApplication
             QApplication.clipboard().setText(tok)
-            self.qq_token_btn.setText("  ✅ 已复制 Token")
+            self.qq_token_btn.setText("   已复制 Token")
             from PyQt5.QtCore import QTimer
-            QTimer.singleShot(2000, lambda: self.qq_token_btn.setText("  📋 复制 NapCat Token"))
+            QTimer.singleShot(2000, lambda: self.qq_token_btn.setText("   复制 NapCat Token"))
             print("[PCL] Token 已复制到剪贴板")
         except Exception as e:
             print(f"[PCL] 复制失败: {e}")
@@ -1553,7 +1553,7 @@ class PCLMainWindow(QWidget):
             return
         self._napcat_relogin_busy = True
         self.qq_relogin_btn.setEnabled(False)
-        self.qq_relogin_btn.setText("  ⏳ 正在重启 NapCat...")
+        self.qq_relogin_btn.setText("   正在重启 NapCat...")
         import threading as _th
         _th.Thread(target=self._napcat_relogin_worker, daemon=True).start()
 
@@ -1561,7 +1561,7 @@ class PCLMainWindow(QWidget):
         """扫码重启线程结束回调(主线程)"""
         self._napcat_relogin_busy = False
         self.qq_relogin_btn.setEnabled(True)
-        self.qq_relogin_btn.setText("  🔄 重新扫码登录 NapCat")
+        self.qq_relogin_btn.setText("   重新扫码登录 NapCat")
         if not ok:
             msg = "NapCat 重启失败" + chr(10) + "请检查后重试，或查看启动器日志。"
             self._show_config_dialog(msg)
@@ -1595,7 +1595,7 @@ class PCLMainWindow(QWidget):
                 return 0.0
 
         try:
-            print("[PCL] 🔄 重新扫码登录：停止旧 NapCat...")
+            print("[PCL]  重新扫码登录：停止旧 NapCat...")
             _sp.run(
                 ["powershell", "-NoProfile", "-Command",
                  "Get-CimInstance Win32_Process | Where-Object { "
@@ -1610,9 +1610,9 @@ class PCLMainWindow(QWidget):
             _sp.Popen(["cmd.exe", "/c", "launcher-user.bat"], cwd=nc_dir,
                       creationflags=getattr(_sp, "CREATE_NO_WINDOW", 0),
                       stdout=open(logf, "wb"), stderr=_sp.STDOUT)
-            print("[PCL] 🔄 NapCat 已重新启动，等待登录(3001就绪 / 出码即弹)...")
+            print("[PCL]  NapCat 已重新启动，等待登录(3001就绪 / 出码即弹)...")
         except Exception as e:
-            print(f"[PCL] ⚠ NapCat 启动失败: {e}")
+            print(f"[PCL]  NapCat 启动失败: {e}")
             _finish(False)
             return
 
@@ -1631,36 +1631,36 @@ class PCLMainWindow(QWidget):
         waited = 0
         while _time.time() < dl:
             if _port_ready():
-                print(f"[PCL] ✅ NapCat 已恢复(自动登录成功，耗时约 {waited}s)")
+                print(f"[PCL]  NapCat 已恢复(自动登录成功，耗时约 {waited}s)")
                 _finish(True)
                 return
             if _qr_mtime() != qr_base and _qr_mtime() > 0:
                 # QQ 已出新码 → 立即弹码，进入扫码等待阶段
-                print(f"[PCL] 🔄 检测到新二维码(约 {waited}s)，弹出提示...")
+                print(f"[PCL]  检测到新二维码(约 {waited}s)，弹出提示...")
                 self._prompt_scan_ui(force=True)
                 break
             _time.sleep(1.2)
             waited += 1.2
         else:
             # 70s 内既没自动登录也没出码：异常，弹一次码提示兜底
-            print("[PCL] 🔄 70s 内未见新码，弹出提示（兜底）...")
+            print("[PCL]  70s 内未见新码，弹出提示（兜底）...")
             self._prompt_scan_ui(force=True)
         # 阶段2：扫码等待，最多 5 分钟。码文件更新→重开新图；弹窗由 _prompt_scan_ui 45s 节流
-        print("[PCL] 🔄 等待扫码(5分钟上限)...")
+        print("[PCL]  等待扫码(5分钟上限)...")
         last_qr = _qr_mtime()
         dl2 = _time.time() + 300
         while _time.time() < dl2:
             _time.sleep(4)
             if _port_ready():
-                print("[PCL] ✅ 扫码登录成功，NapCat 已恢复")
+                print("[PCL]  扫码登录成功，NapCat 已恢复")
                 _finish(True)
                 return
             m = _qr_mtime()
             if m > 0 and m != last_qr:
                 last_qr = m
-                print("[PCL] 🔄 二维码已刷新，重开新图...")
+                print("[PCL]  二维码已刷新，重开新图...")
                 self._prompt_scan_ui()
-        print("[PCL] ⚠ 等待扫码超时(5分钟)，NapCat 仍未登录")
+        print("[PCL]  等待扫码超时(5分钟)，NapCat 仍未登录")
         _finish(False)
 
     def _napcat_token(self) -> str:
@@ -1742,7 +1742,7 @@ class PCLMainWindow(QWidget):
                         capture_output=True, timeout=10,
                         creationflags=getattr(_sp, "CREATE_NO_WINDOW", 0),
                     )
-                    print("[PCL] ✅ 已随 QQ AIpet 关闭 NapCat（含控制台窗口）")
+                    print("[PCL]  已随 QQ AIpet 关闭 NapCat（含控制台窗口）")
                     return
             except Exception:
                 pass
@@ -1764,9 +1764,9 @@ class PCLMainWindow(QWidget):
                 capture_output=True, timeout=15,
                 creationflags=getattr(_sp, "CREATE_NO_WINDOW", 0),
             )
-            print("[PCL] ✅ NapCat 兜底进程清理完成")
+            print("[PCL]  NapCat 兜底进程清理完成")
         except Exception as e:
-            print(f"[PCL] ⚠ NapCat 关闭失败: {e}")
+            print(f"[PCL]  NapCat 关闭失败: {e}")
 
     @staticmethod
     def _kill_stray_run_qq(base: str):
@@ -1834,12 +1834,12 @@ class PCLMainWindow(QWidget):
         if not py:
             self._show_config_dialog("未找到 Python 解释器")
             return
-        # ⚠ 先清理残留的旧 run_qq.py 实例：旧实例可能还带着过期的 WS token 在空转重连，
+        #  先清理残留的旧 run_qq.py 实例：旧实例可能还带着过期的 WS token 在空转重连，
         #   不清掉会出现「同时跑好几个实例」「同一条消息被回复多次」（用户反馈过）。
         try:
             self._kill_stray_run_qq(base)
         except Exception as _e:
-            print(f"[PCL] ⚠ 清理残留 QQ 实例失败（继续启动）: {_e}")
+            print(f"[PCL]  清理残留 QQ 实例失败（继续启动）: {_e}")
         # 记录 QQ 服务的角色（切角色时用于提示）
         try:
             from pets.pet_registry import get_active_pet_id
@@ -1854,7 +1854,7 @@ class PCLMainWindow(QWidget):
         # 关键：等待 NapCat 期间按钮被禁用，这里必须恢复可用，
         # 否则 run_qq 启动后按钮仍为灰色 → 用户无法点击"关闭 QQ AIpet"（历史 bug）
         self.qq_btn.setEnabled(True)
-        self.qq_btn.setText("  ⏹ 关闭 QQ AIpet")
+        self.qq_btn.setText("   关闭 QQ AIpet")
         # QQ AIpet 已运行 → 显示 NapCat 工具按钮
         self._set_qq_tools_visible(True)
         self.qq_btn.setStyleSheet(f"""
@@ -1900,7 +1900,7 @@ class PCLMainWindow(QWidget):
         #      重启自动快速登录、无需扫码；9.9.33 独立版不支持登录持久化）
         napcat_bat = os.path.join(base, "NapCat.Shell.Windows.OneKey", "NapCat", "launcher-user.bat")
         if not os.path.exists(napcat_bat):
-            print(f"[PCL] ⚠ 未找到 NapCat 启动脚本: {napcat_bat}")
+            print(f"[PCL]  未找到 NapCat 启动脚本: {napcat_bat}")
             self._show_config_dialog("NapCat 未安装")
             return
 
@@ -1914,7 +1914,7 @@ class PCLMainWindow(QWidget):
             # 记录 NapCat 由本启动器拉起 → 关闭 QQ AIpet 时连带关闭（含控制台窗口）
             self._napcat_started_by_us = True
         except Exception as e:
-            print(f"[PCL] ⚠ 启动 NapCat 失败: {e}")
+            print(f"[PCL]  启动 NapCat 失败: {e}")
             self._napcat_proc = None
             self._napcat_started_by_us = False
             self._show_config_dialog("NapCat 启动失败")
@@ -1922,7 +1922,7 @@ class PCLMainWindow(QWidget):
 
         # 等待期间：禁用按钮 + 更新文字，防止重复点击
         self.qq_btn.setEnabled(False)
-        self.qq_btn.setText("  ⏳ 等待 NapCat...（自动登录中）")
+        self.qq_btn.setText("   等待 NapCat...（自动登录中）")
 
         # 异步轮询：QTimer 每秒检查一次端口（不阻塞 UI）
         self._napcat_wait_elapsed = 0
@@ -1945,7 +1945,7 @@ class PCLMainWindow(QWidget):
             self._napcat_wait_running = False
             self._napcat_wait_timer.stop()
             self._napcat_wait_elapsed = 0
-            print(f"[PCL] ✅ NapCat WebSocket 就绪（{elapsed} 秒）")
+            print(f"[PCL]  NapCat WebSocket 就绪（{elapsed} 秒）")
             self._start_run_qq()
             return
 
@@ -1955,8 +1955,8 @@ class PCLMainWindow(QWidget):
             self._napcat_wait_timer.stop()
             self._napcat_wait_elapsed = 0
             self.qq_btn.setEnabled(True)
-            self.qq_btn.setText("  💬 启动 QQ AIpet")
-            print(f"[PCL] ⚠ 等待 NapCat 超时（{self._napcat_wait_timeout} 秒），请检查 NapCat 控制台")
+            self.qq_btn.setText("   启动 QQ AIpet")
+            print(f"[PCL]  等待 NapCat 超时（{self._napcat_wait_timeout} 秒），请检查 NapCat 控制台")
             self._show_config_dialog("NapCat 启动超时")
             return
 
@@ -1979,14 +1979,14 @@ class PCLMainWindow(QWidget):
             self._napcat_started_by_us = False  # 用户接管 NapCat，关闭 QQ 时不再连带关闭
             self._napcat_proc = None
             self.qq_btn.setEnabled(True)
-            self.qq_btn.setText("  💬 启动 QQ AIpet")
+            self.qq_btn.setText("   启动 QQ AIpet")
             return
 
         # 关闭 QQ AIpet
         if self._qq_process is not None:
             self._kill_qq_process()
             self._qq_pet_id = None
-            self.qq_btn.setText("  💬 启动 QQ AIpet")
+            self.qq_btn.setText("   启动 QQ AIpet")
             self.qq_btn.setEnabled(True)
             self.qq_btn.setToolTip("启动 QQ 聊天模块（自动启动 NapCat，首次需扫码登录）")
             self.qq_btn.setStyleSheet(f"""
@@ -2087,7 +2087,7 @@ class PCLMainWindow(QWidget):
     def _wechat_btn_styled(self, running):
         """微信按钮样式切换（启动绿 / 关闭红）"""
         if running:
-            self.wechat_btn.setText("  ⏹ 关闭微信 AIpet")
+            self.wechat_btn.setText("   关闭微信 AIpet")
             self.wechat_btn.setStyleSheet(f"""
                 QPushButton {{ background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
                     stop:0 #e03030,stop:1 #f06060);
@@ -2095,7 +2095,7 @@ class PCLMainWindow(QWidget):
                     border-radius: {int(14*S)}px; }}
             """)
         else:
-            self.wechat_btn.setText("  💬 启动微信 AIpet")
+            self.wechat_btn.setText("   启动微信 AIpet")
             self.wechat_btn.setStyleSheet(f"""
                 QPushButton {{ background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
                     stop:0 {THEME_COLORS['green']['btn_start']},stop:1 {THEME_COLORS['green']['btn_end']});

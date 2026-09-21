@@ -176,12 +176,73 @@ def _derive_from_base(pal: dict) -> dict:
               f" 文字={'浅' if dark else '深'} 面={face.name()}")
         return p2
     except Exception as e:
-        print(f"[Colors] ⚠ 底色派生失败（用主题配色）: {e}")
+        print(f"[Colors]  底色派生失败（用主题配色）: {e}")
+        return pal
+
+
+def _mix_color(c: QColor, k: float) -> QColor:
+    """把颜色往白(k>0)或往黑(k<0)混一点（k 取 0~1）"""
+    if k >= 0:
+        return QColor(int(c.red() + (255 - c.red()) * k),
+                      int(c.green() + (255 - c.green()) * k),
+                      int(c.blue() + (255 - c.blue()) * k))
+    k = -k
+    return QColor(int(c.red() * (1 - k)), int(c.green() * (1 - k)), int(c.blue() * (1 - k)))
+
+
+def _theme_text_color(theme_id: str = "") -> str:
+    """主题里自带的文字颜色（theme.json 的 text_color）——「复制为我的」时会连同文字色一起存进去"""
+    try:
+        import json as _json
+        pj = os.path.join(THEME_DIR, str(theme_id or current_theme_id()), "theme.json")
+        if os.path.isfile(pj):
+            with open(pj, "r", encoding="utf-8") as f:
+                return str((_json.load(f) or {}).get("text_color") or "").strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _apply_text_color(pal: dict, theme_id: str = "") -> dict:
+    """应用用户设定的文字颜色（config.json 的 ui_text_color）。
+
+     为什么需要：壁纸/浅色底 + 浅色文字会完全看不见（用户反馈"背景是白色，结果文字
+      也是白色"）。这里让文字颜色能手动指定；留空或写 auto 仍然按底色自动对比。
+      次级文字（Gray 系：说明/占位/时间）跟着主文字色往背景方向压一点，保持层次。
+    """
+    try:
+        import json as _json
+        cfg_path = os.path.join(_app_base_dir(), "config.json")
+        with open(cfg_path, "r", encoding="utf-8") as f:
+            cfg = _json.load(f)
+        hexv = str(cfg.get("ui_text_color") or "").strip()
+        if not hexv:
+            hexv = _theme_text_color(theme_id)      # 回落：主题自带的文字色
+        if not hexv or hexv.lower() in ("auto", "自动"):
+            return pal
+        c = QColor(hexv)
+        if not c.isValid():
+            return pal
+        p2 = dict(pal)
+        p2["Color1"] = c.name()
+        p2["Color2"] = c.name()
+        light_text = c.lightness() > 140
+        k = -0.28 if light_text else 0.30        # 往背景方向压，做出"次要"层次
+        p2["Gray1"] = _mix_color(c, k * 0.6).name()
+        p2["Gray2"] = _mix_color(c, k).name()
+        p2["Gray3"] = _mix_color(c, k * 1.35).name()
+        p2["Gray4"] = _mix_color(c, k * 1.7).name()
+        print(f"[Colors] 已应用自定义文字颜色: {c.name()}"
+              f"（次要用 {p2['Gray2']}）")
+        return p2
+    except Exception as e:
+        print(f"[Colors]  自定义文字色应用失败（改用自动对比）: {e}")
         return pal
 
 
 # ===== 当前主题色板（启动时加载一次）=====
 _PAL = _derive_from_base(_load_theme_palette(current_theme_id()))
+_PAL = _apply_text_color(_PAL)      #  用户自定义文字颜色（config.ui_text_color）
 ACCENT_ID = str(_PAL.get("accent", "blue"))
 
 # ===== 基础色板 =====
@@ -406,6 +467,7 @@ def apply_theme_live(theme_id: str) -> dict:
     global _PAL, ACCENT_ID
     theme_id = str(theme_id or "").strip() or "silicon"
     pal = _derive_from_base(_load_theme_palette(theme_id))
+    pal = _apply_text_color(pal, theme_id)      #  实时切换也要应用（自定义/主题自带的）文字颜色
     _apply_palette_inplace(pal)
     _PAL = pal
     ACCENT_ID = str(pal.get("accent", "blue") or "blue")
@@ -435,6 +497,6 @@ def apply_accent_live(accent_key: str) -> str:
                 json.dump(data, f, ensure_ascii=False, indent=2)
             os.replace(tmp, pj)
     except Exception as e:
-        print(f"[Colors] ⚠ 强调色写回主题失败: {e}")
+        print(f"[Colors]  强调色写回主题失败: {e}")
     print(f"[Colors] 强调色已实时切换 → {key} ({accent_hex(key)})")
     return accent_hex(key)

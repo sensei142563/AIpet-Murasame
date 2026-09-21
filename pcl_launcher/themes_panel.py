@@ -30,16 +30,20 @@ class PCLThemeBgDialog(SiliconDialog):
     """主题背景设置：选择图片或视频作为启动器背景（写入该主题，立即生效）"""
 
     def __init__(self, meta, parent=None):
-        super().__init__(parent)
+        #  两个关键点（曾经的 bug：内容全都不显示，只剩标题栏和关闭按钮）：
+        #   ① SiliconDialog.__init__ 的第一个参数是 **title**，以前把 parent 传成了标题 →
+        #      父窗口没设上，而且拿控件当标题；
+        #   ② 内容必须塞进基类给的 self.content 布局。以前又 QVBoxLayout(self) 新建一个 →
+        #      Qt 不给已有布局的控件再装第二个 → 里面的按钮/标签全都成了"没有父窗口的孤儿"，
+        #      永远不显示 → 用户看到的就是"一个黑窗口，无法设置背景图片/视频"。
+        super().__init__(f"{meta.get('name', meta.get('id'))} 背景设置", parent)
         try:
             self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
         except Exception:
             pass
         self._meta = meta
-        self.setWindowTitle(f"🖼 {meta.get('name', meta.get('id'))} 背景设置")
         self.setMinimumWidth(int(470 * S))
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(int(18 * S), int(14 * S), int(18 * S), int(14 * S))
+        lay = self.content                      # ← 用基类的 content 布局
         lay.setSpacing(int(10 * S))
 
         try:
@@ -64,8 +68,8 @@ class PCLThemeBgDialog(SiliconDialog):
         lay.addWidget(info)
 
         row = QHBoxLayout()
-        btn_img = QPushButton("  🖼 选择背景图片")
-        btn_vid = QPushButton("  🎞 选择背景视频")
+        btn_img = QPushButton("   选择背景图片")
+        btn_vid = QPushButton("   选择背景视频")
         btn_rm = QPushButton("  移除背景")
         for b in (btn_img, btn_vid, btn_rm):
             b.setStyleSheet(primary_btn_qss(pad_h=12, font_size=12))
@@ -84,6 +88,7 @@ class PCLThemeBgDialog(SiliconDialog):
         btns.addStretch()
         btns.addWidget(btn_cancel)
         lay.addLayout(btns)
+        lay.addStretch(1)          # 内容靠上排，别把标签拉成大块
 
     def _copy_into_theme(self, src, ext, kind):
         tdir = self._meta["_dir"]
@@ -100,6 +105,15 @@ class PCLThemeBgDialog(SiliconDialog):
         pj = os.path.join(tdir, "theme.json")
         tj = json.load(io.open(pj, encoding="utf-8"))
         tj["background"] = {"type": kind, "source": f"assets/bg_custom.{ext}", "opacity": 1.0}
+        #  主题保存时连带保存文字颜色（用户要求：换主题/复制为主题时文字色跟着走）
+        try:
+            _tc = str((_load_config() or {}).get("ui_text_color") or "").strip()
+            if _tc:
+                tj["text_color"] = _tc
+            else:
+                tj.pop("text_color", None)
+        except Exception:
+            pass
         with io.open(pj, "w", encoding="utf-8") as f:
             json.dump(tj, f, ensure_ascii=False, indent=2)
         self.accept()
@@ -184,7 +198,7 @@ class PCLThemesPanel(QScrollArea):
         self._layout.setSpacing(int(14 * S))
         self.setWidget(self._container)
 
-        title = QLabel("  🎨 主题目录")
+        title = QLabel("   主题目录")
         title.setFont(QFont("Microsoft YaHei", int(16 * S), QFont.Bold))
         title.setStyleSheet(f"color: {Color1.name()};")
         self._layout.addWidget(title)
@@ -197,10 +211,10 @@ class PCLThemesPanel(QScrollArea):
         try:
             self._layout.addWidget(self._build_bg_controls())
         except Exception as _e:
-            print(f"[Themes] ⚠ 背景调节控件挂载失败: {_e}")
+            print(f"[Themes]  背景调节控件挂载失败: {_e}")
 
         # ===== 主题色（强调色）选择：与主题一体管理 =====
-        acc_label = QLabel("  🎨 主题色（强调色，点击即时预览切换）")
+        acc_label = QLabel("   主题色（强调色，点击即时预览切换）")
         acc_label.setFont(QFont("Microsoft YaHei", int(13 * S), QFont.Bold))
         acc_label.setStyleSheet(
             f"color: {Color3.name()}; margin-top: {int(8*S)}px;"
@@ -225,8 +239,8 @@ class PCLThemesPanel(QScrollArea):
         self._layout.addLayout(acc_row)
 
         top = QHBoxLayout()
-        btn_import = QPushButton("  📦 导入主题 (zip)")
-        btn_refresh = QPushButton("  🔄 刷新")
+        btn_import = QPushButton("   导入主题 (zip)")
+        btn_refresh = QPushButton("   刷新")
         for b in (btn_import, btn_refresh):
             b.setStyleSheet(f"""
                 QPushButton {{ background: {Color3.name()}; color: white; border: none;
@@ -266,7 +280,7 @@ class PCLThemesPanel(QScrollArea):
         lay.setContentsMargins(int(16*S), int(12*S), int(16*S), int(12*S))
         lay.setSpacing(int(8*S))
 
-        head = QLabel("🖼 背景调节（壁纸 / 背景视频 · 拖动实时生效）")
+        head = QLabel(" 背景调节（壁纸 / 背景视频 · 拖动实时生效）")
         head.setStyleSheet(f"color: {Color1.name()}; font-size: {int(13*S)}px; font-weight: bold;")
         lay.addWidget(head)
 
@@ -295,7 +309,7 @@ class PCLThemesPanel(QScrollArea):
                     if callable(fn):
                         fn({k: int(v)})          # 自带节流：只在值变化时重载背景
                 except Exception as e:
-                    print(f"[Themes] ⚠ 实时预览失败: {e}")
+                    print(f"[Themes]  实时预览失败: {e}")
 
             def _commit(v, k=key):
                 """松手/点箭头后落盘一次（300ms 防抖，避免频繁写盘卡顿）"""
@@ -315,13 +329,13 @@ class PCLThemesPanel(QScrollArea):
                                     self._bg_pending = {}
                                     print(f"[Themes] 背景设置已保存（实时生效）: {pend}")
                             except Exception as e:
-                                print(f"[Themes] ⚠ 背景设置落盘失败: {e}")
+                                print(f"[Themes]  背景设置落盘失败: {e}")
                         self._bg_save_timer.timeout.connect(_flush)
                     self._bg_pending = getattr(self, "_bg_pending", {})
                     self._bg_pending[k] = int(v)
                     self._bg_save_timer.start(300)
                 except Exception as e:
-                    print(f"[Themes] ⚠ 背景设置提交失败: {e}")
+                    print(f"[Themes]  背景设置提交失败: {e}")
 
             sd.valueChanged.connect(_chg)
             sd.sliderReleased.connect(lambda k=key, sd=sd: _commit(sd.value(), k))
@@ -370,7 +384,7 @@ class PCLThemesPanel(QScrollArea):
                     if callable(fn):
                         fn({"ui_bg_color": c.name()})
                 except Exception as _e:
-                    print(f"[Themes] ⚠ 底色实时应用失败: {_e}")
+                    print(f"[Themes]  底色实时应用失败: {_e}")
                 print(f"[Themes] 背景底色 → {c.name()}（已实时生效）")
 
             def _pick_color():
@@ -395,8 +409,77 @@ class PCLThemesPanel(QScrollArea):
                 row_c.addWidget(_b)
             row_c.addStretch()
             lay.addLayout(row_c)
+
+            # ── 文字颜色：和背景底色一样能选（浅色背景必须能改深色字，否则白底白字看不见）──
+            row_t = QHBoxLayout()
+            lab_t = QLabel("文字颜色")
+            lab_t.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(12*S)}px;")
+            lab_t.setFixedWidth(int(84*S))
+            row_t.addWidget(lab_t)
+            self._text_color = _QC(str((_load_config() or {}).get("ui_text_color") or "#eef1f7"))
+            btn_txt = QPushButton()
+            btn_txt.setFixedSize(int(58*S), int(24*S))
+            btn_txt.setCursor(Qt.PointingHandCursor)
+
+            def _paint_txt_btn():
+                c = self._text_color
+                btn_txt.setStyleSheet(
+                    f"QPushButton {{ background: {c.name()}; border: 1px solid rgba(255,255,255,0.35);"
+                    f" border-radius: 6px; }}")
+
+            def _save_text_color(hexv):
+                """写 ui_text_color 并提示重启（全界面配色是启动时加载的）"""
+                if hexv:
+                    self._text_color = _QC(hexv)
+                _paint_txt_btn()
+                cc = _load_config() or {}
+                cc["ui_text_color"] = str(hexv or "")
+                _save_config(cc)
+                # 即时生效（重算色板 + 重建界面），不用重启
+                try:
+                    win = self.window()
+                    fn = getattr(win, "apply_text_color", None)
+                    if callable(fn):
+                        fn(hexv or "")
+                except Exception as _e:
+                    print(f"[Themes]  文字色实时应用失败: {_e}")
+                print(f"[Themes] 文字颜色 → {hexv or '自动'}（已实时生效）")
+
+            def _pick_text_color():
+                c = QColorDialog.getColor(self._text_color, self, "选择文字颜色")
+                if c.isValid():
+                    _save_text_color(c.name())
+
+            btn_txt.clicked.connect(_pick_text_color)
+            _paint_txt_btn()
+            row_t.addWidget(btn_txt)
+            for _name, _hex in (("深灰字", "#20242e"), ("黑字", "#111111"), ("白字", "#ffffff"),
+                                ("米白字", "#fdf6ee"), ("浅灰字", "#b9c2d6")):
+                _bt = QPushButton(_name)
+                _bt.setCursor(Qt.PointingHandCursor)
+                _bt.setFixedHeight(int(24*S))
+                _bt.setStyleSheet(
+                    f"QPushButton {{ background: rgba(255,255,255,0.10); color: {Color1.name()};"
+                    f" border: 1px solid {Color5.name()}; border-radius: 6px; padding: 0 10px;"
+                    f" font-size: {int(11*S)}px; }}"
+                    f"QPushButton:hover {{ border-color: {Color3.name()}; }}")
+                _bt.clicked.connect(lambda _=False, h=_hex: _save_text_color(h))
+                row_t.addWidget(_bt)
+            _bt_auto = QPushButton("自动")
+            _bt_auto.setCursor(Qt.PointingHandCursor)
+            _bt_auto.setFixedHeight(int(24*S))
+            _bt_auto.setToolTip("由启动器按背景底色自动决定文字明暗（底深→浅字，底浅→深字）")
+            _bt_auto.setStyleSheet(
+                f"QPushButton {{ background: rgba(255,255,255,0.10); color: {Color1.name()};"
+                f" border: 1px solid {Color5.name()}; border-radius: 6px; padding: 0 10px;"
+                f" font-size: {int(11*S)}px; }}"
+                f"QPushButton:hover {{ border-color: {Color3.name()}; }}")
+            _bt_auto.clicked.connect(lambda: _save_text_color(""))
+            row_t.addWidget(_bt_auto)
+            row_t.addStretch()
+            lay.addLayout(row_t)
         except Exception as _e:
-            print(f"[Themes] ⚠ 背景底色控件构建失败: {_e}")
+            print(f"[Themes]  背景底色/文字颜色控件构建失败: {_e}")
         self._bg_blur_slider = _mk("背景模糊度", "ui_bg_blur", 0)
 
         btn_reset = QPushButton("恢复默认（100% / 0%）")
@@ -442,14 +525,14 @@ class PCLThemesPanel(QScrollArea):
         mine = [t for t in themes if not t.get("builtin", True)]
 
         # —— 官方主题（不可删除/修改）——
-        self._list_layout.addWidget(self._section_label("🏛 官方主题", len(official)))
+        self._list_layout.addWidget(self._section_label(" 官方主题", len(official)))
         for meta in official:
             self._list_layout.addWidget(self._make_card(meta, cur))
         if not official:
             self._list_layout.addWidget(QLabel("  暂无官方主题。"))
 
         # —— 我的主题（导入/复制，可删除/修改/重命名）——
-        self._list_layout.addWidget(self._section_label("📁 我的主题", len(mine)))
+        self._list_layout.addWidget(self._section_label(" 我的主题", len(mine)))
         for meta in mine:
             self._list_layout.addWidget(self._make_card(meta, cur))
         if not mine:
@@ -473,7 +556,7 @@ class PCLThemesPanel(QScrollArea):
         is_cur = meta["id"] == current
         name = meta["name"]
         if is_cur:
-            name += "   ✅ 当前使用"
+            name += "    当前使用"
         name_lbl = QLabel(name)
         name_lbl.setFont(QFont("Microsoft YaHei", int(14*S), QFont.Bold))
         name_lbl.setStyleSheet(f"color: {Color3.name() if is_cur else Color1.name()}; "
@@ -527,34 +610,34 @@ class PCLThemesPanel(QScrollArea):
         col_a = QVBoxLayout(); col_a.setSpacing(int(6*S))
         col_b = QVBoxLayout(); col_b.setSpacing(int(6*S))
 
-        btn_apply = _mk("✅ 应用" if not is_cur else "使用中")
+        btn_apply = _mk(" 应用" if not is_cur else "使用中")
         btn_apply.setEnabled(not is_cur)
         btn_apply.clicked.connect(lambda: self._apply(meta))
         col_a.addWidget(btn_apply)
 
-        btn_export = _mk("📤 导出")
+        btn_export = _mk(" 导出")
         btn_export.clicked.connect(lambda: self._export(meta))
         col_a.addWidget(btn_export)
 
         if not _official:
-            btn_bg = _mk("🖼 背景", "设置该主题的启动器背景图片/视频")
+            btn_bg = _mk(" 背景", "设置该主题的启动器背景图片/视频")
             btn_bg.clicked.connect(lambda: self._bg_setting(meta))
             col_a.addWidget(btn_bg)
         else:
             # 官方主题：改细节先复制为我的主题
-            btn_copy = _mk("📑 复制为我的", "复制一份到「我的主题」，之后可自由修改背景、重命名或删除")
+            btn_copy = _mk(" 复制为我的", "复制一份到「我的主题」，之后可自由修改背景、重命名或删除")
             btn_copy.clicked.connect(lambda: self._duplicate(meta))
             col_b.addWidget(btn_copy)
 
         # 所有主题都支持重命名与打开目录
-        btn_rename = _mk("✏️ 重命名")
+        btn_rename = _mk(" 重命名")
         btn_rename.clicked.connect(lambda: self._rename(meta))
         col_b.addWidget(btn_rename)
-        btn_open = _mk("📂 打开目录", "打开该主题所在文件夹")
+        btn_open = _mk(" 打开目录", "打开该主题所在文件夹")
         btn_open.clicked.connect(lambda: self._open_dir(meta))
         col_b.addWidget(btn_open)
         if not _official:
-            btn_del = _mk("🗑 删除")
+            btn_del = _mk(" 删除")
             btn_del.clicked.connect(lambda: self._delete(meta))
             col_b.addWidget(btn_del)
 
@@ -677,6 +760,19 @@ class PCLThemesPanel(QScrollArea):
             self._reload()
         except Exception as e:
             QMessageBox.warning(self, "复制失败", str(e))
+
+        #  复制为主题时，把当前文字颜色一起带过去（用户要求：主题保存要含字体颜色）
+        try:
+            _tc = str((_load_config() or {}).get("ui_text_color") or "").strip()
+            _pj2 = os.path.join(new_dir, "theme.json")
+            if _tc and os.path.isfile(_pj2):
+                _tj2 = json.load(io.open(_pj2, encoding="utf-8"))
+                _tj2["text_color"] = _tc
+                with io.open(_pj2, "w", encoding="utf-8") as _f:
+                    json.dump(_tj2, _f, ensure_ascii=False, indent=2)
+                print(f"[Themes] 已把当前文字颜色 {_tc} 一并写入新主题")
+        except Exception as _e:
+            print(f"[Themes]  复制文字颜色失败: {_e}")
 
     def _import_theme(self):
         path, _ = QFileDialog.getOpenFileName(self, "选择主题包 (zip)", "",

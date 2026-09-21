@@ -59,6 +59,16 @@ if _os.path.exists(dll_dir):
     except Exception:
         pass
 
+# ★ 让 Qt 找到多媒体后端插件（mediaservice）：缺了它 QMediaPlayer 直接不可用，
+#   视频背景永远播不出来（用户反馈"视频背景不显示"）。源码/冻结两种布局都算一遍。
+try:
+    import PyQt5 as _pyqt5, os as _os3
+    _pp = _os3.path.join(_os3.path.dirname(_pyqt5.__file__), "Qt5", "plugins")
+    if _os3.path.isdir(_pp):
+        _os3.environ.setdefault("QT_PLUGIN_PATH", _pp)
+except Exception:
+    pass
+
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtGui import QSurfaceFormat
 # 不再导入旧版主窗口（PCLMainWindow 已随旧界面下线）：

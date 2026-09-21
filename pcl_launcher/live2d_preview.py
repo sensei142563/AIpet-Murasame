@@ -12,7 +12,7 @@ from PyQt5.QtGui import QImage, QPixmap, QSurfaceFormat, QColor, QPainter
 from PyQt5.QtWidgets import (QOpenGLWidget, QWidget, QVBoxLayout, QHBoxLayout,
                                QPushButton)
 
-# ⚠ 从旧版主窗口抽出来时漏了 colors 里的常量（PREVIEW_BG 等）→ initializeGL 抛 NameError
+#  从旧版主窗口抽出来时漏了 colors 里的常量（PREVIEW_BG 等）→ initializeGL 抛 NameError
 #   → 预览一直是空白/透明（这就是「Live2D 显示不出来」的真正原因）
 from .colors import *            # noqa: F401,F403
 from .colors import background_info, PREVIEW_BG   # noqa: F401
@@ -352,7 +352,7 @@ class Live2DPreviewWidget(QOpenGLWidget):
     def _rebuild_model_in_ctx(self):
         """在**当前（控件的）GL 上下文里**创建模型 + 渲染器。
 
-        ⚠ 为什么必须这样：Cubism 的 `LAppModel.LoadModelJson()` 会 `CreateRenderer()`，
+         为什么必须这样：Cubism 的 `LAppModel.LoadModelJson()` 会 `CreateRenderer()`，
         即把贴图/遮罩等 GL 资源建到「调用时的当前上下文」里。
         旧写法在普通槽函数里直接 LoadModelJson（那时当前上下文不是控件的上下文）→
         资源建错地方 → 第二次打开画面异常（看着像被拉伸/错乱）。
@@ -396,7 +396,7 @@ class Live2DPreviewWidget(QOpenGLWidget):
                 glBlendFunc, glClearColor, glClear, GL_COLOR_BUFFER_BIT
             )
             import live2d.v3 as l2d
-            # ⚠ Cubism 的 init/glInit 一个进程只能做一次：第二次开窗口再调就会报错/崩溃
+            #  Cubism 的 init/glInit 一个进程只能做一次：第二次开窗口再调就会报错/崩溃
             #   （这就是「预览第一次正常、第二次出错」的根因）
             if not _L2D_INITED:
                 try:
@@ -427,7 +427,7 @@ class Live2DPreviewWidget(QOpenGLWidget):
     def reload_model(self, path: str):
         """按「全新加载」的方式重建模型（用于复用窗口时切换模型）。
 
-        ⚠ 两个关键点（缺一个都会导致「第二次打开和第一次不一样」）：
+         两个关键点（缺一个都会导致「第二次打开和第一次不一样」）：
         1) 模型必须建在控件自己的 GL 上下文里 → `makeCurrent()` 包住创建过程；
         2) 视口/时间/变换全部重置 → 与第一次打开的画面完全一致。
         """
@@ -463,7 +463,7 @@ class Live2DPreviewWidget(QOpenGLWidget):
     def paintGL(self):
         try:
             from OpenGL.GL import glClearColor, glClear, GL_COLOR_BUFFER_BIT, GL_DEPTH_BUFFER_BIT
-            # ⚠ 预览必须“不透明”：主题没壁纸时 alpha 会让整块看着是透明的（模型像没显示）
+            #  预览必须“不透明”：主题没壁纸时 alpha 会让整块看着是透明的（模型像没显示）
             _cc = list(self._clear_color())
             if len(_cc) == 4:
                 _cc[3] = 1.0
@@ -484,7 +484,7 @@ class Live2DPreviewWidget(QOpenGLWidget):
             self._draw_bg_quad()
         except Exception:
             pass
-        # ★ 先铺一层不透明底色：即使模型没画出来，也能看到一块面板
+        #  先铺一层不透明底色：即使模型没画出来，也能看到一块面板
         #   （避免"窗口一片透明像没显示"）
         try:
             from OpenGL.GL import (glMatrixMode, glLoadIdentity, glOrtho,
@@ -500,7 +500,7 @@ class Live2DPreviewWidget(QOpenGLWidget):
             glEnd()
         except Exception as _e:
             _l2d_log(f"底色绘制失败: {_e}")
-        # ⚠ 兜底自愈：窗口隐藏/移动后 GL 上下文可能被系统重建，
+        #  兜底自愈：窗口隐藏/移动后 GL 上下文可能被系统重建，
         #   此时旧模型的 GL 资源已失效（画面空白/错乱）→ 在当前上下文里重建一次。
         try:
             if self._render_ready and self.model is not None \
@@ -524,7 +524,7 @@ class Live2DPreviewWidget(QOpenGLWidget):
     def _ensure_viewport(self):
         """把模型画布尺寸对齐控件尺寸。
 
-        ⚠ 只靠 resizeGL 不够：控件嵌在布局/堆叠容器里时，resizeGL 可能早于模型加载
+         只靠 resizeGL 不够：控件嵌在布局/堆叠容器里时，resizeGL 可能早于模型加载
         或根本不触发 → 模型按 0×0 视口绘制（表现就是「Live2D 显示不出来 / 只有一小块」）。"""
         try:
             if self.model is None or not self._render_ready:
@@ -568,7 +568,7 @@ class Live2DPreviewWidget(QOpenGLWidget):
 class Live2DPreviewWindow(QWidget):
     """独立的 Live2D 实时预览窗口。
 
-    ⚠ 为什么单独开窗口：QOpenGLWidget 放在**透明窗口**（亚克力对话框）里渲染不出来，
+     为什么单独开窗口：QOpenGLWidget 放在**透明窗口**（亚克力对话框）里渲染不出来，
     旧版启动器的预览之所以正常，就是因为它在一个普通窗口里。这里同样用不透明窗口。
     """
 
@@ -595,9 +595,9 @@ class Live2DPreviewWindow(QWidget):
         lay.addWidget(self.view, 1)
         bar = QHBoxLayout()
         bar.setContentsMargins(8, 4, 8, 8)
-        self.btn_reload = QPushButton("🔄 重新加载")
+        self.btn_reload = QPushButton(" 重新加载")
         self.btn_reload.clicked.connect(lambda: self.view.load_model(self._model_json) if self._model_json else None)
-        self.btn_fit = QPushButton("🎯 适合窗口")
+        self.btn_fit = QPushButton(" 适合窗口")
         self.btn_fit.clicked.connect(self._fit)
         bar.addWidget(self.btn_reload)
         bar.addWidget(self.btn_fit)
@@ -625,7 +625,7 @@ class Live2DPreviewWindow(QWidget):
                 self.view.reload_model(model_json)
         except Exception as e:
             _l2d_log(f"切换模型失败: {e}")
-            print(f"[Live2DWindow] ⚠ 切换模型失败: {e}")
+            print(f"[Live2DWindow]  切换模型失败: {e}")
 
 
 _WINDOWS = []
@@ -636,7 +636,7 @@ def open_live2d_window(model_json: str = "", parent=None) -> "Live2DPreviewWindo
     try:
         from PyQt5.QtWidgets import QApplication
         app = QApplication.instance()
-        # ★ 关键：**复用同一个窗口/同一个 QOpenGLWidget**。
+        #  关键：**复用同一个窗口/同一个 QOpenGLWidget**。
         #   Cubism 的 glInit 是绑定在「当前 GL 上下文」上的；每新建一个 QOpenGLWidget
         #   就是换了一个上下文 → 引擎在那个上下文里没初始化 → 第二/第三次打开就画不出来。
         for w in list(_WINDOWS):
@@ -659,5 +659,5 @@ def open_live2d_window(model_json: str = "", parent=None) -> "Live2DPreviewWindo
     except Exception as e:
         import traceback as _tb
         _l2d_log("打开失败: " + repr(e) + " | " + _tb.format_exc()[:900])
-        print(f"[Live2DWindow] ⚠ 打开失败: {e}")
+        print(f"[Live2DWindow]  打开失败: {e}")
         return None

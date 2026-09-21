@@ -14,7 +14,7 @@ import shutil
 import zipfile
 import subprocess
 
-from PyQt5.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve
+from PyQt5.QtCore import QObject, pyqtSignal, Qt, QPropertyAnimation, QEasingCurve
 from PyQt5.QtWidgets import (
     QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QScrollArea,
     QCheckBox, QFrame, QMessageBox, QFileDialog, QSizePolicy, QDialog,
@@ -148,25 +148,66 @@ def set_enabled(meta, enabled: bool) -> bool:
     return True
 
 
-def _tool_running(meta) -> bool:
-    if meta.get("id") != "time_guard":
-        return True
+_TOOL_STATE = {}          # 工具型插件运行状态缓存（后台探测）
+_TOOL_BUSY = set()
+
+
+class _ToolProbe(QObject):
+    """探测完成后通知界面刷新（免得一直显示旧状态）"""
+    done = pyqtSignal()
+
+
+tool_probe = _ToolProbe()
+
+
+def _probe_tool_state(pid: str):
     try:
         out = subprocess.run(
             ["powershell", "-NoProfile", "-Command",
              "(Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'python(w)?.exe' -and "
              "$_.CommandLine -like '*time_sync_guard.py*' } | Measure-Object).Count"],
-            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10)
-        return out.stdout.strip().startswith(("1", "2", "3"))
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))   # ★ 别弹终端窗口
+        _TOOL_STATE[pid] = out.stdout.strip().startswith(("1", "2", "3"))
     except Exception:
-        return False
+        _TOOL_STATE[pid] = False
+    finally:
+        _TOOL_BUSY.discard(pid)
+    try:
+        tool_probe.done.emit()
+    except Exception:
+        pass
+
+
+def _tool_running(meta, sync: bool = False) -> bool:
+    """工具型插件是否在运行（time_guard = 时间同步守护）。
+
+    ★ 以前这里是**同步**跑 powershell 查进程，而且没带 CREATE_NO_WINDOW →
+      点「插件」目录必弹一个终端窗口、界面还要卡半秒以上（用户反馈）。
+      现在：界面刷新只读缓存，没缓存就丢后台线程去探（探完发信号刷新）；
+      只有"启停"这种需要立即拿准结果的操作才同步等（同样不弹窗口）。
+    """
+    if meta.get("id") != "time_guard":
+        return True
+    pid = str(meta.get("id"))
+    if pid in _TOOL_STATE:
+        return _TOOL_STATE[pid]
+    if sync:
+        _TOOL_BUSY.add(pid)
+        _probe_tool_state(pid)
+        return _TOOL_STATE.get(pid, False)
+    if pid not in _TOOL_BUSY:
+        _TOOL_BUSY.add(pid)
+        import threading
+        threading.Thread(target=_probe_tool_state, args=(pid,), daemon=True).start()
+    return False          # 首次先按"未运行"显示，后台探完会自动刷新
 
 
 def _time_guard_set(enabled: bool) -> bool:
     """启停时间同步守护进程（计划任务每 3 分钟也会拉起，若已装任务则以任务为准）"""
     try:
         if enabled:
-            if _tool_running({"id": "time_guard"}):
+            if _tool_running({"id": "time_guard"}, sync=True):
                 return True
             pyw = r"C:\Users\Administrator\AppData\Local\Programs\Python\Python310\pythonw.exe"
             base = _app_base_dir()
@@ -203,7 +244,7 @@ class PCLPluginSettingsDialog(SiliconDialog):
             self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
         except Exception:
             pass
-        _title = f"⚙ {meta.get('name', meta.get('id', '插件'))} 设置"
+        _title = f" {meta.get('name', meta.get('id', '插件'))} 设置"
         super().__init__(_title, parent, width=560, height=620)
         self.setWindowTitle(_title)
         self._meta = meta
@@ -280,7 +321,7 @@ class PCLPluginSettingsDialog(SiliconDialog):
 
         # 底部按钮
         btns = QHBoxLayout()
-        btn_save = QPushButton("  💾 保存")
+        btn_save = QPushButton("   保存")
         btn_cancel = QPushButton("  取消")
         for b in (btn_save, btn_cancel):
             b.setStyleSheet(f"""
@@ -300,7 +341,7 @@ class PCLPluginSettingsDialog(SiliconDialog):
 
         # 人脸识别插件：照片库直接内嵌在本设置对话框里（原来的顶部「人脸」目录已移除）
         if meta.get("id") == "face":
-            info = QLabel("📷 主人 / 其他人的照片在这里添加、删除；下面是识别参数。")
+            info = QLabel(" 主人 / 其他人的照片在这里添加、删除；下面是识别参数。")
             info.setWordWrap(True)
             info.setStyleSheet(f"color: {Color3.name()}; font-size: {int(12*S)}px;"
                                f"background: {Color6.name()}; border-radius: {int(4*S)}px;"
@@ -369,7 +410,7 @@ class PCLPluginsPanel(QScrollArea):
         self._layout.setSpacing(int(14 * S))
         self.setWidget(self._container)
 
-        title = QLabel("  🧩 插件管理")
+        title = QLabel("   插件管理")
         title.setFont(QFont("Microsoft YaHei", int(16 * S), QFont.Bold))
         title.setStyleSheet(f"color: {Color1.name()};")
         self._layout.addWidget(title)
@@ -415,8 +456,8 @@ class PCLPluginsPanel(QScrollArea):
 
         # 顶部操作行
         top = QHBoxLayout()
-        btn_import = QPushButton("  📦 导入插件 (zip)")
-        btn_refresh = QPushButton("  🔄 刷新")
+        btn_import = QPushButton("   导入插件 (zip)")
+        btn_refresh = QPushButton("   刷新")
         for b in (btn_import, btn_refresh):
             b.setStyleSheet(f"""
                 QPushButton {{ background: {Color3.name()}; color: white; border: none;
@@ -479,6 +520,11 @@ class PCLPluginsPanel(QScrollArea):
             pass
 
     def _reload(self):
+        # 后台探测完成后自动刷新一次（插件运行状态）
+        try:
+            tool_probe.done.connect(self._reload)
+        except Exception:
+            pass
         """从磁盘扫描重建全部卡片（导入/删除/刷新/设置关闭时调用；切分类不走这里）"""
         # 清空旧列表
         while self._list_layout.count():
@@ -575,10 +621,10 @@ class PCLPluginsPanel(QScrollArea):
         chk.stateChanged.connect(lambda st, m=meta: self._on_toggle(m, st))
         right.addWidget(chk)
 
-        btn_cfg = QPushButton("⚙ 设置")
-        btn_open = QPushButton("📁 打开位置")
+        btn_cfg = QPushButton(" 设置")
+        btn_open = QPushButton(" 打开位置")
         # 官方内置插件不可删除；仅第三方（我的插件）显示删除按钮
-        btn_del = None if _official else QPushButton("🗑 删除")
+        btn_del = None if _official else QPushButton(" 删除")
         small_style = f"""
             QPushButton {{ background: {Color6.name()}; color: {Color1.name()};
                 border: 1px solid {Color5.name()}; padding: {int(4*S)}px {int(8*S)}px;
@@ -604,7 +650,7 @@ class PCLPluginsPanel(QScrollArea):
     def _open_settings(self, meta):
         dlg = PCLPluginSettingsDialog(meta, self)
         accepted = dlg.exec_()
-        # ⚡ 只有真正保存过才重建整个插件列表；「取消」直接返回（原来无条件 _reload 会卡一下）
+        #  只有真正保存过才重建整个插件列表；「取消」直接返回（原来无条件 _reload 会卡一下）
         if accepted == QDialog.Accepted:
             self._reload()
 

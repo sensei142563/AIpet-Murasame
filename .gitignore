@@ -65,3 +65,7 @@ AIpet-Murasame-安装包.exe
 plugins/adult_mode/
 qq/qq_adult.py
 # 开发期临时文件
+
+# 用户自己「复制为我的」的主题（含个人壁纸/背景视频，别进仓库）
+pcl_launcher/themes/*_copy/
+pcl_launcher/themes/*/assets/bg_custom.*

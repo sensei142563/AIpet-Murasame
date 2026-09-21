@@ -18,7 +18,7 @@ import subprocess
 import sys
 import urllib.request
 
-from PyQt5.QtCore import Qt, QTimer, QEvent, QSize, QUrl, pyqtSignal
+from PyQt5.QtCore import Qt, QTimer, QEvent, QSize, QUrl, QThread, pyqtSignal
 from PyQt5.QtGui import (QColor, QFont, QIcon, QImage, QPainter, QPainterPath,
                          QPixmap)
 from PyQt5.QtWidgets import (QScrollArea, QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
@@ -33,12 +33,12 @@ _CONTROL_BASE = "http://localhost:28565/control"
 
 # 导航项（key, 图标, 标题, 副标题）
 NAV = [
-    ("home",    "🏠", "总览",  "启动与状态"),
-    ("pets",    "🐾", "桌宠",  "角色与立绘"),
-    ("memory",  "🧠", "记忆",  "对话与备份"),
-    ("prompt",  "📝", "提示词", "人设微调"),
-    ("plugins", "🧩", "插件",  "功能开关"),
-    ("themes",  "🎨", "主题",  "外观与配色"),
+    ("home",    "", "总览",  "启动与状态"),
+    ("pets",    "", "桌宠",  "角色与立绘"),
+    ("memory",  "", "记忆",  "对话与备份"),
+    ("prompt",  "", "提示词", "人设微调"),
+    ("plugins", "", "插件",  "功能开关"),
+    ("themes",  "", "主题",  "外观与配色"),
 ]
 
 
@@ -76,7 +76,7 @@ def _ensure_src_on_path():
             print(f"[NewUI] 已把程序目录加入导入路径: {base}")
             return True
     except Exception as e:
-        print(f"[NewUI] ⚠ 程序目录加入导入路径失败: {e}")
+        print(f"[NewUI]  程序目录加入导入路径失败: {e}")
     return False
 
 
@@ -97,6 +97,157 @@ def _spawn_flags() -> int:
     return getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if _quiet_mode()         else subprocess.CREATE_NEW_CONSOLE
 
 
+class _VideoBgPlayer(QThread):
+    """视频背景播放器：用 OpenCV 逐帧解码 → 交给底板当壁纸画。
+
+    ★ 为什么不用 QMediaPlayer：这台机器上 Qt 的多媒体后端（wmfengine/dsengine）
+      打不开**完全标准**的 H.264 1080p mp4（实测 error=1 ResourceError、
+      mediaStatus=InvalidMedia，isAvailable 也是 False/无有效 service），
+      视频背景就永远不显示（用户反馈）。cv2 自己解码不依赖系统解码器，最可靠，
+      还顺带解决了「中文路径」和「透明窗口装不下原生视频表面」两个坑。
+    """
+    frame_ready = pyqtSignal(object)      # QImage
+
+    def __init__(self, path: str, fps_cap: float = 12.0, parent=None):
+        super().__init__(parent)
+        self._path = str(path)
+        self._fps_cap = max(1.0, float(fps_cap))
+        self._stop = False
+        # ★ 背景透明度/模糊度也要作用在视频上（用户反馈：滑块对视频背景无效）。
+        #   图片壁纸是把透明度"烘进画面"再当壁纸的，视频以前直接原帧贴上去 → 滑块没反应。
+        self._opacity = 1.0
+        self._blur = 0
+
+    def set_effects(self, opacity=None, blur=None):
+        """实时更新透明度/模糊（滑块拖动时调用；下一帧就生效，不用重启播放）"""
+        try:
+            if opacity is not None:
+                self._opacity = max(0.05, min(1.0, float(opacity)))
+            if blur is not None:
+                self._blur = max(0, int(blur))
+        except Exception:
+            pass
+
+    def stop(self):
+        self._stop = True
+        try:
+            self.requestInterruption()
+        except Exception:
+            pass
+
+    def run(self):
+        try:
+            import cv2
+            from PyQt5.QtGui import QImage
+        except Exception as e:
+            print(f"[NewUI] ⚠ 视频背景需要 cv2（不可用: {e}）")
+            return
+        cap = None
+        try:
+            cap = cv2.VideoCapture(self._path)
+            if not cap or not cap.isOpened():
+                print(f"[NewUI] ⚠ 打不开背景视频: {self._path}")
+                return
+            src_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+            step = max(1, int(round(src_fps / self._fps_cap)))   # 抽帧到 ~12fps，省 CPU
+            idx = 0
+            t_next = 0.0
+            import time as _t
+            while not self._stop and not self.isInterruptionRequested():
+                ok, frame = cap.read()
+                if not ok:                     # 播完 → 从头循环
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    idx = 0
+                    continue
+                idx += 1
+                if idx % step:
+                    continue
+                try:
+                    # 模糊（在解码线程里做，不吃界面线程）
+                    _b = int(getattr(self, "_blur", 0) or 0)
+                    if _b > 0:
+                        k = max(3, int(_b) * 2 + 1)
+                        frame = cv2.GaussianBlur(frame, (k, k), 0)
+                    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    h, w, ch = rgb.shape
+                    img = QImage(rgb.data, w, h, ch * w, QImage.Format_RGB888).copy()
+                    # ★ 透明度：烘进画面（和图片壁纸同一套做法），否则滑块对视频无效
+                    _op = float(getattr(self, "_opacity", 1.0) or 1.0)
+                    if _op < 0.995:
+                        from PyQt5.QtGui import QPainter as _QP
+                        from PyQt5.QtCore import Qt as _Qt2
+                        faded = QImage(w, h, QImage.Format_ARGB32_Premultiplied)
+                        faded.fill(_Qt2.transparent)
+                        _p = _QP(faded)
+                        if _p.isActive():
+                            _p.setOpacity(max(0.05, min(1.0, _op)))
+                            _p.drawImage(0, 0, img)
+                            _p.end()
+                        img = faded
+                    self.frame_ready.emit(img)
+                except Exception:
+                    pass
+                # 按抽帧后的节奏限速
+                t_next += 1.0 / self._fps_cap
+                dt = t_next - _t.time()
+                if dt > 0:
+                    _t.sleep(min(0.5, dt))
+                else:
+                    t_next = _t.time()
+        except Exception as e:
+            print(f"[NewUI] ⚠ 视频背景播放异常: {e}")
+        finally:
+            try:
+                if cap is not None:
+                    cap.release()
+            except Exception:
+                pass
+
+
+def _ascii_media_path(src: str) -> str:
+    """给媒体播放器一个「纯 ASCII 路径」。
+
+    ★ Windows 的 DirectShow/WMF 后端**打不开含中文的路径**（错误码 1 ResourceError、
+      mediaStatus=InvalidMedia），表现就是"视频背景永远不显示"（用户反馈；本项目路径
+      是 D:\下载\AI桌宠\…）。先用 8.3 短路径，取不到就复制到纯 ASCII 缓存目录。
+    """
+    try:
+        src = os.path.abspath(src)
+        if not os.path.isfile(src):
+            return src
+        if src.isascii():
+            return src
+        # ① 8.3 短路径（不复制文件，最省事）
+        try:
+            import ctypes
+            buf = ctypes.create_unicode_buffer(1024)
+            if ctypes.windll.kernel32.GetShortPathNameW(src, buf, 1024) and buf.value:
+                if str(buf.value).isascii() and os.path.isfile(buf.value):
+                    print(f"[NewUI] 背景视频用 8.3 短路径播放: {buf.value}")
+                    return str(buf.value)
+        except Exception:
+            pass
+        # ② 复制到纯 ASCII 目录（放 D 盘，避免占 C 盘）
+        try:
+            import shutil
+            ext = os.path.splitext(src)[1] or ".mp4"
+            for base in ("D:" + os.sep + "AIpetBgCache",
+                         os.path.join(os.environ.get("TEMP", ""), "AIpetBg")):
+                if not base or not base.isascii():
+                    continue
+                os.makedirs(base, exist_ok=True)
+                dst = os.path.join(base, "bg_loop" + ext)
+                if (not os.path.isfile(dst)) or os.path.getsize(dst) != os.path.getsize(src):
+                    shutil.copy2(src, dst)
+                print(f"[NewUI] 背景视频路径含中文 → 已复制到 {dst} 播放")
+                return dst
+        except Exception as e:
+            print(f"[NewUI] ⚠ 复制背景视频失败（可能仍无法播放）: {e}")
+    except Exception as e:
+        print(f"[NewUI] ⚠ 处理视频路径失败: {e}")
+    return src
+
+
 def _find_python(base: str) -> str:
     for rel in (os.path.join("runtime", "venv", "Scripts", "python.exe"), "python.exe"):
         p = os.path.join(base, rel)
@@ -108,7 +259,7 @@ def _find_python(base: str) -> str:
 def _local_opener():
     """访问本机服务用的 opener：显式禁用代理。
 
-    ⚠ 挂加速器/梯子时系统代理（注册表）会把 127.0.0.1 也送去代理 →
+     挂加速器/梯子时系统代理（注册表）会把 127.0.0.1 也送去代理 →
        启动器一直显示"桌宠：未运行"、也无法"关闭桌宠"（用户反馈）。
        这里直接不带代理发请求，最可靠。
     """
@@ -181,7 +332,7 @@ class NavRailButton(QPushButton):
                     self.setIcon(QIcon(self._pix))
                     self.setIconSize(self._pix.size())
         except Exception as e:
-            print(f"[NewUI] ⚠ 主题导航图标加载失败({self._icon_key}): {e}")
+            print(f"[NewUI]  主题导航图标加载失败({self._icon_key}): {e}")
 
     def _apply_style(self):
         """样式只设一次：选中/悬停交给 QSS 伪状态，避免每次点击都重新解析样式表（卡顿源）"""
@@ -415,9 +566,9 @@ class HomePage(QWidget):
         cl2.setSpacing(10)
         cl2.addWidget(silicon_ui.section_title("桌宠控制面板", accent))
         grid = QHBoxLayout()
-        for text, feat in (("📝 汉语模式", "longtext"), ("🎭 Live2D", "live2d"),
-                           ("📷 摄像头识别", "camera"), ("🖥 屏幕识别", "screenshot"),
-                           ("🎤 按住说话", "voice")):
+        for text, feat in ((" 汉语模式", "longtext"), (" Live2D", "live2d"),
+                           (" 摄像头识别", "camera"), (" 屏幕识别", "screenshot"),
+                           (" 按住说话", "voice")):
             b = QPushButton(text)
             b.setStyleSheet(_ghost_btn_qss())
             b.setMinimumHeight(38)
@@ -428,7 +579,7 @@ class HomePage(QWidget):
                 b.clicked.connect(lambda _=False, f=feat: _send_control(f))
             grid.addWidget(b)
         # 重置桌宠位置：桌宠跑到屏幕外 / 找不到时一键回到屏幕中央
-        self.btn_reset_pos = QPushButton("🎯 重置桌宠位置")
+        self.btn_reset_pos = QPushButton(" 重置桌宠位置")
         self.btn_reset_pos.setStyleSheet(_ghost_btn_qss())
         self.btn_reset_pos.setMinimumHeight(38)
         self.btn_reset_pos.setToolTip("把桌宠移回屏幕中央（找不到桌宠时点这里）")
@@ -449,12 +600,12 @@ class HomePage(QWidget):
         tl.setSpacing(10)
         tl.addWidget(silicon_ui.section_title("快捷工具", accent))
         tr = QHBoxLayout()
-        for text, slot in (("🎨 立绘工坊", self.open_studio),
-                           ("⚙ 桌宠设置", self.open_pet_settings),
-                           ("🔑 NapCat WebUI", self.open_napcat_webui),
-                           ("📱 重新扫码登录", self.napcat_relogin),
-                           ("📂 打开程序目录", self.open_app_dir),
-                           ("📜 更新日志", self.open_changelog)):
+        for text, slot in ((" 立绘工坊", self.open_studio),
+                           (" 桌宠设置", self.open_pet_settings),
+                           (" NapCat WebUI", self.open_napcat_webui),
+                           (" 重新扫码登录", self.napcat_relogin),
+                           (" 打开程序目录", self.open_app_dir),
+                           (" 更新日志", self.open_changelog)):
             b = QPushButton(text)
             b.setStyleSheet(_ghost_btn_qss())
             b.clicked.connect(slot)
@@ -487,7 +638,7 @@ class HomePage(QWidget):
                     res[k] = (it.get("model") or "未配置",
                               _balance_for(str(it.get("provider") or ""), str(it.get("key") or "")))
             except Exception as e:
-                print(f"[NewUI] ⚠ 模型状态查询失败: {e}")
+                print(f"[NewUI]  模型状态查询失败: {e}")
                 res = {"lang": ("查询失败", "—"), "vision": ("查询失败", "—")}
             self._models_result = res
             try:
@@ -519,7 +670,7 @@ class HomePage(QWidget):
                     f"color: {'#e0603a' if warn else '#3d9e6a' if s and not warn and '无费用' in s else Gray2.name()};"
                     f" font-size: 13px; font-family: '{silicon_ui.M.font}';")
             except Exception as e:
-                print(f"[NewUI] ⚠ 模型状态显示失败: {e}")
+                print(f"[NewUI]  模型状态显示失败: {e}")
 
     def refresh_status(self):
         """后台线程探测运行状态（绝不在 UI 线程做网络探测 → 不卡界面）"""
@@ -564,13 +715,13 @@ class HomePage(QWidget):
             self.chip_pet.set_text("桌宠：运行中" if alive else "桌宠：未运行", alive)
             # 「正在关闭/启动中」期间不要被状态刷新覆盖文案
             if self.btn_pet.isEnabled():
-                self.btn_pet.setText("  ⏹ 关闭桌宠" if alive else "  启动 AIpet 桌宠")
+                self.btn_pet.setText("   关闭桌宠" if alive else "  启动 AIpet 桌宠")
             accent = THEME_COLORS.get(str(ACCENT_ID), {}).get("title_start", "#2f6fd0")
             self.btn_pet.setStyleSheet(_accent_btn_qss(accent, danger=alive))
             try:
                 self.btn_reset_pos.setEnabled(alive)
                 if self.btn_reset_pos.isEnabled():
-                    self.btn_reset_pos.setText("🎯 重置桌宠位置")
+                    self.btn_reset_pos.setText(" 重置桌宠位置")
             except Exception:
                 pass
             qq_on = self.shell._qq_proc is not None and self.shell._qq_proc.poll() is None
@@ -588,7 +739,7 @@ class HomePage(QWidget):
             except Exception:
                 pass
         except Exception as e:
-            print(f"[NewUI] ⚠ 状态更新失败: {e}")
+            print(f"[NewUI]  状态更新失败: {e}")
 
     # ── 启动/关闭 ──
     # ── 启动/关闭：进行中按钮置灰 + 文案，防止连点 ──
@@ -619,7 +770,7 @@ class HomePage(QWidget):
                 self._story_timer.start()
             return None
         except Exception as e:
-            print(f"[UI] ⚠ 打开剧情窗口失败: {e}")
+            print(f"[UI]  打开剧情窗口失败: {e}")
             return None
 
     def _story_continue(self):
@@ -646,8 +797,8 @@ class HomePage(QWidget):
     def toggle_pet(self):
         if _pet_api_alive():
             # 关闭桌宠：显示「正在关闭中…」并禁用按钮，避免重复点击
-            self._busy_btn(self.btn_pet, "⏳ 正在关闭中…", 8000)
-            self.status_lbl.setText("⏳ 正在关闭桌宠…")
+            self._busy_btn(self.btn_pet, " 正在关闭中…", 8000)
+            self.status_lbl.setText(" 正在关闭桌宠…")
             QTimer.singleShot(9000, lambda: self.status_lbl.setText(""))
             print("[NewUI] 正在关闭桌宠…")
             _send_control("shutdown")
@@ -655,11 +806,11 @@ class HomePage(QWidget):
             try:
                 stop_vision_service(self.shell)
             except Exception as e:
-                print(f"[NewUI] ⚠ 关闭本地视觉服务失败: {e}")
+                print(f"[NewUI]  关闭本地视觉服务失败: {e}")
             # 轮询等它真的退出（最多 12 秒），再刷新状态
             self._wait_pet_gone(12)
             return
-        self._busy_btn(self.btn_pet, "⏳ 正在启动中…", 15000)
+        self._busy_btn(self.btn_pet, " 正在启动中…", 15000)
         base = _app_base_dir()
         py = _find_python(base)
         if not py:
@@ -669,7 +820,7 @@ class HomePage(QWidget):
         try:
             ensure_vision_service(self.shell)
         except Exception as e:
-            print(f"[NewUI] ⚠ 启动本地视觉服务失败（不影响桌宠）: {e}")
+            print(f"[NewUI]  启动本地视觉服务失败（不影响桌宠）: {e}")
         try:
             self.shell._pet_proc = subprocess.Popen([py, os.path.join(base, "run.py")], cwd=base,
                                                     creationflags=_spawn_flags())
@@ -698,9 +849,9 @@ class HomePage(QWidget):
         if not _pet_api_alive():
             QMessageBox.information(self, "重置桌宠位置", "桌宠还没启动哦，先点「启动 AIpet 桌宠」。")
             return
-        self._busy_btn(self.btn_reset_pos, "⏳ 正在移动…", 4000)
+        self._busy_btn(self.btn_reset_pos, " 正在移动…", 4000)
         _send_control("reset_position")
-        self.status_lbl.setText("🎯 让桌宠回到屏幕中央…")
+        self.status_lbl.setText(" 让桌宠回到屏幕中央…")
         QTimer.singleShot(4500, lambda: self.status_lbl.setText(""))
         print("[NewUI] 已发送「重置桌宠位置」")
 
@@ -709,7 +860,7 @@ class HomePage(QWidget):
         py = _find_python(base)
         if not py:
             return
-        self._busy_btn(self.btn_qq, "⏳ 正在启动 QQ…", 12000)
+        self._busy_btn(self.btn_qq, " 正在启动 QQ…", 12000)
         try:
             self.shell._qq_proc = subprocess.Popen([py, os.path.join(base, "run_qq.py")], cwd=base,
                                                    creationflags=_spawn_flags())
@@ -723,7 +874,7 @@ class HomePage(QWidget):
         if not py or not os.path.exists(os.path.join(base, "run_wechat.py")):
             QMessageBox.information(self, "微信 AIpet", "未找到微信模块（run_wechat.py）")
             return
-        self._busy_btn(self.btn_wx, "⏳ 正在启动微信…", 12000)
+        self._busy_btn(self.btn_wx, " 正在启动微信…", 12000)
         try:
             self.shell._wx_proc = subprocess.Popen([py, os.path.join(base, "run_wechat.py")], cwd=base,
                                                    creationflags=_spawn_flags())
@@ -794,7 +945,7 @@ class HomePage(QWidget):
             self.btn_preload.setText("  预载失败（可重试）")
             QTimer.singleShot(10000, lambda: self.btn_preload.setText("  预载语音服务"))
             if err:
-                print(f"[NewUI] ⚠ 语音预载失败: {err}")
+                print(f"[NewUI]  语音预载失败: {err}")
         try:
             self.refresh_status()
         except Exception:
@@ -839,7 +990,7 @@ class HomePage(QWidget):
             try:
                 ensure_vision_service(self.shell)
             except Exception as e:
-                print(f"[NewUI] ⚠ 预载视觉服务失败: {e}")
+                print(f"[NewUI]  预载视觉服务失败: {e}")
         # 主线程轮询状态（探测都是本机几毫秒的请求，不会卡界面）
         self._vpre_timer = QTimer(self)
         self._vpre_timer.setInterval(2000)
@@ -875,7 +1026,7 @@ class HomePage(QWidget):
             self.btn_vpreload.setText("  预载失败（可重试）")
             QTimer.singleShot(12000, lambda: self.btn_vpreload.setText("  预载视觉服务"))
             if err:
-                print(f"[NewUI] ⚠ 视觉预载失败: {err}")
+                print(f"[NewUI]  视觉预载失败: {err}")
         try:
             self.refresh_status()
         except Exception:
@@ -953,6 +1104,7 @@ class SiliconLauncher(QWidget):
         self._vision_proc = None     # 本地视觉服务（起桌宠时拉起，桌宠关了收掉）
         self._bg_widget = None
         self._media = None
+        self._video_bg = None
 
         self.setWindowTitle("AIpet 丛雨桌宠 · 启动器")
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
@@ -1012,7 +1164,7 @@ class SiliconLauncher(QWidget):
 
         self._chrome_btns = []          # 最小化/关闭（换肤时一起重上样式）
         for text, slot, tip in (("—", self.showMinimized, "最小化"),
-                                ("✕", self.close, "关闭")):
+                                ("×", self.close, "关闭")):
             b = QPushButton(text)
             b.setFixedSize(36, 30)
             b.setToolTip(tip)
@@ -1045,8 +1197,8 @@ class SiliconLauncher(QWidget):
         b.setStyleSheet(f"""
             QPushButton {{ background: transparent; color: {Color1.name()};
                 border: none; border-radius: 8px; font-size: 14px; }}
-            QPushButton:hover {{ background: {'#e03030' if text == '✕' else SF(0.16)};
-                color: {'white' if text == '✕' else Color1.name()}; }}
+            QPushButton:hover {{ background: {'#e03030' if text == '×' else SF(0.16)};
+                color: {'white' if text == '×' else Color1.name()}; }}
         """)
 
     def _build_nav(self) -> QWidget:
@@ -1073,7 +1225,7 @@ class SiliconLauncher(QWidget):
         sep.setFixedHeight(1)
         sep.setStyleSheet(f"background: {Color5.name()}; border: none;")
         lay.addWidget(sep)
-        b_set = NavRailButton("⚙", "设置", "模型与功能", icon_key="settings")
+        b_set = NavRailButton("", "设置", "模型与功能", icon_key="settings")
         b_set.clicked.connect(lambda _=False: self._goto("settings"))
         b_set._page_key = "settings"
         b_set.installEventFilter(self)
@@ -1137,14 +1289,14 @@ class SiliconLauncher(QWidget):
             try:
                 _make_transparent(w)
             except Exception as _e:
-                print(f"[NewUI] ⚠ 页面透明化失败({key}): {_e}")
-            # ⚠ 页面会自我刷新（点「设置」→ 桌宠列表 _refresh() / 插件页 _reload()），
+                print(f"[NewUI]  页面透明化失败({key}): {_e}")
+            #  页面会自我刷新（点「设置」→ 桌宠列表 _refresh() / 插件页 _reload()），
             #   重建出来的卡片带回内联实心背景色 → 又挡住主题壁纸（表现为「点设置后背景被遮挡」）。
             #   这里挂钩刷新方法：重建后自动再透明化一次。
             try:
                 _hook_repaint_transparency(w)
             except Exception as _e:
-                print(f"[NewUI] ⚠ 透明化挂钩失败({key}): {_e}")
+                print(f"[NewUI]  透明化挂钩失败({key}): {_e}")
             self.pages[key] = w
             self.stack.addWidget(w)
             if key == "home":
@@ -1153,7 +1305,7 @@ class SiliconLauncher(QWidget):
             return w
         except Exception as e:
             import traceback
-            print(f"[NewUI] ⚠ 页面 {key} 加载失败: {e}\n{traceback.format_exc()[:400]}")
+            print(f"[NewUI]  页面 {key} 加载失败: {e}\n{traceback.format_exc()[:400]}")
             err = QLabel(f"页面加载失败：{key}\n{e}")
             err.setStyleSheet(f"color: {RedLight.name()}; padding: 20px;")
             self.pages[key] = err
@@ -1172,7 +1324,7 @@ class SiliconLauncher(QWidget):
                 sig2.connect(self.apply_accent_live)
                 page._accent_wired = True
         except Exception as e:
-            print(f"[NewUI] ⚠ 主题信号挂接失败: {e}")
+            print(f"[NewUI]  主题信号挂接失败: {e}")
 
     # ══════════════ 实时换肤（主题 / 强调色，无需重启）══════════════
     def _current_page_key(self):
@@ -1216,7 +1368,7 @@ class SiliconLauncher(QWidget):
                 pass
             self.reload_background()
         except Exception as e:
-            print(f"[NewUI] ⚠ 外壳重设样式失败: {e}")
+            print(f"[NewUI]  外壳重设样式失败: {e}")
 
     def _discard_other_pages(self, keep_key):
         """换肤后：除当前页外的已建页面作废（下次进入时按新配色重建 → 省时间不卡）"""
@@ -1234,7 +1386,7 @@ class SiliconLauncher(QWidget):
     def _drop_snap(self, snap):
         """删除页面过渡用的快照控件（幂等）。
 
-        ⚠ 快照是「一张不透明的旧页面位图」叠在内容区上：只要它没被删掉，
+         快照是「一张不透明的旧页面位图」叠在内容区上：只要它没被删掉，
         用户看到的就是「背景/内容被遮挡」。所以除了动画结束删除，再加一道
         硬超时兜底（动画被打断/特效对象提前释放时也能删掉）。"""
         try:
@@ -1276,7 +1428,7 @@ class SiliconLauncher(QWidget):
             QTimer.singleShot(int(dur) + 260, lambda: self._drop_snap(snap))   # 硬兜底
             return tuple(anims)
         except Exception as e:
-            print(f"[NewUI] ⚠ 快照淡出失败（直接删除）: {e}")
+            print(f"[NewUI]  快照淡出失败（直接删除）: {e}")
             self._drop_snap(snap)
             return None
 
@@ -1330,7 +1482,7 @@ class SiliconLauncher(QWidget):
                     cfg["ui_theme"] = theme_id
                     _save_config(cfg)
                 except Exception as e:
-                    print(f"[NewUI] ⚠ 主题写入 config 失败: {e}")
+                    print(f"[NewUI]  主题写入 config 失败: {e}")
             from . import colors as _C
             _C.apply_theme_live(theme_id)
             self._accent = _C.accent_hex()
@@ -1341,7 +1493,7 @@ class SiliconLauncher(QWidget):
                 if app is not None:
                     silicon_ui.install(app, accent=self._accent)
             except Exception as e:
-                print(f"[NewUI] ⚠ 全局样式重建失败: {e}")
+                print(f"[NewUI]  全局样式重建失败: {e}")
             self._silicon = theme_id == "silicon"
             cur_key = self._current_page_key()
             self._restyle_chrome()
@@ -1357,7 +1509,7 @@ class SiliconLauncher(QWidget):
                 pass
             print(f"[NewUI] 主题已实时应用: {theme_id}（当前页 {cur_key} 正在重建）")
         except Exception as e:
-            print(f"[NewUI] ⚠ 实时应用主题失败: {e}")
+            print(f"[NewUI]  实时应用主题失败: {e}")
         finally:
             self._theming = False
 
@@ -1387,7 +1539,7 @@ class SiliconLauncher(QWidget):
             except Exception:
                 pass
         except Exception as e:
-            print(f"[NewUI] ⚠ 实时应用强调色失败: {e}")
+            print(f"[NewUI]  实时应用强调色失败: {e}")
 
     def _goto(self, key, force=False):
         if key == "home":
@@ -1430,7 +1582,7 @@ class SiliconLauncher(QWidget):
             a1.finished.connect(lambda: self._drop_snap(snap))
             a1.start()
             a2.start()
-            # ⚠ 硬兜底：动画被打断/特效对象提前释放时，快照也必须消失
+            #  硬兜底：动画被打断/特效对象提前释放时，快照也必须消失
             #   （否则那张不透明的旧页面位图会一直盖在新页面上 = 「背景被遮挡」）
             QTimer.singleShot(470, lambda: self._drop_snap(snap))
             self._page_anim = (a1, a2)
@@ -1457,7 +1609,26 @@ class SiliconLauncher(QWidget):
             pass
 
     # ── 效果 ──
+    def _on_video_frame(self, qimg):
+        """把视频帧画到底板上（和图片壁纸走同一条路：底板 + 透明度）。"""
+        try:
+            from PyQt5.QtGui import QPixmap
+            self.back.set_bg(QPixmap.fromImage(qimg))
+            self.back.lower()
+            self.back.update()
+        except Exception as e:
+            print(f"[NewUI] ⚠ 绘制视频帧失败: {e}")
+
     def _apply_effects(self):
+        #  视频背景：必须保持「不透明窗口」（原生视频表面在透明窗口里不渲染），
+        #   所以这里直接跳过亚克力/圆角那套透明窗口处理（用户反馈"视频背景不显示"）。
+        try:
+            if getattr(self, "_bg_widget", None) is not None:
+                self.setAttribute(Qt.WA_TranslucentBackground, False)
+                print("[NewUI] 当前是视频背景 → 跳过亚克力/圆角（保持不透明，视频才能显示）")
+                return
+        except Exception:
+            pass
         # ui_acrylic=false 时跳过亚克力（低配/远程桌面下更流畅）
         try:
             import json as _json
@@ -1469,7 +1640,7 @@ class SiliconLauncher(QWidget):
                     silicon_ui.apply_round_corners(self)
                     self.update()
                 except Exception as _e:
-                    print(f"[NewUI] ⚠ 圆角设置失败: {_e}")
+                    print(f"[NewUI]  圆角设置失败: {_e}")
                 print("[NewUI] 亚克力已关闭（保留圆角，更流畅）")
                 return
         except Exception:
@@ -1478,7 +1649,7 @@ class SiliconLauncher(QWidget):
             silicon_ui.apply_acrylic(self)
             print("[NewUI] 亚克力 + 圆角已启用")
         except Exception as e:
-            print(f"[NewUI] ⚠ 亚克力失败: {e}")
+            print(f"[NewUI]  亚克力失败: {e}")
 
     def _schedule_blur_refresh(self, delay_ms: int = 400):
         """停手后再做一次（带模糊的）完整重载 —— 重活只做一次"""
@@ -1491,11 +1662,27 @@ class SiliconLauncher(QWidget):
                 self._bg_blur_timer.timeout.connect(self._finish_blur_refresh)
             self._bg_blur_timer.start(int(delay_ms))
         except Exception as e:
-            print(f"[NewUI] ⚠ 模糊刷新调度失败: {e}")
+            print(f"[NewUI]  模糊刷新调度失败: {e}")
 
     def _finish_blur_refresh(self):
         self._bg_blur_skip = False
         self.reload_background()
+
+    def apply_text_color(self, hexv: str = ""):
+        """文字颜色即时生效：写盘后走「实时换肤」路径（重算色板 + 重建当前页）。"""
+        try:
+            from .themes_panel import _load_config, _save_config
+            cfg = _load_config() or {}
+            cfg["ui_text_color"] = str(hexv or "")
+            _save_config(cfg)
+        except Exception as e:
+            print(f"[NewUI]  文字颜色写盘失败: {e}")
+        try:
+            from .colors import current_theme_id as _ctid
+            self.apply_theme_live(_ctid(), persist=False)
+            print(f"[NewUI] 文字颜色已实时应用: {hexv or '自动'}")
+        except Exception as e:
+            print(f"[NewUI]  文字颜色实时应用失败（重启启动器后生效）: {e}")
 
     def apply_bg_settings(self, values: dict):
         """实时应用背景设置（内存生效、不写盘；滑块拖动时调用 → 丝滑不卡）
@@ -1521,12 +1708,23 @@ class SiliconLauncher(QWidget):
                     from .silicon_dialog import refresh_all_dialog_colors
                     refresh_all_dialog_colors(values.get("ui_bg_color"))
             except Exception as _e:
-                print(f"[NewUI] ⚠ 同步二级窗口底色失败: {_e}")
+                print(f"[NewUI]  同步二级窗口底色失败: {_e}")
             self._bg_blur_skip = True      # 拖动中：先不做模糊（毫秒级响应）
+            # ★ 视频背景：透明度/模糊直接推给解码线程（下一帧生效），
+            #   不要 reload —— 那会把播放器停掉重建，画面会闪、还会从头播。
+            try:
+                _vb = getattr(self, "_video_bg", None)
+                if _vb is not None and set((values or {}).keys()) <= {"ui_bg_opacity", "ui_bg_blur"}:
+                    _vb.set_effects(
+                        opacity=(float(self._bg_value("ui_bg_opacity", 100) or 100) / 100.0),
+                        blur=int(self._bg_value("ui_bg_blur", 0) or 0))
+                    return
+            except Exception as _e:
+                print(f"[NewUI] ⚠ 视频背景参数更新失败: {_e}")
             self.reload_background()
             self._schedule_blur_refresh(400)   # 停手后补上模糊
         except Exception as e:
-            print(f"[NewUI] ⚠ 实时应用背景设置失败: {e}")
+            print(f"[NewUI]  实时应用背景设置失败: {e}")
 
     def _bg_value(self, key: str, default):
         """优先取内存实时值（滑块拖动中），其次 config.json"""
@@ -1563,7 +1761,7 @@ class SiliconLauncher(QWidget):
             self._load_background()
             print("[NewUI] 背景已按新参数重建（实时生效）")
         except Exception as e:
-            print(f"[NewUI] ⚠ 背景重建失败: {e}")
+            print(f"[NewUI]  背景重建失败: {e}")
 
     def _load_background(self):
         """主题背景（图片/视频）：铺满整窗，内容叠在上面"""
@@ -1618,24 +1816,27 @@ class SiliconLauncher(QWidget):
                     self.back.lower()          # 底板在最底层（内容叠在上面）
                     self.back.update()
                 except Exception as _e:
-                    print(f"[NewUI] ⚠ 设置圆角壁纸失败: {_e}")
+                    print(f"[NewUI]  设置圆角壁纸失败: {_e}")
             elif btype == "video":
-                from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
-                from PyQt5.QtMultimediaWidgets import QVideoWidget
-                self._bg_widget = QVideoWidget(self.back)
-                self._media = QMediaPlayer(self)
-                self._media.setMedia(QMediaContent(QUrl.fromLocalFile(src)))
-                self._media.setVideoOutput(self._bg_widget)
-                self._media.setVolume(0)
-                self._media.play()
-                self._bg_widget.setAttribute(Qt.WA_TransparentForMouseEvents)
-                self._bg_widget.lower()
-                self._bg_widget.show()
-                self._apply_bg_mask()
-                self.resizeEvent(None)
-                print(f"[NewUI] 主题背景视频: {os.path.basename(src)}")
+                # ★ 用 cv2 逐帧解码，画到底板上（和图片壁纸同一条路）。
+                #   为什么不用 QMediaPlayer：这台机器上 Qt 的多媒体后端
+                #   （wmfengine / dsengine）打不开**完全标准**的 H.264 1080p mp4
+                #   （实测 error=1 ResourceError、mediaStatus=InvalidMedia），
+                #   视频背景就永远不显示（用户反馈）。cv2 自己解码不依赖系统解码器，
+                #   同时绕开了「中文路径打不开」和「透明窗口装不下原生视频表面」两个坑。
+                try:
+                    self._video_bg = _VideoBgPlayer(_ascii_media_path(src), fps_cap=12.0, parent=self)
+                    self._video_bg.set_effects(
+                        opacity=(float(self._bg_value("ui_bg_opacity", 100) or 100) / 100.0),
+                        blur=int(self._bg_value("ui_bg_blur", 0) or 0))
+                    self._video_bg.frame_ready.connect(self._on_video_frame)
+                    self._video_bg.start()
+                    print(f"[NewUI] 主题背景视频（cv2 解码）: {os.path.basename(src)}")
+                except Exception as _e:
+                    print(f"[NewUI] ⚠ 视频背景启动失败: {_e}")
+                return
         except Exception as e:
-            print(f"[NewUI] ⚠ 主题背景加载失败: {e}")
+            print(f"[NewUI]  主题背景加载失败: {e}")
 
     def reload_background(self):
         """背景透明度/模糊度实时生效：销毁旧背景图/视频 → 按当前 config 重建"""
@@ -1650,10 +1851,16 @@ class SiliconLauncher(QWidget):
                 self._bg_widget.hide()
                 self._bg_widget.deleteLater()
                 self._bg_widget = None
+            if getattr(self, "_video_bg", None) is not None:
+                try:
+                    self._video_bg.stop(); self._video_bg.wait(1500)
+                except Exception:
+                    pass
+                self._video_bg = None
             self._load_background()
             print("[NewUI] 背景已按新设置重新加载")
         except Exception as e:
-            print(f"[NewUI] ⚠ 重载背景失败: {e}")
+            print(f"[NewUI]  重载背景失败: {e}")
 
     def resizeEvent(self, event):
         try:
@@ -1671,7 +1878,7 @@ class SiliconLauncher(QWidget):
             self.back.set_color(color)
             self.back.update()
         except Exception as e:
-            print(f"[NewUI] ⚠ 设置底色失败: {e}")
+            print(f"[NewUI]  设置底色失败: {e}")
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -1700,7 +1907,7 @@ class SiliconLauncher(QWidget):
             self._ensure_page(key)
             print(f"[NewUI] 预热 {key}（{why}）: {(_t.time() - t0) * 1000:.0f}ms")
         except Exception as e:
-            print(f"[NewUI] ⚠ 预热 {key} 失败: {e}")
+            print(f"[NewUI]  预热 {key} 失败: {e}")
         finally:
             try:
                 self._prewarm_busy.discard(key)
@@ -1728,13 +1935,13 @@ class SiliconLauncher(QWidget):
             self._prewarm_page(key, "空闲预热")
             QTimer.singleShot(1200, self._prewarm_next)
         except Exception as e:
-            print(f"[NewUI] ⚠ 预热失败: {e}")
+            print(f"[NewUI]  预热失败: {e}")
 
     # ── 关闭清理 ──
     def closeEvent(self, event):
         """先隐藏窗口，再清理子进程。
 
-        ★ 原来是"边关边杀"：taskkill / netstat / tasklist 都是同步调用，每个几百毫秒，
+         原来是"边关边杀"：taskkill / netstat / tasklist 都是同步调用，每个几百毫秒，
           点关闭要等一秒多才消失（用户反馈"关闭时卡一下"）。
           现在先把窗口藏掉（肉眼上立刻关掉），清理放到后台线程里做，最多等 1.5 秒再退出，
           用户已经看不到窗口了，感知上就是秒关。
@@ -1745,7 +1952,7 @@ class SiliconLauncher(QWidget):
         except Exception:
             procs = []
 
-        # ★ hide() 之前绝对不能有联网/子进程调用：
+        #  hide() 之前绝对不能有联网/子进程调用：
         #   _pet_api_alive() 要发 HTTP，桌宠没在跑时能卡好几秒 —— 那正是"关闭卡一下"的真凶。
         try:
             self.hide()
@@ -1756,6 +1963,12 @@ class SiliconLauncher(QWidget):
                 self._media.stop()
             except Exception:
                 pass
+        if getattr(self, "_video_bg", None) is not None:
+            try:
+                self._video_bg.stop()
+            except Exception:
+                pass
+            self._video_bg = None
 
         def _cleanup():
             # 桌宠不在跑了才收视觉服务（这个判断要发 HTTP，放后台做）
@@ -1857,7 +2070,7 @@ def _deepseek_balance(api_key: str) -> str:
             return "余额不足"
         return "—"
     except Exception as e:
-        print(f"[NewUI] ⚠ DeepSeek 余额查询失败: {type(e).__name__}: {e}")
+        print(f"[NewUI]  DeepSeek 余额查询失败: {type(e).__name__}: {e}")
         return "查询失败（网络？）"
 
 
@@ -1925,7 +2138,7 @@ def ensure_vision_service(shell) -> bool:
     base = _app_base_dir()
     script = os.path.join(base, "tool", "vision_service.py")
     if not os.path.isfile(script):
-        print("[NewUI] ⚠ 缺少 tool/vision_service.py，跳过本地视觉服务")
+        print("[NewUI]  缺少 tool/vision_service.py，跳过本地视觉服务")
         return False
     py = ""
     try:
@@ -1937,9 +2150,9 @@ def ensure_vision_service(shell) -> bool:
             _cand = _vs.find_runtime(base, cfg)
             if _cand and _vs._has_torch(_cand):
                 py = _cand
-                print("[NewUI] ⚠ 没找到带显卡加速的运行时，用现有的（识别会明显变慢）")
+                print("[NewUI]  没找到带显卡加速的运行时，用现有的（识别会明显变慢）")
     except Exception as e:
-        print(f"[NewUI] ⚠ 视觉运行时探测失败，按老规矩找：{e}")
+        print(f"[NewUI]  视觉运行时探测失败，按老规矩找：{e}")
     if not py:
         for rel in (os.path.join("GPT-SoVITS", "runtime_rocm", "Scripts", "python.exe"),
                     os.path.join("GPT-SoVITS", "runtime", "Scripts", "python.exe"),
@@ -1949,7 +2162,7 @@ def ensure_vision_service(shell) -> bool:
                 py = os.path.join(base, rel)
                 break
     if not py:
-        print("[NewUI] ⚠ 没找到能跑视觉模型的运行时"
+        print("[NewUI]  没找到能跑视觉模型的运行时"
               "（装 GPT-SoVITS 整合包，或到设置里把识别来源改成云端 API）")
         return False
     try:
@@ -1965,7 +2178,7 @@ def ensure_vision_service(shell) -> bool:
         print(f"[NewUI] 已启动本地视觉服务（PID {shell._vision_proc.pid}，日志 data/vision_service.log）")
         return True
     except Exception as e:
-        print(f"[NewUI] ⚠ 启动本地视觉服务失败: {e}")
+        print(f"[NewUI]  启动本地视觉服务失败: {e}")
         return False
 
 
@@ -2017,7 +2230,7 @@ def stop_vision_service(shell):
                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         print(f"[NewUI] 本地视觉服务已关闭（PID {pid}）")
     except Exception as e:
-        print(f"[NewUI] ⚠ 关闭本地视觉服务失败: {e}")
+        print(f"[NewUI]  关闭本地视觉服务失败: {e}")
 
 
 def _ulog(msg: str):
@@ -2067,7 +2280,7 @@ def _hook_repaint_transparency(page):
                 print(f"[NewUI] 已挂钩 {tgt.__class__.__name__}.{name}（重建后自动透明化）")
                 _ulog(f"已挂钩 {tgt.__class__.__name__}.{name}（刷新后自动透明化）")
             except Exception as e:
-                print(f"[NewUI] ⚠ 挂钩 {name} 失败: {e}")
+                print(f"[NewUI]  挂钩 {name} 失败: {e}")
 
 
 def _soft_blur(pm: QPixmap, strength: int) -> QPixmap:
@@ -2105,7 +2318,7 @@ def _soft_blur(pm: QPixmap, strength: int) -> QPixmap:
         qimg = QImage(out.data, w, h, w * 4, 4)
         return QPixmap.fromImage(qimg.copy())
     except Exception as e:
-        print(f"[NewUI] ⚠ 高斯模糊不可用，回退缩放模糊: {e}")
+        print(f"[NewUI]  高斯模糊不可用，回退缩放模糊: {e}")
         try:
             f = max(2, int(strength) // 6 + 1)
             small = pm.scaled(max(1, pm.width() // f), max(1, pm.height() // f),
@@ -2332,10 +2545,10 @@ def launch() -> int:
         from . import safety as _safety
         _safety.install("launcher")
     except Exception as _e:
-        print(f"[NewUI] ⚠ 全局异常兜底不可用: {_e}")
+        print(f"[NewUI]  全局异常兜底不可用: {_e}")
     if current_theme_id() == "silicon":
         _sui.install(app, accent=THEME_COLORS.get(str(ACCENT_ID), {}).get("title_start", "#2f6fd0"))
-    # ★ 不再用开屏窗口（原来那个 420x240 的小卡片就是用户看到的"弹窗"）：
+    #  不再用开屏窗口（原来那个 420x240 的小卡片就是用户看到的"弹窗"）：
     #   外壳构造实测只要 ~90ms，开屏纯属白等，还给启动过程加了 450ms 延迟和一次窗口切换。
     #   直接显示主窗 + 淡入，打开即见。
     win = SiliconLauncher()
@@ -2343,7 +2556,7 @@ def launch() -> int:
         win.show()
         _fade_window_in(win)
     except Exception as e:
-        print(f"[NewUI] ⚠ 主窗显示失败（直接显示）: {e}")
+        print(f"[NewUI]  主窗显示失败（直接显示）: {e}")
         try:
             win.show()
         except Exception:
@@ -2364,4 +2577,4 @@ def _fade_window_in(win):
         a.start(QPropertyAnimation.DeleteWhenStopped)
         win._fade_in_anim = a
     except Exception as e:
-        print(f"[NewUI] ⚠ 主窗淡入失败: {e}")
+        print(f"[NewUI]  主窗淡入失败: {e}")
