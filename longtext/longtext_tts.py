@@ -282,10 +282,17 @@ class LongTextVoice:
 
     def _effective_ref(self, text: str):
         """返回本次实际要用的 (参考音频, 参考台词, 参考语言, 文本语言)"""
-        import re as _re
-        _kana = lambda t: bool(_re.search(r"[\u3040-\u30ff]", str(t or "")))
-        prompt_lang = "ja" if _kana(self.ref_text) else "zh"     # 参考音频那条台词的语言
-        text_lang = "ja" if _kana(text) else "zh"                # 要念的这段话的语言
+        # ★ 语言判定统一走 tool/chat._tts_text_lang：带假名 → 日语；纯汉字
+        #   （「了解」「大丈夫」这类）→ 跟随当前语言模式，不能一律当中文念
+        #   （那正是用户反馈的"日语模式却合成出中文"）。
+        try:
+            from tool.chat import _tts_text_lang as _lang
+        except Exception:
+            import re as _re
+            _kana = lambda t: bool(_re.search(r"[\u3040-\u30ff]", str(t or "")))
+            _lang = lambda t: ("ja" if _kana(t) else "zh")
+        prompt_lang = _lang(self.ref_text)     # 参考音频那条台词的语言
+        text_lang = _lang(text)                # 要念的这段话的语言
         # ⚠ 长语音只用长语音包（用短语音的样例会让音色变味，用户明确要求不要混用）；
         #   但"文本语言"必须跟着文本走：音色由参考音频决定，语言由文本决定，
         #   两者混用会把中文台词按日文念（听着像换了个人）。跨语言合成是正常用法。

@@ -242,7 +242,9 @@ def _pet_tables(set_name=None, pet_id=None):
         if not cloth_tbl:
             return None
         return {"pid": pid, "set": s, "cloth": cloth_tbl, "decor": decor_tbl,
-                "actions": act_tbl, "emotions": emo_tbl}
+                "actions": act_tbl, "emotions": emo_tbl,
+                # 装饰与表情/服装的绑定规则（如「嫌弃阴影」只能配「嫌弃」表情）
+                "decor_rules": list(blk.get("decor_rules") or [])}
     except Exception:
         return None
 
@@ -300,16 +302,58 @@ def set_active(set_name: str) -> bool:
 
 
 # ══════════ 选项枚举 ══════════
-def clothes_of(set_name=None):
-    """某套的服装选项 → [(名字, 身体层 id, 发型层 id)]"""
-    s = set_name or active_set()
+def clothes_of(set_name=None, pet_id=None):
+    """某套的服装选项 → [(名字, 身体层 id, 发型层 id)]
+
+    ★ 优先用角色自己 pet.json 里的表（新角色都写在那里）；
+      以前这里只认丛雨的内置表 → 别的角色会被塞进丛雨的层号，
+      合成/算画布全错：AI 挑的层换算不过来，画布还会被算得特别宽
+      （用户反馈「对话框变这么大」就是它把窗口撑宽的）。
+    """
+    s = set_name if set_name in SETS else (set_name or active_set())
+    pet = _pet_tables(s, pet_id)
+    if pet:
+        # _pet_tables 里的键名是 cloth / decor / actions（值分别是
+        # (身体层, 发型层) / 装饰层 / (动作层, 所属服装层)）
+        out = []
+        for name, v in (pet.get("cloth") or {}).items():
+            try:
+                c, h = (v if isinstance(v, (tuple, list)) else (v, 0))
+                out.append((str(name), int(c or 0), int(h or 0)))
+            except Exception:
+                continue
+        if out:
+            return [(n, c, h) for n, c, h in out if c]
+    # 有 portrait 块但没写服装表 → 就是没有可选服装，绝不回退到丛雨的表
+    try:
+        from pets.pet_registry import get_pet_config
+        if (get_pet_config(pet_id).get("portrait") or {}):
+            return []
+    except Exception:
+        pass
     m = CLOTHES_BY_SET.get(s, CLOTHES_BY_SET[DEFAULT_SET])
     return [(n, m[n][0], m[n][1]) for n in CLOTH_ORDER if n in m]
 
 
-def decors_of(set_name=None):
-    """某套的装饰选项 → [(名字, 层 id)]"""
-    s = set_name or active_set()
+def decors_of(set_name=None, pet_id=None):
+    """某套的装饰选项 → [(名字, 层 id)]（同样优先用角色自己的表）"""
+    s = set_name if set_name in SETS else (set_name or active_set())
+    pet = _pet_tables(s, pet_id)
+    if pet:
+        out = []
+        for name, v in (pet.get("decor") or {}).items():
+            try:
+                out.append((str(name), int(v)))
+            except Exception:
+                continue
+        if out:
+            return [(n, i) for n, i in out if i]
+    try:
+        from pets.pet_registry import get_pet_config
+        if (get_pet_config(pet_id).get("portrait") or {}):
+            return []
+    except Exception:
+        pass
     m = DECORS_BY_SET.get(s, {})
     return [(n, m[n]) for n in m]
 
@@ -922,6 +966,14 @@ def apply_outfit(layers, set_name=None, outfit=None, fallback_body=0, fallback_e
             hairs = HAIR_LAYERS_BY_SET.get(s, set())
         if isinstance(pet, dict):
             hairs = {v for v in cloth2hair.values() if v}
+            # ★ 兜底用的「默认服装/刘海」也按角色自己的表取。
+            #   以前这里回退的是丛雨内置表 → 换到夏目这种角色，
+            #   便服没有配套刘海，就会去挂丛雨的 1959 / 1261，
+            #   渲染时报「跳过缺失图层: ナツメa_1959.png」（用户反馈过）。
+            _first_cloth = next(iter(pet["cloth"].values()), (0, 0))
+            if not saved_body or saved_body not in body:
+                saved_body = int(_first_cloth[0] or 0)
+            saved_hair = int(of.get("hair") or 0) or int(cloth2hair.get(saved_body, 0) or 0)
         # 1) AI 挑的身体层（服装 / 换臂动作）
         ints = []
         for lid in (layers or []):
@@ -1027,6 +1079,8 @@ def apply_outfit(layers, set_name=None, outfit=None, fallback_body=0, fallback_e
                     print(f"[PortraitOutfit] ℹ 本句没有表情 → 补默认表情 {_dft}")
         except Exception as _e:
             print(f"[PortraitOutfit] ⚠ 补默认表情失败: {_e}")
+        # ★ 装饰与表情/服装的绑定（例：夏目的「嫌弃阴影」只配「嫌弃」表情）
+        out = apply_decor_rules(out, s, pet)
         # ★ 按「身体 → 表情 → 装饰 → 头发」重排：AI 有时把顺序写反，
         #   身体层画在表情上面就把脸盖住了（用户反馈"表情会消失"）
         ranks = {}
@@ -1323,6 +1377,63 @@ def _decor_ids_of(set_name, pet=None) -> set:
     except Exception:
         return set()
 
+def apply_decor_rules(layers, set_name, pet=None) -> list:
+    """按角色的「装饰 ↔ 表情 / 服装」绑定规则增删装饰层。
+
+    规则写在角色包 pet.json 里，例如四季夏目：
+        portrait.sets.b.decor_rules = [{"decor": "嫌弃阴影", "emotion": "嫌弃"}]
+    含义：用「嫌弃」这张脸时必须一起挂上「嫌弃阴影」；换成别的表情时不许带。
+    （游戏原素材就是这么配的：阴影是那套表情的一部分，单独挂着会很怪。）
+
+    规则字段：
+      decor   必填，装饰名（对应 pet.json 的 decors 表）
+      emotion 选填，表情名（对应 emotions 表）——只有当前表情是它时才允许带
+      cloth   选填，服装名（对应 clothes 表）——只有穿着它时才允许带
+    """
+    try:
+        if not layers:
+            return list(layers or [])
+        pet = pet if isinstance(pet, dict) else _pet_tables(set_name)
+        rules = (pet or {}).get("decor_rules") or []
+        if not rules:
+            return list(layers or [])
+        decors = {str(n): int(v) for n, v in (pet.get("decor") or {}).items()}
+        emos = {str(n): int(v) for n, v in (pet.get("emotions") or {}).items()
+                if str(v).strip().lstrip("-").isdigit()}
+        cloths = {str(n): int(v[0]) for n, v in (pet.get("cloth") or {}).items()}
+        out = [int(x) for x in layers if str(x).strip().lstrip("-").isdigit()]
+        emo_ids = set(emos.values())
+        for rule in rules:
+            if not isinstance(rule, dict):
+                continue
+            did = decors.get(str(rule.get("decor") or ""))
+            if not did:
+                continue
+            ok = True
+            emo_name = str(rule.get("emotion") or "")
+            if emo_name:
+                want = emos.get(emo_name)
+                # 当前这张脸是不是规则要求的表情（也接受"这一串里带了它"）
+                ok = bool(want) and any(x in emo_ids and x == want for x in out)
+            cloth_name = str(rule.get("cloth") or "")
+            if ok and cloth_name:
+                want_c = cloths.get(cloth_name)
+                ok = bool(want_c) and want_c in out
+            if ok:
+                if did not in out:
+                    out.append(did)
+                    print(f"[PortraitOutfit] 🎀 绑定装饰：{rule.get('decor')} 随 "
+                          f"{emo_name or cloth_name} 一起上")
+            elif did in out:
+                out = [x for x in out if x != did]
+                print(f"[PortraitOutfit] 🎀 摘下绑定装饰：{rule.get('decor')}"
+                      f"（不属于当前{('表情' if emo_name else '服装')}）")
+        return out
+    except Exception as e:
+        print(f"[PortraitOutfit] ⚠ 装饰绑定规则执行失败: {e}")
+        return list(layers or [])
+
+
 # ══════════ 当前外观（给模型的事实注入）══════════
 # 桌宠每次重画立绘时把"我现在穿的是什么"记下来，对话时注入 system，
 # 这样主人问起穿着、或者聊到衣服时，它答的就是自己身上那套，不会张冠李戴。
@@ -1538,3 +1649,43 @@ def current_look_note(pet_id=None) -> str:
             "这是你此刻真实穿在身上的样子：主人问起你的穿着、或者聊到衣服时，"
             "就按这个回答，不要说自己穿的是别的衣服。")
 
+
+
+def order_for_draw(layers, names=None):
+    """按绘制顺序重排图层（下 → 上）：
+        服装/身体 → 阴影类装饰 → 表情 → 其它装饰 → 前发叠加
+    为什么：游戏里「嫌弃」这类表情要配一张「阴影」层，阴影必须画在表情**下面**，
+    否则会把五官盖住（用户反馈：阴影盖在脸上）。
+    names: {layer_id: 图层名}（来自各角色的图层索引，用来识别阴影/前发/表情）
+    """
+    nm = {}
+    for k, v in (names or {}).items():
+        try:
+            nm[int(k)] = str(v or "")
+        except Exception:
+            pass
+    FACE_KEYS = ("组合表情", "平常", "茫然", "吃惊", "焦急", "害羞", "羞涩", "寂寞", "思考",
+                 "为难", "苦笑", "疑惑", "信服", "认真", "敷衍", "半眯眼", "嫌弃", "闭眼",
+                 "基本表情", "笑容", "微笑", "发愣", "满足", "惊愕", "叹息")
+
+    def rank(lid):
+        try:
+            n = nm.get(int(lid), "")
+        except Exception:
+            n = ""
+        if not n:
+            return 0
+        if "阴影" in n or "影２" in n or "影2" in n:
+            return 1                      # 阴影：画在表情下面
+        if "前髪かぶせ" in n or "·前发" in n or "前发" in n:
+            return 4                      # 前发：最上层
+        if any(k in n for k in FACE_KEYS):
+            return 2                      # 表情
+        if "脸红" in n or "泪水" in n or "涙" in n or "頬" in n:
+            return 3                      # 其它装饰：脸上层
+        return 0                          # 服装/身体
+
+    try:
+        return sorted(list(layers or []), key=rank)
+    except Exception:
+        return list(layers or [])

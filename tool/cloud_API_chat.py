@@ -17,6 +17,13 @@ def now_time():
     return now
 
 def post(name: str, payload, api_key: str = ""):
+    """调云端（经本机 api.py 中转）。失败会自动重试，别让一次抖动废掉一整轮对话。
+
+    为什么要重试：上游/代理偶尔会「连接被强制关闭」「信号灯超时」「返回空响应体」，
+    这类都是一次性的传输层故障。以前一次失败就 return "" → 这一轮她对什么都不回，
+    过一会儿再问又好了（用户反馈："突然问又能回答了"）。
+    """
+    import time as _t
     payload_str = str(payload)
     if len(payload_str) > 200:
         payload_str = payload_str[:180] + "...(truncated)"
@@ -26,26 +33,44 @@ def post(name: str, payload, api_key: str = ""):
         'Content-Type': 'application/json',
         'Authorization': 'Bearer ' + api_key
     }
-    try:
-        # 显式超时：防止云端/代理挂起导致线程永不结束（桌面端非守护线程会卡住退出）
-        from tool.net_env import post_with_direct_fallback as _postf
-        resp = _postf(url, json={"payload": payload, "headers": headers},
-                             timeout=(15, 180))
-    except Exception as e:
-        print(f"[{now_time()}] [{name}] ⚠ 请求失败: {e}")
-        return ""
-    try:
-        resp = resp.json()
-    except Exception as e:
-        print(f"[{now_time()}] [{name}] ⚠ 响应解析失败: {e}")
-        return ""
-    reply = ""
-    if "choices" in resp:
-        reply = resp['choices'][0]['message']['content']
-    else:
-        print(resp)
-    print(f"[{now_time()}] [{name}] Reply:{reply}")
-    return reply
+    attempts = 3
+    last_err = ""
+    for i in range(attempts):
+        # 第一次给足时间；重试时缩短超时，免得一轮对话卡好几分钟
+        timeout = (15, 180) if i == 0 else (8, 60)
+        resp = None
+        try:
+            # 显式超时：防止云端/代理挂起导致线程永不结束（桌面端非守护线程会卡住退出）
+            from tool.net_env import post_with_direct_fallback as _postf
+            resp = _postf(url, json={"payload": payload, "headers": headers}, timeout=timeout)
+        except Exception as e:
+            last_err = f"请求失败: {e}"
+            print(f"[{now_time()}] [{name}] ⚠ {last_err}（第 {i + 1}/{attempts} 次）")
+        if resp is not None:
+            try:
+                data = resp.json()
+            except Exception as e:
+                last_err = f"响应解析失败: {e}"
+                print(f"[{now_time()}] [{name}] ⚠ {last_err}"
+                      f"（第 {i + 1}/{attempts} 次，响应体为空/非 JSON）")
+                data = None
+            if isinstance(data, dict):
+                if "choices" in data:
+                    reply = data['choices'][0]['message']['content']
+                    print(f"[{now_time()}] [{name}] Reply:{reply}")
+                    if i:
+                        print(f"[{now_time()}] [{name}] ℹ 第 {i + 1} 次请求成功")
+                    return reply
+                # 有 JSON 但没 choices：上游的报错（限流/密钥/超时…）→ 只多试一次
+                last_err = f"响应没有 choices: {str(data)[:160]}"
+                print(f"[{now_time()}] [{name}] ⚠ {last_err}")
+                if i >= 1:
+                    break
+        if i < attempts - 1:
+            _t.sleep(0.6 * (i + 1))
+    print(f"[{now_time()}] [{name}] ✗ {attempts} 次都没成功，本轮跳过：{last_err}")
+    return ""
+
 
 def _short_model_cfg():
     """短文本链路模型配置（model_type=local 时返回 None）"""
@@ -106,6 +131,13 @@ def cloud_talk(history: list, user_input: str, role: str):
     else:
         messages.append({"role": "system", "content": identity_default})
 
+    # 她需要看屏幕时可以自己开口（输出【看屏幕】标记）→ 桌宠会截屏识别后再让她回答
+    try:
+        from tool.screen_intent import SCREEN_REQUEST_RULE
+        messages.append({"role": "system", "content": SCREEN_REQUEST_RULE})
+    except Exception:
+        pass
+
     # 你现在穿的是什么（桌宠窗口每次重画立绘都会记下来）——主人问起穿着时按这个答
     try:
         from tool.portrait_outfit import current_look_note
@@ -164,6 +196,25 @@ def cloud_talk(history: list, user_input: str, role: str):
     history.append({"role": "assistant", "content": reply})  # 加入历史
     return reply, history
 
+def _pp_text(value):
+    """把立绘清单里的字段安全地转成文本。
+
+    portrait_prompts.json 里的 {layers_desc}/{example} 正常是字符串，
+    但手改或脚本生成时很容易写成 JSON 数组 → str.replace() 收到 list 会直接抛
+    TypeError，整轮回复就此中断（桌宠会一直卡在"她正在思考"）。
+    这里统一兜底：字符串原样返回，其它类型转成 JSON 文本。
+    """
+    if isinstance(value, str):
+        return value
+    if value is None:
+        return ""
+    try:
+        import json as _json
+        return _json.dumps(value, ensure_ascii=False)
+    except Exception:
+        return str(value)
+
+
 def cloud_portrait(sentence: str, history: list, type: str):
     # ===== 修复：杜绝「立绘历史污染」======================
     # 旧实现把完整 history（含历史返回的图层 ID）塞进 system，导致：
@@ -183,8 +234,8 @@ def cloud_portrait(sentence: str, history: list, type: str):
     set_cfg = portrait_cfg.get("sets", {}).get(type, {})
     if set_cfg:
         template = portrait_cfg.get("prompt_template", "")
-        identity = template.replace("{layers_desc}", set_cfg.get("layers_desc", "")) \
-                           .replace("{example}", set_cfg.get("example", ""))
+        identity = template.replace("{layers_desc}", _pp_text(set_cfg.get("layers_desc", ""))) \
+                           .replace("{example}", _pp_text(set_cfg.get("example", "")))
     else:
         # 回退：角色无 portrait_prompts.json 时的最小提示
         identity = (

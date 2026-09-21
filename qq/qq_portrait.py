@@ -505,13 +505,20 @@ def _load_index(set_name="a"):
 
 
 def _paste(canvas, img, left, top):
+    """把 img 贴到 canvas 的 (left, top)。left/top 可以是负数（图层超出画布左上角）——
+    以前直接 canvas[top:y2, left:x2]，负 left 会被 numpy 当成「从末尾数」→ 切成空数组
+    → 报 operands could not be broadcast together（立绘工坊「合成失败」的真凶）。"""
     h, w = img.shape[:2]
-    y2 = min(canvas.shape[0], top + h)
-    x2 = min(canvas.shape[1], left + w)
-    if top >= y2 or left >= x2:
+    sx = max(0, -int(left))          # 源图要裁掉的左边/上边
+    sy = max(0, -int(top))
+    dx = max(0, int(left))           # 画布上的起点
+    dy = max(0, int(top))
+    w = min(w - sx, canvas.shape[1] - dx)
+    h = min(h - sy, canvas.shape[0] - dy)
+    if w <= 0 or h <= 0:
         return
-    reg_img = img[0:y2 - top, 0:x2 - left]
-    reg_can = canvas[top:y2, left:x2]
+    reg_img = img[sy:sy + h, sx:sx + w]
+    reg_can = canvas[dy:dy + h, dx:dx + w]
     a_img = reg_img[..., 3:4] / 255.0
     a_can = 1.0 - a_img
     for c in range(3):
@@ -724,6 +731,16 @@ def build_portrait(emotion: str = "", bg_kw: str = "",
             _adj = _adjust_table(get_active_pet_id(), s)
         except Exception:
             _adj = {}
+        # ★ 绘制顺序：阴影类装饰要画在表情下面（否则盖住五官）
+        try:
+            from tool.portrait_outfit import order_for_draw
+            _nm = {}
+            for x in (info.get("rows") or []):
+                if len(x) > 9:
+                    _nm[str(x[9])] = x[1]
+            layers = order_for_draw(layers, names=_nm)
+        except Exception as _e:
+            print(f"[QQPortrait] ⚠ 图层排序跳过: {_e}")
         for lid in layers:
             pos = infos.get(lid)
             img = _read_layer(fg_dir, prefix, s, lid)

@@ -212,6 +212,12 @@ if __name__ == "__main__":
         try:
             if getattr(pet, "_portrait_ready", False) or waited >= 5000:
                 pet.show()
+                # 立绘尺寸锁定后窗口会变，保存的位置可能让它有一部分在屏幕外
+                # （用户反馈"刚启动时立绘只显示一半"）→ 显示后校正一次
+                try:
+                    pet._clamp_to_screen()
+                except Exception:
+                    pass
                 if waited >= 5000:
                     print("[桌宠] ⚠ 立绘合成较慢，先显示窗口（稍后会自行补上）")
                 return
@@ -984,17 +990,24 @@ if __name__ == "__main__":
             def _screenshot_task():
                 try:
                     print("[API Control] 触发屏幕识别")
-                    from tool.cloud_API_chat import cloud_vl
+                    from tool.chat import describe_image, vision_fast_size
                     from PyQt5.QtGui import QGuiApplication
+                    from classes.Worker_class import shot_is_blank
                     screen = QGuiApplication.primaryScreen()
                     pixmap = screen.grabWindow(0)
+                    # 锁屏 / 显示器休眠 / 独占全屏时抓屏会返回全黑：别送模型，直接告诉她主人
+                    if shot_is_blank(pixmap):
+                        pet.show_text("这屏幕黑着，看不到东西呀……（锁屏了？还是显示器睡着了）", typing=True)
+                        from api import set_feature_status
+                        set_feature_status("screenshot", "blank")
+                        return
                     import tempfile
                     import os as _os
                     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png", dir="tmp")
                     tmp_name = tmp.name
                     tmp.close()
                     pixmap.save(tmp_name, "PNG")
-                    desc = cloud_vl(tmp_name)
+                    desc = describe_image(tmp_name, max_side=vision_fast_size(), max_new=160)
                     _os.remove(tmp_name)
                     prompt = (
                         "【重要系统指令】你刚刚通过屏幕截图看到了主人当前的真实状态。"
@@ -1003,6 +1016,7 @@ if __name__ == "__main__":
                         f"{desc}\n"
                         "=== 屏幕内容描述结束 ===\n"
                         f"请以{pet.pet_name}的身份，自然地观察并评论主人正在做什么。你的回复必须紧密围绕上述描述。"
+                        "只输出你自己要说的话（JSON 数组），不要写「主人：」也不要替主人说话，不要续写下一轮。"
                     )
                     pet._request_dialog.emit(prompt, "system", True)
                     from api import set_feature_status

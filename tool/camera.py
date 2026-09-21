@@ -8,6 +8,7 @@
 import os
 import sys
 import base64
+import tempfile
 import threading
 import time
 from typing import Optional, Callable
@@ -76,12 +77,18 @@ class CameraCapture:
 
 # ==================== AI 视觉分析 ====================
 
+def _encode_frame_bytes(frame) -> bytes:
+    """OpenCV 帧 → JPEG 字节"""
+    encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 75]
+    ok, buffer = cv2.imencode('.jpg', frame, encode_param)
+    if not ok:
+        raise RuntimeError("画面编码失败")
+    return buffer.tobytes()
+
+
 def _encode_frame(frame) -> str:
     """OpenCV 帧 → JPEG base64 data URL"""
-    encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 75]
-    _, buffer = cv2.imencode('.jpg', frame, encode_param)
-    img_base64 = base64.b64encode(buffer).decode('utf-8')
-    return f"data:image/jpeg;base64,{img_base64}"
+    return "data:image/jpeg;base64," + base64.b64encode(_encode_frame_bytes(frame)).decode('utf-8')
 
 
 def _qwen_vision(image_b64_url: str, prompt: str) -> str:
@@ -159,9 +166,23 @@ def take_photo_and_describe() -> Optional[str]:
         return "无法获取摄像头画面"
 
     try:
-        img_url = _encode_frame(frame)
         prompt = "请用简短的中文描述这张照片中的场景、人物和主要活动，不超过50个字。如果画面很暗看不清，也请如实描述。"
-        result = _qwen_vision(img_url, prompt)
+        from tool.chat import vision_source, describe_image
+        if vision_source() == "local":
+            # 本地视觉服务吃的是「图片文件」，先把这一帧落到临时文件
+            fd, path = tempfile.mkstemp(suffix=".jpg", dir="tmp" if os.path.isdir("tmp") else None)
+            os.close(fd)
+            try:
+                with open(path, "wb") as f:
+                    f.write(_encode_frame_bytes(frame))
+                result = describe_image(path, prompt)
+            finally:
+                try:
+                    os.remove(path)
+                except Exception:
+                    pass
+        else:
+            result = _qwen_vision(_encode_frame(frame), prompt)
         print(f"[camera] 识别结果: {result}")
         return result
     except Exception as e:

@@ -4,8 +4,13 @@
     "qwen3_lora": "http://localhost:28565/qwen3-lora",
     "gpt_sovits_tts": "http://localhost:28565/tts",
     "cloud_api": "http://localhost:28565/cloudAPI",
-    "longtext_tts": "http://localhost:28565/tts_long"
+    "longtext_tts": "http://localhost:28565/tts_long",
+    "vision": "http://127.0.0.1:28460/describe"
   },
+  "vision_source": "local",
+  "vision_local_model_dir": "D:\\下载\\AI桌宠\\vision\\Qwen2-VL-2B-Instruct",
+  "vision_local_port": 28460,
+  "vision_max_side": 1280,
   "APIKEY": {
     "deepseek": "sk-your-deepseek-key",
     "qwen": "sk-your-qwen-key"
@@ -69,5 +74,7 @@
   "portrait_auto_switch": "true",
   "ui_shell": "silicon",
   "ui_acrylic": "false",
-  "ui_bg_color": "#000000"
+  "ui_bg_color": "#000000",
+  "vision_idle_unload": 300,
+  "vision_fast_max_side": 896
 }

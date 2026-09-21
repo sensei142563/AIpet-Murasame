@@ -239,8 +239,15 @@ def generate_fgimage(target, embeddings_layers, pet_id: str = None):
             print(f"[generate] ⚠ 所有图层均缺失，返回空画布")
             return np.zeros((1, 1, 4), dtype=np.uint8)
 
-    all_positions = [(int(x[2]), int(x[3]), int(x[4]), int(x[5]))
-                     for name in valid_layers for x in infos if x[9] == str(name)]
+    # ★ 严格 1:1：一个图层取索引里的「第一行」，避免索引里同 id 出现两次时
+    #   位置列表比图层列表长 → 贴图循环越界（旧 bug：立绘直接合成失败/表情不显示）
+    _pos_by_id = {}
+    for _x in infos:
+        try:
+            _pos_by_id.setdefault(str(_x[9]), (int(_x[2]), int(_x[3]), int(_x[4]), int(_x[5])))
+        except Exception:
+            continue
+    all_positions = [p for p in (_pos_by_id.get(str(n)) for n in valid_layers) if p]
 
     # ===== 兜底（一·五）：图层里没有「表情」→ 补上该角色默认表情 =====
     # （AI 有时只返回服装/头发，结果就是「只有衣服没有脸」）
@@ -323,6 +330,15 @@ def generate_fgimage(target, embeddings_layers, pet_id: str = None):
     else:
         base_x = min((p[0] for p in all_positions), default=0)
         base_y = min((p[1] for p in all_positions), default=0)
+
+    # ★ 绘制顺序：服装 → 阴影装饰 → 表情 → 其它装饰 → 前发
+    try:
+        from tool.portrait_outfit import order_for_draw
+        _nm = {str(x[9]): x[1] for x in infos if len(x) > 9}
+        valid_layers = order_for_draw(valid_layers, names=_nm)
+        all_positions = [q for q in (_pos_by_id.get(str(n)) for n in valid_layers) if q]
+    except Exception as _e:
+        print(f"[generate] ⚠ 图层排序跳过: {_e}")
 
     all_positions = [(pos[0] - base_x, pos[1] - base_y, pos[2], pos[3])
                      for pos in all_positions]

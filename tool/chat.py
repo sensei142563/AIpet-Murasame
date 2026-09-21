@@ -103,6 +103,11 @@ def qwen3_lora(history, user_input, role):
     filtered_history, high_observations, identity_msg = _prepare_priority_messages(history)
 
     messages = []
+    try:
+        from tool.screen_intent import SCREEN_REQUEST_RULE
+        messages.append({"role": "system", "content": SCREEN_REQUEST_RULE})
+    except Exception:
+        pass
     # 1. system 身份（优先保留已有的 system，否则用默认身份）
     if identity_msg:
         messages.append(identity_msg)
@@ -179,6 +184,25 @@ def ollama_qwen3_sentence(sentence: str):
     reply = ollama_post("ollama-qwen3-sentence", prompt)
     return reply
 
+def _pp_text(value):
+    """把立绘清单里的字段安全地转成文本。
+
+    portrait_prompts.json 里的 {layers_desc}/{example} 正常是字符串，
+    但手改或脚本生成时很容易写成 JSON 数组 → str.replace() 收到 list 会直接抛
+    TypeError，整轮回复就此中断（桌宠会一直卡在"她正在思考"）。
+    这里统一兜底：字符串原样返回，其它类型转成 JSON 文本。
+    """
+    if isinstance(value, str):
+        return value
+    if value is None:
+        return ""
+    try:
+        import json as _json
+        return _json.dumps(value, ensure_ascii=False)
+    except Exception:
+        return str(value)
+
+
 def ollama_qwen3_portrait(sentence: str, history: list, type):
     # ===== 从角色包读取立绘映射（无则回退通用提示）=====
     from pets.pet_registry import get_portrait_prompts
@@ -186,8 +210,8 @@ def ollama_qwen3_portrait(sentence: str, history: list, type):
     set_cfg = portrait_cfg.get("sets", {}).get(type, {})
     if set_cfg:
         template = portrait_cfg.get("prompt_template", "")
-        sysprompt = template.replace("{layers_desc}", set_cfg.get("layers_desc", "")) \
-                            .replace("{example}", set_cfg.get("example", ""))
+        sysprompt = template.replace("{layers_desc}", _pp_text(set_cfg.get("layers_desc", ""))) \
+                            .replace("{example}", _pp_text(set_cfg.get("example", "")))
     else:
         # 回退：角色无 portrait_prompts.json 时的最小提示
         sysprompt = (
@@ -372,6 +396,144 @@ def ollama_qwen25vl(image_path: str):
     reply = ollama_post("ollama-qwen2.5vl", prompt)
     return reply
 
+def vision_source() -> str:
+    """视觉识别走哪边：local（本机服务）/ cloud（云端 API）。
+
+    没在设置里选过就跟随对话模型：对话用本地模型 → 视觉也用本地，其它 → 云端。
+    """
+    try:
+        v = str(get_config("./config.json").get("vision_source") or "").strip().lower()
+        if v in ("local", "cloud"):
+            return v
+    except Exception:
+        pass
+    try:
+        return "local" if str(get_config("./config.json").get("model_type") or "").strip().lower() == "local" else "cloud"
+    except Exception:
+        return "cloud"
+
+
+def vision_local_url() -> str:
+    """本地视觉服务地址（config.json 的 local_api.vision）"""
+    try:
+        u = str((get_config("./config.json").get("local_api") or {}).get("vision") or "").strip()
+        if u:
+            return u
+    except Exception:
+        pass
+    try:
+        p = int(get_config("./config.json").get("vision_local_port") or 28460)
+    except Exception:
+        p = 28460
+    return f"http://127.0.0.1:{p}/describe"
+
+
+def vision_fast_size() -> int:
+    """「主人正在等」的时候用多大图（越小越快）。
+
+    视觉编码耗时随像素数近似平方增长：1280 → 约 17~20s，896 → 约 6~8s。
+    主人主动让你看屏幕时用快速档，别让他等半分钟。
+    """
+    try:
+        return max(280, int(get_config("./config.json").get("vision_fast_max_side") or 896))
+    except Exception:
+        return 896
+
+
+def _local_vision_describe(image_path: str, prompt: str = "",
+                           max_side: int = 0, max_new: int = 0) -> str:
+    """调本机视觉服务（tool/vision_service.py）拿描述。
+
+    max_side/max_new > 0 时按本次调用覆盖（快速档用），0 = 用服务端默认。
+    """
+    import base64 as _b64
+    import urllib.request as _ur
+    with open(image_path, "rb") as f:
+        img = _b64.b64encode(f.read()).decode()
+    body_d = {"image_b64": img, "prompt": prompt}
+    if max_side:
+        body_d["max_side"] = int(max_side)
+    if max_new:
+        body_d["max_new"] = int(max_new)
+    body = json.dumps(body_d, ensure_ascii=False).encode("utf-8")
+    req = _ur.Request(vision_local_url(), data=body,
+                      headers={"Content-Type": "application/json"})
+    # 本机请求绝不能走系统代理（代理会把 127.0.0.1 也劫走）
+    op = _ur.build_opener(_ur.ProxyHandler({}))
+    with op.open(req, timeout=300) as r:   # 本地编码一屏要二十多秒，给足时间
+        d = json.loads(r.read().decode("utf-8", "ignore"))
+    if not d.get("ok"):
+        raise RuntimeError(d.get("error") or "本地视觉服务返回失败")
+    return str(d.get("text") or "").strip()
+
+
+def describe_image(image_path: str, prompt: str = "",
+                   max_side: int = 0, max_new: int = 0) -> str:
+    """统一的「看图说话」入口：按设置走本地视觉模型或云端 API。
+
+    本地服务没起来 / 报错时自动回落到云端（并在日志里说一声），不至于整条链路断掉。
+    max_side/max_new：本次调用的快速档参数（主人等着看屏幕时用），0 = 默认。
+    """
+    if vision_source() == "local":
+        try:
+            txt = _local_vision_describe(image_path, prompt, max_side=max_side, max_new=max_new)
+            if txt:
+                print(f"[{now_time()}] [vision-local] 描述完成（{len(txt)} 字）")
+                return txt
+            print(f"[{now_time()}] [vision-local] ⚠ 空描述 → 回落云端")
+        except Exception as e:
+            print(f"[{now_time()}] [vision-local] ⚠ 本地视觉不可用（{type(e).__name__}: {e}）→ 回落云端")
+    from tool.cloud_API_chat import cloud_vl
+    return cloud_vl(image_path)
+
+
+def _tts_text_lang(text: str) -> str:
+    """这段文本该用哪种前端念：ja / zh。
+
+    规则（两条都重要）：
+      1) 句子里有假名 → 一定是日语（中文前端念不出假名）
+      2) 没有假名（纯汉字，如「了解」「大丈夫」「無理」）→ 跟随当前**语言模式**：
+         日语模式（longtext_enabled=false）当日语念，汉语模式当汉语念。
+         以前一律按中文念 → 「了解」变成 liǎo jiě，听着就是"日语模式却合成出中文"。
+    """
+    try:
+        if re.search(r"[\u3040-\u309f\u30a0-\u30ff]", str(text or "")):
+            return "ja"
+    except Exception:
+        pass
+    try:
+        zh_mode = str(get_config("./config.json").get("longtext_enabled", "true")).strip().lower()
+        return "zh" if zh_mode in ("true", "1", "yes", "on") else "ja"
+    except Exception:
+        return "zh"
+
+
+# 「汉字（假名）」形式的注音：翻日语时为了读音准确会写成这样，
+# 但送到 TTS 会被"汉字 + 假名"念两遍 → 只保留括号里的假名。
+_PAREN_READING = re.compile(r"([\u4e00-\u9fff]{1,8})[（(]\s*([\u3040-\u309f\u30a0-\u30ffー]+)\s*[）)]")
+_KANA_ONLY = re.compile(r"^[\u3040-\u309f\u30a0-\u30ffー]+$")
+
+
+def _strip_readings(text: str) -> str:
+    """把「汉字（かな）」收敛成「かな」，避免同一句话被念两遍。"""
+    s = str(text or "")
+    if not s or "（" not in s and "(" not in s:
+        return s
+
+    def _rep(m):
+        kana = m.group(2)
+        return kana if _KANA_ONLY.match(kana) else m.group(0)
+    try:
+        return _PAREN_READING.sub(_rep, s)
+    except Exception:
+        return s
+
+
+def _prep_tts_text(sentence: str) -> str:
+    """送合成前的统一规整：注音括号收敛 + 首尾空白。"""
+    return _strip_readings(sentence).strip()
+
+
 def _gpt_sovits_service_ready(timeout: float = 1.0) -> bool:
     """探测 TTS 服务是否「真的能用」——注意有两层：
 
@@ -485,11 +647,16 @@ def _gsv_local_direct(text: str, ref_audio: str, prompt_text: str, speed: float,
         steps = 16
 
     def _lang_of(t) -> str:
-        """按文本自身判断语言：带假名 → 日语；其余（中文/英文/数字）按中文前端走"""
-        return "ja" if _re.search(r"[\u3040-\u30ff]", str(t or "")) else "zh"
+        """判断一段文本该用哪个前端念：带假名 → 日语；否则看当前语言模式。
+
+        ★ 以前这里只看"有没有假名"，于是纯汉字的日语台词（「了解」「大丈夫」
+          「無理」这种夏目最常说的短句）被判成中文 → 用中文发音念出来，
+          正是用户反馈的"日语模式却合成出中文"。
+          现在：没有假名时跟随当前语言模式（日语模式→ja / 汉语模式→zh）。
+        """
+        return _tts_text_lang(t)
+
     # ⚠ 两个语言必须分开判断：参考音频是日语 ≠ 要念的句子是日语。
-    #   之前两者共用"参考音频的语言" → 中文台词被当日文念（"今天下午" → コンテン…），
-    #   音色虽然还是她，但发音全错，听着就像"换了个人/用错语音包"。
     #   跨语言合成本来就是 GPT-SoVITS 的正常用法：prompt_lang=ja（定音色）+ text_lang=zh（定内容）。
     prompt_lang = _lang_of(prompt_text)
     text_lang = _lang_of(text)
@@ -546,12 +713,18 @@ def _gsv_local_direct(text: str, ref_audio: str, prompt_text: str, speed: float,
     return False
 
 
-def gpt_sovits_tts(sentence: str, emotion: str, aux_ref_audio_paths: list = []):
+def gpt_sovits_tts(sentence: str, emotion: str, aux_ref_audio_paths: list = None):
+    # ★ 可变默认参数会让「辅助参考音」跨调用累积（2→4→6…），这里改成每次新建副本
+    aux_ref_audio_paths = list(aux_ref_audio_paths or [])
     print(f"[{now_time()}] [gpt-sovits-tts] Prompt:{sentence}  {emotion}")
 
     # 空文本（清理动作描写后可能为空）→ 直接跳过
     if not sentence or not sentence.strip():
         print(f"[{now_time()}] [gpt-sovits-tts] ⚠ 空文本，跳过语音合成")
+        return None
+    # 注音括号（「汉字（かな）」）先收敛成假名，别让同一句被念两遍
+    sentence = _prep_tts_text(sentence)
+    if not sentence:
         return None
 
     # GPT-SoVITS 服务不可用（未启动 / 模型还在加载 / 绿色版未打包整合包）→ 优雅跳过
@@ -624,6 +797,18 @@ def gpt_sovits_tts(sentence: str, emotion: str, aux_ref_audio_paths: list = []):
         if ref_path is None:
             return None
         path = ref_path
+        # ★ 同一情感目录里的其它音频 → 作为「辅助参考音」一起发给 GPT-SoVITS，
+        #   多参考能让音色更稳、更像本人（用户要求：多挑几条参考音）
+        try:
+            _aux_all = sorted(a for a in audio if a != audio[0])
+            for _a in _aux_all:
+                _ap = _prepare_ref_audio(os.path.abspath(os.path.join(emotion_path, _a)))
+                if _ap and _ap not in aux_ref_audio_paths:
+                    aux_ref_audio_paths.append(_ap)
+            if aux_ref_audio_paths:
+                print(f"[{now_time()}] [gpt-sovits-tts] 辅助参考音 {len(aux_ref_audio_paths)} 条")
+        except Exception as _e:
+            print(f"[{now_time()}] [gpt-sovits-tts] ⚠ 辅助参考音收集失败: {_e}")
     elif tts_type == "cloud":
         path = f"/root/reference_voices/{emotion}/{audio[0]}"
     with open(os.path.join(emotion_path, "asr.txt"), "r", encoding="utf-8") as f:
@@ -642,11 +827,11 @@ def gpt_sovits_tts(sentence: str, emotion: str, aux_ref_audio_paths: list = []):
     _speed = float(_speed_map.get(emotion, 1.0))
     params = {
         "text": sentence,
-        "text_lang": "ja" if re.search(r"[\u3040-\u30ff]", str(sentence or "")) else "zh",
+        "text_lang": _tts_text_lang(sentence),
         "ref_audio_path": path,
         "aux_ref_audio_paths": aux_ref_audio_paths,
         "prompt_text": ref,
-        "prompt_lang": "ja" if re.search(r"[\u3040-\u30ff]", str(ref or "")) else "zh",
+        "prompt_lang": _tts_text_lang(ref),
         "top_k": 15,
         "top_p": 1,
         "temperature": 1,
@@ -690,7 +875,7 @@ def gpt_sovits_tts(sentence: str, emotion: str, aux_ref_audio_paths: list = []):
         # 缓存键必须包含"一切影响音频的参数"：参考音频、情绪、语速、模型……
         # 以及**合成语言**和 CACHE_VER。少了语言这一项时，改语言参数后旧音频仍被复用，
         # 表现为"明明修好了，听着还是老样子"（中文台词照旧是日文念的）。
-        _lang_key = "ja" if re.search(r"[\u3040-\u30ff]", str(sentence or "")) else "zh"
+        _lang_key = _tts_text_lang(sentence)
         _key = _hl.md5(("%s|%s|%s|%.2f|%s|%s|%s|%s"
                         % (sentence, path, emotion, _speed, _fp, _model,
                            _lang_key, CACHE_VER)).encode("utf-8")).hexdigest()
@@ -759,3 +944,62 @@ def gpt_sovits_tts(sentence: str, emotion: str, aux_ref_audio_paths: list = []):
         f.write(reply.content)
     print(f"[{now_time()}] [gpt-sovits-tts] Wav_name:{sentence_md5}")
     return sentence_md5
+
+
+# 形如「某某：台词」的行（说话人名字不在名单里时用它兜底判断剧本续写）
+_SCRIPT_LINE = re.compile(r"^\s{0,3}[\w\u4e00-\u9fff]{1,8}\s*[:：]\s*\S")
+
+
+def _speaker_label_re():
+    """构造「说话人标签」正则：user/assistant/system、主人，以及所有桌宠的名字。
+
+    标签还可能是叠写的（「user主人：…」），结尾可能是冒号，也可能是 JSON 的 [
+    （模型续写自己的台词时会写成 assistant["…"] 这种形式）。
+    名字按长度倒序拼进正则，避免「四季夏目」被「夏目」抢先匹配。
+    """
+    names = ["user", "assistant", "system", "主人", "将臣", "凉水"]
+    try:
+        from pets import pet_registry as _pr
+        for _pid in _pr.get_pet_ids():
+            _cfg = _pr.get_pet_config(_pid) or {}
+            for _key in ("name", "display_name"):
+                _v = str(_cfg.get(_key) or "").strip()
+                if _v:
+                    names.append(_v)
+    except Exception:
+        names += ["夏目", "丛雨", "诺瓦"]
+    uniq = sorted({n for n in names if n}, key=len, reverse=True)
+    name_re = "|".join(re.escape(n) for n in uniq)
+    tail = r"(?:\s*(?:" + name_re + r"))?\s*[:：\[]"
+    head = re.compile(r"^[\s\"'（(【\[]{0,4}(?:" + name_re + r")" + tail, re.I)
+    inline = re.compile(r"[\s。！？…，,；;、\"'）)】](?:" + name_re + r")" + tail, re.I)
+    return head, inline
+
+
+def strip_self_dialogue(text):
+    """去掉模型自己续写的「主人：…」「user主人：…」「assistant["…"]」多轮剧本。
+
+    现象（用户反馈「AI 自问自答」）：模型把记忆里的历史当成剧本继续往下写，
+    返回里带着主人的台词和下一轮自己的台词，桌宠就会把主人的话也一起念出来。
+    处理：遇到说话人标签就截断——行首标签丢弃该行及其后全部内容，行内标签只截断该行；
+    万一标签是这样的格式但说话人名字不在名单里，还会有一次「两行以上『某某：台词』」的兜底判断。
+    """
+    s = str(text or "")
+    if not s:
+        return s
+    head, inline = _speaker_label_re()
+    out = []
+    for ln in s.splitlines():
+        if head.match(ln):
+            break
+        m = inline.search(ln)
+        if m:
+            ln = ln[:m.start() + 1].rstrip()   # +1：保留标签前的标点
+        if ln.strip():
+            out.append(ln)
+    # 兜底：正文里还留着两行以上「某个名字：台词」，基本能断定是剧本，从第一行起截掉
+    labelled = [i for i, ln in enumerate(out) if _SCRIPT_LINE.match(ln)]
+    if len(labelled) >= 2:
+        out = out[:labelled[0]]
+    r = "\n".join(out).strip()
+    return r if r else s

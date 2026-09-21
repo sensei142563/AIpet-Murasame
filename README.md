@@ -576,6 +576,20 @@ Qwen 流式 token（后台 QThread）
 - Ctrl 长按即时拍照
 - 空闲检测（发呆/离开问候）
 
+**识别走哪边**（PCL → 设置 →「视觉模型（屏幕 / 摄像头识别）」）：
+- **本地视觉模型（默认）**：截图交给本机的 `tool/vision_service.py` 跑（Qwen2-VL-2B，用 GPT-SoVITS 的 ROCm 运行时 + 显卡），不花钱、不联网。启动桌宠时 PCL 会自动把服务拉起来，日志在 `data/vision_service.log`；服务没起来/报错时自动回落到云端 API，不会断掉。设置页里有一行「本地视觉服务：在线/离线」，总览页右上角也有状态胶囊。
+- **云端 API**：走 `vision_model_name` 指定的云端视觉模型（原来的行为）。
+- 屏幕和摄像头两条路都认这个设置。
+
+**怎么配置／检查**：
+- 安装时勾「同时配置本地视觉模型」→ 装完自动下模型（约 4.4GB）+ 备运行环境 + 写好配置（`tool/vision_setup.py` 在干活）。
+- 已经装好了想补配：用安装目录里的 python 跑 `python tool/vision_setup.py`（支持断点续传，中断了再跑接着下）。
+- 没检测到显卡加速时不会把识别切到本地，而是留着云端并提示——装了 GPT-SoVITS 整合包（自带显卡版 torch）后到设置里把「识别来源」改成本地即可。
+
+> 硬件：本地模型约需 6GB 显存，空闲 `vision_idle_unload` 秒后会自动把模型移出显存，把显卡让给语音合成（下次识别约 1 秒搬回来）。绿色版不含 GPT-SoVITS 整合包，没装的话本地视觉靠安装时配的运行环境（有没有显卡加速取决于显卡型号）→ 不行就用云端。
+>
+> 改完「本地视觉服务地址 / 模型目录 / 端口」要**重启桌宠**才生效（服务是跟着桌宠一起起来的）。
+
 **长文本模式下的行为**：
 - **空闲时**：识别 → 走长文本流式回复（"看到主人xxx"）
 - **输出中**：跳过识别（不打断，线程继续抓取，输出结束后自动恢复）
@@ -716,6 +730,15 @@ main.py (PyQt5 主窗口 + FastAPI 28565 + 快捷键监听 + 托盘)
 | `longtext_model` | 长文本对话族：`qwen` / `deepseek`（默认） |
 | `longtext_model_name` | 长文本模型名（默认 `deepseek-v4-flash`；`qwen` 族默认 `qwen-plus`） |
 | `vision_model_name` | 视觉识别模型名（默认 `qwen3-vl-plus`，QQ识图/摄像头/微信识图统一使用） |
+| `vision_source` | 视觉识别走哪边：`local`（默认，本机视觉模型）/ `cloud`（云端 API，用上面的 `vision_model_name`） |
+| `vision_local_model_dir` | 本地视觉模型目录（默认 `D:\下载\AI桌宠\vision\Qwen2-VL-2B-Instruct`） |
+| `vision_local_port` | 本地视觉服务端口（默认 `28460`） |
+| `local_api.vision` | 本地视觉服务地址（默认 `http://127.0.0.1:28460/describe`） |
+| `vision_runtime_python` | 跑本地视觉服务的 python（默认自动找 GPT-SoVITS 整合包里的；安装时勾了「配置本地视觉模型」会写进去） |
+| `vision_device` | 强制用哪个设备跑：`cuda`（显卡）/ `cpu`（很慢，只用来排查）；留空 = 有显卡就用显卡 |
+| `vision_max_side` | 截图喂模型前长边压到多少像素（默认 `1280`；调小更快、认字更差） |
+| `vision_fast_max_side` | 主人主动让你看屏幕时的快速档长边像素（默认 `896`，约 8 秒；后台自动识别仍用 `vision_max_side`） |
+| `vision_idle_unload` | 空闲多少秒把本地视觉模型移出显存（默认 `300`；`0`=不让位，会跟语音合成抢显存） |
 | `reasoning_level` | 推理等级：`off`（默认，最省 token）/ `low` / `high` / `max`。DeepSeek 四档完整支持；Qwen3 系仅开关两档；不支持的模型自动忽略 |
 | `tts_type` | `local`（GPT-SoVITS）/ `cloud`（云端 TTS） |
 | `longtext_enabled` | 长文本模式总开关（`"true"` 启用） |

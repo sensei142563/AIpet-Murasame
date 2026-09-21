@@ -11,7 +11,8 @@ from pathlib import Path
 import cv2
 from PyQt5.QtCore import QTimer, pyqtSignal
 from PyQt5.QtCore import Qt, QRect, QSize
-from PyQt5.QtGui import QGuiApplication, QImage
+from PyQt5.QtCore import QPropertyAnimation, QEasingCurve, QVariantAnimation, QPoint
+from PyQt5.QtGui import QGuiApplication, QCursor, QImage
 from PyQt5.QtGui import QPainter, QColor, QFont, QPixmap, QFontMetrics
 from PyQt5.QtMultimedia import QSound
 from PyQt5.QtWidgets import QLabel
@@ -19,7 +20,7 @@ from PyQt5.QtWidgets import QLabel
 from classes.Worker_class import ScreenWorker
 from classes.Worker_class import qwen3_lora_Worker, cloud_API_Worker, CameraWorker
 from tool.config import get_config
-from tool.chat import ollama_qwen25vl
+from tool.chat import ollama_qwen25vl, describe_image
 from tool.cloud_API_chat import cloud_vl
 from tool.generate import generate_fgimage
 from longtext.longtext_manager import LongTextManager
@@ -47,6 +48,132 @@ camera_interval = CONFIG.get("camera_interval", 300)
 DEFAULT_PORTRAIT_SCREEN_RATIO = CONFIG["DEFAULT_PORTRAIT_SCREEN_RATIO"]
 IDLE_THINKING_MINUTES = CONFIG.get("idle_thinking_minutes")
 IDLE_AWAY_MINUTES = CONFIG.get("idle_away_minutes")
+
+
+class PetQuickButton(QLabel):
+    """立绘右上角的小按钮：只显示一个图标，悬停轻微放大变亮（自带 120ms 过渡）。
+
+    为什么做成独立小控件而不是画在大窗口里：
+      桌宠窗口是半透明 + 带描边文字的大窗口，在大窗口里做动画每帧都要重绘整窗
+      → 又卡又有延迟；小控件只脏自己那几十像素，而且悬停用 enterEvent
+      → 即时响应，不依赖鼠标移动事件或轮询。
+    """
+
+    clicked = pyqtSignal()
+
+    def __init__(self, icon_name: str, size: int = 44, parent=None):
+        super().__init__(parent)
+        self._icon_name = str(icon_name)
+        self._k = 0.0                 # 悬停进度 0~1
+        self._pressed = False
+        self._scaled_cache = {}
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WA_NoSystemBackground, True)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFixedSize(int(size), int(size))
+        self._anim = QVariantAnimation(self)
+        self._anim.setDuration(120)
+        self._anim.setEasingCurve(QEasingCurve.OutCubic)
+        self._anim.valueChanged.connect(self._on_anim)
+        self._src = self._load_icon()
+
+    def _load_icon(self):
+        try:
+            from tool.paths import app_base_dir
+            base = app_base_dir()
+        except Exception:
+            base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        fp = os.path.join(base, "ui", "chat.png" if self._icon_name == "chat" else "menu.png")
+        pm = QPixmap(fp) if os.path.isfile(fp) else QPixmap()
+        if not pm.isNull() and pm.width() > 256:
+            pm = pm.scaled(256, 256, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        return pm
+
+    def set_size(self, size: int):
+        size = max(30, min(64, int(size)))
+        if size != self.width():
+            self.setFixedSize(size, size)
+            self._scaled_cache.clear()
+            self.update()
+
+    def _scaled(self, size: int):
+        pm = self._scaled_cache.get(size)
+        if pm is None and not self._src.isNull():
+            pm = self._src.scaled(size, size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            if len(self._scaled_cache) > 24:
+                self._scaled_cache.clear()
+            self._scaled_cache[size] = pm
+        return pm
+
+    def _on_anim(self, v):
+        try:
+            self._k = float(v)
+            self.update()
+        except Exception:
+            pass
+
+    def _animate(self, target: float):
+        try:
+            self._anim.stop()
+            self._anim.setStartValue(float(self._k))
+            self._anim.setEndValue(float(target))
+            self._anim.start()
+        except Exception:
+            pass
+
+    def enterEvent(self, event):
+        self._animate(1.0)
+        try:
+            return super().enterEvent(event)
+        except Exception:
+            pass
+
+    def leaveEvent(self, event):
+        self._animate(0.0)
+        self._pressed = False
+        try:
+            return super().leaveEvent(event)
+        except Exception:
+            pass
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._pressed = True
+            self.update()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton and self._pressed:
+            self._pressed = False
+            self.update()
+            try:
+                self.clicked.emit()
+            except Exception:
+                pass
+
+    def paintEvent(self, event):
+        # 只画图标、没有底板：悬停放大 + 更亮，按下略缩
+        try:
+            k = max(0.0, min(1.0, self._k))
+            grow = 1.0 + 0.14 * k - (0.08 if self._pressed else 0.0)
+            side = max(8, int(min(self.width(), self.height()) * grow))
+            pm = self._scaled(side)
+            pt = QPainter(self)
+            pt.setRenderHint(QPainter.Antialiasing, True)
+            pt.setRenderHint(QPainter.SmoothPixmapTransform, True)
+            cx, cy = self.width() // 2, self.height() // 2
+            if pm is not None and not pm.isNull():
+                pt.setOpacity(0.86 + 0.14 * k)
+                pt.drawPixmap(cx - pm.width() // 2, cy - pm.height() // 2, pm)
+                pt.setOpacity(1.0)
+            else:
+                pt.setPen(QColor(255, 250, 245, 230))
+                f = QFont(self.font())
+                f.setPointSize(max(11, int(side * 0.5)))
+                pt.setFont(f)
+                pt.drawText(self.rect(), Qt.AlignCenter, "聊" if self._icon_name == "chat" else "≡")
+            pt.end()
+        except Exception as e:
+            print(f"[桌宠] ⚠ 快捷按钮绘制失败: {e}")
 
 
 class LASTINPUTINFO(ctypes.Structure):
@@ -230,6 +357,25 @@ class Murasame(QLabel):
             self.setMouseTracking(True)
         except Exception:
             pass
+        # ── 立绘右上角的两个快捷按钮（对话 / 菜单）──
+        self._ui_hover = ""
+        self._ui_press = ""
+        self._ui_anim_v = 0.0          # 悬停动画进度 0~1
+        self._ui_anim_obj = None
+        self._ui_pix = {}
+        self._ui_btn_rects = {}
+        self._ui_enabled = self._quick_buttons_enabled()
+        self._ui_btns = {}
+        try:
+            for _nm in ("chat", "menu"):
+                _b = PetQuickButton(_nm, 44, self)
+                _b.hide()
+                self._ui_btns[_nm] = _b
+            self._ui_btns["chat"].clicked.connect(self._toggle_input_mode)
+            self._ui_btns["menu"].clicked.connect(lambda: self._show_outfit_menu(QCursor.pos()))
+        except Exception as _e:
+            print(f"[桌宠] ⚠ 创建快捷按钮失败: {_e}")
+        self._sync_quick_buttons()
         # 悬停提示改用"全局轮询光标位置"：本窗口是 Tool + 半透明分层窗口，
         # 非激活状态下鼠标事件不可靠（用户反馈"必须先点一下桌宠才提示"）。
         # 轮询 QCursor.pos() 与窗口激活无关，任何时候都能提示。
@@ -252,15 +398,23 @@ class Murasame(QLabel):
             _disp = active_set() or portrait_type
         except Exception:
             pass
-        # active 是全局设置（可能停在丛雨的 b 套）→ 角色没这成套素材时回落到自己有的一套，
+        # active 是全局设置（可能停在别的角色的 b 套）→ 角色没这成套素材时回落到自己有的一套，
         # 否则会去找 {prefix}b.txt（不存在）→ 立绘一直空白
         try:
             _avail = [str(s) for s in (self._fgimages_sets or [])]
-            if not _avail and self._has_fgimages:
-                _dir = get_fgimages_dir()
-                _avail = sorted({f[len(self._fgimages_prefix):-4]
-                                 for f in os.listdir(_dir)
-                                 if f.startswith(self._fgimages_prefix) and f.endswith(".txt")})
+            if self._has_fgimages:
+                # ★ 声明可能过时：natsume 的 pet.json 只写了 ['a']，但 b 套素材（76 个图层）其实
+                #   齐全 → 每次启动都被强制切到 a，而 AI/保存的装扮按 b 给 ID → 立绘缺图层。
+                #   所以以磁盘上真实存在的清单文件为准做并集（谁在磁盘上有 {prefix}X.txt 谁就可用）。
+                try:
+                    _dir = get_fgimages_dir()
+                    _disk = {f[len(self._fgimages_prefix):-4] for f in os.listdir(_dir)
+                             if f.startswith(self._fgimages_prefix) and f.endswith(".txt")}
+                    _disk = {d for d in _disk if d}
+                    if _disk:
+                        _avail = [s for s in dict.fromkeys(_avail + sorted(_disk))]
+                except Exception:
+                    pass
             if _avail and _disp not in _avail:
                 print(f"[桌宠] ℹ 角色没有 {_disp} 套立绘（可用: {_avail}）→ 改用 {_avail[0]}")
                 _disp = _avail[0]
@@ -869,8 +1023,9 @@ class Murasame(QLabel):
     def focusInEvent(self, event):
         """当桌宠获得焦点时（用户点中、开始输入）"""
         # 输入时暂停自动行为，但勿扰模式下保持静默
+        # stop_voice=False：不掐断正在念的句子（点她/点对话框/系统切焦点都会触发本事件）
         if not self.is_dnd_enabled():
-            self.pause_all_ai()
+            self.pause_all_ai(stop_voice=False)
         super().focusInEvent(event)
 
     def focusOutEvent(self, event):
@@ -1125,17 +1280,22 @@ class Murasame(QLabel):
                 if self.long_text_mode and self._stream_playing:
                     print("[AIpet] 长文本输出中，跳过截图识别")
                     return
+                # 正在思考/说话时也跳过：视觉识别要占显卡 40~50 秒，而这一轮回复的
+                # 语音合成同样要用显卡 → 抢起来会让"回复"变成等好几分钟（像不回话）。
+                # 一轮结束后的下一次抓屏（150 秒后）识别照常。
                 try:
-                    if model_type == "deepseek" or model_type == "qwen":
-                        if self.force_stop:
-                            print("[cloud-vl] 已中断生成")
-                            return
-                        desc = cloud_vl(path)
-                    elif model_type == "local":
-                        if self.force_stop:
-                            print("[ollama-qwen2.5vl] 已中断生成")
-                            return
-                        desc = ollama_qwen25vl(path)
+                    if self.is_busy_reply() or getattr(self, "_screen_look_busy", False):
+                        print("[AIpet] 正在回复中（或正在应主人要求看屏幕），跳过本轮屏幕识别")
+                        return
+                except Exception:
+                    pass
+                try:
+                    # ★ 视觉走哪边由设置决定（视觉模型来源：本地服务 / 云端 API），
+                    #   以前只看对话模型 model_type，装不了本地视觉就没得选。
+                    if self.force_stop:
+                        print("[vision] 已中断生成")
+                        return
+                    desc = describe_image(path)
                     propmt = (
                         "【重要系统指令】你刚刚通过屏幕截图看到了主人当前的真实状态。"
                         "以下是对主人屏幕内容的描述，这是你亲眼所见的事实，你必须围绕这个内容展开对话：\n"
@@ -1145,6 +1305,7 @@ class Murasame(QLabel):
                         f"（截图里那个桌宠窗口就是你本人，不是别人。）"
                         f"请以{self.pet_name}的身份，自然地观察并评论主人正在做什么。你的回复必须紧密围绕上述描述，"
                         "可以表达关心、好奇、或撒娇——但要让人感觉你真的看到了主人的屏幕。"
+                        "只输出你自己要说的话（JSON 数组），不要写「主人：」也不要替主人说话，不要续写下一轮。"
                     )
                     if self.force_stop:
                         print("屏幕回复 已中断生成")
@@ -1161,8 +1322,15 @@ class Murasame(QLabel):
 
         self._screenshot_executor.submit(task, image_path)
 
-    def pause_all_ai(self):
-        """用户输入/点击桌宠时：停止截图线程、中断语音播放，但不打断正在进行的对话"""
+    def pause_all_ai(self, stop_voice: bool = True):
+        """用户输入/点击桌宠时：停止截图线程；stop_voice=True 时一并中断语音播放。
+
+        ★ stop_voice=False 用于「窗口获得焦点」这类被动触发：只暂停自动行为
+          （截图/空闲检测），不掐断正在念的那句话。
+          以前一律 QSound.stop()：点她、点对话框、系统把焦点切过来都会走到这里
+          → 正在念的句子被半路掐掉，而句子队列照常往下走，听起来就是
+          「有的句子/几个字没声」，而且是随机的（用户反馈）。
+        """
         self.force_stop = True  # 启用软中断标记
 
         if self._screenshot_worker and self._screenshot_worker.isRunning():
@@ -1170,10 +1338,11 @@ class Murasame(QLabel):
             self.stop_screenshot_worker()
         # 不再中断 worker — 对话让它自然播完
         # 用户主动输入会通过 start_thread(t=False) 正常打断
-        try:
-            QSound.stop()
-        except Exception:
-            pass
+        if stop_voice:
+            try:
+                QSound.stop()
+            except Exception:
+                pass
 
     def resume_all_ai(self):
         """用户输入结束后：恢复截图线程与 AI 响应"""
@@ -1273,6 +1442,27 @@ class Murasame(QLabel):
         # Live2D 模式下显示透明文字层（点击穿透，不抢焦点）
         self._ensure_live2d_overlay()
 
+        # ── 她自己要求看屏幕（提示词里教她：需要画面时只输出【看屏幕】）──
+        try:
+            from tool.screen_intent import SCREEN_LOOK_MARK
+            _joined = "".join(str(x) for x in (reply or []))
+            if SCREEN_LOOK_MARK in _joined:
+                import time as _t2
+                if _t2.time() - float(getattr(self, "_last_self_look", 0)) > 20:
+                    self._last_self_look = _t2.time()
+                    print("[桌宠] 👀 她自己要求看屏幕 → 抓屏识别后重新回答")
+                    self._talking = False
+                    self.show_text("唔……我看看。", typing=True)
+                    self._screen_look_busy = True
+                    import threading as _th2
+                    _th2.Thread(target=self._look_screen_and_reply,
+                                args=(getattr(self, "_last_user_text", "") or "看看我屏幕上是什么",),
+                                daemon=True).start()
+                    return
+                print("[桌宠] ⏭ 她又要求看屏幕（刚看过，忽略）")
+        except Exception as _e2:
+            print(f"[桌宠] ⚠ 自主要求看屏幕判断失败: {_e2}")
+
         # ⚠ 云端请求失败时 worker 拿到的是空串 → 切句后是 [""] → 以前会一路跳过，
         #   对话框什么都不显示（用户反馈"摸了没反应 / 聊天没回复"）。这里明确提示。
         try:
@@ -1302,14 +1492,24 @@ class Murasame(QLabel):
                 print(f"[桌宠] 旧回复链已作废（第 {_gen} 轮，当前第 {getattr(self, '_reply_gen', 0)} 轮）→ 停止")
                 return
             def get_audio_length_wave(audio_file_path):
+                """音频时长（毫秒）。wave 解析不了就按文件大小估（32k/16bit/单声道）。
+
+                以前解析失败直接返回 0 → 下面会「跳过播放」+ 用纯文字时长当间隔 →
+                句子被下一句的开播打断，听感就是"这几个字没声"。现在解析失败也给个估值，
+                并且绝不用 0 去挡住播放。
+                """
                 try:
                     with wave.open(audio_file_path, "rb") as wave_file:
                         frames = wave_file.getnframes()  # 获取音频的帧数
                         rate = wave_file.getframerate()  # 获取音频的帧速率
-                        duration = frames / float(rate)  # 计算时长（秒）
-                        return duration * 1000  # 转换为毫秒
+                        return frames / float(rate or 1) * 1000
                 except Exception:
-                    return 0
+                    try:
+                        n = os.path.getsize(audio_file_path)
+                        # GPT-SoVITS 输出固定 32kHz/16bit/单声道 → 每毫秒 64 字节
+                        return max(300.0, n / 64.0)
+                    except Exception:
+                        return 300.0
 
             if index >= len(reply):
                 # 所有句子播完，释放对话锁（文字层保持显示，与 2D 一致）
@@ -1354,26 +1554,46 @@ class Murasame(QLabel):
 
             if voice_path and os.path.exists(voice_path):
                 voice_length = get_audio_length_wave(os.path.abspath(voice_path))
-                if voice_length > 0:
-                    QSound.play(voice_path)
+                # ★ 只要文件在、不是空壳就播（以前按「解析出的时长 > 0」当开关，
+                #   解析一失败就整句不出声 —— 音频格式/文件状态稍有不同就会静音）
+                try:
+                    if os.path.getsize(os.path.abspath(voice_path)) > 2000:
+                        # 用绝对路径：QSound 用相对路径时依赖进程工作目录，换目录启动就会找不到文件
+                        QSound.play(os.path.abspath(voice_path))
+                except Exception as _e:
+                    print(f"[桌宠] ⚠ 语音播放失败: {_e}")
 
             self.show_text(sentence, typing=True)
             # 计算打字机需要的时间（40ms * 每个字）
-            delay = max(40 * len(sentence) + 800, voice_length + 400)  # 额外停顿
+            # 音频间隔多留 600ms：QSound 起播有延迟，间隔太紧会被下一句开播打断（"没声"）
+            delay = max(40 * len(sentence) + 800, voice_length + 600)  # 额外停顿
 
             def after_delay():
                 if self._live2d_mode and self._live2d_widget:
                     self._live2d_widget.set_speaking(False)
                     # 句间不释放姿态：同情绪保持、换情绪在下一句切（自然衔接）
-                # 播放完删除临时 wav（用完即删）
-                try:
-                    if voice_path and os.path.exists(voice_path):
-                        os.remove(voice_path)
-                except Exception:
-                    pass
+                # ★ 这里不再删 wav：同一句话重复出现时（同一轮里说两遍、或下一轮又说同一句）
+                #   文件名是一样的，先播的那次删掉文件会把后一次的声音一起弄没（"有的句子没声"）。
+                #   临时文件改由每轮开场统一清理陈旧文件。
                 show_next_sentence(index + 1)
 
             QTimer.singleShot(int(delay), after_delay)
+
+        # 开场：清掉上次遗留的临时语音（超过 3 分钟的），避免 tmp/ 越积越多
+        try:
+            _td = os.path.abspath("./tmp")
+            if os.path.isdir(_td):
+                _old = time.time() - 180
+                for _f in os.listdir(_td):
+                    if _f.lower().endswith(".wav"):
+                        _p = os.path.join(_td, _f)
+                        try:
+                            if os.path.getmtime(_p) < _old:
+                                os.remove(_p)
+                        except Exception:
+                            pass
+        except Exception:
+            pass
 
         show_next_sentence(index=0)
         self.worker = None  # 线程结束后清空引用
@@ -1429,6 +1649,22 @@ class Murasame(QLabel):
 
     def _clear_thinking_if_stuck(self):
         """「思考中」卡住时恢复上一句（网络失败时回复永远不来）"""
+        try:
+            # 线程已经结束、可 finished 信号一直没回来（以前某一步抛异常就会这样）：
+            # 主动释放对话锁，否则 _talking 一直是 True，点她只会被当成「她还在说话」忽略，
+            # 整只桌宠就变成「点了没反应」（用户反馈"点击对不了话"）。
+            _w = getattr(self, "worker", None)
+            if _w is not None and not _w.isRunning():
+                print("[桌宠] ⏱ 上一轮回复没有正常收尾 → 释放对话锁（点击恢复可用）")
+                self.worker = None
+                self._talking = False
+                self._stream_playing = False
+                self._thinking_on = False
+                self._busy_hint_on = False
+                self.display_text = getattr(self, "_last_real_text", "") or ""
+                self.update()
+        except Exception:
+            pass
         try:
             if getattr(self, "_thinking_on", False) and "思考中" in str(self.display_text or ""):
                 self.display_text = getattr(self, "_last_real_text", "") or ""
@@ -1488,6 +1724,26 @@ class Murasame(QLabel):
         except Exception as _e:
             print(f"[桌宠] ⚠ 排队判断失败（照常继续）: {_e}")
         # 长文本模式下：识别触发（t=True）在流式输出中自动跳过，空闲时走长文本流式
+        # ── 主人让我看屏幕 → 当场抓屏识别 ──
+        # 以前只有「定时抓屏」和「截图按钮」会调用视觉模型；直接问她
+        # 「我屏幕上是什么」「我在干嘛」时根本不抓屏，她只能拿之前自动识别留下的
+        # 记忆凑答案，或者干脆说看不到（用户反馈）。这里先判断意图，命中就抓一张
+        # 新图识别，再把描述和主人的问题一起送进对话流程。
+        try:
+            if role == "user" and not t and not getattr(self, "_screen_look_busy", False):
+                from tool.screen_intent import needs_screen_look
+                if needs_screen_look(text):
+                    self._screen_look_busy = True
+                    print("[桌宠] 👀 主人让我看屏幕 → 当场抓屏识别")
+                    self.show_text("正在看你的屏幕......", typing=False)
+                    import threading as _th
+                    _th.Thread(target=self._look_screen_and_reply,
+                               args=(text,), daemon=True).start()
+                    return
+        except Exception as _e:
+            self._screen_look_busy = False
+            print(f"[桌宠] ⚠ 屏幕意图判断失败（照常对话）: {_e}")
+
         if self.long_text_mode:
             if t:
                 if self._stream_playing:
@@ -1505,6 +1761,8 @@ class Murasame(QLabel):
             print(f"[AIpet] 对话进行中，跳过自动触发: {text[:30]}...")
             return
 
+        if role == "user" and text:
+            self._last_user_text = str(text)     # 她自己要求看屏幕时，带着这句重新回答
         # 记录本轮是否为识别触发（识别触发的内容不降权，留给下一轮高权重）
         self._current_input_is_observation = (t and role == "system")
         # 检查本轮传给 AI 的历史中是否有 high 观察（本轮结束后需降权）
@@ -1537,20 +1795,143 @@ class Murasame(QLabel):
         self._show_thinking(role == "user")   # 只有主人发起才显示"思考中"
 
         # 启动新线程
+        # ★ 把「当前画面上显示的那一套立绘」一起交给 AI：
+        #   以前 AI 读的是 config.json 里的套，和实际渲染的套不一致时会跨套换算，
+        #   表情/装饰被丢掉 → 立绘看起来"没有表情"（用户反馈）。
+        _ptype = str(getattr(self, "_display_set", "") or "") or None
         if model_type == "local":
             self.worker = qwen3_lora_Worker(
-                self.history, self.portrait_history, text, role, t=t
+                self.history, self.portrait_history, text, role, t=t,
+                portrait_type=_ptype,
             )
         else:
             self.worker = cloud_API_Worker(
-                self.history, self.portrait_history, text, role, t=t
+                self.history, self.portrait_history, text, role, t=t,
+                portrait_type=_ptype,
             )
 
         self.worker.finished.connect(self.on_reply)
         self.worker.start()
 
+    def _ensure_window_fits_pixmap(self, pm):
+        """兜底：窗口至少要和立绘一样大，否则图会被裁掉一半。
+
+        立绘宽度会随衣服/表情变化，任何"窗口比图窄"的情况（键变了、换了张更宽的图、
+        渐变收尾时用了别的尺寸……）都在这里被纠正。
+        """
+        try:
+            if pm is None or pm.isNull():
+                return
+            w, h = self.width(), self.height()
+            nw, nh = max(w, pm.width()), max(h, pm.height())
+            if (nw, nh) != (w, h):
+                self.setFixedSize(nw, nh)
+                try:
+                    self._portrait_max_w = max(int(getattr(self, "_portrait_max_w", 0) or 0), nw)
+                except Exception:
+                    pass
+                print(f"[桌宠] 窗口放大到 {nw}x{nh}（原 {w}x{h}）以完整显示立绘")
+        except Exception as e:
+            print(f"[桌宠] ⚠ 窗口尺寸兜底失败: {e}")
+
+    def _clamp_to_screen(self):
+        """把窗口挪回屏幕内。
+
+        立绘尺寸是「首次合成后锁死」的，而保存的位置是按**旧的窗口尺寸**算的 →
+        启动时窗口一变宽/变高，右下角就跑到屏幕外，看起来"立绘只显示一半"（用户反馈）。
+        每次锁定尺寸/显示之后都调一次这个。
+        """
+        try:
+            from PyQt5.QtGui import QGuiApplication
+            scr = QGuiApplication.screenAt(self.frameGeometry().center()) or QGuiApplication.primaryScreen()
+            g = scr.availableGeometry()
+            w, h = self.width(), self.height()
+            x, y = self.x(), self.y()
+            nx = min(max(x, g.x()), max(g.x(), g.x() + g.width() - w))
+            ny = min(max(y, g.y()), max(g.y(), g.height() - h))
+            if (nx, ny) != (x, y):
+                self.move(nx, ny)
+                print(f"[桌宠] 立绘尺寸变化 → 挪回屏幕内 ({x},{y}) → ({nx},{ny})")
+            # ★ 启动自检：把关键几何打进日志，万一还出现"立绘只显示一半"，
+            #   这一行就能看出是窗口、立绘还是屏幕对不上。
+            if not getattr(self, "_geom_logged", False):
+                self._geom_logged = True
+                _pm = self.pixmap()
+                print("[桌宠] 📏 立绘自检：窗口 %dx%d | 立绘 %s | 记忆画布宽 %s | 屏幕可用 %dx%d | 位置 (%d,%d)"
+                      % (self.width(), self.height(),
+                         ("%dx%d" % (_pm.width(), _pm.height())) if (_pm and not _pm.isNull()) else "无",
+                         getattr(self, "_portrait_max_w", 0),
+                         g.width(), g.height(), self.x(), self.y()))
+        except Exception as e:
+            print(f"[桌宠] ⚠ 位置校正失败: {e}")
+
+    def _look_screen_and_reply(self, user_text):
+        """当场抓一张屏 → 交给视觉模型 → 把描述和主人的问题一起送进对话流程。
+
+        跑在后台线程里（视觉识别要 30~50 秒，不能在界面线程做）。
+        任何一步失败都退回「只用主人原话」的正常对话，不会让她卡住不说话。
+        """
+        tmp_name = ""
+        try:
+            import tempfile
+            from PyQt5.QtGui import QGuiApplication
+            from classes.Worker_class import shot_is_blank
+            from tool.chat import describe_image, vision_fast_size
+            from tool.screen_intent import build_screen_prompt
+            screen = QGuiApplication.primaryScreen()
+            pixmap = screen.grabWindow(0)
+            if shot_is_blank(pixmap):
+                print("[桌宠] ⚠ 屏幕是黑的（锁屏/显示器休眠）→ 如实告诉主人，不带屏幕内容")
+                self._request_dialog.emit(
+                    "【系统提示】主人让你看屏幕，但此刻抓不到画面（可能锁屏或显示器休眠）。"
+                    "请简短如实地告诉主人你看不到，并问他是不是锁屏了。"
+                    "只输出你自己要说的话（JSON 数组）。", "user", False)
+                return
+            fd = tempfile.NamedTemporaryFile(delete=False, suffix=".png", dir="tmp")
+            tmp_name = fd.name
+            fd.close()
+            pixmap.save(tmp_name, "PNG")
+            # 主人正在等 → 用快速档（896px：编码约 6~8 秒，比 1280px 快一倍多）
+            desc = describe_image(tmp_name, max_side=vision_fast_size(), max_new=140)
+            if not str(desc or "").strip():
+                print("[桌宠] ⚠ 视觉识别没返回内容 → 退回普通回答")
+                self._request_dialog.emit(user_text, "user", False)
+                return
+            prompt = build_screen_prompt(desc, user_text, getattr(self, "pet_name", "桌宠"))
+            print(f"[桌宠] 👀 屏幕识别完成（{len(str(desc))} 字）→ 带着描述回答主人")
+            self._request_dialog.emit(prompt, "user", False)
+        except Exception as e:
+            print(f"[桌宠] ⚠ 看屏幕失败（{type(e).__name__}: {e}）→ 退回普通回答")
+            try:
+                self._request_dialog.emit(user_text, "user", False)
+            except Exception:
+                pass
+        finally:
+            self._screen_look_busy = False
+            if tmp_name:
+                try:
+                    os.remove(tmp_name)
+                except Exception:
+                    pass
+
     # 鼠标按下事件
     def mousePressEvent(self, event):
+        # ⓪ 立绘右上角的快捷按钮优先（对话 / 菜单）
+        try:
+            if event.button() == Qt.LeftButton:
+                _b = self._ui_button_at(event.x(), event.y())
+                if _b:
+                    self._ui_press = _b
+                    self.update()
+                    QTimer.singleShot(120, self._ui_press_clear)
+                    if _b == "menu":
+                        self._show_outfit_menu(event.globalPos())
+                    else:
+                        self._enter_input_mode()
+                    return
+        except Exception as _e:
+            print(f"[桌宠] ⚠ 快捷按钮点击失败: {_e}")
+
         # ★ 她正在思考 / 正在说话时，鼠标整体不响应：
         #   点对话框（文字区）会命中"触摸互动"→ 触发一段反应，看起来就像插话；
         #   点下半身会进键盘输入。这两种都在她说的时候禁掉，只保留"思考中..."。
@@ -1628,14 +2009,72 @@ class Murasame(QLabel):
             self._show_outfit_menu(event.globalPos())
 
     def _show_outfit_menu(self, global_pos):
-        """右键菜单：切换服装 / 动作（写共享配置 → QQ 立绘与桌宠同时生效并持久化）。"""
+        """右键菜单：切换服装 / 动作（写共享配置 → QQ 立绘与桌宠同时生效并持久化）。
+
+        弹出时做一段淡入 + 轻微上浮的过渡（菜单这类原生弹窗只能动 windowOpacity/pos）。
+        """
+        # ★ 菜单已经开着 → 再点一次就关掉（用户要求：同一个按钮切换开关）
+        try:
+            _m = getattr(self, "_outfit_menu", None)
+            if _m is not None and _m.isVisible():
+                _m.close()
+                self._outfit_menu = None
+                try:
+                    self._ui_press = None
+                    self.update()
+                except Exception:
+                    pass
+                print("[桌宠] 菜单已关闭（再点「菜单」可重新打开）")
+                return
+        except Exception:
+            pass
         try:
             menu = self._build_outfit_menu()
             if menu is None or menu.isEmpty():
                 return
-            menu.exec_(global_pos)
+            self._outfit_menu = menu
+            try:                                  # 菜单消失时清掉引用，下次点击是"打开"
+                menu.aboutToHide.connect(lambda: setattr(self, "_outfit_menu", None))
+            except Exception:
+                pass
+            self._popup_menu_animated(menu, global_pos)
         except Exception as e:
             print(f"[桌宠] ⚠ 打开换装菜单失败: {e}")
+
+    def _popup_menu_animated(self, menu, global_pos):
+        """菜单过渡动画：淡入（180ms）+ 从下方 10px 处上浮到最终位置。"""
+        try:
+            menu.setWindowOpacity(0.0)
+            menu.popup(global_pos)
+            a = QPropertyAnimation(menu, b"windowOpacity", menu)
+            a.setDuration(150)
+            a.setStartValue(0.0)
+            a.setEndValue(1.0)
+            a.setEasingCurve(QEasingCurve.OutCubic)
+            self._menu_fade_anim = a          # 保引用，别被回收
+            a.start()
+            try:
+                g = menu.geometry()
+                end = g.topLeft()
+                start = end + QPoint(0, 7)
+                m = QPropertyAnimation(menu, b"pos", menu)
+                m.setDuration(140)
+                m.setStartValue(start)
+                m.setEndValue(end)
+                m.setEasingCurve(QEasingCurve.OutCubic)
+                self._menu_pos_anim = m
+                menu.move(start)
+                m.start()
+            except Exception:
+                pass
+            try:                              # 菜单开着时按钮保持"按下"高亮
+                self._ui_press = "menu"
+                menu.aboutToHide.connect(self._ui_press_clear)
+            except Exception:
+                pass
+        except Exception as e:
+            print(f"[桌宠] ⚠ 菜单动画失败（直接弹出）: {e}")
+            menu.exec_(global_pos)
 
     def _build_outfit_menu(self):
         """构造右键换装菜单（单独拆出来便于测试）。
@@ -1645,6 +2084,7 @@ class Murasame(QLabel):
         没有服装素材的角色（例如「每个表情一张整图」）不显示换装项。"""
         try:
             from PyQt5.QtWidgets import QMenu
+            from tool.pet_menu import StoryMenu, section, item, submenu
             from tool.portrait_outfit import SETS, load_outfit
             # ⚠ 服装/动作必须按【这个桌宠自己的表】取：以前这里用的是内置的丛雨表，
             #   于是任何角色右键看到的都是丛雨的 制服/睡衣/私服/刀服。
@@ -1707,10 +2147,9 @@ class Murasame(QLabel):
                 cur_acts = [x for x in acts if not _cur_cid or x[2] == _cur_cid]
             except Exception:
                 cur_acts = []
-            menu = QMenu(self)
+            menu = StoryMenu(self)
             if cloths:
-                title = menu.addAction(f"👗 切换服装（{cur_set} 立绘 · 当前：{cur_name}）")
-                title.setEnabled(False)
+                section(menu, f"切换服装　{cur_set} 立绘 · 当前：{cur_name}")
                 menu.addSeparator()
                 for name, cid, _h in cloths:
                     # 勾号要能对上：菜单名和"当前穿着"可能一个叫"刀装"一个叫"刀服"，
@@ -1720,15 +2159,15 @@ class Murasame(QLabel):
                         _same = (_rc(name) or name) == (_rc(cur_name) or cur_name)
                     except Exception:
                         _same = (name == cur_name)
-                    act = menu.addAction(("✅ " if _same else "　　") + name)
+                    act = item(menu, name, checked=_same)
                     act.triggered.connect(lambda checked=False, n=name: self._switch_cloth(n))
             if cur_acts:
                 menu.addSeparator()
-                sub = menu.addMenu("🤸 切换动作（手臂姿势）")
-                act0 = sub.addAction(("✅ " if not cur_act else "　　") + "默认姿势")
+                sub = submenu(menu, "切换动作（手臂姿势）")
+                act0 = item(sub, "默认姿势", checked=not cur_act)
                 act0.triggered.connect(lambda checked=False: self._switch_action(0))
                 for name, aid, _b in cur_acts:
-                    a2 = sub.addAction(("✅ " if name == cur_act else "　　") + name)
+                    a2 = item(sub, name, checked=(name == cur_act))
                     a2.triggered.connect(lambda checked=False, n=name: self._switch_action(n))
             # 装饰：单独一页（可滚动）——装饰多了不会把菜单撑得满屏
             try:
@@ -1738,7 +2177,7 @@ class Murasame(QLabel):
                 _decs = []
             if _decs:
                 menu.addSeparator()
-                sub = menu.addMenu("🎀 装饰（可多选）")
+                sub = submenu(menu, "装饰（可多选）")
                 self._fill_decor_menu(sub, cur_set, _decs, cur)
 
             # a / b 切换：只有这个角色确实有两套素材时才给
@@ -1746,26 +2185,30 @@ class Murasame(QLabel):
             if len(_avail) >= 2:
                 if cloths:
                     menu.addSeparator()
-                sub = menu.addMenu("🧩 切换立绘类型（a / b）")
+                sub = submenu(menu, "切换立绘类型（a / b）")
                 for s in SETS:
                     if s not in _avail:
                         continue
-                    label = f"{'✅ ' if s == cur_set else '　　'}{s} 立绘"
-                    act = sub.addAction(label)
+                    act = item(sub, f"{s} 立绘", checked=(s == cur_set))
                     act.triggered.connect(lambda checked=False, ss=s: self._switch_portrait_set(ss))
                 # 自动切换立绘类型 开关（写入 config.json，立即生效）
                 # 调试模式：无条件服从（仅开发版显示；正式版不提供）
-                act_dbg = menu.addAction("🛠 调试模式（无条件服从）") if self._debug_available() else None
+                act_dbg = (item(menu, "调试模式（无条件服从）", checked=self._debug_obey())
+                           if self._debug_available() else None)
                 if act_dbg is not None:
-                    act_dbg.setCheckable(True)
-                    act_dbg.setChecked(self._debug_obey())
                     act_dbg.setToolTip("开启后她无条件听你的：换装不再要求明确指令、AI 挑的服装与姿势一律照做、不再保持同款连贯。仅调试用。")
                     act_dbg.triggered.connect(self._toggle_debug_obey)
                     menu.addSeparator()
-                act_auto = menu.addAction("🔁 自动切换立绘类型")
-                act_auto.setCheckable(True)
-                act_auto.setChecked(self._auto_switch_enabled())
+                act_auto = item(menu, "自动切换立绘类型", checked=self._auto_switch_enabled())
                 act_auto.triggered.connect(self._toggle_auto_switch)
+            # 快捷按钮（立绘右上角的 对话 / 菜单）开关
+            try:
+                menu.addSeparator()
+                _act_qb = item(menu, "显示快捷按钮（对话 / 菜单）", checked=self._quick_buttons_enabled())
+                _act_qb.setToolTip("关掉后立绘右上角那两个小按钮会隐藏；右键菜单和点对话框打字照旧可用。")
+                _act_qb.triggered.connect(self._toggle_quick_buttons)
+            except Exception:
+                pass
             return menu
         except Exception as e:
             print(f"[桌宠] ⚠ 构造换装菜单失败: {e}")
@@ -1916,6 +2359,8 @@ class Murasame(QLabel):
             from PyQt5.QtWidgets import (QScrollArea, QWidget, QVBoxLayout, QCheckBox,
                                          QWidgetAction, QLabel)
             from PyQt5.QtCore import Qt
+            from tool.pet_menu import item as _menu_item
+            from tool.pet_menu import style_decor_page as _style_page
             box = QWidget()
             lay = QVBoxLayout(box)
             lay.setContentsMargins(8, 6, 8, 6)
@@ -1940,6 +2385,10 @@ class Murasame(QLabel):
             area.setFrameShape(QScrollArea.NoFrame)
             area.setWidget(box)
             area.setMinimumWidth(240)
+            try:
+                _style_page(area, box)
+            except Exception:
+                pass
             # 高度上限：装饰再多也只显示这么高，用滚轮看剩下的
             area.setMaximumHeight(min(300, 34 + 26 * max(1, len(decs))))
             area.setMinimumHeight(min(120, area.maximumHeight()))
@@ -1953,9 +2402,7 @@ class Murasame(QLabel):
         except Exception as e:
             print(f"[桌宠] ⚠ 构造装饰页失败: {e}")
             for name, did in decs:      # 兜底：退化成普通勾选项
-                act = sub.addAction(name)
-                act.setCheckable(True)
-                act.setChecked(int(did) in set(int(x) for x in (cur.get("decor") or [])))
+                act = _menu_item(sub, name, checked=(int(did) in set(int(x) for x in (cur.get("decor") or []))))
                 act.triggered.connect(lambda checked=False, d=did: self._toggle_decor(d, checked))
 
     def _toggle_decor(self, decor_id, checked, clear_all=False):
@@ -2257,6 +2704,18 @@ class Murasame(QLabel):
             st = getattr(self, "_fade_state", None)
             if not st or st.get("id") != self._fade_id:
                 return
+            # ★ 看门狗：渐变正常 320ms 结束；万一某一帧丢了（系统卡顿/异常），
+            #   状态会在 2.5 秒后强制收尾，绝不把立绘长时间留在半透明状态。
+            import time as _tf
+            st.setdefault("t0", _tf.time())
+            if _tf.time() - float(st.get("t0") or 0) > 2.5:
+                fin = st.get("pm_in")
+                self._fade_state = None
+                if fin is not None and not fin.isNull():
+                    self.setPixmap(fin)
+                    self.update()
+                print("[桌宠] ⚠ 立绘渐变超时 → 强制收尾（防止半透明卡住）")
+                return
             i, n = st["i"], st["n"]
             pm = st["pm_out"] if i < n else st["pm_in"]
             a = (1.0 - i / float(n)) if i < n else ((i - n) / float(n))
@@ -2272,6 +2731,7 @@ class Murasame(QLabel):
                 self._fade_state = None
                 if fin is not None and not fin.isNull():
                     self.setPixmap(fin)
+                    self._ensure_window_fits_pixmap(fin)
                     self.resize(fin.size())
                     self.update()
         except Exception as e:
@@ -2287,13 +2747,17 @@ class Murasame(QLabel):
         try:
             if pm is None or pm.isNull():
                 return pm
-            if pm.size() == size:
+            # ★ 画布只放大、绝不裁切：源图比目标宽时，原来的
+            #   drawPixmap(max(0, 负偏移)) 会把立绘右半边切掉（用户反馈"立绘只显示一半"）。
+            w = max(int(size.width()), pm.width(), 1)
+            h = max(int(size.height()), pm.height(), 1)
+            if pm.width() == w and pm.height() == h:
                 return pm
-            out = QPixmap(size)
+            out = QPixmap(w, h)
             out.fill(Qt.transparent)
             p = QPainter(out)
             if p.isActive():
-                _dx = int((size.width() - pm.width()) / 2) if center_x else 0
+                _dx = int((w - pm.width()) / 2) if center_x else 0
                 p.drawPixmap(max(0, _dx), 0, pm)
                 p.end()
             return out
@@ -2576,6 +3040,12 @@ class Murasame(QLabel):
         self._set_hover_box(False)
 
     def mouseMoveEvent(self, event):
+        # ⓪ 悬停在快捷按钮上 → 平滑高亮
+        try:
+            self._ui_hover_to(self._ui_button_at(event.x(), event.y()))
+        except Exception:
+            pass
+
         # ⓪ 悬停在对话框上 → 提示"这里是打字的地方"（否则老是点到身体区域，
         #    触发了摸头/摸身反应、把她带进"思考"状态 —— 用户反馈）
         try:
@@ -2792,7 +3262,272 @@ class Murasame(QLabel):
             -r.height() // 2 + self.text_y_offset + oy,
         )
 
-    # 绘制事件
+    # ══════════ 立绘右上角：对话 / 菜单 快捷按钮 ══════════
+    def _quick_buttons_enabled(self) -> bool:
+        """快捷按钮是否显示（config.json 的 pet_quick_buttons，可在菜单里关）"""
+        try:
+            v = get_config("./config.json").get("pet_quick_buttons", True)
+            if isinstance(v, str):
+                return v.strip().lower() not in ("false", "0", "no", "off")
+            return bool(v)
+        except Exception:
+            return True
+
+    def _toggle_quick_buttons(self):
+        """菜单里开关这两个按钮（写入 config.json，立即生效）"""
+        try:
+            on = not self._quick_buttons_enabled()
+            try:
+                from tool.config import get_config as _gc
+                cfg = dict(_gc("./config.json") or {})
+            except Exception:
+                cfg = {}
+            cfg["pet_quick_buttons"] = "true" if on else "false"
+            import json as _json
+            with open("./config.json", "w", encoding="utf-8") as f:
+                _json.dump(cfg, f, ensure_ascii=False, indent=2)
+            self._ui_enabled = on
+            self._sync_quick_buttons()
+            self.update()
+            print("[桌宠] 快捷按钮（对话 / 菜单）%s" % ("已显示" if on else "已隐藏"))
+        except Exception as e:
+            print(f"[桌宠] ⚠ 切换快捷按钮失败: {e}")
+
+    def _ui_icon(self, name: str):
+        """按钮图标（ui/chat.png / ui/menu.png），按尺寸缓存"""
+        try:
+            key = str(name)
+            if key in self._ui_pix:
+                return self._ui_pix[key]
+            pm = QPixmap()
+            try:
+                from tool.paths import app_base_dir
+                base = app_base_dir()
+            except Exception:
+                base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            fp = os.path.join(base, "ui", "chat.png" if key == "chat" else "menu.png")
+            if os.path.isfile(fp):
+                src = QPixmap(fp)
+                # 1170×1170 的源图先缩到 256 存着：动画逐帧缩放时几乎不耗时
+                if not src.isNull() and src.width() > 256:
+                    src = src.scaled(256, 256, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                pm = src
+            self._ui_pix[key] = pm
+            return pm
+        except Exception:
+            return QPixmap()
+
+    def _sync_quick_buttons(self):
+        """把两个小按钮摆到立绘右上角（竖排），并按开关显示/隐藏"""
+        try:
+            btns = getattr(self, "_ui_btns", None)
+            if not btns:
+                return
+            on = bool(getattr(self, "_ui_enabled", True))
+            size = max(34, min(62, int(self.width() * 0.11)))
+            gap = max(6, int(size * 0.22))
+            m = max(8, int(size * 0.30))
+            x = max(4, self.width() - m - size)
+            for idx, nm in enumerate(("chat", "menu")):
+                b = btns.get(nm)
+                if not b:
+                    continue
+                b.set_size(size)
+                b.move(x, m + idx * (size + gap))
+                b.setVisible(on)
+        except Exception as e:
+            print(f"[桌宠] ⚠ 摆放快捷按钮失败: {e}")
+
+    def _ui_layout(self):
+        """两个按钮的位置：立绘右上角，竖着排"""
+        size = max(34, min(62, int(self.width() * 0.11)))
+        gap = max(6, int(size * 0.24))
+        m = max(8, int(size * 0.30))
+        x = max(4, self.width() - m - size)
+        self._ui_btn_rects = {
+            "chat": QRect(x, m, size, size),
+            "menu": QRect(x, m + size + gap, size, size),
+        }
+        return self._ui_btn_rects
+
+    def _ui_button_at(self, x, y) -> str:
+        if not getattr(self, "_ui_enabled", True):
+            return ""
+        try:
+            for name, r in self._ui_layout().items():
+                if r.contains(int(x), int(y)):
+                    return name
+        except Exception:
+            pass
+        return ""
+
+    def _ui_anim_to(self, target: float):
+        """悬停/按下的平滑过渡（180ms，OutCubic）"""
+        try:
+            a = self._ui_anim_obj
+            if a is None:
+                a = QVariantAnimation(self)
+                a.setDuration(150)
+                a.setEasingCurve(QEasingCurve.OutCubic)
+                a.valueChanged.connect(self._ui_anim_step)
+                self._ui_anim_obj = a
+            a.stop()
+            a.setStartValue(float(getattr(self, "_ui_anim_v", 0.0)))
+            a.setEndValue(float(target))
+            a.start()
+        except Exception:
+            pass
+
+    def _ui_btn_repaint_rect(self):
+        """两个按钮合起来的那一小块（含放大余量）——动画只重画这里，省掉整窗重绘"""
+        try:
+            rs = self._ui_btn_rects or self._ui_layout()
+            r = QRect()
+            for x in rs.values():
+                r = r.united(x.adjusted(-12, -12, 12, 12))
+            return r if not r.isNull() else None
+        except Exception:
+            return None
+
+    def _ui_anim_step(self, v):
+        try:
+            self._ui_anim_v = float(v)
+            r = self._ui_btn_repaint_rect()
+            if r is not None:
+                self.update(r)
+            else:
+                self.update()
+        except Exception:
+            pass
+
+    def _ui_hover_to(self, name: str):
+        if name != getattr(self, "_ui_hover", ""):
+            self._ui_hover = name
+            self._ui_anim_to(1.0 if name else 0.0)
+            try:
+                if name:
+                    self.setCursor(Qt.PointingHandCursor)
+            except Exception:
+                pass
+
+    def _ui_press_clear(self):
+        self._ui_press = ""
+        r = self._ui_btn_repaint_rect()
+        self.update(r) if r is not None else self.update()
+
+    def _enter_input_mode(self):
+        """点「对话」：直接进入打字模式（不用去点对话框）"""
+        try:
+            self._trigger_input_mode()          # 内含"她还在忙"的判断与提示
+            if getattr(self, "input_mode", False):
+                self.setFocus()
+                try:
+                    self._set_ime(True)
+                except Exception:
+                    pass
+                self.update()
+        except Exception as e:
+            print(f"[桌宠] ⚠ 进入输入模式失败: {e}")
+
+    def _exit_input_mode(self):
+        """退出打字模式（和按 Esc 一样的收尾；再点一次「对话」按钮也能退出）"""
+        try:
+            self.input_mode = False
+            self.input_buffer = ""
+            self.preedit_text = ""
+            self._set_ime(False)
+            try:
+                self._set_overlay_click_through(True)
+            except Exception:
+                pass
+            self.display_text = getattr(self, "_last_real_text", "") or ""
+            self.update()
+            print("[桌宠] ⌨ 已退出输入模式（再点「对话」可重新进入）")
+        except Exception as e:
+            print(f"[桌宠] ⚠ 退出输入模式失败: {e}")
+
+    def _toggle_input_mode(self):
+        """「对话」按钮：没在输入就进入，已经在输入就退出（用户要求）"""
+        try:
+            if getattr(self, "input_mode", False):
+                self._exit_input_mode()
+            else:
+                self._enter_input_mode()
+        except Exception as e:
+            print(f"[桌宠] ⚠ 切换输入模式失败: {e}")
+
+    def _ui_pair_pixmap(self, hover, press, step):
+        """把「两个按钮当前状态」预渲染成一张图，动画每帧只要一次 drawPixmap。
+
+        之前每帧都要重新缩放图标 + 分批绘制，转场就掉帧（用户反馈卡）。
+        """
+        rects = self._ui_layout()
+        union = QRect()
+        for x in rects.values():
+            union = union.united(x.adjusted(-12, -12, 12, 12))
+        ck = (hover, press, int(step), union.width(), union.height(),
+              int(rects["chat"].width()))
+        cache = getattr(self, "_ui_pair_cache", None)
+        if cache is None:
+            cache = {}
+            self._ui_pair_cache = cache
+        pm = cache.get(ck)
+        if pm is not None:
+            return pm, union
+        pm = QPixmap(union.size())
+        pm.fill(Qt.transparent)
+        pt = QPainter(pm)
+        pt.setRenderHint(QPainter.Antialiasing, True)
+        pt.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        k = max(0.0, min(1.0, float(step) / 10.0))
+        for name, r in rects.items():
+            _h = (hover == name)
+            _p = (press == name)
+            kk = k if (_h or _p) else 0.0
+            grow = 1.0 + 0.10 * kk - (0.07 if _p else 0.0)
+            size = int(r.width() * grow)
+            cx, cy = r.center().x() - union.x(), r.center().y() - union.y()
+            rr = QRect(cx - size // 2, cy - size // 2, size, size)
+            ipm = self._ui_icon(name)
+            if ipm is not None and not ipm.isNull():
+                sc = ipm.scaled(rr.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                pt.setOpacity(0.88 + 0.12 * kk)
+                pt.drawPixmap(rr.center().x() - sc.width() // 2,
+                              rr.center().y() - sc.height() // 2, sc)
+                pt.setOpacity(1.0)
+            else:
+                pt.setPen(QColor(255, 250, 245, 230))
+                f = QFont(self.text_font)
+                f.setPointSize(max(11, int(rr.width() * 0.36)))
+                pt.setFont(f)
+                pt.drawText(rr, Qt.AlignCenter, "聊" if name == "chat" else "≡")
+        pt.end()
+        if len(cache) > 48:
+            cache.clear()
+        cache[ck] = pm
+        return pm, union
+
+    def _draw_ui_buttons(self, painter):
+        """（已停用：按钮改成独立小控件 PetQuickButton，见 _sync_quick_buttons）"""
+        return
+        try:
+            _upd = painter.clipBoundingRect()
+            _u = QRect()
+            for _r in (self._ui_btn_rects or self._ui_layout()).values():
+                _u = _u.united(_r.adjusted(-14, -14, 14, 14))
+            if not _u.isNull() and not _upd.intersects(_u):
+                return          # 这次重绘跟按钮无关（比如文字变了）→ 不画
+        except Exception:
+            pass
+        _hover = getattr(self, "_ui_hover", "")
+        _press = getattr(self, "_ui_press", "")
+        _k = max(0.0, min(1.0, float(getattr(self, "_ui_anim_v", 0.0))))
+        _step = int(round(_k * 10))
+        pm, union = self._ui_pair_pixmap(_hover, _press, _step)
+        if pm is not None and not pm.isNull():
+            painter.drawPixmap(union.topLeft(), pm)
+        return
+
     def paintEvent(self, event):
         # 1. 先调用 QLabel 默认的绘制（画立绘 / 背景）
         super().paintEvent(event)
@@ -2816,6 +3551,40 @@ class Murasame(QLabel):
         except Exception:
             pass
         _draw_text = str(getattr(self, "display_text", "") or "")
+        # ★ 性能：按钮动画每帧只要求重画右上角一小块 —— 若这块不碰文字区，
+        #   就整段跳过文字绘制（带描边+自动换行的文字是全窗口最贵的一笔）。
+        try:
+            _upd = event.rect()
+            _trect = self._text_rect()
+            if _draw_text and not _upd.intersects(_trect):
+                _draw_text = ""
+        except Exception:
+            pass
+        # ★ 输入模式提示常显：她的回复会把 display_text 覆盖掉，之前提示就没了
+        #   （用户反馈"明明可以输入文字，对话框却没有提示"）
+        if getattr(self, "input_mode", False):
+            try:
+                _r = self._text_rect()
+                if _r.width() > 40 and _r.height() > 12:
+                    _p2 = QPainter(self)
+                    _p2.setRenderHint(QPainter.TextAntialiasing, True)
+                    _f2 = QFont(self.text_font)
+                    try:
+                        _f2.setPointSizeF(max(8.0, self.text_font.pointSizeF() * 0.82))
+                    except Exception:
+                        pass
+                    _p2.setFont(_f2)
+                    _p2.setPen(QColor(255, 232, 140, 240))
+                    _n = len(str(getattr(self, "input_buffer", "") or "") +
+                             str(getattr(self, "preedit_text", "") or ""))
+                    _hint = "✎ 正在输入…（回车发送 · Esc 取消）" + (f"  已输入 {_n} 字" if _n else "")
+                    _hr = QRect(_r.left(), _r.bottom() - int(_r.height() * 0.24),
+                                _r.width(), int(_r.height() * 0.24))
+                    _p2.drawText(_hr, Qt.AlignHCenter | Qt.AlignBottom, _hint)
+                    _p2.end()
+            except Exception as _e2:
+                pass
+
         if _draw_text:  # 过滤掉空字符串和 None
             # 设置绘图环境
             painter = QPainter(self)  # 在这个控件上绘制
@@ -2851,6 +3620,14 @@ class Murasame(QLabel):
             painter.drawText(text_rect, align_flag, _draw_text)
 
             painter.end()
+
+        # ── 立绘右上角的快捷按钮（对话 / 菜单）──
+        try:
+            _ui_p = QPainter(self)
+            self._draw_ui_buttons(_ui_p)
+            _ui_p.end()
+        except Exception as _e:
+            print(f"[桌宠] ⚠ 快捷按钮绘制失败: {_e}")
 
     # 更新立绘
     def update_portrait(self, target, layers):
@@ -2938,6 +3715,7 @@ class Murasame(QLabel):
 
         # 5. Attach to the QLabel and request a repaint
         self.setPixmap(pixmap)
+        self._ensure_window_fits_pixmap(pixmap)      # 图比窗口宽就先放大窗口，别裁图
         self.resize(pixmap.size())
         self.update()
         # 立绘就绪（main.py 等这个标记再显示窗口：服装没加载出来之前不露脸）
@@ -2997,6 +3775,7 @@ class Murasame(QLabel):
             self._update_text_scaling()
         except Exception:
             pass
+        self._sync_quick_buttons()
 
     def _scale_portrait_pixmap(self, pixmap: QPixmap) -> QPixmap:
         """
@@ -3081,6 +3860,9 @@ class Murasame(QLabel):
             #   两套的立绘宽高比略有差异，各存一份的话切换类型时窗口尺寸会变
             #   → 对话框位置/字号跟着跳，文字还可能被挤出去（用户反馈）。
             #   共用后切换只多出透明边，窗口和对话框完全不动。
+            # ★ 用「本进程见过的最大宽度」而不是按高度分键：
+            #   target_height 启动时偶尔会差一两像素 → 换个键，"只增不减"的记忆就失效
+            #   → 窗口缩回窄图宽度，而图还是宽的 → 右边被裁掉（用户反馈"立绘只显示一半"）。
             key = ("canvas", int(target_height))
             stab = getattr(self, "_stable_canvas", None) or {}
             if not isinstance(stab, dict):
@@ -3092,13 +3874,22 @@ class Murasame(QLabel):
                 stab = dict(list(stab.items())[-6:])
             self._stable_canvas = stab
             _w = stab.get(key) or out.width()
+            try:
+                _mx_ever = int(getattr(self, "_portrait_max_w", 0) or 0)
+                if _mx_ever > _w:
+                    _w = _mx_ever
+            except Exception:
+                pass
             # ★ 尺寸锁死：立绘画布一旦定下来，就把窗口固定成"画布尺寸"。
             #   否则 Qt 会按标签（文字+图）的 sizeHint 把窗口撑大（实测启动时 581，
             #   而立绘画布只要 465 → 用户看到"刚出现时大了一圈，对话一次后变小"）。
             #   锁死后：露面那一刻就是最终尺寸，之后一直不变。
             try:
                 _lock = self._pad_pixmap(out, QSize(int(_w), out.height()), center_x=True)
+                self._portrait_max_w = max(int(getattr(self, "_portrait_max_w", 0) or 0), _lock.width())
                 self.setFixedSize(_lock.size())
+                self._ensure_window_fits_pixmap(_lock)   # 窗口绝不能比图窄（否则右侧被裁）
+                self._clamp_to_screen()      # 尺寸变了可能有一部分跑到屏幕外
                 # ★ 锁定尺寸后必须按"最终窗口宽度"重算字号：
                 #   字号是按文字区宽度算的，而首帧时窗口还是临时尺寸（比最终大一截），
                 #   不重算就会出现"刚出现的字比对话一次后大一圈"（用户反馈）。

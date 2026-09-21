@@ -18,7 +18,7 @@ import subprocess
 import sys
 import urllib.request
 
-from PyQt5.QtCore import Qt, QTimer, QSize, QUrl, pyqtSignal
+from PyQt5.QtCore import Qt, QTimer, QEvent, QSize, QUrl, pyqtSignal
 from PyQt5.QtGui import (QColor, QFont, QIcon, QImage, QPainter, QPainterPath,
                          QPixmap)
 from PyQt5.QtWidgets import (QScrollArea, QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
@@ -269,6 +269,7 @@ class HomePage(QWidget):
     """总览：启动/关闭桌宠、QQ、微信 + 控制面板 + 运行状态"""
 
     _probe_signal = pyqtSignal()
+    _models_probe_signal = pyqtSignal()   # 模型余额查询结果回到界面线程
 
     def __init__(self, shell, parent=None):
         super().__init__(parent)
@@ -291,7 +292,8 @@ class HomePage(QWidget):
         self.chip_pet = StatusChip("桌宠：未运行")
         self.chip_qq = StatusChip("QQ：未运行")
         self.chip_tts = StatusChip("语音服务：未知")
-        for c in (self.chip_pet, self.chip_qq, self.chip_tts):
+        self.chip_vision = StatusChip("视觉服务：未知")
+        for c in (self.chip_pet, self.chip_qq, self.chip_tts, self.chip_vision):
             head.addWidget(c)
         outer.addLayout(head)
 
@@ -322,7 +324,16 @@ class HomePage(QWidget):
             "首次加载模型要 1~2 分钟，预热后桌宠开口几乎不用等。\n"
             "预载完成后按钮显示「预载完成」。")
         self.btn_preload.clicked.connect(self.preload_tts)
-        for b in (self.btn_pet, self.btn_qq, self.btn_wx, self.btn_preload):
+        # 预载视觉服务：本地视觉模型加载 + 预热约 30 秒，先点这个再启动桌宠，识别不用等冷启动
+        self.btn_vpreload = QPushButton("  预载视觉服务")
+        self.btn_vpreload.setStyleSheet(_ghost_btn_qss())
+        self.btn_vpreload.setMinimumHeight(46)
+        self.btn_vpreload.setToolTip(
+            "提前启动本地视觉服务（屏幕/摄像头识别用的那个模型）：\n"
+            "加载 + 预热约 30 秒，预载后桌宠第一屏识别就不用等。\n"
+            "不预载也没关系：启动桌宠时会自动拉起。")
+        self.btn_vpreload.clicked.connect(self.preload_vision)
+        for b in (self.btn_pet, self.btn_qq, self.btn_wx, self.btn_preload, self.btn_vpreload):
             row.addWidget(b)
         row.addStretch()
         cl.addLayout(row)
@@ -331,6 +342,48 @@ class HomePage(QWidget):
         tip.setStyleSheet(f"color: {Gray2.name()}; font-size: 12px;")
         cl.addWidget(tip)
         outer.addWidget(card)
+
+        # ── 模型状态卡片：语言模型 / 视觉模型 各一行（模型名 + 来源 + 余额）──
+        models = Card()
+        ml = QVBoxLayout(models)
+        ml.setContentsMargins(18, 14, 18, 16)
+        ml.setSpacing(8)
+        ml.addWidget(silicon_ui.section_title("模型状态", accent))
+        self.model_rows = {}
+        for _k, _icon, _title, _hint in (
+                ("lang", "", "语言模型", "对话用的模型"),
+                ("vision", "", "视觉模型", "屏幕/摄像头识别用的模型")):
+            row = QHBoxLayout()
+            row.setSpacing(8)
+            tag = QLabel(f"{(_icon + ' ') if _icon else ''}{_title}")
+            tag.setStyleSheet(f"color: {Gray2.name()}; font-size: 12px;"
+                              f" font-family: '{silicon_ui.M.font}';")
+            tag.setFixedWidth(int(78 * S))
+            tag.setToolTip(_hint)
+            name_lbl = QLabel("检测中…")
+            name_lbl.setStyleSheet(f"color: {Color1.name()}; font-size: 13px;"
+                                   f" font-family: '{silicon_ui.M.font}';")
+            bal_lbl = QLabel("")
+            bal_lbl.setStyleSheet(f"color: {Gray2.name()}; font-size: 13px;"
+                                  f" font-family: '{silicon_ui.M.font}';")
+            bal_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            row.addWidget(tag)
+            row.addWidget(name_lbl, 1)
+            row.addWidget(bal_lbl)
+            ml.addLayout(row)
+            self.model_rows[_k] = (name_lbl, bal_lbl)
+        # 卡片位置放到最后（快捷工具下面）——见文件末尾的 addWidget
+        # 余额要联网查，不能跟着 6 秒的状态刷新跑 → 单独的定时器（60 秒一次，后台线程里查）
+        self._models_probe_signal.connect(self._apply_models)
+        try:
+            from PyQt5.QtCore import QTimer as _QT
+            self._models_timer = _QT(self)
+            self._models_timer.setInterval(60000)
+            self._models_timer.timeout.connect(self.refresh_models)
+            self._models_timer.start()
+            _QT.singleShot(1200, self.refresh_models)
+        except Exception:
+            pass
 
         # ── 剧情模式（Galgame）入口：只放一个按钮 ──
         # 正式版没有剧情模块（story/ 被移除）→ 直接不显示这个入口，免得点了报错
@@ -409,6 +462,8 @@ class HomePage(QWidget):
         tr.addStretch()
         tl.addLayout(tr)
         outer.addWidget(tools)
+        # ── 模型状态卡片放最底下（语言模型 / 视觉模型：模型名 + 余额）──
+        outer.addWidget(models)
         outer.addStretch()
 
         self._probe_signal.connect(self._apply_status)
@@ -417,6 +472,55 @@ class HomePage(QWidget):
         self._timer.start(6000)
 
     # ── 状态 ──
+    def refresh_models(self):
+        """后台线程查两个模型的余额（联网查询绝不能放界面线程）"""
+        if getattr(self, "_models_busy", False):
+            return
+        self._models_busy = True
+
+        def _work():
+            res = {}
+            try:
+                info = _models_info()
+                for k in ("lang", "vision"):
+                    it = info.get(k) or {}
+                    res[k] = (it.get("model") or "未配置",
+                              _balance_for(str(it.get("provider") or ""), str(it.get("key") or "")))
+            except Exception as e:
+                print(f"[NewUI] ⚠ 模型状态查询失败: {e}")
+                res = {"lang": ("查询失败", "—"), "vision": ("查询失败", "—")}
+            self._models_result = res
+            try:
+                self._models_probe_signal.emit()
+            except Exception:
+                pass
+
+        import threading
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _apply_models(self):
+        self._models_busy = False
+        res = getattr(self, "_models_result", None) or {}
+        for k, widgets in (getattr(self, "model_rows", None) or {}).items():
+            name_lbl, bal_lbl = widgets
+            model, bal = res.get(k, ("未配置", "—"))
+            try:
+                name_lbl.setText(str(model))
+                bal_lbl.setText(str(bal))
+                # 余额少的标红提醒（本地部署/查询失败保持灰色）
+                warn = False
+                s = str(bal)
+                if s.startswith(("¥", "$")):
+                    try:
+                        warn = float(s[1:]) < 5.0
+                    except Exception:
+                        warn = False
+                bal_lbl.setStyleSheet(
+                    f"color: {'#e0603a' if warn else '#3d9e6a' if s and not warn and '无费用' in s else Gray2.name()};"
+                    f" font-size: 13px; font-family: '{silicon_ui.M.font}';")
+            except Exception as e:
+                print(f"[NewUI] ⚠ 模型状态显示失败: {e}")
+
     def refresh_status(self):
         """后台线程探测运行状态（绝不在 UI 线程做网络探测 → 不卡界面）"""
         if getattr(self, "_probe_busy", False):
@@ -433,7 +537,17 @@ class HomePage(QWidget):
                     tts_ok = s.connect_ex(("127.0.0.1", 9880)) == 0
             except Exception:
                 pass
-            self._probe_result = (alive, tts_ok)
+            # 视觉：设置成云端就显示「云端」，本地就探服务端口在不在
+            vis_state = "unknown"
+            try:
+                _cfg = _vision_cfg()
+                if str(_cfg.get("vision_source") or "local").strip().lower() != "local":
+                    vis_state = "cloud"
+                else:
+                    vis_state = "online" if _vision_alive(_vision_port(_cfg)) else "offline"
+            except Exception:
+                pass
+            self._probe_result = (alive, tts_ok, vis_state)
             try:
                 self._probe_signal.emit()
             except Exception:
@@ -445,7 +559,7 @@ class HomePage(QWidget):
     def _apply_status(self):
         """探测结果回到 UI 线程再更新（信号触发）"""
         try:
-            alive, tts_ok = getattr(self, "_probe_result", (False, False))
+            alive, tts_ok, vis_state = getattr(self, "_probe_result", (False, False, "unknown"))
             self._probe_busy = False
             self.chip_pet.set_text("桌宠：运行中" if alive else "桌宠：未运行", alive)
             # 「正在关闭/启动中」期间不要被状态刷新覆盖文案
@@ -462,6 +576,17 @@ class HomePage(QWidget):
             qq_on = self.shell._qq_proc is not None and self.shell._qq_proc.poll() is None
             self.chip_qq.set_text("QQ：运行中" if qq_on else "QQ：未运行", qq_on)
             self.chip_tts.set_text("语音服务：在线" if tts_ok else "语音服务：未启动", tts_ok)
+            try:
+                if vis_state == "cloud":
+                    self.chip_vision.set_text("视觉识别：云端", True)
+                elif vis_state == "online":
+                    self.chip_vision.set_text("视觉服务：在线", True)
+                elif vis_state == "offline":
+                    self.chip_vision.set_text("视觉服务：离线", False)
+                else:
+                    self.chip_vision.set_text("视觉服务：未知", False)
+            except Exception:
+                pass
         except Exception as e:
             print(f"[NewUI] ⚠ 状态更新失败: {e}")
 
@@ -526,6 +651,11 @@ class HomePage(QWidget):
             QTimer.singleShot(9000, lambda: self.status_lbl.setText(""))
             print("[NewUI] 正在关闭桌宠…")
             _send_control("shutdown")
+            # 桌宠不用了：把本地视觉服务也收掉，显卡（6G 显存）让给别的程序
+            try:
+                stop_vision_service(self.shell)
+            except Exception as e:
+                print(f"[NewUI] ⚠ 关闭本地视觉服务失败: {e}")
             # 轮询等它真的退出（最多 12 秒），再刷新状态
             self._wait_pet_gone(12)
             return
@@ -535,6 +665,11 @@ class HomePage(QWidget):
         if not py:
             QMessageBox.warning(self, "启动失败", "未找到 Python 解释器（runtime/venv）")
             return
+        # 本地视觉模型（屏幕/摄像头识别）跟着桌宠一起起：加载要几秒，先开好再启动桌宠
+        try:
+            ensure_vision_service(self.shell)
+        except Exception as e:
+            print(f"[NewUI] ⚠ 启动本地视觉服务失败（不影响桌宠）: {e}")
         try:
             self.shell._pet_proc = subprocess.Popen([py, os.path.join(base, "run.py")], cwd=base,
                                                     creationflags=_spawn_flags())
@@ -665,6 +800,87 @@ class HomePage(QWidget):
         except Exception:
             pass
 
+    # ── 本地视觉服务预载 ──
+    def _vision_health(self, port: int) -> dict:
+        """问一下本地视觉服务：起来了没 / 模型加载完了没（出错返回空字典）"""
+        try:
+            import json as _json
+            import urllib.request as _ur
+            op = _ur.build_opener(_ur.ProxyHandler({}))          # 本机请求别走代理
+            with op.open(f"http://127.0.0.1:{int(port)}/", timeout=1.5) as r:
+                return _json.loads(r.read().decode("utf-8", "ignore")) or {}
+        except Exception:
+            return {}
+
+    def preload_vision(self):
+        """预载本地视觉服务：把服务起起来并等模型加载好（约 30 秒，进度显示在按钮上）。
+
+        预载只是"提前热身"：不点也会在启动桌宠时自动拉起。
+        """
+        import time as _t
+        cfg = _vision_cfg()
+        if str(cfg.get("vision_source") or "local").strip().lower() != "local":
+            QMessageBox.information(
+                self, "预载视觉服务",
+                "当前「识别来源」是云端 API，不需要本地视觉服务。\n\n"
+                "想用本地模型：设置 → 视觉模型 → 识别来源改成「本地视觉模型」。")
+            return
+        base = _app_base_dir()
+        if not os.path.isfile(os.path.join(base, "tool", "vision_service.py")):
+            QMessageBox.information(self, "预载视觉服务",
+                                    "未找到 tool/vision_service.py（安装包可能不完整）")
+            return
+        port = _vision_port(cfg)
+        self.btn_vpreload.setEnabled(False)
+        self.btn_vpreload.setText("  预载中…")
+        self._vpre_t0 = _t.time()
+        self._vpre_ready = False
+        if not _vision_alive(port):
+            try:
+                ensure_vision_service(self.shell)
+            except Exception as e:
+                print(f"[NewUI] ⚠ 预载视觉服务失败: {e}")
+        # 主线程轮询状态（探测都是本机几毫秒的请求，不会卡界面）
+        self._vpre_timer = QTimer(self)
+        self._vpre_timer.setInterval(2000)
+
+        def _tick():
+            if not _vision_alive(port):
+                if _t.time() - self._vpre_t0 > 180:
+                    self._vpre_timer.stop()
+                    self._vpre_done(False)
+                return
+            h = self._vision_health(port)
+            if h.get("ok"):
+                self._vpre_ready = True
+                self._vpre_timer.stop()
+                self._vpre_done(True)
+            elif h.get("error"):
+                self._vpre_timer.stop()
+                self._vpre_done(False, str(h.get("error"))[:60])
+            else:
+                el = int(_t.time() - self._vpre_t0)
+                self.btn_vpreload.setText(f"  模型加载中… {el}s")
+
+        self._vpre_timer.timeout.connect(_tick)
+        self._vpre_timer.start()
+        _tick()
+
+    def _vpre_done(self, ok, err=""):
+        self.btn_vpreload.setEnabled(True)
+        if ok:
+            self.btn_vpreload.setText("  预载完成")
+            QTimer.singleShot(10000, lambda: self.btn_vpreload.setText("  预载视觉服务"))
+        else:
+            self.btn_vpreload.setText("  预载失败（可重试）")
+            QTimer.singleShot(12000, lambda: self.btn_vpreload.setText("  预载视觉服务"))
+            if err:
+                print(f"[NewUI] ⚠ 视觉预载失败: {err}")
+        try:
+            self.refresh_status()
+        except Exception:
+            pass
+
     # ── 工具 ──
     def open_studio(self):
         try:
@@ -734,6 +950,7 @@ class SiliconLauncher(QWidget):
         self._pet_proc = None
         self._qq_proc = None
         self._wx_proc = None
+        self._vision_proc = None     # 本地视觉服务（起桌宠时拉起，桌宠关了收掉）
         self._bg_widget = None
         self._media = None
 
@@ -845,6 +1062,8 @@ class SiliconLauncher(QWidget):
             # 主题图标键：总览复用「模型」图标
             b = NavRailButton(icon, title, sub, icon_key=("model" if key == "home" else key))
             b.clicked.connect(lambda _=False, k=key: self._goto(k))
+            b._page_key = key                       # 悬停预热用（见 eventFilter）
+            b.installEventFilter(self)
             self.nav_btns[key] = b
             lay.addWidget(b)
         lay.addStretch()
@@ -856,6 +1075,8 @@ class SiliconLauncher(QWidget):
         lay.addWidget(sep)
         b_set = NavRailButton("⚙", "设置", "模型与功能", icon_key="settings")
         b_set.clicked.connect(lambda _=False: self._goto("settings"))
+        b_set._page_key = "settings"
+        b_set.installEventFilter(self)
         self.nav_btns["settings"] = b_set
         lay.addWidget(b_set)
         ver = QLabel("Silicon UI · 新版")
@@ -1457,48 +1678,346 @@ class SiliconLauncher(QWidget):
         if self._silicon and not getattr(self, "_fx_done", False):
             self._fx_done = True
             QTimer.singleShot(50, self._apply_effects)
-        # 预热重页面：启动空闲时按顺序构建（插件/桌宠/记忆/设置），
-        # 之后点导航就是秒开（以前第一次点插件目录会卡一下 = 现建页面）
+        # 预热页面：只提前建「便宜」的几页（几十毫秒），重的页面（插件 659ms / 记忆 321ms）
+        # 改成鼠标悬停到对应导航按钮上再建 —— 以前一开机就挨个建，每建一个界面就卡一下
+        # （用户反馈"每次打开都会卡一下"）。
         if not getattr(self, "_prewarm_started", False):
             self._prewarm_started = True
-            self._prewarm_queue = ["plugins", "pets", "memory", "settings", "prompt", "themes"]
-            QTimer.singleShot(1500, self._prewarm_next)
+            self._prewarm_queue = ["settings", "pets", "prompt", "themes"]
+            QTimer.singleShot(3000, self._prewarm_next)
+
+    def _prewarm_page(self, key: str, why: str = "悬停"):
+        """把某一页提前建好（点了才建的话第一次点会停顿）"""
+        try:
+            if key in self.pages or key in getattr(self, "_prewarm_busy", set()):
+                return
+            busy = getattr(self, "_prewarm_busy", None)
+            if busy is None:
+                busy = self._prewarm_busy = set()
+            busy.add(key)
+            import time as _t
+            t0 = _t.time()
+            self._ensure_page(key)
+            print(f"[NewUI] 预热 {key}（{why}）: {(_t.time() - t0) * 1000:.0f}ms")
+        except Exception as e:
+            print(f"[NewUI] ⚠ 预热 {key} 失败: {e}")
+        finally:
+            try:
+                self._prewarm_busy.discard(key)
+            except Exception:
+                pass
+
+    def eventFilter(self, obj, event):
+        """导航按钮悬停 → 提前建对应页面（悬停时那一小下停顿，比开机乱卡自然）"""
+        try:
+            if event.type() == QEvent.Enter:
+                key = getattr(obj, "_page_key", None)
+                if key:
+                    QTimer.singleShot(0, lambda k=key: self._prewarm_page(k))
+        except Exception:
+            pass
+        return super().eventFilter(obj, event)
 
     def _prewarm_next(self):
-        """逐个预热页面（每个之间留 250ms，绝不影响使用）"""
+        """逐个预热便宜页面（每个之间留 1200ms，绝不连着卡）"""
         try:
             q = getattr(self, "_prewarm_queue", [])
             if not q:
-                print("[NewUI] 页面预热完成")
                 return
             key = q.pop(0)
-            if key not in self.pages:
-                import time as _t
-                t0 = _t.time()
-                self._ensure_page(key)
-                print(f"[NewUI] 预热 {key}: {( _t.time()-t0)*1000:.0f}ms")
-            QTimer.singleShot(250, self._prewarm_next)
+            self._prewarm_page(key, "空闲预热")
+            QTimer.singleShot(1200, self._prewarm_next)
         except Exception as e:
             print(f"[NewUI] ⚠ 预热失败: {e}")
 
     # ── 关闭清理 ──
     def closeEvent(self, event):
+        """先隐藏窗口，再清理子进程。
+
+        ★ 原来是"边关边杀"：taskkill / netstat / tasklist 都是同步调用，每个几百毫秒，
+          点关闭要等一秒多才消失（用户反馈"关闭时卡一下"）。
+          现在先把窗口藏掉（肉眼上立刻关掉），清理放到后台线程里做，最多等 1.5 秒再退出，
+          用户已经看不到窗口了，感知上就是秒关。
+        """
+        procs = []
         try:
-            for proc in (self._qq_proc, self._wx_proc):
-                if proc and proc.poll() is None:
-                    subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
-                                   capture_output=True,
-                                   creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            procs = [p for p in (self._qq_proc, self._wx_proc) if p and p.poll() is None]
+        except Exception:
+            procs = []
+
+        # ★ hide() 之前绝对不能有联网/子进程调用：
+        #   _pet_api_alive() 要发 HTTP，桌宠没在跑时能卡好几秒 —— 那正是"关闭卡一下"的真凶。
+        try:
+            self.hide()
         except Exception:
             pass
-        self.hide()
         if self._media is not None:
             try:
                 self._media.stop()
             except Exception:
                 pass
+
+        def _cleanup():
+            # 桌宠不在跑了才收视觉服务（这个判断要发 HTTP，放后台做）
+            need_vision_kill = False
+            try:
+                need_vision_kill = not _pet_api_alive()
+            except Exception:
+                need_vision_kill = False
+            for proc in procs:
+                try:
+                    subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                                   capture_output=True,
+                                   creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                except Exception:
+                    pass
+            if need_vision_kill:
+                try:
+                    stop_vision_service(self.shell)     # 桌宠没在跑就把视觉服务也收掉
+                except Exception:
+                    pass
+
+        try:
+            import threading as _th
+            t = _th.Thread(target=_cleanup, daemon=True)
+            t.start()
+            t.join(1.5)          # 给清理一点时间（窗口已经藏了，用户感知不到）
+        except Exception:
+            _cleanup()
         event.accept()
         print("[NewUI] 启动器已关闭")
+
+
+def _models_info() -> dict:
+    """总览页「模型状态」用：语言模型 / 视觉模型 各自的名字、来源、要不要查余额。
+
+    - 本地部署的（Ollama / 本地视觉模型）→ 只显示"本地部署"，不花钱
+    - 云端的 → 显示模型名 + 去服务商查余额
+    """
+    cfg = _vision_cfg()          # 就是读 config.json（下面这些键都在里面）
+    out = {}
+    # ── 语言模型（对话）──
+    mt = str(cfg.get("model_type") or "deepseek").strip().lower()
+    _lt = str(cfg.get("longtext_enabled", "true")).strip().lower() in ("true", "1", "yes", "on")
+    name = str((cfg.get("longtext_model_name") if _lt else cfg.get("short_model_name"))
+               or cfg.get("short_model_name") or cfg.get("longtext_model_name") or "未配置").strip()
+    key = str(((cfg.get("APIKEY") or {}).get(mt)) or "").strip()
+    if mt == "local":
+        out["lang"] = {"model": f"{name}（本地部署）", "balance": "本地部署，无费用", "provider": "local"}
+    else:
+        prov = {"deepseek": "DeepSeek", "qwen": "通义千问"}.get(mt, mt)
+        out["lang"] = {"model": f"{name}（{prov} 云端）", "balance": None,
+                       "provider": mt, "key": key}
+    # ── 视觉模型（屏幕/摄像头识别）──
+    if str(cfg.get("vision_source") or "local").strip().lower() == "local":
+        d = str(cfg.get("vision_local_model_dir") or "").strip()
+        base = os.path.basename(d.rstrip("\\/")) if d else ""
+        out["vision"] = {"model": f"{base or '本地视觉模型'}（本地部署）",
+                         "balance": "本地部署，无费用", "provider": "local"}
+    else:
+        vn = str(cfg.get("vision_model_name") or "未配置").strip()
+        vkey = str(((cfg.get("APIKEY") or {}).get("qwen")) or "").strip()
+        out["vision"] = {"model": f"{vn}（云端）", "balance": None,
+                         "provider": "qwen", "key": vkey}
+    return out
+
+
+def _http_get_json(url: str, headers: dict, timeout: float = 8.0):
+    """GET 一个 JSON：先按系统代理，失败再直连（和桌宠那边的网络策略一致）。"""
+    import json as _json
+    import urllib.request as _ur
+    req = _ur.Request(url, headers=headers)
+    last = None
+    for use_proxy in (True, False):
+        try:
+            if use_proxy:
+                op = _ur.build_opener()
+            else:
+                op = _ur.build_opener(_ur.ProxyHandler({}))   # 直连
+            with op.open(req, timeout=timeout) as r:
+                return _json.loads(r.read().decode("utf-8", "ignore"))
+        except Exception as e:
+            last = e
+    raise last if last else RuntimeError("请求失败")
+
+
+def _deepseek_balance(api_key: str) -> str:
+    """查 DeepSeek 余额 → '¥12.34'；查不到给一句能看懂的话。"""
+    if not api_key:
+        return "未填 API Key"
+    try:
+        d = _http_get_json("https://api.deepseek.com/user/balance",
+                           {"Authorization": "Bearer " + api_key, "Accept": "application/json"})
+        infos = d.get("balance_infos") or []
+        if infos:
+            it = infos[0]
+            sym = {"CNY": "¥", "USD": "$"}.get(str(it.get("currency") or "CNY").upper(), "")
+            return f"{sym}{it.get('total_balance')}"
+        if d.get("is_available") is False:
+            return "余额不足"
+        return "—"
+    except Exception as e:
+        print(f"[NewUI] ⚠ DeepSeek 余额查询失败: {type(e).__name__}: {e}")
+        return "查询失败（网络？）"
+
+
+def _qwen_balance(api_key: str) -> str:
+    """通义千问（阿里云 DashScope）没有公开的余额接口 → 说明一句，引导去控制台看。"""
+    return "阿里云无余额接口，控制台查看" if api_key else "未填 API Key"
+
+
+def _balance_for(provider: str, key: str) -> str:
+    if provider == "local":
+        return "本地部署，无费用"
+    if provider == "deepseek":
+        return _deepseek_balance(key)
+    if provider == "qwen":
+        return _qwen_balance(key)
+    return "—"
+
+
+def _vision_cfg() -> dict:
+    """读 config.json：视觉识别走本地还是云端、本地服务端口是多少"""
+    try:
+        import json as _json
+        with open(os.path.join(_app_base_dir(), "config.json"), encoding="utf-8") as f:
+            return _json.load(f) or {}
+    except Exception:
+        return {}
+
+
+def _vision_port(cfg: dict) -> int:
+    """从 local_api.vision 里抠端口；没写就用 vision_local_port，再不行 28460"""
+    u = str((cfg.get("local_api") or {}).get("vision") or "")
+    m = re.search(r":([0-9]+)", u)
+    if m:
+        return int(m.group(1))
+    try:
+        return int(cfg.get("vision_local_port") or 28460)
+    except Exception:
+        return 28460
+
+
+def _vision_alive(port: int) -> bool:
+    import socket as _s
+    try:
+        with _s.create_connection(("127.0.0.1", port), timeout=0.4):
+            return True
+    except Exception:
+        return False
+
+
+def ensure_vision_service(shell) -> bool:
+    """按设置拉起本地视觉服务（tool/vision_service.py，借用 GPT-SoVITS 的 ROCm 运行时 + 显卡）。
+
+    - 设置里选了「云端 API」→ 不启动
+    - 服务已经在跑（比如上一次没关干净）→ 不重复启动
+    - 找不到运行时/模型 → 只打日志，桌宠那边会自动回落到云端
+    """
+    cfg = _vision_cfg()
+    if str(cfg.get("vision_source") or "local").strip().lower() != "local":
+        print("[NewUI] 视觉识别设为云端 API，本地视觉服务不启动")
+        return False
+    port = _vision_port(cfg)
+    if _vision_alive(port):
+        print(f"[NewUI] 本地视觉服务已在运行（端口 {port}）")
+        return True
+    base = _app_base_dir()
+    script = os.path.join(base, "tool", "vision_service.py")
+    if not os.path.isfile(script):
+        print("[NewUI] ⚠ 缺少 tool/vision_service.py，跳过本地视觉服务")
+        return False
+    py = ""
+    try:
+        # 统一的「用哪个 python」规则：配置指定的（安装时配置写进去的）→ GPT-SoVITS 整合包
+        # → <程序目录>/vision_runtime → 本体 venv。优先挑带显卡加速的那个。
+        from tool import vision_setup as _vs
+        py = _vs.find_gpu_runtime(base, cfg) or ""
+        if not py:
+            _cand = _vs.find_runtime(base, cfg)
+            if _cand and _vs._has_torch(_cand):
+                py = _cand
+                print("[NewUI] ⚠ 没找到带显卡加速的运行时，用现有的（识别会明显变慢）")
+    except Exception as e:
+        print(f"[NewUI] ⚠ 视觉运行时探测失败，按老规矩找：{e}")
+    if not py:
+        for rel in (os.path.join("GPT-SoVITS", "runtime_rocm", "Scripts", "python.exe"),
+                    os.path.join("GPT-SoVITS", "runtime", "Scripts", "python.exe"),
+                    os.path.join("GPT-SoVITS", "runtime", "python.exe"),
+                    os.path.join("vision_runtime", "Scripts", "python.exe")):
+            if os.path.isfile(os.path.join(base, rel)):
+                py = os.path.join(base, rel)
+                break
+    if not py:
+        print("[NewUI] ⚠ 没找到能跑视觉模型的运行时"
+              "（装 GPT-SoVITS 整合包，或到设置里把识别来源改成云端 API）")
+        return False
+    try:
+        os.makedirs(os.path.join(base, "data"), exist_ok=True)
+        log = open(os.path.join(base, "data", "vision_service.log"), "a",
+                   encoding="utf-8", errors="replace")
+    except Exception:
+        log = None
+    try:
+        shell._vision_proc = subprocess.Popen(
+            [py, script], cwd=base, stdout=log, stderr=subprocess.STDOUT,
+            creationflags=(subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0))
+        print(f"[NewUI] 已启动本地视觉服务（PID {shell._vision_proc.pid}，日志 data/vision_service.log）")
+        return True
+    except Exception as e:
+        print(f"[NewUI] ⚠ 启动本地视觉服务失败: {e}")
+        return False
+
+
+def _vision_pid_on_port(port: int) -> int:
+    """谁占着这个端口（服务不是本启动器拉起来的时，也得能收掉它）。
+
+    只认 python 进程 —— 万一这个端口被别的程序占了，不能去杀人家。
+    """
+    try:
+        # 注意：中文 Windows 的 netstat/tasklist 输出是 GBK，不能直接 text=True
+        out = (subprocess.run(["netstat", "-ano", "-p", "TCP"], capture_output=True,
+                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
+               or b"").decode("utf-8", "replace")
+    except Exception:
+        return 0
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) < 4 or not parts[1].endswith(":" + str(port)):
+            continue
+        if "LISTENING" not in line.upper():
+            continue
+        try:
+            pid = int(parts[-1])
+        except Exception:
+            continue
+        try:
+            chk = (subprocess.run(["tasklist", "/FI", f"PID eq {pid}"], capture_output=True,
+                                  creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
+                   or b"").decode("utf-8", "replace")
+        except Exception:
+            return 0
+        if "python" in chk.lower():
+            return pid
+    return 0
+
+
+def stop_vision_service(shell):
+    """收掉本地视觉服务：它一直占着显卡，桌宠不用了就该让出来"""
+    proc = getattr(shell, "_vision_proc", None)
+    try:
+        shell._vision_proc = None
+    except Exception:
+        pass
+    pid = proc.pid if (proc and proc.poll() is None) else _vision_pid_on_port(_vision_port(_vision_cfg()))
+    if not pid:
+        return
+    try:
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True,
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        print(f"[NewUI] 本地视觉服务已关闭（PID {pid}）")
+    except Exception as e:
+        print(f"[NewUI] ⚠ 关闭本地视觉服务失败: {e}")
 
 
 def _ulog(msg: str):
@@ -1816,28 +2335,19 @@ def launch() -> int:
         print(f"[NewUI] ⚠ 全局异常兜底不可用: {_e}")
     if current_theme_id() == "silicon":
         _sui.install(app, accent=THEME_COLORS.get(str(ACCENT_ID), {}).get("title_start", "#2f6fd0"))
-    splash = SplashScreen()
-    splash.show()
-    splash.fade(1.0, 260)
-    splash.set_progress(25, "加载界面样式…")
-
+    # ★ 不再用开屏窗口（原来那个 420x240 的小卡片就是用户看到的"弹窗"）：
+    #   外壳构造实测只要 ~90ms，开屏纯属白等，还给启动过程加了 450ms 延迟和一次窗口切换。
+    #   直接显示主窗 + 淡入，打开即见。
     win = SiliconLauncher()
-
-    def _ready():
+    try:
+        win.show()
+        _fade_window_in(win)
+    except Exception as e:
+        print(f"[NewUI] ⚠ 主窗显示失败（直接显示）: {e}")
         try:
-            splash.set_progress(100, "准备就绪")
             win.show()
-            QTimer.singleShot(160, lambda: splash.fade(0.0, 260, splash.close))
-            QTimer.singleShot(120, lambda: _fade_window_in(win))
-        except Exception as e:
-            print(f"[NewUI] ⚠ 开屏收尾失败: {e}")
-            try:
-                win.show()
-                splash.close()
-            except Exception:
-                pass
-
-    QTimer.singleShot(900, _ready)
+        except Exception:
+            pass
     return app.exec_()
 
 

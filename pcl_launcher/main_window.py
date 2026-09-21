@@ -976,6 +976,7 @@ class PCLMainWindow(QWidget):
         # ===== 双启动按钮（桌宠 + QQ）=====
         self._qq_process = None
         self._napcat_proc = None             # 本启动器拉起的 start_napcat.bat 控制台进程（Popen 句柄）
+        self._vision_process = None          # 本启动器拉起的本地视觉服务进程（Popen 句柄）
         self._napcat_started_by_us = False   # 本次会话 NapCat 是否由本启动器拉起（关闭 QQ 时连带关闭）
         btn_row = QHBoxLayout()
         btn_row.setSpacing(int(12 * S))
@@ -1388,6 +1389,10 @@ class PCLMainWindow(QWidget):
             return
         from pets.pet_registry import get_active_pet_id
         self._running_pet_id = get_active_pet_id()
+        try:
+            self._ensure_vision_service(base)
+        except Exception as e:
+            print(f"[PCL] ⚠ 启动视觉服务失败: {e}")
         self._pet_process = subprocess.Popen(
             [py, os.path.join(base, "run.py")],
             cwd=base,
@@ -1402,6 +1407,66 @@ class PCLMainWindow(QWidget):
                 border-radius: {int(14*S)}px; }}
         """)
         print(f"[PCL] 已启动桌宠: {self._running_pet_id}")
+
+    def _vision_cfg(self) -> dict:
+        """读视觉相关配置（设置页里那份）"""
+        try:
+            from tool.config import get_config
+            return get_config("./config.json") or {}
+        except Exception:
+            return {}
+
+    def _vision_port(self) -> int:
+        cfg = self._vision_cfg()
+        u = str((cfg.get("local_api") or {}).get("vision") or "")
+        import re as _re
+        m = _re.search(r":(\d+)", u)
+        if m:
+            return int(m.group(1))
+        try:
+            return int(cfg.get("vision_local_port") or 28460)
+        except Exception:
+            return 28460
+
+    def _vision_alive(self) -> bool:
+        import socket as _s
+        try:
+            with _s.create_connection(("127.0.0.1", self._vision_port()), timeout=0.4):
+                return True
+        except Exception:
+            return False
+
+    def _ensure_vision_service(self, base: str) -> bool:
+        """按设置拉起本地视觉服务（用 GPT-SoVITS 的 runtime，torch+显卡是通的）"""
+        cfg = self._vision_cfg()
+        if str(cfg.get("vision_source") or "local").strip().lower() != "local":
+            print("[PCL] 视觉识别用的是云端 API，本地视觉服务不启动")
+            return False
+        if self._vision_alive():
+            print("[PCL] 本地视觉服务已在运行")
+            return True
+        py = os.path.join(base, "GPT-SoVITS", "runtime_rocm", "Scripts", "python.exe")
+        if not os.path.isfile(py):
+            py2 = os.path.join(base, "GPT-SoVITS", "runtime", "python.exe")
+            py = py2 if os.path.isfile(py2) else ""
+        if not py:
+            print("[PCL] ⚠ 找不到 GPT-SoVITS 运行时，无法启动本地视觉服务")
+            return False
+        script = os.path.join(base, "tool", "vision_service.py")
+        if not os.path.isfile(script):
+            print("[PCL] ⚠ 缺少 tool/vision_service.py")
+            return False
+        log = os.path.join(base, "data", "vision_service.log")
+        try:
+            os.makedirs(os.path.dirname(log), exist_ok=True)
+            f = open(log, "a", encoding="utf-8", errors="replace")
+        except Exception:
+            f = None
+        self._vision_process = subprocess.Popen(
+            [py, script], cwd=base, stdout=f, stderr=subprocess.STDOUT,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        print(f"[PCL] 已启动本地视觉服务（PID {self._vision_process.pid}，日志 data/vision_service.log）")
+        return True
 
     def _kill_process(self, proc_ref):
         """强制终止一个子进程（含子进程树）"""
@@ -2050,6 +2115,13 @@ class PCLMainWindow(QWidget):
         self._kill_pet_process()
         self._kill_qq_process()
         self._kill_wechat_process()
+        # 本地视觉服务一直占着几 G 显存，启动器关了就得一起收掉，
+        # 不然会留下一个看不见的进程在后台吃显卡。
+        try:
+            self._kill_process(getattr(self, "_vision_process", None))
+            self._vision_process = None
+        except Exception:
+            pass
         super().closeEvent(event)
 
     def nativeEvent(self, event_type, message):

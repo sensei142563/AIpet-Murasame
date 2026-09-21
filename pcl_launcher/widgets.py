@@ -444,6 +444,7 @@ class PCLSidebar(QWidget):
 class PCLSettingsPanel(QWidget):
     size_changed = pyqtSignal(int, int)
     color_changed = pyqtSignal(str)
+    _vision_probe_signal = pyqtSignal()   # 视觉服务探测结果回到界面线程用
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -526,6 +527,32 @@ class PCLSettingsPanel(QWidget):
         )
         self._add_slider("reasoning_level", "推理等级", ["off", "low", "high", "max"], "off")
         self._add_slider("force_gpu_check", "强制 GPU 检查", ["false", "true"], "false")
+
+        # ===== 视觉模型（屏幕 / 摄像头识别）=====
+        self._section("视觉模型（屏幕 / 摄像头识别）", "👁")
+        self._add_slider("vision_source", "识别来源", ["local", "cloud"], "local",
+                         labels=["本地视觉模型（本机显卡）", "云端 API"],
+                         hint="本地=用本机跑的视觉模型（不花钱、不联网，需要本地视觉服务在跑）；云端=走对话模型的 API。")
+        # 本地视觉服务在线/离线（跟着状态每 4 秒刷一次，探测在后台线程做）
+        self._vision_status = QLabel("  ⏳ 正在检测本地视觉服务…")
+        self._vision_status.setWordWrap(True)
+        self._vision_status.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(11*S)}px;"
+                                          f"padding: 2px 0 2px {int(6*S)}px;")
+        self._cur_layout.addWidget(self._vision_status)
+        self._vision_probe_signal.connect(self._apply_vision_status)
+        try:
+            from PyQt5.QtCore import QTimer as _QT
+            self._vision_timer = _QT(self)
+            self._vision_timer.setInterval(4000)
+            self._vision_timer.timeout.connect(self._refresh_vision_status)
+            self._vision_timer.start()
+            self._refresh_vision_status()
+        except Exception:
+            pass
+        self._add_text_input("vision_service_url", "本地视觉服务地址",
+                             "http://127.0.0.1:28460/describe")
+        self._add_text_input("vision_model_dir", "本地视觉模型目录",
+                             r"D:\下载\AI桌宠\vision\Qwen2-VL-2B-Instruct")
 
         # ===== ③ 长文本输出 =====
         self._section("汉语模式（长回复 + 汉语语音）", "📝")
@@ -920,6 +947,13 @@ class PCLSettingsPanel(QWidget):
             self._set_if("deepseek_api_key", cfg.get("APIKEY", {}).get("deepseek", ""))
             self._set_if("qwen_api_key", cfg.get("APIKEY", {}).get("qwen", ""))
             self._set_slider("model_type", cfg.get("model_type", "qwen"))
+            self._set_slider("vision_source", str(cfg.get("vision_source") or "local"))
+            self._set_if("vision_service_url",
+                         (cfg.get("local_api") or {}).get("vision",
+                                                          "http://127.0.0.1:28460/describe"))
+            self._set_if("vision_model_dir",
+                         cfg.get("vision_local_model_dir",
+                                 r"D:\下载\AI桌宠\vision\Qwen2-VL-2B-Instruct"))
             self._set_if("short_model_name", cfg.get("short_model_name", "qwen-plus"))
             self._set_slider("tts_type", cfg.get("tts_type", "local"))
             self._set_slider("quiet_mode", cfg.get("quiet_mode", "false"))
@@ -992,6 +1026,15 @@ class PCLSettingsPanel(QWidget):
             cfg["APIKEY"]["qwen"] = self._get_text("qwen_api_key")
 
             cfg["model_type"] = self._get_slider("model_type")
+            _vs = self._get_slider("vision_source")
+            if _vs in ("local", "cloud"):
+                cfg["vision_source"] = _vs
+            _vu = (self._get_text("vision_service_url") or "").strip()
+            if _vu:
+                cfg.setdefault("local_api", {})["vision"] = _vu
+            _vd = (self._get_text("vision_model_dir") or "").strip()
+            if _vd:
+                cfg["vision_local_model_dir"] = _vd
             cfg["short_model_name"] = self._get_combo("short_model_name")
             cfg["tts_type"] = self._get_slider("tts_type")
             cfg["quiet_mode"] = self._get_slider("quiet_mode")
@@ -1064,6 +1107,66 @@ class PCLSettingsPanel(QWidget):
             slider, options, _ = entry
             return options[slider.value()]
         return "false"
+
+    # ── 本地视觉服务在线/离线 ──
+    def _refresh_vision_status(self):
+        """后台线程探测（界面线程里连网络会卡界面），结果用信号送回界面线程"""
+        if getattr(self, "_vision_probing", False):
+            return
+        self._vision_probing = True
+
+        def _work():
+            state = "unknown"
+            try:
+                base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                if getattr(sys, "frozen", False):
+                    base = os.path.dirname(sys.executable)
+                if base not in sys.path:
+                    sys.path.insert(0, base)
+                from pcl_launcher.silicon_window import _vision_alive, _vision_cfg, _vision_port
+                cfg = _vision_cfg()
+                if str(cfg.get("vision_source") or "local").strip().lower() != "local":
+                    state = "cloud"
+                else:
+                    state = "online" if _vision_alive(_vision_port(cfg)) else "offline"
+            except Exception:
+                state = "unknown"
+            self._vision_state = state
+            try:
+                self._vision_probe_signal.emit()
+            except Exception:
+                pass
+
+        import threading
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _apply_vision_status(self):
+        self._vision_probing = False
+        state = getattr(self, "_vision_state", "unknown")
+        lbl = getattr(self, "_vision_status", None)
+        if lbl is None:
+            return
+        try:
+            if state == "cloud":
+                lbl.setText("  识别来源设为「云端 API」，本地视觉服务不需要启动。")
+                lbl.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(11*S)}px;"
+                                  f"padding: 2px 0 2px {int(6*S)}px;")
+            elif state == "online":
+                lbl.setText("  ● 本地视觉服务：在线（启动桌宠时会自动拉起；识别一屏约 30 秒）")
+                lbl.setStyleSheet(f"color: #3d9e6a; font-size: {int(11*S)}px;"
+                                  f"padding: 2px 0 2px {int(6*S)}px;")
+            elif state == "offline":
+                lbl.setText("  ○ 本地视觉服务：离线 —— 启动桌宠后会自动拉起；"
+                            "若一直离线，检查下面的「本地视觉模型目录/服务地址」是否正确"
+                            "（日志见 data/vision_service.log）")
+                lbl.setStyleSheet(f"color: #c96b3a; font-size: {int(11*S)}px;"
+                                  f"padding: 2px 0 2px {int(6*S)}px;")
+            else:
+                lbl.setText("  ？本地视觉服务：状态未知（点保存后重新检测）")
+                lbl.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(11*S)}px;"
+                                  f"padding: 2px 0 2px {int(6*S)}px;")
+        except Exception:
+            pass
 
     def _restart_pet(self):
         """保存配置后，关闭当前运行中的桌宠进程（不重启）"""

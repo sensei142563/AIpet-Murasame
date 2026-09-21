@@ -9,7 +9,7 @@ from PyQt5.QtGui import QGuiApplication
 
 from tool.cloud_API_chat import cloud_portrait, cloud_translate, cloud_talk, cloud_emotion
 from tool.config import get_config
-from tool.chat import qwen3_lora, ollama_qwen3_sentence, ollama_qwen3_portrait, gpt_sovits_tts, ollama_qwen3_emotion, ollama_qwen3_translate
+from tool.chat import qwen3_lora, ollama_qwen3_sentence, ollama_qwen3_portrait, gpt_sovits_tts, ollama_qwen3_emotion, ollama_qwen3_translate, strip_self_dialogue
 
 portrait_type = get_config("./config.json")['portrait']
 
@@ -107,8 +107,12 @@ def _align_lists(reply_list, translate_list, emotion_list, portrait_list):
 class qwen3_lora_Worker(QThread):
     finished = pyqtSignal(list, list, list, list, list, list)  # (AI回复, 立绘, history, 立绘历史, 语音, 情绪列表)
 
-    def __init__(self, history, portrait_history, user_input, role="user", t = False):
+    def __init__(self, history, portrait_history, user_input, role="user", t = False,
+                 portrait_type=None):
         super().__init__()
+        # 当前画面上显示的那一套立绘（a/b）——AI 必须按同一套选层，
+        # 否则渲染时要跨套换算，表情/装饰会被丢掉（用户反馈"立绘没有表情"）
+        self.portrait_type = portrait_type
         self.history = history
         self.portrait_history = portrait_history
         self.user_input = user_input
@@ -125,6 +129,23 @@ class qwen3_lora_Worker(QThread):
         if self.t:
             self.force_stop = True
     def run(self):
+        """QThread 入口：外面兜一层底。
+
+        任何一步抛异常（模型返回异常、立绘清单被写坏、网络超时……）以前会让线程直接死掉，
+        finished 信号永远不发 → 桌宠一直停在「她还在说话/思考」，点她也不理（用户反馈）。
+        现在异常也发一个空回复，让她正常收尾、把对话锁放掉。
+        """
+        try:
+            self._run_impl()
+        except Exception as _e:
+            import traceback
+            print(f"[对话] ⚠ 本轮回复失败（已自动恢复，不会卡住）：{_e}")
+            traceback.print_exc()
+            try:
+                self.finished.emit([], [], self.history, self.portrait_history, [], [])
+            except Exception:
+                pass
+    def _run_impl(self):
         def to_list(text):
             try:
                 text = json.loads(text)  # 把字符串解析成 Python 列表
@@ -135,11 +156,16 @@ class qwen3_lora_Worker(QThread):
             print("[qwen3-lora] 已中断生成。")
             return
         reply, history = qwen3_lora(self.history, self.user_input, self.role)  # 对话
+        # ★ 防「自问自答」：模型有时会把历史当剧本继续写，返回里带上「user主人：…」和下一轮
+        _fixed = strip_self_dialogue(reply)
+        if _fixed != reply:
+            print('[对话] ⚠ 已截断模型自行续写的多轮台词（防自问自答）')
+            reply = _fixed
         if self.force_stop:print("[ollama-qwn3] 已中断生成。");return
         reply = ollama_qwen3_sentence(reply)  # 句子分割
         if self.force_stop: print("[ollama-qwn3] 已中断生成。");return
         history[-1]["content"] = reply
-        portrait_list, portrait_history = ollama_qwen3_portrait(reply, self.portrait_history, current_portrait_type())  # 立绘
+        portrait_list, portrait_history = ollama_qwen3_portrait(reply, self.portrait_history, (getattr(self, "portrait_type", None) or current_portrait_type()))  # 立绘
         if self.force_stop: print("[ollama-qwn3] 已中断生成。");return
         emotion_list = ollama_qwen3_emotion(history)  # 情感
         if self.force_stop: print("[ollama-qwn3] 已中断生成。");return
@@ -197,8 +223,12 @@ class qwen3_lora_Worker(QThread):
 class cloud_API_Worker(QThread):
     finished = pyqtSignal(list, list, list, list, list, list)
 
-    def __init__(self, history, portrait_history, user_input, role="user", t = False):
+    def __init__(self, history, portrait_history, user_input, role="user", t = False,
+                 portrait_type=None):
         super().__init__()
+        # 当前画面上显示的那一套立绘（a/b）——AI 必须按同一套选层，
+        # 否则渲染时要跨套换算，表情/装饰会被丢掉（用户反馈"立绘没有表情"）
+        self.portrait_type = portrait_type
         self.history = history
         self.portrait_history = portrait_history
         self.user_input = user_input
@@ -217,6 +247,23 @@ class cloud_API_Worker(QThread):
     这种定义方法来实现中途中断的操作我之前一直没有想到，这个做法很好
     '''
     def run(self):
+        """QThread 入口：外面兜一层底。
+
+        任何一步抛异常（模型返回异常、立绘清单被写坏、网络超时……）以前会让线程直接死掉，
+        finished 信号永远不发 → 桌宠一直停在「她还在说话/思考」，点她也不理（用户反馈）。
+        现在异常也发一个空回复，让她正常收尾、把对话锁放掉。
+        """
+        try:
+            self._run_impl()
+        except Exception as _e:
+            import traceback
+            print(f"[对话] ⚠ 本轮回复失败（已自动恢复，不会卡住）：{_e}")
+            traceback.print_exc()
+            try:
+                self.finished.emit([], [], self.history, self.portrait_history, [], [])
+            except Exception:
+                pass
+    def _run_impl(self):
         def to_list(text):
             try:
                 text = json.loads(text)  # 把字符串解析成 Python 列表
@@ -227,6 +274,11 @@ class cloud_API_Worker(QThread):
         # 1. 先获取对话回复（这个必须串行，因为依赖前面的历史）
         if self.force_stop:print("[deepseek] 已中断生成。");return
         reply, history = cloud_talk(self.history, self.user_input, self.role)
+        # ★ 防「自问自答」：云端模型也会把历史当剧本接着写，带回「主人：…」和下一轮台词
+        _fixed = strip_self_dialogue(reply)
+        if _fixed != reply:
+            print('[对话] ⚠ 已截断模型自行续写的多轮台词（防自问自答）')
+            reply = _fixed
         # 兜底切句：AI 未按 JSON 列表返回时，客户端按句末标点切分（修复整段话不切句）
         try:
             parsed = json.loads(reply)
@@ -238,7 +290,7 @@ class cloud_API_Worker(QThread):
         if self.force_stop:print("[deepseek] 已中断生成。");return
         with ThreadPoolExecutor(max_workers=5) as executor:  # 增加线程数
             # 提交所有任务（下游拿到切好的句子列表，保证对齐）
-            future_portrait = executor.submit(cloud_portrait, reply_json, self.portrait_history, current_portrait_type())
+            future_portrait = executor.submit(cloud_portrait, reply_json, self.portrait_history, (getattr(self, "portrait_type", None) or current_portrait_type()))
             future_translate = executor.submit(cloud_translate, reply_json)
             future_emotion = executor.submit(cloud_emotion, history)
 
@@ -302,6 +354,42 @@ class cloud_API_Worker(QThread):
 
 
 screen_index = get_config("./config.json")["screen_index"]
+
+
+def shot_is_blank(pixmap) -> bool:
+    """截到的画面是不是黑的/一片纯色（等于没截到东西）。
+
+    锁屏、显示器休眠、独占全屏（游戏/播放器）时 QScreen.grabWindow(0) 会返回一张全黑图；
+    偶尔也会返回一张纯色图。这种图送给视觉模型只能得到「看不到内容」，
+    她就跟着说「我看不到你的屏幕」（用户反馈过）。
+    判定（缩到 48x48 再采样，开销可忽略）：
+      * 又黑又没有内容：平均亮度 < 12 或 97% 以上是纯黑像素
+      * 整幅几乎没有变化：标准差 < 3（真实屏幕哪怕全白也有文字/边框的抗锯齿，实测标准差 60+）
+    """
+    import statistics
+    try:
+        from PyQt5.QtCore import Qt
+        if pixmap is None or pixmap.isNull():
+            return True
+        small = pixmap.scaled(48, 48, Qt.IgnoreAspectRatio, Qt.FastTransformation).toImage()
+        vals = []
+        for y in range(small.height()):
+            for x in range(small.width()):
+                c = small.pixelColor(x, y)
+                vals.append((c.red() + c.green() + c.blue()) / 3.0)
+        if not vals:
+            return True
+        mean = sum(vals) / len(vals)
+        dark_ratio = sum(1 for v in vals if v < 10) / len(vals)
+        try:
+            sd = statistics.pstdev(vals)
+        except Exception:
+            sd = 99.0
+        return mean < 12 or dark_ratio > 0.97 or sd < 3.0
+    except Exception:
+        return False
+
+
 class ScreenWorker(QThread):
     # 发出临时文件路径（主线程负责删除）
     screenshot_captured = pyqtSignal(str)
@@ -319,6 +407,20 @@ class ScreenWorker(QThread):
         while not self.isInterruptionRequested():
             # 抓屏（全屏）
             pixmap = screen.grabWindow(0)
+            if shot_is_blank(pixmap):
+                # 偶尔会抓到全黑（锁屏 / 显示器休眠 / 独占全屏）→ 等一下重抓一次；
+                # 还是黑就安静跳过这轮：不调用视觉模型，也不让她说"看不到"
+                time.sleep(1.5)
+                if self.isInterruptionRequested():
+                    break
+                pixmap = screen.grabWindow(0)
+                if shot_is_blank(pixmap):
+                    print("[vision] ⚠ 两次抓屏都是黑的（锁屏 / 显示器休眠 / 独占全屏）→ 跳过本轮屏幕识别")
+                    for _ in range(int(self.interval * 10)):
+                        if self.isInterruptionRequested():
+                            break
+                        time.sleep(0.1)
+                    continue
             # 存到临时文件
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png", dir="tmp")
             tmp_name = tmp.name

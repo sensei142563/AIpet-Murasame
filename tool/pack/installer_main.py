@@ -202,8 +202,10 @@ def _make_shortcut(install_dir: str, log=None) -> bool:
 
 
 def install(install_dir: str, progress=None, make_shortcut=True,
-            size_text: str = "") -> tuple:
+            size_text: str = "", do_vision: bool = False,
+            vision_progress=None) -> tuple:
     """执行安装。progress(done_bytes, total_bytes, current_file) 可为 None。
+    do_vision=True 时安装完顺带配置本地视觉模型（下载模型 + 运行环境，见 tool/vision_setup.py）。
     返回 (ok, message, log_lines)"""
     logs = []
 
@@ -251,6 +253,26 @@ def install(install_dir: str, progress=None, make_shortcut=True,
         log(f"[安装] 已生成说明书: {os.path.basename(f)}")
     if make_shortcut:
         _make_shortcut(install_dir, log)
+
+    # ── 本地视觉模型（可选）：下模型 + 备运行时 + 写 vision_* 配置 ──
+    if do_vision:
+        log("[安装] 开始配置本地视觉模型（下载模型约 4.4GB，视网速可能要十几分钟）…")
+        try:
+            import importlib.util
+            _sp = os.path.join(install_dir, "tool", "vision_setup.py")
+            if not os.path.isfile(_sp):
+                raise RuntimeError("安装目录里没有 tool/vision_setup.py")
+            spec = importlib.util.spec_from_file_location("vision_setup_setup", _sp)
+            vs = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(vs)
+            r = vs.setup(app_dir=install_dir, log=log, progress=vision_progress)
+            log(f"[安装] 本地视觉：{r.get('note') or r}")
+            if r.get("gpu"):
+                log("[安装] 显卡加速可用，识别一屏约 30 秒")
+        except Exception as e:
+            log(f"[安装] ⚠ 配置本地视觉模型失败：{type(e).__name__}: {e}")
+            log("[安装]   可以稍后单独配置：用安装目录里的 python 运行 tool/vision_setup.py")
+
     log("[安装] 完成")
     try:
         import datetime
@@ -271,7 +293,7 @@ def run_gui():
 
     root = tk.Tk()
     root.title(INSTALLER_TITLE)
-    root.geometry("640x430")
+    root.geometry("640x492")
     root.resizable(False, False)
     # 窗口图标（icon.ico 随安装器 exe 一起打包）
     try:
@@ -300,24 +322,31 @@ def run_gui():
 
     var_sc = tk.BooleanVar(value=True)
     tk.Checkbutton(root, text="创建桌面快捷方式", variable=var_sc,
-                   font=("Microsoft YaHei", 10)).place(x=24, y=128)
+                   font=("Microsoft YaHei", 10)).place(x=24, y=126)
     var_open = tk.BooleanVar(value=True)
     tk.Checkbutton(root, text="安装完成后打开使用教程", variable=var_open,
-                   font=("Microsoft YaHei", 10)).place(x=210, y=128)
+                   font=("Microsoft YaHei", 10)).place(x=210, y=126)
 
-    tip = tk.Label(root, text="提示：安装约需 5 GB 磁盘空间；安装到已有旧版的目录会自动保留 data/、config.json 等个人数据。",
+    # 本地视觉模型（屏幕识别用）：勾了就在装完后自动下模型 + 备运行环境
+    var_vision = tk.BooleanVar(value=False)
+    tk.Checkbutton(root, text="同时配置本地视觉模型（屏幕识别用；自动下载模型与环境，需独立显卡）",
+                   variable=var_vision, font=("Microsoft YaHei", 10)).place(x=24, y=154)
+
+    tip = tk.Label(root, text="提示：安装约需 5 GB 磁盘空间；勾选本地视觉模型会再下载约 4.4 GB"
+                              "模型（外加运行环境，视网速十几分钟）。装到已有旧版的目录会自动保留"
+                              " data/、config.json 等个人数据。没显卡加速时识别会自动走云端 API，不影响使用。",
                    font=("Microsoft YaHei", 9), fg="#666", wraplength=590, justify="left")
-    tip.place(x=24, y=160)
+    tip.place(x=24, y=184)
 
     bar = ttk.Progressbar(root, length=590, mode="determinate")
-    bar.place(x=24, y=215)
+    bar.place(x=24, y=252)
     lbl = tk.Label(root, text="准备就绪", font=("Microsoft YaHei", 9), fg="#333", anchor="w")
-    lbl.place(x=24, y=243)
+    lbl.place(x=24, y=280)
     pct = tk.Label(root, text="0%", font=("Microsoft YaHei", 9), fg="#333")
-    pct.place(x=560, y=243)
+    pct.place(x=560, y=280)
 
     status = tk.Text(root, height=6, width=76, font=("Consolas", 9), bg="#f6f6f8")
-    status.place(x=24, y=270)
+    status.place(x=24, y=306)
     status.insert("end", "点击「开始安装」开始。\n")
     status.config(state="disabled")
 
@@ -333,6 +362,19 @@ def run_gui():
         bar["value"] = p
         pct.config(text=f"{p}%")
         lbl.config(text=f"正在安装：{os.path.basename(cur)}   ({done / 1e9:.2f}/{total / 1e9:.2f} GB)")
+        root.update_idletasks()
+
+    # 视觉模型下载的进度（同一根进度条；日志别刷屏，每 5% 记一行）
+    _vlog = {"p": -5}
+
+    def on_vision_progress(done, total, name):
+        p = int(done * 100 / max(1, total))
+        bar["value"] = p
+        pct.config(text=f"{p}%")
+        lbl.config(text=f"正在配置本地视觉模型：{name}   ({done / 1e9:.2f}/{total / 1e9:.2f} GB)")
+        if p - _vlog["p"] >= 5:
+            _vlog["p"] = p
+            say(f"[视觉] 下载进度 {p}%（{done / 1e9:.2f}/{total / 1e9:.2f} GB）")
         root.update_idletasks()
 
     btn = tk.Button(root, text="开始安装", font=("Microsoft YaHei", 11, "bold"),
@@ -357,7 +399,9 @@ def run_gui():
         def work():
             try:
                 ok, msg, _logs = install(d, progress=on_progress,
-                                         make_shortcut=var_sc.get())
+                                         make_shortcut=var_sc.get(),
+                                         do_vision=var_vision.get(),
+                                         vision_progress=on_vision_progress)
             except Exception as e:
                 ok, msg = False, "安装异常：" + str(e) + "\n" + traceback.format_exc()[:800]
             def finish():
@@ -375,11 +419,15 @@ def run_gui():
                                 os.startfile(os.path.join(d, "使用教程说明书.txt"))
                             except Exception:
                                 pass
+                    _extra = ("3) 本地视觉模型：已按勾选配置好（识别走本机显卡；"
+                              "若安装日志里提示没有显卡加速，会自动用云端 API）\n\n"
+                              if var_vision.get() else "")
                     messagebox.showinfo("安装完成",
                                         f"已安装到：\n{d}\n\n"
                                         "下一步：\n"
                                         "1) 打开启动器 → 设置 → 填写对话模型 API Key\n"
-                                        "2) 点「启动 AIpet 桌宠」\n\n"
+                                        "2) 点「启动 AIpet 桌宠」\n"
+                                        + _extra +
                                         "详见安装目录里的《使用教程说明书》。")
                 else:
                     lbl.config(text="安装失败")
@@ -389,13 +437,14 @@ def run_gui():
         threading.Thread(target=work, daemon=True).start()
 
     btn.config(command=start)
-    btn.place(x=254, y=380)
+    btn.place(x=254, y=442)
     root.mainloop()
 
 
 def run_silent(argv) -> int:
     d = None
     shortcut, open_manual = True, False
+    do_vision = False
     for a in argv:
         al = a.lower()
         if al.startswith("/d="):
@@ -406,15 +455,26 @@ def run_silent(argv) -> int:
             shortcut = False
         elif al == "/noopen":
             open_manual = False
+        elif al in ("/vision", "/localvision"):
+            do_vision = True          # 静默安装也能顺带配本地视觉模型
     d = d or DEFAULT_DIR
-    print(f"[安装] 静默安装 → {d}")
+    print(f"[安装] 静默安装 → {d}（本地视觉模型：{'配置' if do_vision else '跳过'}）")
 
     def prog(done, total, cur):
         p = int(done * 100 / max(1, total))
         if p % 5 == 0:
             print(f"[安装] {p}% {done / 1e9:.2f}/{total / 1e9:.2f} GB  {os.path.basename(cur)}")
 
-    ok, msg, _ = install(d, progress=prog, make_shortcut=shortcut)
+    _last = {"p": -5}
+
+    def vprog(done, total, name):
+        p = int(done * 100 / max(1, total))
+        if p - _last["p"] >= 5:
+            _last["p"] = p
+            print(f"[安装] 视觉模型 {p}% {done / 1e9:.2f}/{total / 1e9:.2f} GB  {name}")
+
+    ok, msg, _ = install(d, progress=prog, make_shortcut=shortcut,
+                         do_vision=do_vision, vision_progress=vprog)
     print(("[安装] " + msg) if ok else ("[安装] 失败: " + msg))
     if ok:
         print(f"[安装] 安装目录: {d}")
