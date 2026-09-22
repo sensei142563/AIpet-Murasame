@@ -220,7 +220,7 @@ python run_launcher.py
 > 语音消息走 **F5-TTS**（端口 9881）。若日志出现 `F5-TTS 服务未运行...将自动跳过`，说明服务没起来：
 > - 确认项目里 `F5-TTS_Models/F5TTS_v1_Base` 与 `vocos-mel-24khz` 都存在（绿色版已内置，源码版需自备）
 > - `qq_send_voice="true"` 才会触发语音；服务就绪时会自动拉起
-> - 首次合成模型加载约 10-45 秒，静音属正常；一直无声可就运行 `restart_longtext.bat`（或删掉 `data/qq_f5tts.pid` 后重启）
+> - 首次合成模型加载约 10-45 秒，静音属正常；一直无声可就运行 `重启长语音服务.bat`（或删掉 `data/qq_f5tts.pid` 后重启）
 
 **离线消息补拉（默认开启）**：`qq_offline_enable` 默认 `"true"`，启动时自动补回离线期间的消息：
 - 窗口 = 上次启动时间往前推 **24 小时**（隔一天再开也能补回；首次运行只补最近 10 分钟防刷历史）
@@ -298,7 +298,7 @@ python run_launcher.py
 > **解决**：更新显卡驱动，确保 CUDA 与 PyTorch 匹配。
 
 ### F5-TTS 长文本不发声
-> **解决**：确认 `longtext_enabled="true"`，F5-TTS 服务在 9881 端口运行（`restart_longtext.bat` 可一键重启）。模型首次加载约 10-30 秒。
+> **解决**：确认 `longtext_enabled="true"`，F5-TTS 服务在 9881 端口运行（`重启长语音服务.bat` 可一键重启）。模型首次加载约 10-30 秒。
 
 ### SoVITS 响应慢
 > **解决**：下载与显卡对应的版本——50 系列用专用版，40 系及以下用通用版。
@@ -544,7 +544,7 @@ Qwen 流式 token（后台 QThread）
         # 在这里按相同格式添加你发现读错的词
    })
    ```
-4. 保存文件，重启 `restart_longtext.bat` 生效（F5-TTS 服务重建时加载词典）
+4. 保存文件，重启 `重启长语音服务.bat` 生效（F5-TTS 服务重建时加载词典）
 
 > 拼音数字代表声调：1=一声，2=二声，3=三声，4=四声，5=轻声。
 > 例："王" = `[["wang2"]]`，"重" 单独 = `[["zhong4"]]`（重量）。
@@ -555,7 +555,7 @@ Qwen 流式 token（后台 QThread）
 > - **短文本日语语音（GPT-SoVITS）**：替换 `pets/<id>/voices/short/<情绪>/` 里的 `ref.wav/mp3`，并把 `asr.txt` 改成该音频的准确文本；**音频 3~10 秒**
 > - **长文本中文语音（F5-TTS）**：替换 `pets/<id>/voices/long/` 的 wav，并在 pet.json 填 `long_ref_audio` + `long_ref_text`；F5-TTS 是零样本音色克隆，3~5 秒清晰音频即可
 > - 丛雨未配置角色包内长语音时会用全局兜底 `reference_voices/long_chinese/953244.wav`
-> - 改完重启桌宠（或 `restart_longtext.bat` 重建 F5-TTS）生效
+> - 改完重启桌宠（或 `重启长语音服务.bat` 重建 F5-TTS）生效
 
 ---
 
@@ -782,7 +782,7 @@ main.py (PyQt5 主窗口 + FastAPI 28565 + 快捷键监听 + 托盘)
 | `data/qq_processed_ids.json` | QQ 已处理消息 ID（防重复回复） |
 | `NapCat.Shell.Windows.OneKey/` | QQ 机器人运行环境（NapCat） |
 | `runtime/venv/` | 项目本地虚拟环境（`install.bat` 自动创建） |
-| `restart_longtext.bat` | 一键重启 F5-TTS 语音服务（改了音色/词典后用它） |
+| `重启长语音服务.bat` | 一键重启 F5-TTS 语音服务（改了音色/词典后用它） |
 
 ---
 ## 🌟 解锁全部功能清单

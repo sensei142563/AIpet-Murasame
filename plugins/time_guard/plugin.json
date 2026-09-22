@@ -10,7 +10,7 @@
   "settings": [
     {
       "type": "info",
-      "text": "系统工具（非 QQ 对话功能）。\n守护脚本：time_sync_guard.py（主目录）\n计划任务：AIPetTimeSyncGuard——需先以管理员运行主目录的「安装时间同步守护_右键管理员运行.bat」\n日志：data/time_sync_guard.log"
+      "text": "系统工具（非 QQ 对话功能）。\n守护脚本：time_sync_guard.py（主目录）\n计划任务：AIPetTimeSyncGuard——需先「右键 → 以管理员身份运行」主目录的「安装时间同步守护【管理员】.bat」\n日志：data/time_sync_guard.log"
     }
   ],
   "builtin": true

@@ -220,9 +220,11 @@ if files is None:
     top_items = [
         "api.py", "build_launcher.py", "config.example.json", "download.py",
         "icon.ico", "icon.png", "install.bat", "LICENSE", "main.py",
-        "prompt.txt", "README.md", "requirements.txt", "restart_longtext.bat",
+        "prompt.txt", "README.md", "requirements.txt", "重启长语音服务.bat",
         "run.py", "run_launcher.py", "run_qq.py",
-        "思源黑体Bold.otf", "启动QQ.bat", "启动桌宠.bat",
+        "思源黑体Bold.otf", "启动QQ.bat", "启动桌宠.bat", "启动微信.bat",
+        "time_sync_guard.py", "time_sync_guard_runner.bat",
+        "安装时间同步守护【管理员】.bat", "修复系统时间同步【管理员】.bat",
         "biaoqingbao", "classes", "fgimages", "Live2d", "longtext",
         "pcl_launcher", "pets", "qq", "reference_voices", "tool", "场景素材",
     ]
