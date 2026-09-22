@@ -263,10 +263,30 @@ def _chat_text(text: str) -> str:
             f"{text}<|im_end|>\n<|im_start|>assistant\n")
 
 
-def describe(image_b64: str, prompt: str = "", max_new: int = 256, max_side_px: int = 0) -> str:
-    """识别一张图。max_side_px>0 时按调用方要求压缩（越小越快：编码耗时随像素数近似平方增长）。"""
+def _game_mode() -> bool:
+    """现在是不是在打游戏/全屏（决定"用完要不要立刻让出显存"）"""
+    try:
+        from tool.perf_guard import game_mode
+        return bool(game_mode())
+    except Exception:
+        return False
+
+
+def describe(image_b64: str, prompt: str = "", max_new: int = 256,
+             max_side_px: int = 0) -> str:
+    """识别一张图（max_side_px>0 时按调用方要求压缩，越小越快）。
+
+    ⚠ 用完要不要马上把模型挪出显存：
+      · 打游戏/全屏时 → 立刻挪（把显卡让给游戏，这是主人要的）
+      · 平时 → **不挪**，保持常驻。以前默认 30 秒就卸，结果每 150 秒一次识别都要
+        重新把约 6G 模型搬上显卡，正好和语音合成抢显卡 ——
+        实测语音合成从 1.5~7 秒恶化成 24~54 秒，听起来就像"她没说话"。
+    """
     with _lock:
-        return _describe_locked(image_b64, prompt, max_new, max_side_px)
+        out = _describe_locked(image_b64, prompt, max_new, max_side_px)
+    if _game_mode():                      # 打游戏中：用完立刻让出显存
+        _offload_now("全屏游戏/演示中，用完让出显存")
+    return out
 
 
 def _describe_locked(image_b64: str, prompt: str, max_new: int, max_side_px: int = 0) -> str:

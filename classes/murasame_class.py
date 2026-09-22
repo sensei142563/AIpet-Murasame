@@ -1332,7 +1332,16 @@ class Murasame(QLabel):
                 # 一轮结束后的下一次抓屏（150 秒后）识别照常。
                 try:
                     if self.is_busy_reply() or getattr(self, "_screen_look_busy", False):
-                        print("[AIpet] 正在回复中（或正在应主人要求看屏幕），跳过本轮屏幕识别")
+                        # ⚠ 关键：不要"丢弃"，而是**稍后马上重试**。
+                        #   以前这里直接 return（丢掉这一轮），下次要等整个间隔（150 秒）；
+                        #   而她说话/合成语音经常要几十秒 → 大部分屏幕观察都被丢掉，
+                        #   表现就是"她从来不主动看屏幕说话"（用户反馈）。
+                        print("[AIpet] 她正在回复中 → 本轮屏幕识别稍后重试（不丢）")
+                        try:
+                            if self._screenshot_worker is not None:
+                                self._screenshot_worker.wake(delay=8.0)
+                        except Exception:
+                            pass
                         return
                 except Exception:
                     pass

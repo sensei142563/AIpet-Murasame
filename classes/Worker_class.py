@@ -1,5 +1,6 @@
 import json
 import tempfile
+import threading
 import time
 import os
 from concurrent.futures import ThreadPoolExecutor
@@ -568,7 +569,18 @@ class ScreenWorker(QThread):
     def __init__(self, interval_sec=3.0, parent=None):
         super().__init__(parent)
         self.interval = interval_sec
+        # 被"唤醒"的信号：桌宠发现她在忙、这轮识别没做成时，用它让截图线程提前重来
+        self._wake = threading.Event()
+        self._wake_delay = 0.0
         os.makedirs("tmp", exist_ok=True)
+
+    def wake(self, delay: float = 8.0):
+        """提前结束本轮的等待，delay 秒后重新抓屏（而不是等满整个间隔）"""
+        try:
+            self._wake_delay = max(0.5, float(delay))
+            self._wake.set()
+        except Exception:
+            pass
 
     def run(self):
         from tool.screen_capture import capture_qimage, is_blank as _is_blank_img
@@ -604,8 +616,18 @@ class ScreenWorker(QThread):
             # 发信号，让主线程去处理（网络调用等）
             self.screenshot_captured.emit(tmp_name)
             # sleep 可被 requestInterruption() 打断（间隔相对宽松）
+            # 另外：桌宠发现"她在忙、这轮识别没做成"时会调 wake()，让我们早点重来
+            self._wake.clear()
             for _ in range(int(self.interval * 10)):
                 if self.isInterruptionRequested():
+                    break
+                if self._wake.is_set():
+                    _d = max(0.5, float(self._wake_delay or 8.0))
+                    print(f"[vision] 收到重试请求 → {_d:.0f} 秒后再抓一次")
+                    for _j in range(int(_d * 10)):
+                        if self.isInterruptionRequested() or not self._wake.is_set():
+                            break
+                        time.sleep(0.1)
                     break
                 time.sleep(0.1)
 
