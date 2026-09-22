@@ -104,6 +104,36 @@ def _align_lists(reply_list, translate_list, emotion_list, portrait_list):
     return t, e, p
 
 
+def _handle_pc_control(reply: str, owner, is_auto: bool) -> str:
+    """她要求操作键鼠：把【键鼠】指令抽出来执行，返回剥离指令后的文字。
+
+    必须在 切句/翻译/情绪/立绘/TTS 之前调用 —— 否则指令会被念出来，
+    而且显示用的句子列表里还会残留「【键鼠】点击 800 250」这种句子。
+    is_auto=True 表示这是她自己主动动手（屏幕观察/空闲搭话那一轮）：
+    受命动手（主人开口）不受自主间隔限制，主人让她做就必须做。
+    """
+    try:
+        from tool import pc_control as _pc
+        _acts = _pc.parse(reply)
+        # 解析不出动作也要把半截指令从文字里去掉：那种"【键鼠】晃动鼠标"念出来更糟
+        _clean = _pc.strip(reply)
+        if not _acts:
+            return _clean
+        print(f"[桌宠] 她请求操作电脑：{len(_acts)} 个动作（{'自主' if is_auto else '受命'}）")
+        if _pc.enabled():
+            import threading as _thpc
+            _thpc.Thread(target=_pc.execute, args=(_acts,),
+                         kwargs={"auto": is_auto,
+                                 "notify": getattr(owner, "_pc_note", None)},
+                         daemon=True).start()
+        else:
+            print("[桌宠] 操控电脑未开启（右键菜单可打开）→ 只解析不执行")
+        return _clean or "……好，我试试。"
+    except Exception as _epc:
+        print(f"[桌宠] 处理电脑操作失败: {_epc}")
+        return reply
+
+
 class qwen3_lora_Worker(QThread):
     finished = pyqtSignal(list, list, list, list, list, list)  # (AI回复, 立绘, history, 立绘历史, 语音, 情绪列表)
 
@@ -128,6 +158,22 @@ class qwen3_lora_Worker(QThread):
       
         if self.t:
             self.force_stop = True
+
+    def _pc_note(self, reason: str):
+        """动作被拦下来（没开发、自主间隔没到、坐标越界…）时把实情记进对话。
+
+        不记的话她嘴上已经说了"帮你点掉"，实际什么都没做，下一轮还照旧吹牛。
+        """
+        try:
+            self.history.append({
+                "role": "system",
+                "content": "（系统提示：你刚才想操作电脑，但那个动作没有真的执行——%s。"
+                           "别重复同一个动作，也别声称自己做过了；如实地跟主人说没做成，"
+                           "或者让他自己来。）" % reason,
+            })
+        except Exception:
+            pass
+
     def run(self):
         """QThread 入口：外面兜一层底。
 
@@ -162,24 +208,11 @@ class qwen3_lora_Worker(QThread):
             print('[对话] ⚠ 已截断模型自行续写的多轮台词（防自问自答）')
             reply = _fixed
         if self.force_stop:print("[ollama-qwn3] 已中断生成。");return
-        # ── 她要求操作键鼠：把【键鼠】指令抽出来（动作归动作、文字归文字）──
-        #    必须在翻译/情绪/立绘/TTS 之前剥离，否则她会把指令念出来。
-        try:
-            from tool import pc_control as _pc
-            _acts = _pc.parse(reply)
-            if _acts:
-                # 识别触发/系统观察那一轮 = 她自己在看屏幕，属于"自主行动"
-                _auto_turn = bool(getattr(self, "t", False)) or str(getattr(self, "role", "")) == "system"
-                print(f"[桌宠] 她请求操作电脑：{len(_acts)} 个动作（自主={_auto_turn}）")
-                if _pc.enabled():
-                    import threading as _thpc
-                    _thpc.Thread(target=_pc.execute, args=(_acts,),
-                                 kwargs={"auto": _auto_turn}, daemon=True).start()
-                else:
-                    print("[桌宠] 操控电脑未开启（右键菜单可打开）→ 只解析不执行")
-                reply = _pc.strip(reply) or "……好，我试试。"
-        except Exception as _epc:
-            print(f"[桌宠] 处理电脑操作失败: {_epc}")
+        # ── 她要求操作键鼠：动作归动作、文字归文字（必须在切句/TTS 之前剥离）──
+        #    识别触发/系统观察那一轮（t=True / role=system）= 她自己在看屏幕，算自主行动。
+        reply = _handle_pc_control(
+            reply, self,
+            bool(getattr(self, "t", False)) or str(getattr(self, "role", "")) == "system")
 
         reply = ollama_qwen3_sentence(reply)  # 句子分割
         if self.force_stop: print("[ollama-qwn3] 已中断生成。");return
@@ -262,6 +295,22 @@ class cloud_API_Worker(QThread):
         """外部调用，用于请求线程中断"""
         if self.t:
             self.force_stop = True
+
+    def _pc_note(self, reason: str):
+        """动作被拦下来（没开发、自主间隔没到、坐标越界…）时把实情记进对话。
+
+        不记的话她嘴上已经说了"帮你点掉"，实际什么都没做，下一轮还照旧吹牛。
+        """
+        try:
+            self.history.append({
+                "role": "system",
+                "content": "（系统提示：你刚才想操作电脑，但那个动作没有真的执行——%s。"
+                           "别重复同一个动作，也别声称自己做过了；如实地跟主人说没做成，"
+                           "或者让他自己来。）" % reason,
+            })
+        except Exception:
+            pass
+
     '''
     这种定义方法来实现中途中断的操作我之前一直没有想到，这个做法很好
     '''
@@ -298,6 +347,12 @@ class cloud_API_Worker(QThread):
         if _fixed != reply:
             print('[对话] ⚠ 已截断模型自行续写的多轮台词（防自问自答）')
             reply = _fixed
+        # ── 她要求操作键鼠：动作归动作、文字归文字（必须在切句/翻译/TTS 之前剥离）──
+        #    以前放在切句之后：显示用的 reply_list_raw 还留着「【键鼠】移动 960 540」，
+        #    strip 出来的空句子也会白白占一次翻译。
+        reply = _handle_pc_control(
+            reply, self,
+            bool(getattr(self, "t", False)) or str(getattr(self, "role", "")) == "system")
         # 兜底切句：AI 未按 JSON 列表返回时，客户端按句末标点切分（修复整段话不切句）
         try:
             parsed = json.loads(reply)
@@ -307,23 +362,6 @@ class cloud_API_Worker(QThread):
         reply_json = json.dumps(reply_list_raw, ensure_ascii=False)
         # 2. 使用线程池并发执行所有 DeepSeek 任务和 TTS 任务
         if self.force_stop:print("[deepseek] 已中断生成。");return
-        # ── 她要求操作键鼠：把【键鼠】指令抽出来（动作归动作、文字归文字）──
-        #    必须在翻译/情绪/立绘/TTS 之前剥离，否则她会把指令念出来。
-        try:
-            from tool import pc_control as _pc
-            _acts = _pc.parse(reply_json)
-            if _acts:
-                _auto_turn = bool(getattr(self, "t", False)) or str(getattr(self, "role", "")) == "system"
-                print(f"[桌宠] 她请求操作电脑：{len(_acts)} 个动作（自主={_auto_turn}）")
-                if _pc.enabled():
-                    import threading as _thpc
-                    _thpc.Thread(target=_pc.execute, args=(_acts,),
-                                 kwargs={"auto": _auto_turn}, daemon=True).start()
-                else:
-                    print("[桌宠] 操控电脑未开启（右键菜单可打开）→ 只解析不执行")
-                reply_json = _pc.strip(reply_json) or "……好，我试试。"
-        except Exception as _epc:
-            print(f"[桌宠] 处理电脑操作失败: {_epc}")
 
         with ThreadPoolExecutor(max_workers=5) as executor:  # 增加线程数
             # 提交所有任务（下游拿到切好的句子列表，保证对齐）

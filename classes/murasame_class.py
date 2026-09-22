@@ -2218,14 +2218,16 @@ class Murasame(QLabel):
                 _act_pc = item(menu, "允许操控电脑（键鼠）", checked=_pc.enabled())
                 _act_pc.setToolTip(
                     "开启后她可以自己操作键鼠：点击 / 双击 / 右键 / 滚轮 / 输入文字 / 组合键（Ctrl+S 等）/ 等待。\n"
+                    "她看不到画面时可以自己输出「【看屏幕】」先看一眼再动手（移动鼠标→看清楚→点击）。\n"
                     "每轮最多 8 个动作，坐标必须在屏幕内；所有操作都会记到 data/pc_control.log。\n"
                     "随时可以在这里关掉（关掉后立刻停止执行）。")
                 _act_pc.triggered.connect(lambda on=False: _pc.set_enabled(bool(on)))
                 _act_auto = item(menu, "自主操作（不用主人开口）", checked=_pc.auto_enabled())
                 _act_auto.setToolTip(
                     "开启后她会自己判断要不要动手（看你屏幕上的情况），不必每次等你吩咐。" + chr(10) +
-                    "有最小间隔（默认 3 分钟一次，config 的 pc_auto_minutes 可调），避免她自己反复点；" + chr(10) +
-                    "你明确让她做事时不受这个间隔限制。所有操作都记在 data/pc_control.log。")
+                    "有最小间隔（默认 1 分钟一次，config 的 pc_auto_minutes 可调），避免她自己反复点；" + chr(10) +
+                    "只是移动鼠标不算做事、也不占用间隔；你明确让她做事时不受这个间隔限制。" + chr(10) +
+                    "所有操作都记在 data/pc_control.log（她没做成的原因也写在那里）。")
                 _act_auto.triggered.connect(lambda on=False: _pc.set_auto_enabled(bool(on)))
             except Exception as _epc:
                 print(f"[桌宠] ⚠ 电脑操作菜单项失败: {_epc}")
