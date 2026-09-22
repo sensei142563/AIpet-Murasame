@@ -1,4 +1,6 @@
+import asyncio
 import io
+import json
 import os
 import threading
 from datetime import datetime
@@ -173,17 +175,39 @@ async def cloudAPI(req: cloudAPIRequest):
         url = url_deepseek
     else:
         url = url_qwen
-    async with aiohttp.ClientSession() as session:
-        async with session.post(
-            url,
-            headers=req.headers,
-            json=req.payload,
-            timeout=aiohttp.ClientTimeout(total=180),
-        ) as response:
-            if response.status == 200:
-                return await response.json()
-            else:
-                return {"error": f"API返回错误: {await response.json()}"}
+
+    # ⚠ 以前这里只有一次请求，而且失败时 `await response.json()` 会直接抛异常：
+    #   上游一个 429/5xx、或者代理抽风返回空响应体，中转就吐「500 + 空 body」，
+    #   桌宠那边看到的就是"响应体为空/非 JSON" → 弹「信号好像不太好」（用户反馈）。
+    #   现在：① 失败会重试；② 第二次改直连（绕过系统代理，梯子挂了也能通）；
+    #   ③ 任何情况都返回 JSON（不再 500 空响应），把真正的原因带回给桌宠日志。
+    last_err = "未知错误"
+    for attempt in range(3):
+        trust_env = attempt == 0          # 第一次走系统代理，之后直连
+        try:
+            timeout = aiohttp.ClientTimeout(total=180 if attempt == 0 else 90)
+            async with aiohttp.ClientSession(trust_env=trust_env, timeout=timeout) as session:
+                async with session.post(url, headers=req.headers, json=req.payload) as response:
+                    raw = await response.read()
+                    if response.status == 200:
+                        try:
+                            return json.loads(raw.decode("utf-8", "replace"))
+                        except Exception:
+                            last_err = "上游 200 但响应体为空/非 JSON"
+                    else:
+                        body = raw.decode("utf-8", "replace")[:300]
+                        last_err = f"上游 HTTP {response.status}: {body}"
+                        # 4xx 是请求本身的问题（密钥/额度/参数），重试没意义
+                        if 400 <= response.status < 500:
+                            print(f"[cloudAPI] {last_err}（不重试）")
+                            return {"error": last_err}
+        except Exception as e:
+            last_err = f"{type(e).__name__}: {e}"
+        print(f"[cloudAPI] ⚠ 第 {attempt + 1}/3 次失败（{'走代理' if trust_env else '直连'}）：{last_err}")
+        if attempt < 2:
+            await asyncio.sleep(0.8 * (attempt + 1))
+    print(f"[cloudAPI] ✗ 3 次都没成功：{last_err}")
+    return {"error": last_err}
 
 
 # ============== Control Endpoints (PCL 启动器按钮调用) ==============

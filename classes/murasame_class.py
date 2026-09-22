@@ -495,6 +495,14 @@ class Murasame(QLabel):
         self.idle_timer.timeout.connect(self.check_idle_state)
         self.idle_timer.start()
 
+        # 自主学习 / 电脑近况：每 4 分钟看一眼（内部自己限速：≥20 分钟才动手、
+        # 主人刚说完话或她正忙就跳过；都在后台线程，界面不会卡）
+        self._last_user_ts = 0.0
+        self._learn_timer = QTimer(self)
+        self._learn_timer.setInterval(4 * 60 * 1000)
+        self._learn_timer.timeout.connect(self._learn_tick)
+        self._learn_timer.start()
+
         # 勿扰模式：开启后关闭截图与空闲检测，并禁止主动搭话
         self._dnd_enabled = False
 
@@ -1353,6 +1361,124 @@ class Murasame(QLabel):
             print("[AIpet] 恢复截图线程")
             self.start_screenshot_worker(interval=self.interval)
 
+    def _file_read_and_reply(self, request, user_text):
+        """真的去翻她要看的东西，然后把内容交给她接着说（后台线程，别卡界面）"""
+        try:
+            from tool import file_access as _fa
+            content = _fa.run([request])
+            if not str(content or "").strip():
+                content = "（没看到什么东西）"
+            print(f"[桌宠] 📂 翻完了（{len(str(content))} 字）→ 带着内容回答主人")
+            prompt = ("【系统指令】你刚刚真的翻开了主人电脑里的东西，下面是你亲眼看到的："
+                      + chr(10) + "=== 看到的内容开始 ===" + chr(10)
+                      + str(content)[:3500] + chr(10) + "=== 看到的内容结束 ===" + chr(10)
+                      + f"主人刚才说：「{user_text}」。请用你自己的口吻自然地跟他说说你看到了什么，"
+                        "挑重点说、别念条目、别说'文件显示'、别提系统提示，回答简短一些。")
+            self._request_dialog.emit(prompt, "user", False)
+        except Exception as e:
+            print(f"[桌宠] ⚠ 看文件失败（{type(e).__name__}: {e}）→ 退回普通回答")
+            try:
+                self._request_dialog.emit(str(user_text), "user", False)
+            except Exception:
+                pass
+
+    def _show_learned(self):
+        """菜单：看看她学到了什么"""
+        try:
+            from tool import self_learn as _sl
+            txt = _sl.summary_text()
+            print("[学习] " + txt.replace(chr(10), " ｜ "))
+            self.show_text(txt[:300], typing=False)
+        except Exception as e:
+            print(f"[学习] ⚠ 查看失败: {e}")
+
+    def _study_now(self):
+        """菜单：让她现在学点什么（立刻自习一次）"""
+        try:
+            from tool import self_learn as _sl
+            if not _sl.enabled():
+                print("[学习] 自主学习没开 → 先去菜单打开")
+                self.show_text("先打开「自主学习」我才能自己学哦。", typing=True)
+                return
+            self.show_text("唔……那我去看看书。", typing=True)
+            import threading as _thl
+            _thl.Thread(target=self._learn_cycle, kwargs={"force": True}, daemon=True).start()
+        except Exception as e:
+            print(f"[学习] ⚠ 立即自习失败: {e}")
+
+    def _model_ready(self) -> bool:
+        """现在有可用的对话模型吗（自主学习要用）"""
+        try:
+            from tool.config import get_config
+            mt = str(get_config("./config.json").get("model_type", "deepseek")).strip().lower()
+            if mt == "local":
+                return True
+            from longtext.model_config import get_short_model_config
+            return bool(get_short_model_config())
+        except Exception:
+            return False
+
+    def _learn_cycle(self, force: bool = False):
+        """后台跑一次自主学习（归纳 / 自习 / 日记）。force=True 忽略间隔。"""
+        try:
+            from tool import self_learn as _sl
+            if not _sl.enabled():
+                return
+            if force:
+                _sl._last_cycle[0] = 0.0
+            what = _sl.maybe_cycle(self.history, getattr(self, "pet_name", "桌宠"),
+                                   last_user_ts=float(getattr(self, "_last_user_ts", 0.0) or 0.0),
+                                   has_model=self._model_ready())
+            if not what:
+                return
+            print(f"[学习] 这一轮：{what}")
+            if force:
+                self._request_dialog.emit(
+                    "（系统提示：你刚刚自己" + ("学了一点东西" if what.startswith("自习") else "记了点东西")
+                     + "：" + what + "。用你自己的口吻跟主人提一句，一句话、别太得意。）", "system", False)
+        except Exception as e:
+            print(f"[学习] ⚠ 学习循环失败（{type(e).__name__}: {e}）")
+
+    def _pc_info_tick(self):
+        """采一次电脑近况，写进她的「观察」——她聊到相关话题时自然用得上（后台线程）"""
+        try:
+            from tool import pc_info as _pi
+            from tool import file_access as _fa
+            if not _fa.enabled():
+                return
+            txt = _pi.sample()
+            if not txt:
+                return
+            print("[桌宠] " + txt[:140])
+            self.history.append({
+                "role": "system",
+                "content": (txt + "（这些只是背景信息，主人没问起时不用特意汇报；"
+                                   "聊到相关话题可以自然提一句。）"),
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "priority": "high",
+            })
+            # 只留最近 2 条电脑近况，别把历史撑大
+            old = [i for i, m in enumerate(self.history)
+                   if isinstance(m, dict) and str(m.get("content", "")).startswith("【电脑近况】")]
+            for i in old[:-2][::-1]:
+                try:
+                    self.history.pop(i)
+                except Exception:
+                    pass
+        except Exception as e:
+            print(f"[桌宠] ⚠ 电脑近况采集失败: {e}")
+
+    def _learn_tick(self):
+        """定时器：自主学习 + 电脑近况（都在后台线程，界面不卡）"""
+        try:
+            if self.is_busy_reply() or getattr(self, "input_mode", False):
+                return
+            import threading as _th
+            _th.Thread(target=self._learn_cycle, daemon=True).start()
+            _th.Thread(target=self._pc_info_tick, daemon=True).start()
+        except Exception:
+            pass
+
     def check_idle_state(self):
         """检查系统空闲时间并在阈值上触发对话"""
         idle_seconds = get_idle_seconds()
@@ -1462,6 +1588,30 @@ class Murasame(QLabel):
                 print("[桌宠] ⏭ 她又要求看屏幕（刚看过，忽略）")
         except Exception as _e2:
             print(f"[桌宠] ⚠ 自主要求看屏幕判断失败: {_e2}")
+
+        # ── 她想看看电脑里的文件（提示词里教她：需要时输出【文件】列出 桌面）──
+        #    和【看屏幕】一个套路：真去翻，翻完把内容交回给她接着说。
+        #    请求内容由 Worker 解析标记时暂存在 file_access.set_pending 里。
+        try:
+            from tool.file_access import FILE_MARK
+            from tool import file_access as _fa
+            if FILE_MARK in "".join(str(x) for x in (reply or [])):
+                _req = _fa.take_pending()
+                if not _fa.enabled():
+                    print("[桌宠] 📂 她想看文件，但「允许读取电脑文件」没开 → 跳过这轮")
+                    return
+                if _req:
+                    print("[桌宠] 📂 她想看文件 → 去翻一下再回答")
+                    self._talking = False
+                    self.show_text("唔……我翻翻看。", typing=True)
+                    import threading as _thf
+                    _thf.Thread(target=self._file_read_and_reply,
+                                args=(_req[0], getattr(self, "_last_user_text", "")
+                                      or "看看我电脑里的东西"),
+                                daemon=True).start()
+                    return
+        except Exception as _e3:
+            print(f"[桌宠] ⚠ 文件意图判断失败: {_e3}")
 
         # ⚠ 云端请求失败时 worker 拿到的是空串 → 切句后是 [""] → 以前会一路跳过，
         #   对话框什么都不显示（用户反馈"摸了没反应 / 聊天没回复"）。这里明确提示。
@@ -1694,6 +1844,8 @@ class Murasame(QLabel):
             pass
 
     def start_thread(self, text, role, t=False):
+        if role == "user":
+            self._last_user_ts = time.time()   # 自主学习用它判断"主人是不是刚说过话"
         # ★ 主人正在打字时，系统自动接话（打招呼/空闲搭话/触摸）一律不发起：
         #   一起话就会把她切到"思考/说话"状态，正在打的字就被吃掉（用户反馈）。
         try:
@@ -2231,6 +2383,38 @@ class Murasame(QLabel):
                 _act_auto.triggered.connect(lambda on=False: _pc.set_auto_enabled(bool(on)))
             except Exception as _epc:
                 print(f"[桌宠] ⚠ 电脑操作菜单项失败: {_epc}")
+            # ── 电脑文件 / 自主学习开关 ──
+            # 读取文件：只读（不写不改不删），只允许用户目录与桌面/文档/下载这些地方，
+            # 系统目录一律拒绝；日志在 data/file_access.log。
+            # 自主学习：她自己归纳长期记忆、空闲自习、写日记，存在
+            # pets/<角色>/memory/learned.json（"看看她学到了什么"可以直接看）。
+            try:
+                from tool import file_access as _fa
+                from tool import self_learn as _sl
+                menu.addSeparator()
+                _act_fa = item(menu, "允许读取电脑文件", checked=_fa.enabled())
+                _act_fa.setToolTip(
+                    "开启后她能看看你电脑里的文件（只读，不会改动、删除任何东西）。" + chr(10) +
+                    "你能这样用：「我桌面上有什么」「下载里那个笔记写了啥」；" + chr(10) +
+                    "她也会自己偶尔了解一下电脑近况（磁盘、桌面、开着的窗口）当聊天话题。" + chr(10) +
+                    "只看桌面／文档／下载／图片／音乐／视频和桌宠自己的目录，系统目录一律拒绝；" + chr(10) +
+                    "每次最多读一个文件（≤200KB）或列 60 个条目，记录在 data/file_access.log。")
+                _act_fa.triggered.connect(lambda on=False: _fa.set_enabled(bool(on)))
+                _act_learn = item(menu, "自主学习（自己记东西）", checked=_sl.enabled())
+                _act_learn.setToolTip(
+                    "开启后她会自己学东西：" + chr(10) +
+                    "① 聊完一段自己归纳「关于主人的事」和心情，存成长期记忆（聊天时会自动用上）；" + chr(10) +
+                    "② 你不在的时候挑个话题自己补课（约 20 分钟一次，你刚说过话就不打扰）；" + chr(10) +
+                    "③ 每天写一段日记。全部存在 pets/角色/memory/learned.json，可以随时看。")
+                _act_learn.triggered.connect(lambda on=False: _sl.set_enabled(bool(on)))
+                _act_seen = item(menu, "看看她学到了什么")
+                _act_seen.setToolTip("把她记住的事、学到的东西和最近几天的日记显示出来。")
+                _act_seen.triggered.connect(self._show_learned)
+                _act_study = item(menu, "让她现在学点什么")
+                _act_study.setToolTip("立刻让她自习一次（要先打开上面的「自主学习」）。")
+                _act_study.triggered.connect(self._study_now)
+            except Exception as _efa:
+                print(f"[桌宠] ⚠ 文件/学习菜单项失败: {_efa}")
             return menu
         except Exception as e:
             print(f"[桌宠] ⚠ 构造换装菜单失败: {e}")

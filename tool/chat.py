@@ -131,6 +131,24 @@ def qwen3_lora(history, user_input, role):
     except Exception:
         pass
 
+    # 允许看文件时，把「怎么看电脑里的文件」也交给她（菜单里可开关）
+    try:
+        from tool import file_access as _fa2
+        _frules = _fa2.prompt_rules()
+        if _frules:
+            messages.append({"role": "system", "content": _frules})
+    except Exception:
+        pass
+
+    # 她自己记下的长期记忆（关于主人的事 / 自己学的东西 / 今天的日记）——相关度高的优先
+    try:
+        from tool import self_learn as _sl2
+        _mem = _sl2.memory_note(str(user_input or ""))
+        if _mem:
+            messages.append({"role": "system", "content": _mem})
+    except Exception:
+        pass
+
     # 你现在穿的是什么（桌宠窗口每次重画立绘都会记下来）——主人问起穿着时按这个答
     try:
         from tool.portrait_outfit import current_look_note

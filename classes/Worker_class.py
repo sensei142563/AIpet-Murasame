@@ -49,6 +49,39 @@ def split_sentences(text):
     return parts
 
 
+def _tidy_sentences(items):
+    """整理待显示的句子列表：清理动作描写/括注 + 去掉清理后变空的句子。
+
+    三件事都很要紧：
+    * 【看屏幕】标记必须原样保留 —— 她只输出这个标记时，以前会被 clean_sentence 的
+      「去掉【动作描写】」规则顺手删掉，主线程就认不出标记、走到"空回复"分支弹出
+      「信号好像不太好」。日志实锤：自请看屏幕成功 0 次，「本轮回复为空」14 次。
+    * 【文件】标记同样要保留（她要看电脑里的文件），并把她写的具体请求暂存起来，
+      主线程取走后真的去翻。
+    * 清理后变空的句子直接去掉 —— 否则对话框里会空出一行（用户反馈"文字有问题"），
+      也会白白多跑一次翻译/情绪/立绘。
+    """
+    from tool.screen_intent import SCREEN_LOOK_MARK
+    out = []
+    for t in (items or []):
+        s = str(t or "")
+        if SCREEN_LOOK_MARK in s:
+            out.append(SCREEN_LOOK_MARK)
+            continue
+        try:
+            from tool import file_access as _fa
+            if _fa.FILE_MARK in s:
+                _fa.set_pending(s)          # 请求暂存，"列出 桌面"这种内容不进台词
+                out.append(_fa.FILE_MARK)
+                continue
+        except Exception:
+            pass
+        c = clean_sentence(s)
+        if c.strip():
+            out.append(c)
+    return out
+
+
 def _is_pure_punct(text):
     """句子是否为纯标点/省略号（没有可朗读内容）"""
     return not (text or "").strip("…。.!！?？、，~～\"'“”‘’「」『』 \t\n")
@@ -228,10 +261,10 @@ class qwen3_lora_Worker(QThread):
         emotion_list = to_list(emotion_list)
         portrait_list = to_list(portrait_list)
 
-        # 防御性清理：动作描写/括注/Emoji
+        # 防御性清理：动作描写/括注/Emoji（保留【看屏幕】标记、去掉清理后变空的句子）
         reply_raw = list(reply)          # 清洗前的原始句（句内【标签】从这里提取）
         translate = [clean_sentence(t) for t in translate]
-        reply = [clean_sentence(t) for t in reply]
+        reply = _tidy_sentences(reply)
 
         # 对齐：以中文回复句数为准（翻译/情绪/立绘可能与回复句数不一致）
         translate, emotion_list, portrait_list = _align_lists(
@@ -359,7 +392,17 @@ class cloud_API_Worker(QThread):
             reply_list_raw = parsed if isinstance(parsed, list) else split_sentences(str(parsed))
         except Exception:
             reply_list_raw = split_sentences(reply)
+        # 清理 + 去空句 + 保留【看屏幕】标记（下游翻译/情绪/立绘都按这份列表走）
+        reply_list_raw = _tidy_sentences(reply_list_raw)
         reply_json = json.dumps(reply_list_raw, ensure_ascii=False)
+        # 历史里只留她**实际说出口**的话：cloud_talk 早先把带指令的原文写进历史了，
+        # 她会照着自己的历史学成「只回一行【键鼠】不说话」，而且显示/朗读也会对不上。
+        try:
+            if (self.history and isinstance(self.history[-1], dict)
+                    and self.history[-1].get("role") == "assistant"):
+                self.history[-1]["content"] = reply_json
+        except Exception:
+            pass
         # 2. 使用线程池并发执行所有 DeepSeek 任务和 TTS 任务
         if self.force_stop:print("[deepseek] 已中断生成。");return
 
@@ -381,7 +424,7 @@ class cloud_API_Worker(QThread):
         portrait_list = to_list(portrait_result)
         # 防御性清理：动作描写/括注/Emoji
         translate_list = [clean_sentence(t) for t in translate_list]
-        reply_list = [clean_sentence(t) for t in reply_list_raw]
+        reply_list = list(reply_list_raw)   # 已在 _tidy_sentences 里清理过（【看屏幕】标记要留着）
 
         # 4. 对齐列表后并发执行所有TTS任务
         translate_list, emotion_list, portrait_list = _align_lists(
