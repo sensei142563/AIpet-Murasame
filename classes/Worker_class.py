@@ -550,33 +550,13 @@ screen_index = get_config("./config.json")["screen_index"]
 def shot_is_blank(pixmap) -> bool:
     """截到的画面是不是黑的/一片纯色（等于没截到东西）。
 
-    锁屏、显示器休眠、独占全屏（游戏/播放器）时 QScreen.grabWindow(0) 会返回一张全黑图；
-    偶尔也会返回一张纯色图。这种图送给视觉模型只能得到「看不到内容」，
-    她就跟着说「我看不到你的屏幕」（用户反馈过）。
-    判定（缩到 48x48 再采样，开销可忽略）：
-      * 又黑又没有内容：平均亮度 < 12 或 97% 以上是纯黑像素
-      * 整幅几乎没有变化：标准差 < 3（真实屏幕哪怕全白也有文字/边框的抗锯齿，实测标准差 60+）
+    ⚠ 现在统一走 tool.screen_capture.is_blank（兼容 QImage 与 QPixmap）。
+      历史背景：锁屏、显示器休眠、独占全屏（游戏/播放器）时抓屏会得到全黑图，
+      送给视觉模型只能得到「看不到内容」，她就跟着说「我看不到你的屏幕」。
     """
-    import statistics
     try:
-        from PyQt5.QtCore import Qt
-        if pixmap is None or pixmap.isNull():
-            return True
-        small = pixmap.scaled(48, 48, Qt.IgnoreAspectRatio, Qt.FastTransformation).toImage()
-        vals = []
-        for y in range(small.height()):
-            for x in range(small.width()):
-                c = small.pixelColor(x, y)
-                vals.append((c.red() + c.green() + c.blue()) / 3.0)
-        if not vals:
-            return True
-        mean = sum(vals) / len(vals)
-        dark_ratio = sum(1 for v in vals if v < 10) / len(vals)
-        try:
-            sd = statistics.pstdev(vals)
-        except Exception:
-            sd = 99.0
-        return mean < 12 or dark_ratio > 0.97 or sd < 3.0
+        from tool.screen_capture import is_blank
+        return is_blank(pixmap)
     except Exception:
         return False
 
@@ -591,21 +571,21 @@ class ScreenWorker(QThread):
         os.makedirs("tmp", exist_ok=True)
 
     def run(self):
-        screens = QGuiApplication.screens()
-        screen = screens[screen_index]
-        if screen is None:
-            return
+        from tool.screen_capture import capture_qimage, is_blank as _is_blank_img
         while not self.isInterruptionRequested():
-            # 抓屏（全屏）
-            pixmap = screen.grabWindow(0)
-            if shot_is_blank(pixmap):
+            # 抓屏（Win32 BitBlt：任何线程都能调，毫秒级）
+            # ⚠ 以前这里用 QScreen.grabWindow()——那是 GUI 线程专用的 API，
+            #   在 QThread 里调用会直接把进程搞崩（实测：日志无报错、桌宠凭空消失，
+            #   残留的服务还占着显存）；全屏游戏下更慢更不稳。
+            img = capture_qimage(screen_index)
+            if img is None or _is_blank_img(img):
                 # 偶尔会抓到全黑（锁屏 / 显示器休眠 / 独占全屏）→ 等一下重抓一次；
                 # 还是黑就安静跳过这轮：不调用视觉模型，也不让她说"看不到"
                 time.sleep(1.5)
                 if self.isInterruptionRequested():
                     break
-                pixmap = screen.grabWindow(0)
-                if shot_is_blank(pixmap):
+                img = capture_qimage(screen_index)
+                if img is None or _is_blank_img(img):
                     print("[vision] ⚠ 两次抓屏都是黑的（锁屏 / 显示器休眠 / 独占全屏）→ 跳过本轮屏幕识别")
                     for _ in range(int(self.interval * 10)):
                         if self.isInterruptionRequested():
@@ -616,7 +596,11 @@ class ScreenWorker(QThread):
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png", dir="tmp")
             tmp_name = tmp.name
             tmp.close()
-            pixmap.save(tmp_name, "PNG")
+            try:
+                img.save(tmp_name, "PNG")
+            except Exception as e:
+                print(f"[vision] ⚠ 存截图失败: {e}")
+                continue
             # 发信号，让主线程去处理（网络调用等）
             self.screenshot_captured.emit(tmp_name)
             # sleep 可被 requestInterruption() 打断（间隔相对宽松）

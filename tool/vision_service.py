@@ -18,6 +18,7 @@
                       → {"ok": true, "text": "屏幕内容描述..."}
 """
 import base64
+import ctypes
 import io
 import json
 import os
@@ -127,12 +128,54 @@ def _offload_now(reason: str = "") -> bool:
         return False
 
 
+def _parent_alive() -> bool:
+    """启动我的那个进程还在吗（不在了就该自己退出，别占着显存当孤儿）
+
+    为什么需要：桌宠崩过一次（QScreen.grabWindow 在后台线程用，进程直接没了），
+    结果这个视觉服务还活着、继续占着约 5G 显存，主人打游戏更卡了。
+    """
+    try:
+        ppid = os.getppid()
+        if not ppid:
+            return True
+        k32 = ctypes.windll.kernel32
+        k32.OpenProcess.restype = ctypes.c_void_p
+        k32.OpenProcess.argtypes = [ctypes.c_uint, ctypes.c_int, ctypes.c_uint]
+        h = k32.OpenProcess(0x1000, False, int(ppid))   # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return False
+        try:
+            code = ctypes.c_ulong(0)
+            ok = k32.GetExitCodeProcess(ctypes.c_void_p(h), ctypes.byref(code))
+            return bool(ok) and code.value == 259          # STILL_ACTIVE
+        finally:
+            try:
+                k32.CloseHandle(ctypes.c_void_p(h))
+            except Exception:
+                pass
+    except Exception:
+        return True          # 判断不了就当它还活着，别乱退出
+
+
 def idle_guard():
-    """后台盯着：长时间没人用就把模型移出显存，把显卡让给语音合成。"""
+    """后台盯着：长时间没人用就把模型移出显存，把显卡让给语音合成。
+
+    顺便看管"启动我的那个进程还在不在"——不在了就自己退出（不留占显存的孤儿）。
+    """
     import torch
 
     while True:
         time.sleep(30)
+        try:
+            if not _parent_alive():
+                print("[vision] 启动我的程序已经退出 → 视觉服务自行结束（释放显存）", flush=True)
+                try:
+                    _offload_now("父进程已退出")
+                except Exception:
+                    pass
+                os._exit(0)
+        except Exception:
+            pass
         try:
             idle = idle_unload_seconds()
             if idle <= 0 or _model["qwen"] is None or _model["offloaded"]:

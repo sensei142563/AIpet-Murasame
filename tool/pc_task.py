@@ -197,15 +197,19 @@ def _look_once() -> str:
         if _state["looks"] >= LOOK_BUDGET:
             return "（这一轮不能再看了——看屏幕次数已经用完，按现有信息继续或说做不了）"
         import tempfile
-        from PyQt5.QtGui import QGuiApplication
+        from tool.screen_capture import capture_qimage, is_blank as _is_blank_img
         from tool.chat import describe_image
         _state["looks"] += 1
         _say_status("正在观看屏幕……")
-        screen = QGuiApplication.primaryScreen()
-        pm = screen.grabWindow(0)
+        # ⚠ Win32 抓屏（这里在后台线程里，Qt 的 grabWindow 只能 GUI 线程用）
+        img = capture_qimage()
+        if img is None:
+            return "（看不清）"
         os.makedirs("tmp", exist_ok=True)
         p = os.path.join("tmp", "task_shot.png")
-        pm.save(p, "PNG")
+        img.save(p, "PNG")
+        if _is_blank_img(img):
+            return "（屏幕是黑的，看不到内容）"
         # 任务里用更小的图（约 5 秒，比正常快档还快），描述也短一点
         desc = describe_image(p, max_side=640, max_new=120)
         return str(desc or "（看不清）")

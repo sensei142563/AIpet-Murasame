@@ -213,6 +213,8 @@ class Murasame(QLabel):
     # 任务循环（pc_task 后台线程）的状态与收尾 → 主线程显示/说话
     _task_status = pyqtSignal(str)
     _task_finish = pyqtSignal(str, bool)
+    # 自主学习窗口刷新（后台线程 → 主线程；Qt 控件不能在别的线程碰）
+    _learn_refresh = pyqtSignal()
 
     # 初始
     def __init__(self):
@@ -221,6 +223,7 @@ class Murasame(QLabel):
         self._pc_done.connect(self._on_pc_done)
         self._task_status.connect(self._on_worker_status)
         self._task_finish.connect(self._on_task_finish)
+        self._learn_refresh.connect(self._do_refresh_learn_window)
         # 文字
         self.full_text = ""  # 打字机效果用到的整体字符串
         from pets.pet_registry import get_pet_config, get_fgimages_dir
@@ -1573,7 +1576,19 @@ class Murasame(QLabel):
             print(f"[学习] ⚠ 学习循环失败（{type(e).__name__}: {e}）")
 
     def _refresh_learn_window(self):
-        """记忆窗口开着的话刷新一下内容"""
+        """记忆窗口开着的话刷新一下内容
+
+        ⚠ 这个方法会被后台线程调用（自主学习跑在线程里），所以**绝不能直接碰控件**：
+          Qt 的控件只能在主线程访问，从别的线程去 isVisible()/setPlainText() 轻则乱码
+          重则整个进程崩掉（实测有这种"桌宠凭空消失"）。这里只发个信号，让主线程去做。
+        """
+        try:
+            self._learn_refresh.emit()
+        except Exception:
+            pass
+
+    def _do_refresh_learn_window(self):
+        """主线程里真正刷新窗口（由 _learn_refresh 信号触发）"""
         try:
             w = getattr(self, "_learn_window", None)
             if w is not None and w.isVisible():
@@ -2284,13 +2299,13 @@ class Murasame(QLabel):
         tmp_name = ""
         try:
             import tempfile
-            from PyQt5.QtGui import QGuiApplication
-            from classes.Worker_class import shot_is_blank
+            from tool.screen_capture import capture_qimage, is_blank as _is_blank_img
             from tool.chat import describe_image, vision_fast_size
             from tool.screen_intent import build_screen_prompt
-            screen = QGuiApplication.primaryScreen()
-            pixmap = screen.grabWindow(0)
-            if shot_is_blank(pixmap):
+            # ⚠ 用 Win32 抓屏（tool.screen_capture）：这里跑在后台线程，
+            #   Qt 的 QScreen.grabWindow 只能 GUI 线程用，在这里调会崩进程。
+            _img = capture_qimage(self._screen_index_now())
+            if _img is None or _is_blank_img(_img):
                 print("[桌宠] ⚠ 屏幕是黑的（锁屏/显示器休眠）→ 如实告诉主人，不带屏幕内容")
                 self._request_dialog.emit(
                     "【系统提示】主人让你看屏幕，但此刻抓不到画面（可能锁屏或显示器休眠）。"
@@ -2300,7 +2315,7 @@ class Murasame(QLabel):
             fd = tempfile.NamedTemporaryFile(delete=False, suffix=".png", dir="tmp")
             tmp_name = fd.name
             fd.close()
-            pixmap.save(tmp_name, "PNG")
+            _img.save(tmp_name, "PNG")
             # 主人正在等 → 用快速档（896px：编码约 6~8 秒，比 1280px 快一倍多）
             desc = describe_image(tmp_name, max_side=vision_fast_size(), max_new=140)
             if not str(desc or "").strip():
@@ -3757,6 +3772,14 @@ class Murasame(QLabel):
             print("[桌宠] ▶ 游戏结束：优先级恢复（低于正常）")
         except Exception as e:
             print(f"[桌宠] ⚠ 退出游戏模式失败: {e}")
+
+    def _screen_index_now(self) -> int:
+        """当前配置里选的显示器序号（抓屏用）"""
+        try:
+            from tool.config import get_config
+            return int(get_config("./config.json").get("screen_index") or 0)
+        except Exception:
+            return 0
 
     def _screen_interval_seconds(self) -> float:
         """定时截屏的间隔（config 的 screen_interval，秒）"""
