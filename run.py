@@ -454,16 +454,25 @@ def setup_runtime_and_pytorch(config_path="config.json", cfg=None, hardware_type
 
         if mismatch:
             log("开始安装与当前 CUDA 版本匹配的 PyTorch...", "INFO")
-            subprocess.run([
-                _project_python(), "-m", "pip", "install", "-U",
-                "torch", "torchvision", "torchaudio",
-                "--index-url", torch_url,
-                "--no-warn-script-location"
-            ], check=True)
-            import torch
-            log("已安装与当前 CUDA 匹配的 PyTorch 版本。", "SUCCESS")
-            log("⚠️⚠️请关闭并重新运行程序，以加载新的 PyTorch 版本。⚠️⚠️", "INFO")
-            sys.exit(0)
+            try:
+                subprocess.run([
+                    _project_python(), "-m", "pip", "install", "-U",
+                    "torch", "torchvision", "torchaudio",
+                    "--index-url", torch_url,
+                    "--no-warn-script-location"
+                ], check=True)
+                import torch
+                log("已安装与当前 CUDA 匹配的 PyTorch 版本。", "SUCCESS")
+                log("⚠️⚠️请关闭并重新运行程序，以加载新的 PyTorch 版本。⚠️⚠️", "INFO")
+                sys.exit(0)
+            except Exception as e:
+                # ⚠ 以前这里 check=True 且没有 try：源里没有对应 cu 版本 / 网络不通时
+                #   会抛 CalledProcessError 一路冒到 __main__ → 桌宠直接起不来。
+                #   现在降级：继续用现有 torch（CPU 版也能跑，只是慢）。
+                log(f"CUDA 版 PyTorch 安装失败：{e}", "WARN")
+                log("→ 继续使用现有 PyTorch（本地语音/模型会走 CPU，较慢）", "INFO")
+                log(f"  需要 GPU 时可手动执行：{_project_python()} -m pip install -U torch "
+                    f"torchvision torchaudio --index-url {torch_url}", "INFO")
 
     except ImportError:
         log("未检测到 PyTorch，开始安装...", "INFO")
@@ -476,9 +485,13 @@ def setup_runtime_and_pytorch(config_path="config.json", cfg=None, hardware_type
             ], check=True)
             import torch
             log(f"成功安装 PyTorch {torch.__version__} (CUDA {torch.version.cuda or 'CPU'})", "SUCCESS")
-        except subprocess.CalledProcessError:
-            log("PyTorch 安装失败！请检查网络或 CUDA 环境。", "ERROR")
-            sys.exit(1)
+        except Exception as e:
+            # 与 ensure_cpu_torch() 同一策略：装不上也不退出。
+            # 云端模式不需要 torch；只有本地模型/本地语音会不可用。
+            log(f"PyTorch 安装失败：{e}", "WARN")
+            log("→ 继续以「无 torch」方式启动（云端模式可用；本地模型/语音不可用）", "INFO")
+            log(f"  需要时手动执行：{_project_python()} -m pip install torch torchvision "
+                f"torchaudio --index-url {torch_url}", "INFO")
 
     return model_type
 
