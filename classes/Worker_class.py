@@ -193,6 +193,16 @@ def _handle_pc_control(reply: str, owner, is_auto: bool) -> str:
                          kwargs={"auto": is_auto,
                                  "notify": getattr(owner, "_pc_note", None)},
                          daemon=True).start()
+            # 受命动手 → 开「连着做完」的任务循环：每步只花一次小调用，
+# 不再一步等一整轮对话（实测一步 25~45 秒、一次任务要五分钟，用户反馈"效率太低"）。
+            if not is_auto:
+                try:
+                    from tool import pc_task as _pt
+                    _pt.start_task(getattr(owner, "history", None) or [],
+                                   str(getattr(owner, "user_input", "") or ""),
+                                   is_auto=False, done_note=_pc.describe(_acts))
+                except Exception as _et:
+                    print(f"[桌宠] ⚠ 任务循环启动失败: {_et}")
         else:
             print("[桌宠] 操控电脑未开启（右键菜单可打开）→ 只解析不执行")
         # ★ 只发指令、没留台词 → 补一句，别让她"变哑巴"

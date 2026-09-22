@@ -37,13 +37,36 @@ import time
 # ⚠ 不再限制每轮动作条数：限制会让她"做到一半停下"（用户反馈）。
 #   这里只留一个防跑飞的保险丝（正常一轮几十条都用不到）。
 SAFETY_MAX = 500
-# 重复抑制窗口（秒）：同一个动作在这么短时间内又来一遍 → 只做一次，其余丢掉。
-# 为什么：她做过一次没看到变化，会以为没成功，于是一轮一轮重复点同一个地方（用户反馈）。
+# 重复抑制窗口（秒）：同一个地方连续点超过 DUP_ATTEMPTS 次才判为"卡在重复"
+# ⚠ 不能一重复就挡：按两次 win 是"开开始菜单再关掉"、点两下同一个按钮可能是正常的
+#   （实测一刀切把她的合法重试也挡死了，任务直接卡住）。
 DUP_WINDOW = 90
-# 连续重复到这个次数，就明确告诉她"别再重复了，换办法或说实话"
-DUP_REPEAT_LIMIT = 2
-_recent_acts = []          # [(指纹, 时间)]
+DUP_ATTEMPTS = 2
+_recent_acts = []          # [(指纹, 时间, 次数)]
 _dup_hits = [0]
+# 立刻停手的开关（主人喊停 / 任务中止）：每个动作执行前都要检查
+_abort = ["", 0.0]
+
+
+def set_abort(reason: str = "主人喊停"):
+    """立刻停手：正在执行的动作做完当前这一个就停，后面的全部丢弃。
+
+    8 秒后自动失效——避免这个标记留着，把主人之后让她做的事也一起挡掉。
+    """
+    _abort[0] = str(reason or "停")
+    _abort[1] = time.time()
+    _log_line(f"⛔ 收到停止请求（{_abort[0]}）→ 后续动作不再执行")
+
+
+def clear_abort():
+    _abort[0] = ""
+    _abort[1] = 0.0
+
+
+def abort_requested() -> str:
+    if _abort[0] and (time.time() - float(_abort[1] or 0)) > 8:
+        clear_abort()
+    return _abort[0]
 # 做完之后的"说一句"回调（桌宠注册，用来让她汇报自己干了什么；Worker 线程里调用）
 _narrator = [None]
 
@@ -70,33 +93,31 @@ def _act_key(a: dict) -> str:
 
 
 def _is_dup(a: dict) -> bool:
-    """这个动作是不是刚做过（DUP_WINDOW 秒内同一个动作）→ True 表示应当跳过。
+    """这个点击是不是"卡住重复了"→ True 表示应当跳过。
 
-    坐标类动作按容差比较（±24px 算同一处）：她每次估的坐标都会抖几像素，
-    分桶比较在边界上会漏（实测 540 和 534 落进了不同的桶）。
+    只对"点哪里"这类做抑制（click/double/right），而且同一个地方**允许连做两次**，
+    第三次起才判为卡住——按两次 win 是开关开始菜单、点两下同一个按钮也常常是正常的，
+    一刀切会把合法的重试也挡掉（实测她就此卡死）。坐标按 ±24px 容差算同一处。
     """
     try:
         t = str(a.get("type") or "")
-        if t == "wait":
+        if t not in ("click", "double", "right"):
             return False
+        x, y = int(a.get("x", 0)), int(a.get("y", 0))
         now = time.time()
-        _recent_acts[:] = [(k, ts) for k, ts in _recent_acts if now - ts < DUP_WINDOW]
-        if t in ("move", "click", "double", "right"):
-            x, y = int(a.get("x", 0)), int(a.get("y", 0))
-            for kk, _ts in _recent_acts:
-                try:
-                    kt, pos = kk.split("@", 1)
-                    px, py = pos.split(",")
-                    if kt == t and abs(int(px) - x) <= 24 and abs(int(py) - y) <= 24:
+        _recent_acts[:] = [r for r in _recent_acts if now - r[1] < DUP_WINDOW]
+        for i, (kk, _ts, cnt) in enumerate(_recent_acts):
+            try:
+                kt, pos = kk.split("@", 1)
+                px, py = pos.split(",")
+                if kt == t and abs(int(px) - x) <= 24 and abs(int(py) - y) <= 24:
+                    if cnt >= DUP_ATTEMPTS:
                         return True
-                except Exception:
-                    continue
-            _recent_acts.append(("%s@%d,%d" % (t, x, y), now))
-            return False
-        k = _act_key(a)
-        if any(kk == k for kk, _ in _recent_acts):
-            return True
-        _recent_acts.append((k, now))
+                    _recent_acts[i] = (kk, now, cnt + 1)
+                    return False
+            except Exception:
+                continue
+        _recent_acts.append(("%s@%d,%d" % (t, x, y), now, 1))
         return False
     except Exception:
         return False
@@ -210,19 +231,23 @@ PROMPT_RULES = (
     "看清鼠标底下是什么，确认后再「【键鼠】点击 800 250」。\n"
     "★ 边说话边动手：动手那一轮也要说一句人话（例如「好，我来点」「点掉了，你看看」），"
     "不能只留一行指令——只发指令的回合主人什么都听不到，会以为你哑了。\n"
-    "★ 同一件事只做一次：做过之后如果画面没变化，别一遍遍重复同一个动作（重复的会被丢掉）。"
-    "换个办法——先「【看屏幕】」看清，或者直接告诉主人你做不了、让他自己来。\n"
+    "★ 一次把整件事写完：一件事要几步就一次写几行指令（点完等界面反应就写「【键鼠】等待 0.8」），"
+    "别一步一条回复慢慢磨——那样一步要等半分钟，主人会等到发火。\n"
+    "★ 看屏幕很慢（一次十几秒），同一次动手最多看一次；能靠已知位置判断就别看。\n"
+    "★ 同一个地方别连着点三次（重复的会被丢掉）。做过没变化就换个办法，"
+    "或者直接告诉主人你做不了、让他自己来。\n"
     "★ 只写「移动」等于什么都没做（那只是把鼠标挪过去），不许拿它敷衍。"
-    "一条指令只做一个动作，要做两件事就写两行；指令那一行不会被念出来。"
+    "指令那一行不会被念出来。"
 )
 
 AUTO_RULES = (
     "【自主行动的权限（已开启）】主人没有开口时，你也可以**自己判断**要不要动手，"
     "不必每次等主人吩咐。看到屏幕上明显的弹窗、报错、广告、需要点掉的按钮，"
     "就该动手点掉，别只在嘴上说。判断依据是你最近看到的画面描述；"
-    "拿不准就先输出「【看屏幕】」看清再决定。"
+    "拿不准就先输出「【看屏幕】」看清再决定，一次动手最多看一次。"
     "动手时照旧用「【键鼠】动作 参数」指令；确实没什么可做的就正常说话，别硬找事做。"
     "主人明确让你做事时不受此限制，直接动手即可。"
+    "★ 主人中途喊停（停、别动、算了…）时，你已经停手了，如实回他一句就好，别再动手。"
 )
 
 
@@ -658,16 +683,18 @@ def execute(actions: list, dry_run: bool = False, auto: bool = False, notify=Non
         _acts = _acts[:SAFETY_MAX]
     for a in _acts:
         t = a.get("type")
-        # ── 重复抑制：同一件事刚做过就别再做了 ──
-        # 她做过一次（没看到变化）会以为没成功，于是反复点同一个地方；
-        # 这里把 90 秒内重复的同一个动作直接丢掉，连续重复还会明确提醒她换办法。
+        # ── 立刻停手：主人喊停 / 任务中止 ──
+        if not dry_run and abort_requested():
+            _log_line(f"⛔ 已停止（{_abort[0]}）→ 丢弃剩下的动作")
+            _drop(f"主人叫停了（{_abort[0]}），剩下的动作我没做")
+            break
+        # ── 重复抑制：同一个地方连着点太多次才算"卡住"（允许两次） ──
         if not dry_run and _is_dup(a):
             _dup_hits[0] += 1
-            _log_line(f"⏭ 这个动作刚做过（{_act_key(a)}）→ 跳过，不重复")
-            if _dup_hits[0] >= DUP_REPEAT_LIMIT:
-                _dup_hits[0] = 0
-                _drop("你在反复做同一个动作（%s）。它已经做过了，再做也不会有变化——"
-                      "换个办法，或者直接跟主人说你做不了。" % _act_key(a))
+            _log_line(f"⏭ 这个地方已经点过两次了（{_act_key(a)}）→ 跳过，别再重复")
+            _drop("你在反复点同一个地方（%s）。它已经点过了，再点也不会有变化——"
+                  "换个办法（比如【看屏幕】看清位置再点），或者直接跟主人说你做不了。"
+                  % _act_key(a))
             continue
         try:
             if t in ("move", "click", "double", "right"):

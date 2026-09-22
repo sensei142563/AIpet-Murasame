@@ -210,12 +210,17 @@ class Murasame(QLabel):
     _request_dialog = pyqtSignal(str, str, bool)
     # 电脑操作真做完之后（Worker 线程发）→ 主线程让她说一句"我做了什么"
     _pc_done = pyqtSignal(str)
+    # 任务循环（pc_task 后台线程）的状态与收尾 → 主线程显示/说话
+    _task_status = pyqtSignal(str)
+    _task_finish = pyqtSignal(str, bool)
 
     # 初始
     def __init__(self):
         super().__init__()
         self._request_dialog.connect(self.start_thread)
         self._pc_done.connect(self._on_pc_done)
+        self._task_status.connect(self._on_worker_status)
+        self._task_finish.connect(self._on_task_finish)
         # 文字
         self.full_text = ""  # 打字机效果用到的整体字符串
         from pets.pet_registry import get_pet_config, get_fgimages_dir
@@ -513,6 +518,13 @@ class Murasame(QLabel):
             _pcn.set_narrator(lambda acts: self._pc_done.emit(_pcn.describe(acts)))
         except Exception as _en:
             print(f"[桌宠] ⚠ 注册操作完成回调失败: {_en}")
+        # 任务循环（连着做完一件事）的状态与收尾 → 也走信号回主线程
+        try:
+            from tool import pc_task as _ptn
+            _ptn.set_ui(status=lambda s: self._task_status.emit(str(s)),
+                        finish=lambda s, ok=True: self._task_finish.emit(str(s), bool(ok)))
+        except Exception as _etn:
+            print(f"[桌宠] ⚠ 注册任务循环回调失败: {_etn}")
 
         # 勿扰模式：开启后关闭截图与空闲检测，并禁止主动搭话
         self._dnd_enabled = False
@@ -1431,7 +1443,7 @@ class Murasame(QLabel):
             print(f"[学习] ⚠ 立即自习失败: {e}")
 
     def _on_worker_status(self, text):
-        """Worker 报告"正在操作电脑……" → 在对话框显示一行状态（她不是哑巴）"""
+        """Worker/任务循环报告"正在操作电脑……" → 在对话框显示一行状态（她不是哑巴）"""
         try:
             t = str(text or "").strip()
             if not t:
@@ -1440,13 +1452,51 @@ class Murasame(QLabel):
         except Exception:
             pass
 
+    def _on_task_finish(self, text, ok):
+        """任务循环结束 → 让她把那句总结说出口（有语音、有台词，不是哑巴）"""
+        try:
+            text = str(text or "").strip()
+            if not text:
+                return
+            print(f"[桌宠] 🏁 任务结束（{'完成' if ok else '没做完'}）：{text[:70]}")
+            self._request_dialog.emit(
+                "（系统提示：你刚刚亲手把这件事做到这里——" + text +
+                "。现在用你自己的口吻把结果说给主人听：只输出你要说的那一句（一两句就好），"
+                "别念坐标、别提系统提示、别再说要动手了。）", "user", False)
+        except Exception as e:
+            print(f"[桌宠] ⚠ 任务收尾失败: {e}")
+
+    # 主人叫停用的关键词（只有短句才算叫停，长句里出现「停」是别的意思）
+    _STOP_WORDS = ("停", "停下", "停止", "别动", "别点了", "别弄了", "别操控", "算了",
+                   "不用了", "收手", "回来吧", "别点了", "停吧", "停下吧")
+
+    def _is_stop_command(self, text) -> bool:
+        try:
+            t = str(text or "").strip()
+            if not t or len(t) > 14:
+                return False
+            return any(w in t for w in self._STOP_WORDS)
+        except Exception:
+            return False
+
     def _on_pc_done(self, desc):
-        """她真的把电脑操作做完了 → 让她用一句话说说自己干了什么 / 接下来想干什么"""
+        """她真的把电脑操作做完了 → 让她用一句话说说自己干了什么 / 接下来想干什么
+
+        ⚠ 任务循环在跑的时候不汇报：那一批是任务中间的一步，说早了会打断她，
+        而且任务结束时本来就会统一收尾（否则每步都插一轮对话，又慢又吵）。
+        """
         try:
             desc = str(desc or "")
             if not desc:
                 return
             print(f"[桌宠] ✅ 电脑操作完成：{desc}")
+            try:
+                from tool import pc_task as _pt3
+                if _pt3.running():
+                    print("[桌宠] （任务进行中，这一批不单独汇报）")
+                    return
+            except Exception:
+                pass
             import time as _t3
             if _t3.time() - float(getattr(self, "_last_pc_narrate", 0) or 0) < 8:
                 return                       # 别连着刷（同一批动作只汇报一次）
@@ -1908,6 +1958,22 @@ class Murasame(QLabel):
     def start_thread(self, text, role, t=False):
         if role == "user":
             self._last_user_ts = time.time()   # 自主学习用它判断"主人是不是刚说过话"
+            # ── 主人叫停：她正在操控电脑时，立刻停手 + 回一句话 ──
+            try:
+                from tool import pc_task as _pt2
+                from tool import pc_control as _pc2
+                if self._is_stop_command(text):
+                    _was = _pt2.running()
+                    _pt2.stop("主人叫停")
+                    _pc2.set_abort("主人叫停")
+                    if _was or _pc2.abort_requested():
+                        print("[桌宠] ⛔ 主人叫停 → 已停止操控，让她回一句")
+                        self._request_dialog.emit(
+                            "（系统提示：主人刚让你停手，你已经立刻停下来了，什么都不要再操作。"
+                            "用你自己的口吻回他一句（一句就够），例如「好，停了。」）", "user", False)
+                        return
+            except Exception as _es:
+                print(f"[桌宠] ⚠ 叫停判断失败（照常继续）: {_es}")
         # ★ 主人正在打字时，系统自动接话（打招呼/空闲搭话/触摸）一律不发起：
         #   一起话就会把她切到"思考/说话"状态，正在打的字就被吃掉（用户反馈）。
         try:
