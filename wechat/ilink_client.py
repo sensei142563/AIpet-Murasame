@@ -110,14 +110,6 @@ def save_credentials(data):
     _save_json(CRED_FILE, data)
 
 
-def clear_credentials():
-    try:
-        if os.path.exists(CRED_FILE):
-            os.remove(CRED_FILE)
-    except Exception:
-        pass
-
-
 def load_sync_buf():
     try:
         with open(SYNC_BUF_FILE, "r", encoding="utf-8") as f:
@@ -146,10 +138,6 @@ def save_ctx_token(user_id, token):
     d = load_ctx_tokens()
     d[user_id] = token
     _save_json(CTX_TOKENS_FILE, d)
-
-
-def get_ctx_token(user_id):
-    return load_ctx_tokens().get(user_id, "")
 
 
 def _base_info(bot_agent=DEFAULT_BOT_AGENT):

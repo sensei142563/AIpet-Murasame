@@ -21,7 +21,6 @@ import re
 import time
 import uuid
 import threading
-import requests
 import websocket  # pip install websocket-client
 
 from qq.qq_config import get_qq_config, STICKER_DIR, check_port_open, F5TTS_PORT
@@ -277,82 +276,6 @@ def split_by_char_limit(text, limit, max_parts=3):
     if i < len(clauses):                      # 兜底：剩余句子并入最后一条
         merged[-1] = merged[-1] + "".join(clauses[i:])
     return [p for p in merged if p]
-
-
-def split_private_reply(reply: str):
-    """
-    将 AI 完整回复按强断句符切分为多条短消息。
-    规则：
-    - 强断句：。！？…；; 换行
-    - 右引号随断句符并入前句
-    - 不足 4 字的残段并入最后一条
-    - 兜底 30 字强制切
-    返回: [str, str, ...]
-    """
-    reply = (reply or "").strip()
-    if not reply:
-        return []
-
-    clauses = []
-    buffer = ""
-
-    i = 0
-    while i < len(reply):
-        ch = reply[i]
-        buffer += ch
-
-        # 检查强断句符
-        if ch in _PRIVATE_STRONG_BREAKS:
-            # 并入后续右引号
-            j = i + 1
-            while j < len(reply) and reply[j] in _PRIVATE_RIGHT_QUOTES:
-                buffer += reply[j]
-                j += 1
-            # 连续省略号
-            while j < len(reply) and reply[j] == "\u2026":
-                buffer += reply[j]
-                j += 1
-            i = j - 1
-            # 切句（去掉首尾空白）
-            clause = buffer.strip()
-            if len(clause) >= 4:
-                clauses.append(clause)
-                buffer = ""
-        # 兜底：超长无断句
-        elif len(buffer) >= _PRIVATE_MAX_LEN:
-            # 找最后一个逗号切（避免硬切）
-            last_comma = max(buffer.rfind("，"), buffer.rfind(","), buffer.rfind("、"))
-            if last_comma >= 4:
-                clause = buffer[:last_comma + 1].strip()
-                if clause:
-                    clauses.append(clause)
-                buffer = buffer[last_comma + 1:]
-            else:
-                clause = buffer.strip()
-                if clause:
-                    clauses.append(clause)
-                buffer = ""
-        i += 1
-
-    # 剩余残段
-    tail = buffer.strip()
-    if tail:
-        # 清理纯符号残留
-        while tail and tail[0] in _PRIVATE_RIGHT_QUOTES:
-            tail = tail[1:]
-        if not tail:
-            tail = ""
-        if tail:
-            if clauses:
-                # 残段很短（<4字）→ 并入最后一条
-                if len(tail) < 4:
-                    clauses[-1] = clauses[-1] + tail
-                else:
-                    clauses.append(tail)
-            else:
-                clauses.append(tail)
-
-    return clauses
 
 
 class QQBotBridge:
@@ -922,7 +845,6 @@ class QQBotBridge:
     # ================= 自主学习（官方插件）辅助 =================
     def _maybe_learn_group_link(self, group_id, user_id, nickname, text):
         """群链接学习：打开链接提取内容入库(每群 5 分钟限流, 异步)"""
-        import urllib.parse as _up
         m_url = None
         try:
             import re as _re

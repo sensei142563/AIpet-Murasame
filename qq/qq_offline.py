@@ -105,18 +105,18 @@ def _load_processed_ids():
         return []
 
 
-def _save_processed_ids(ordered_ids):
-    """保存已处理的消息 ID（有序，保留尾部最新 PROCESSED_IDS_MAX 条）"""
-    with _IDS_LOCK:
-        try:
-            tail = ordered_ids[-PROCESSED_IDS_MAX:]
-            os.makedirs(os.path.dirname(PROCESSED_IDS_FILE), exist_ok=True)
-            tmp = PROCESSED_IDS_FILE + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump({"ids": tail}, f, ensure_ascii=False, indent=2)
-            os.replace(tmp, PROCESSED_IDS_FILE)  # 原子写
-        except Exception as e:
-            print(f"[QQOffline] ⚠ 保存已处理 ID 失败: {e}")
+def _write_processed_ids(ordered_ids):
+    """把已处理 ID 列表落盘（保留尾部最新 PROCESSED_IDS_MAX 条；原子写）。
+
+    调用方必须已持有 _IDS_LOCK —— _IDS_LOCK 是普通 Lock（不可重入），
+    这里再加锁会直接死锁，所以本函数只负责写盘。
+    """
+    tail = ordered_ids[-PROCESSED_IDS_MAX:]
+    os.makedirs(os.path.dirname(PROCESSED_IDS_FILE), exist_ok=True)
+    tmp = PROCESSED_IDS_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({"ids": tail}, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, PROCESSED_IDS_FILE)  # 原子写
 
 
 def _append_processed_ids(new_ids) -> bool:
@@ -150,12 +150,7 @@ def _append_processed_ids(new_ids) -> bool:
                     existing.add(s)
                     added = True
             if added:
-                tail = ordered[-PROCESSED_IDS_MAX:]
-                os.makedirs(os.path.dirname(PROCESSED_IDS_FILE), exist_ok=True)
-                tmp = PROCESSED_IDS_FILE + ".tmp"
-                with open(tmp, "w", encoding="utf-8") as f:
-                    json.dump({"ids": tail}, f, ensure_ascii=False, indent=2)
-                os.replace(tmp, PROCESSED_IDS_FILE)
+                _write_processed_ids(ordered)
             return True
         except Exception as e:
             print(f"[QQOffline] ⚠ 追加已处理 ID 失败: {e}")

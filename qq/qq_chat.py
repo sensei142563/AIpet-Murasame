@@ -305,17 +305,6 @@ def _build_messages(history):
     return messages
 
 
-def _get_api_key():
-    """读取 config 中的 qwen API Key"""
-    import json as _json
-    try:
-        with open(os.path.join(BASE_DIR, "config.json"), "r", encoding="utf-8") as f:
-            cfg = _json.load(f)
-        return cfg.get("APIKEY", {}).get("qwen", "")
-    except Exception:
-        return ""
-
-
 def _get_history_turns():
     """读取 config 的 longtext_max_history_turns（默认 20），统一桌宠与 QQ 记忆轮数"""
     import json as _json

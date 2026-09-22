@@ -66,12 +66,6 @@ def get_reasoning_level() -> str:
     return val if val in REASONING_LEVELS else "off"
 
 
-def supports_thinking(model_name: str) -> bool:
-    """该模型名是否支持思考模式开关/强度控制"""
-    name = str(model_name or "").strip().lower()
-    return name.startswith("deepseek") or name.startswith("qwen3")
-
-
 def build_reasoning_params(model_name: str, level: str = "off") -> dict:
     """
     按模型名 + 推理等级生成请求附加参数（不支持思考的模型返回空 dict）。

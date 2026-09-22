@@ -82,15 +82,6 @@ def _group(gid):
     return g
 
 
-def group_enabled(gid) -> bool:
-    """兼容旧调用：任意成员开启过即 True（新版按人，见 member_enabled）"""
-    try:
-        with _lock:
-            return bool(_group(gid).get("members")) or bool(_group(gid).get("enabled", False))
-    except Exception:
-        return False
-
-
 def member_enabled(gid, uin) -> bool:
     """该成员是否在本群开启 Galgame（按人生效，互不影响）。
 
@@ -113,16 +104,6 @@ def set_member_enabled(gid, uin, enabled: bool) -> None:
         with _lock:
             g = _group(gid)
             g.setdefault("members", {})[str(uin)] = {"enabled": bool(enabled)}
-            _save()
-    except Exception as e:
-        print(f"[QQGalgame] ⚠ 切换失败: {e}")
-
-
-def set_group_enabled(gid, enabled: bool) -> None:
-    """兼容旧调用：群级开关（新版请用 set_member_enabled 按人）"""
-    try:
-        with _lock:
-            _group(gid)["enabled"] = bool(enabled)
             _save()
     except Exception as e:
         print(f"[QQGalgame] ⚠ 切换失败: {e}")

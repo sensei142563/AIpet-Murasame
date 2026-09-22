@@ -364,12 +364,6 @@ def set_long_text_mode_active(active: bool):
         _feature_status["longtext"] = "on" if active else "off"
 
 
-def is_long_text_mode_active() -> bool:
-    """PCL / QQ 接口查询长文本模式状态"""
-    with _control_lock:
-        return _long_text_mode_active
-
-
 def check_voice_start() -> bool:
     """由 main.py 轮询，检测是否应该开始录音"""
     global _voice_start_flag

@@ -11,13 +11,12 @@
 import os
 import json
 import base64
-import sys as _sys
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
 
 import cv2
 import numpy as np
 
-from tool.paths import app_base_dir, data_path
+from tool.paths import data_path
 
 # ============ 识别阈值（余弦相似度，0~1，越大越相似） ============
 MASTER_SIM = 0.28     # 主人：max 余弦相似度 ≥ 此值才认（ArcFace 余弦相似度阈值）
@@ -450,9 +449,6 @@ def reload_known_faces():
     cfg = _load_faces_config()
     _build_master_embeddings(cfg)
     _build_others_embeddings(cfg)
-
-def compute_known_faces_encodings(cfg):
-    return _build_master_embeddings(cfg), _build_others_embeddings(cfg)
 
 def get_all_known_faces():
     return {}, {}

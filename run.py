@@ -129,29 +129,6 @@ def load_runtime_config(config_path="config.json"):
         }
 
 
-def config_enabled(value):
-    return str(value).strip().lower() in ("1", "true", "yes", "y", "on")
-
-
-def should_check_hardware(cfg):
-    model_type = str(cfg.get("model_type", "deepseek")).strip().lower()
-    tts_type = str(cfg.get("tts_type", "cloud")).strip().lower()
-
-    if config_enabled(cfg.get("force_gpu_check", False)):
-        log("检测到 force_gpu_check = true，将强制执行显卡检查。", "INFO")
-        return False
-
-    if model_type == "local":
-        log("检测到 model_type = local，需要检查本机显卡。", "INFO")
-        return False
-
-    if tts_type == "local":
-        log("检测到 tts_type = local，需要检查本机显卡。", "INFO")
-        return False
-
-    log("检测到对话与 TTS 均为云端模式，跳过本机显卡检查。", "INFO")
-    return False
-
 def check_hardware():
     """检测操作系统与显卡兼容性（支持 Windows + NVIDIA GPU 或 CPU）"""
     system = platform.system()

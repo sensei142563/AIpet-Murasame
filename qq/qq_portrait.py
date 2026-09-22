@@ -94,20 +94,7 @@ def decors_for(set_name=None):
     return [((n + "（頬）") if n == "脸红" else n, i) for n, i in decors_of(set_name)]
 
 
-def cross_set_layers(layers, dst_set) -> list:
-    """把任意套的图层换算到 dst_set（供桌宠灵动切换 / 历史图层复用）"""
-    from tool.portrait_outfit import normalize_layers
-    return normalize_layers(layers, dst_set)
-
 _cache = {}   # {套装: {infos, dir, prefix, rows}}
-
-
-def _choice_path():
-    try:
-        from tool.portrait_outfit import choice_path
-        return choice_path()
-    except Exception:
-        return os.path.join("data", "portrait_choice.json")
 
 
 def load_choice(set_name=None) -> dict:
@@ -320,15 +307,6 @@ def compose_custom(cloth, hair, expr, decors=None, out_name="qq_portrait_studio.
                           full_body=full_body, no_bg=no_bg)
 
 
-def emotion_words() -> str:
-    """给模型的可用情绪词列表（去重保序）"""
-    seen = []
-    for k in EMOTION_MAP:
-        if k not in seen:
-            seen.append(k)
-    return "、".join(seen)
-
-
 def _resolve_dir():
     pet_id = get_active_pet_id()
     fg_dir = get_fgimages_dir(pet_id)
@@ -445,43 +423,6 @@ def _default_bg(h=880, w=720):
     return bg
 
 
-def _search_bg(kw):
-    """联网找背景图 → 返回 720x880(cover 裁切) BGRA；失败返回 None"""
-    try:
-        from qq.qq_search import search_images
-        import requests as _req
-        imgs = search_images(kw + " 背景", 2) or search_images(kw, 2)
-        for im in imgs:
-            u = im.get("url")
-            if not u:
-                continue
-            try:
-                r = _req.get(u, timeout=15, headers={
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0"})
-                if r.status_code != 200 or len(r.content) < 2000:
-                    continue
-                arr = np.frombuffer(r.content, dtype=np.uint8)
-                img = cv2.imdecode(arr, cv2.IMREAD_UNCHANGED)
-                if img is None:
-                    continue
-                if img.shape[2] == 3:
-                    img = cv2.cvtColor(img, cv2.COLOR_BGR2BGRA)
-                # cover 裁切到 720x880
-                ih, iw = img.shape[:2]
-                scale = max(720.0 / iw, 880.0 / ih)
-                img = cv2.resize(img, (int(iw * scale + 0.5), int(ih * scale + 0.5)),
-                                 interpolation=cv2.INTER_AREA)
-                ih2, iw2 = img.shape[:2]
-                x0 = (iw2 - 720) // 2
-                y0 = (ih2 - 880) // 2
-                return img[y0:y0 + 880, x0:x0 + 720].copy()
-            except Exception:
-                continue
-    except Exception:
-        pass
-    return None
-
-
 def _with_scene_bg(_scene, half):
     """把人物贴到本地场景背景上（长方形画布，cover 裁剪 + 放大防黑边；无场景回退默认渐变）。
 
@@ -589,7 +530,7 @@ def build_portrait(emotion: str = "", bg_kw: str = "",
         canvas = np.zeros((_CANVAS_H, _CANVAS_W, 4), dtype=np.uint8)
         # 图层微调（防穿模）：网页版/QQ 立绘与桌面立绘共用同一份设置
         try:
-            from tool.generate import _adjust_table, _category_of
+            from tool.generate import _adjust_table
             _adj = _adjust_table(get_active_pet_id(), s)
         except Exception:
             _adj = {}
