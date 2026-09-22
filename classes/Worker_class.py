@@ -162,6 +162,22 @@ class qwen3_lora_Worker(QThread):
             print('[对话] ⚠ 已截断模型自行续写的多轮台词（防自问自答）')
             reply = _fixed
         if self.force_stop:print("[ollama-qwn3] 已中断生成。");return
+        # ── 她要求操作键鼠：把【键鼠】指令抽出来（动作归动作、文字归文字）──
+        #    必须在翻译/情绪/立绘/TTS 之前剥离，否则她会把指令念出来。
+        try:
+            from tool import pc_control as _pc
+            _acts = _pc.parse(reply)
+            if _acts:
+                print(f"[桌宠] 她请求操作电脑：{len(_acts)} 个动作")
+                if _pc.enabled():
+                    import threading as _thpc
+                    _thpc.Thread(target=_pc.execute, args=(_acts,), daemon=True).start()
+                else:
+                    print("[桌宠] 操控电脑未开启（右键菜单可打开）→ 只解析不执行")
+                reply = _pc.strip(reply) or "……好，我试试。"
+        except Exception as _epc:
+            print(f"[桌宠] 处理电脑操作失败: {_epc}")
+
         reply = ollama_qwen3_sentence(reply)  # 句子分割
         if self.force_stop: print("[ollama-qwn3] 已中断生成。");return
         history[-1]["content"] = reply
@@ -288,6 +304,22 @@ class cloud_API_Worker(QThread):
         reply_json = json.dumps(reply_list_raw, ensure_ascii=False)
         # 2. 使用线程池并发执行所有 DeepSeek 任务和 TTS 任务
         if self.force_stop:print("[deepseek] 已中断生成。");return
+        # ── 她要求操作键鼠：把【键鼠】指令抽出来（动作归动作、文字归文字）──
+        #    必须在翻译/情绪/立绘/TTS 之前剥离，否则她会把指令念出来。
+        try:
+            from tool import pc_control as _pc
+            _acts = _pc.parse(reply_json)
+            if _acts:
+                print(f"[桌宠] 她请求操作电脑：{len(_acts)} 个动作")
+                if _pc.enabled():
+                    import threading as _thpc
+                    _thpc.Thread(target=_pc.execute, args=(_acts,), daemon=True).start()
+                else:
+                    print("[桌宠] 操控电脑未开启（右键菜单可打开）→ 只解析不执行")
+                reply_json = _pc.strip(reply_json) or "……好，我试试。"
+        except Exception as _epc:
+            print(f"[桌宠] 处理电脑操作失败: {_epc}")
+
         with ThreadPoolExecutor(max_workers=5) as executor:  # 增加线程数
             # 提交所有任务（下游拿到切好的句子列表，保证对齐）
             future_portrait = executor.submit(cloud_portrait, reply_json, self.portrait_history, (getattr(self, "portrait_type", None) or current_portrait_type()))

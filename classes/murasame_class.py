@@ -2209,6 +2209,20 @@ class Murasame(QLabel):
                 _act_qb.triggered.connect(self._toggle_quick_buttons)
             except Exception:
                 pass
+            # ── 电脑操作（让她自己动键鼠）开关 ──
+            # 默认关闭。开启后她可以移动/点击鼠标、滚轮、输入文字、按组合键；
+            # 每轮最多 8 个动作、坐标必须在屏幕内，所有操作写进 data/pc_control.log。
+            try:
+                from tool import pc_control as _pc
+                menu.addSeparator()
+                _act_pc = item(menu, "允许操控电脑（键鼠）", checked=_pc.enabled())
+                _act_pc.setToolTip(
+                    "开启后她可以自己操作键鼠：点击 / 双击 / 右键 / 滚轮 / 输入文字 / 组合键（Ctrl+S 等）/ 等待。\n"
+                    "每轮最多 8 个动作，坐标必须在屏幕内；所有操作都会记到 data/pc_control.log。\n"
+                    "随时可以在这里关掉（关掉后立刻停止执行）。")
+                _act_pc.triggered.connect(lambda on=False: _pc.set_enabled(bool(on)))
+            except Exception as _epc:
+                print(f"[桌宠] ⚠ 电脑操作菜单项失败: {_epc}")
             return menu
         except Exception as e:
             print(f"[桌宠] ⚠ 构造换装菜单失败: {e}")

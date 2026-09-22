@@ -138,6 +138,14 @@ def cloud_talk(history: list, user_input: str, role: str):
     except Exception:
         pass
 
+    # 允许操控电脑时，把键鼠操作说明也交给她（菜单里可开关）
+    try:
+        from tool import pc_control as _pc2
+        if _pc2.enabled():
+            messages.append({"role": "system", "content": _pc2.PROMPT_RULES})
+    except Exception:
+        pass
+
     # 你现在穿的是什么（桌宠窗口每次重画立绘都会记下来）——主人问起穿着时按这个答
     try:
         from tool.portrait_outfit import current_look_note
