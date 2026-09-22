@@ -159,7 +159,6 @@ _PRIVATE_RIGHT_QUOTES = {
     "\u0022",  # " ASCII 双引号
     "\u0027",  # ' ASCII 单引号
 }
-_PRIVATE_MAX_LEN = 30  # 兜底强制切
 
 # 私聊逐条发送间隔（秒）
 _PRIVATE_SEND_INTERVAL = (0.6, 1.2)
@@ -225,6 +224,35 @@ def split_sentences(reply: str):
     return clauses
 
 
+def _wrap_long_clause(clause: str, limit: int):
+    """把「超长且没有句末标点」的片段按逗号/顿号强制分段（实在没有逗号才硬切）。
+
+    为什么需要：split_by_char_limit 只按【句子】边界打包，模型吐出一条"全是逗号、
+    没有句末标点"的长句时，整条会被当成一句发出 —— 用户设的「单次回复字数上限」
+    就被整个绕过。基线里这一步由 split_private_reply 的 30 字兜底强制切负责，
+    换成按句分句的实现时丢了（旧的 `_PRIVATE_MAX_LEN` 常量成了死代码，就是它的墓碑）。
+    """
+    if limit <= 0 or len(clause) <= limit:
+        return [clause]
+    out, buf = [], ""
+    for piece in re.split(r"(?<=[，,、])", clause):     # 逗号留在片段末尾
+        while len(piece) > limit:                       # 该段本身还是超长 → 硬切
+            if buf:
+                out.append(buf)
+                buf = ""
+            out.append(piece[:limit])
+            piece = piece[limit:]
+        if len(buf) + len(piece) <= limit:
+            buf += piece
+        else:
+            if buf:
+                out.append(buf)
+            buf = piece
+    if buf:
+        out.append(buf)
+    return out or [clause]
+
+
 def split_by_char_limit(text, limit, max_parts=3):
     """按「单次回复字数上限」把回复切成若干条短消息。
 
@@ -244,6 +272,12 @@ def split_by_char_limit(text, limit, max_parts=3):
     if lim <= 0:
         return [text]
     clauses = split_sentences(text) or [text]
+    # 兜底：单句超长时先按逗号强制分段（见 _wrap_long_clause 的说明），
+    # 否则"只有逗号没有句末标点"的长句会整条发出、绕过字数上限。
+    _wrapped = []
+    for _c in clauses:
+        _wrapped.extend(_wrap_long_clause(_c, lim))
+    clauses = _wrapped
     # ① 贪心打包：每段尽量贴近但不超过 limit
     parts = []
     for c in clauses:
@@ -1331,7 +1365,9 @@ class QQBotBridge:
         import os as _os
         base = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
         try:
-            # 1. 杀 NapCat 全家(D:\QQ 注入链 + 引导器)
+            # 1. 杀 NapCat 全家：引导器 NapCatWinBootMain.exe + 被 NapCat 注入的 QQ.exe
+            #    ⚠ 判据是进程名 / CommandLine 含 NapCat，**不是**安装路径（旧版按 D:\QQ 路径杀，
+            #      装到别的盘就失效，还会误杀用户自己开的 QQ）
             _sp.run(
                 ["powershell", "-NoProfile", "-Command",
                  "Get-CimInstance Win32_Process | Where-Object { "
@@ -1595,29 +1631,29 @@ class QQBotBridge:
             if _is_fluff:
                 print(f"[QQBridge] ⚠ 活泼发言为 API 兜底文案，跳过: {reply[:30]}")
                 return
-                # 对话调节：单次回复字数上限（0=不限）；活泼发言额外兜底 200 字防刷屏
-                # —— 超限不再硬截断，改为按句子边界拆成至多 2 条短消息发出（内容不丢）
-                reply = self._apply_cloth_marker(reply)
-                lively_parts = self._reply_parts(reply, 2, hard_limit=200) or [reply]
-                ok = True
-                for _i, _part in enumerate(lively_parts):
-                    ok = self._safe_send({
-                        "action": "send_msg",
-                        "params": {
-                            "message_type": "group",
-                            "group_id": int(group_id),
-                            "message": _part,
-                        },
-                        "echo": f"lively_{uuid.uuid4().hex[:8]}",
-                    }, label=f"活泼群{group_id} ")
-                    if not ok:
-                        break
-                    _tag = f"（{_i+1}/{len(lively_parts)}）" if len(lively_parts) > 1 else ""
-                    print(f"[QQBridge] 🎉 活泼群 {group_id} 发言{_tag}: {_part[:40]}...")
-                    if _i < len(lively_parts) - 1:
-                        time.sleep(_PRIVATE_SEND_INTERVAL[0])
-                if ok:
-                    reply = lively_parts[0]
+            # 对话调节：单次回复字数上限（0=不限）；活泼发言额外兜底 200 字防刷屏
+            # —— 超限不再硬截断，改为按句子边界拆成至多 2 条短消息发出（内容不丢）
+            reply = self._apply_cloth_marker(reply)
+            lively_parts = self._reply_parts(reply, 2, hard_limit=200) or [reply]
+            ok = True
+            for _i, _part in enumerate(lively_parts):
+                ok = self._safe_send({
+                    "action": "send_msg",
+                    "params": {
+                        "message_type": "group",
+                        "group_id": int(group_id),
+                        "message": _part,
+                    },
+                    "echo": f"lively_{uuid.uuid4().hex[:8]}",
+                }, label=f"活泼群{group_id} ")
+                if not ok:
+                    break
+                _tag = f"（{_i+1}/{len(lively_parts)}）" if len(lively_parts) > 1 else ""
+                print(f"[QQBridge] 🎉 活泼群 {group_id} 发言{_tag}: {_part[:40]}...")
+                if _i < len(lively_parts) - 1:
+                    time.sleep(_PRIVATE_SEND_INTERVAL[0])
+            if ok:
+                reply = lively_parts[0]
             # ⚠ 表情包开关关闭时不发（连自存池随机逻辑都不执行）——见 _stickers_on()
             for path in (resolve_sticker_files(stickers)[0] if self._stickers_on() else []):
                 if path:
