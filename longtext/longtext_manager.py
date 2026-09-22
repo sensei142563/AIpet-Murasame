@@ -275,6 +275,9 @@ class LongTextStreamThread(QThread):
             pass
 
         # 当前用户消息
+        # ⚠ 这里**不注入**【看屏幕】/【键鼠】能力规则：长文本模式是流式逐句送 TTS 的，
+        #   没有剥离指令的落点，注入了只会让她把指令念出来（而且不动手）。
+        #   要让这两个能力生效，请关掉长文本模式（config 的 longtext_enabled=false）。
         messages.append({"role": "user", "content": user_content})
 
         headers = {
