@@ -336,20 +336,3 @@ def fade_in(widget: QWidget, ms: int = 200, start: float = 0.0):
         return None
 
 
-def slide_fade_in(widget: QWidget, ms: int = 200, dx: int = 18):
-    """淡入 + 轻微横向滑入（页面切换用）"""
-    try:
-        eff = QGraphicsOpacityEffect(widget)
-        eff.setOpacity(0.0)
-        widget.setGraphicsEffect(eff)
-        a1 = QPropertyAnimation(eff, b"opacity", widget)
-        a1.setDuration(int(ms))
-        a1.setStartValue(0.0)
-        a1.setEndValue(1.0)
-        a1.setEasingCurve(QEasingCurve.OutCubic)
-        a1.finished.connect(lambda: widget.setGraphicsEffect(None))
-        a1.start(QPropertyAnimation.DeleteWhenStopped)
-        widget._fade_anim = a1
-        return a1
-    except Exception:
-        return None

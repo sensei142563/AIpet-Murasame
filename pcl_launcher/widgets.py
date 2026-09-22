@@ -3,11 +3,10 @@
 import os
 import json
 import subprocess
-import sys
 import urllib.request
 
-from PyQt5.QtCore import Qt, pyqtSignal, QSize
-from PyQt5.QtGui import (QPainter, QColor, QLinearGradient, QPainterPath, QFont, QIcon, QPixmap, QPen)
+from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtGui import QColor, QFont, QPixmap
 from PyQt5.QtWidgets import (
     QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QSpinBox, QScrollArea,
     QLineEdit, QSlider, QDoubleSpinBox, QComboBox, QTextEdit,

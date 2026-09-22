@@ -40,7 +40,6 @@ try:
 except Exception:
     pass
 
-from PyQt5.QtWidgets import QApplication
 from PyQt5.QtGui import QSurfaceFormat
 # 不再导入旧版主窗口（PCLMainWindow 已随旧界面下线）：
 # 那个导入会连带拉起 widgets.py 等重模块 → 启动变慢；
@@ -48,67 +47,36 @@ from PyQt5.QtGui import QSurfaceFormat
 
 
 def main():
-    # OpenGL 格式设置（支持 Live2D 预览）
+    # OpenGL 格式设置（支持 Live2D 预览）——必须在 QApplication 创建前
     fmt = QSurfaceFormat()
     fmt.setAlphaBufferSize(8)
     fmt.setSamples(0)
     QSurfaceFormat.setDefaultFormat(fmt)
 
-    app = QApplication(sys.argv)
-
-    # ===== 全局异常兜底：未捕获异常只记日志并跳过，不再让启动器整进程消失 =====
-    try:
-        from pcl_launcher import safety as _safety
-        _safety.install("launcher")
-    except Exception as _e:
-        print(f"[PCL] ⚠ 全局异常兜底不可用: {_e}")
-
-    # ===== Silicon 新界面：全局样式（强调色跟随主题设置）=====
-    try:
-        import sys as _sys
-        _sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        from pcl_launcher import silicon_ui
-        from pcl_launcher.colors import ACCENT_ID, THEME_COLORS, current_theme_id
-        _acc = "#4c8dff"
-        try:
-            _acc = THEME_COLORS.get(str(ACCENT_ID), {}).get("title_start", _acc)
-        except Exception:
-            pass
-        silicon_ui.install(app, accent=_acc)
-        print(f"[PCL] 界面风格: {current_theme_id()} · 强调色 {ACCENT_ID} ({_acc})")
-    except Exception as _e:
-        print(f"[PCL] ⚠ 新界面样式加载失败（回退旧样式）: {_e}")
-
     def _dbg(msg):
         try:
-            import os as _os
-            base = _os.path.dirname(_os.path.abspath(__file__))
-            with open(_os.path.join(base, "data", "launcher_start.log"), "a", encoding="utf-8") as f:
-                import datetime as _dt
+            import datetime as _dt
+            base = os.path.dirname(os.path.abspath(__file__))
+            with open(os.path.join(base, "data", "launcher_start.log"), "a", encoding="utf-8") as f:
                 f.write(f"{_dt.datetime.now():%H:%M:%S} {msg}\n")
         except Exception:
             pass
 
+    # ===== 界面装配全部交给 silicon_window.launch() =====
+    # 全局样式 / 异常兜底 / 开屏动画 / 主窗口 / 事件循环都在那里。
+    # 本文件只负责「环境准备」（sys.path、Live2D DLL、Qt 插件路径、OpenGL 格式）
+    # 与启动日志——以前这里把装配逻辑又抄了一遍，结果两边逐渐走偏
+    # （最典型：这里没开屏动画，那边全局样式又因为主题名判断写错而没装）。
+    _dbg("调用 launch() 前")
     try:
-        _dbg("构造启动器窗口前")
-        # ===== 外壳选择：新版 Silicon 界面（默认）/ 旧版界面（config.ui_shell）=====
-        # 新版外壳（旧版界面已下线）
-        _shell = "silicon"
-        from pcl_launcher.silicon_window import SiliconLauncher
-        window = SiliconLauncher()
-        _dbg(f"构造完成（外壳={_shell}）")
-        window.show()
-        _dbg("show 完成")
-        print(f"[Launcher] 窗口已显示（{_shell}），进入事件循环...")
+        from pcl_launcher.silicon_window import launch
+        rc = launch()
     except Exception as e:
         import traceback
-        _dbg("构造异常: " + repr(e) + "\n" + traceback.format_exc())
+        _dbg("launch() 异常: " + repr(e) + "\n" + traceback.format_exc())
         traceback.print_exc()
         return 1
-
-    _dbg("进入 exec_")
-    rc = app.exec_()
-    _dbg(f"exec_ 返回 {rc}")
+    _dbg(f"launch() 返回 {rc}")
     return rc
 
 

@@ -251,15 +251,7 @@ THEME_COLORS = {
     },
 }
 
-# ===== 图标路径（相对于 pcl_launcher 目录） =====
-_RESOURCES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "resources", "blocks")
-
-
-def block_icon(name: str) -> str:
-    return os.path.join(_RESOURCES, f"{name}.png")
-
-
-# ===== 主题装饰资源与控件风格（供标题栏/页面/按钮渲染） =====
+# ===== 主题资源与控件风格（供页面/按钮渲染） =====
 def _current_theme_dir() -> str:
     return os.path.join(THEME_DIR, current_theme_id())
 
@@ -278,16 +270,6 @@ def theme_asset(rel: str) -> str:
         return ""
     p = os.path.join(_current_theme_dir(), str(rel).replace("/", os.sep))
     return p if os.path.isfile(p) else ""
-
-
-def title_decor_path() -> str:
-    """标题栏装饰图（如樱花簇）；无则空串"""
-    return theme_asset((_theme_json().get("decor") or {}).get("titlebar", ""))
-
-
-def corner_decor_path() -> str:
-    """窗口角落装饰图（如散落花瓣）；无则空串"""
-    return theme_asset((_theme_json().get("decor") or {}).get("corner", ""))
 
 
 def nav_icon_path(key: str) -> str:
@@ -337,28 +319,6 @@ def primary_btn_qss(pad_v: int = 8, pad_h: int = 18, font_size: int = 13,
             background: {Color4.name()}; }}
         QPushButton:pressed {{ background: {Color2.name()}; }}
         QPushButton:disabled {{ color: rgba(255,255,255,0.6); border-color: rgba(255,255,255,0.15); }}
-    """
-
-
-def nav_img_btn_qss() -> str:
-    """导航图按钮（千恋万花素材按钮）——透明底，选中/悬停加亮框"""
-    return f"""
-        QPushButton {{ background: transparent; border: none; border-radius: {int(10*S)}px; }}
-        QPushButton:hover {{ background: rgba(255,255,255,0.18); }}
-        QPushButton:checked {{ background: rgba(255,255,255,0.30);
-            border: 2px solid rgba(255,255,255,0.7); }}
-    """
-
-
-def nav_btn_qss() -> str:
-    """导航按钮卡通化：未选中透明，选中/悬停呈白色半透明胶囊"""
-    return f"""
-        QPushButton {{ background: transparent; color: white; border: none;
-            padding: {int(6*S)}px {int(16*S)}px; font-size: {int(13*S)}px;
-            font-family: 'Microsoft YaHei'; border-radius: {int(16*S)}px; }}
-        QPushButton:hover {{ background: rgba(255,255,255,0.20); }}
-        QPushButton:checked {{ background: rgba(255,255,255,0.32);
-            border: 1px solid rgba(255,255,255,0.6); }}
     """
 
 

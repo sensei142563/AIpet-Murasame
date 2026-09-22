@@ -55,16 +55,6 @@ def _runtime_python():
 from .silicon_dialog import SiliconDialog, fade_in as _sil_fade  # noqa: E402
 
 
-def _clean_name(x) -> str:
-    """清理图层/表情名里的控制字符与替换符（避免显示成乱码方块）"""
-    try:
-        t = str(x)
-        t = "".join(ch for ch in t if ch == "\n" or ord(ch) >= 32)
-        return t.replace("\ufffd", "").strip()
-    except Exception:
-        return str(x)
-
-
 class PortraitStudio(SiliconDialog):
     """立绘工坊对话框"""
 

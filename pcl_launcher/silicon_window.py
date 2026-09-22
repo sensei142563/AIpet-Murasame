@@ -22,8 +22,7 @@ from PyQt5.QtCore import Qt, QTimer, QSize, QUrl, pyqtSignal
 from PyQt5.QtGui import (QColor, QFont, QIcon, QImage, QPainter, QPainterPath,
                          QPixmap)
 from PyQt5.QtWidgets import (QScrollArea, QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
-                             QStackedWidget, QFrame, QMessageBox, QSizePolicy,
-                             QGraphicsOpacityEffect, QScrollArea)
+                             QStackedWidget, QFrame, QMessageBox, QSizePolicy)
 
 from .colors import *          # noqa: F401,F403  (Color1..8 / Gray* / S / THEME_COLORS / btn_radius …)
 from . import silicon_ui
@@ -1532,15 +1531,6 @@ class _RoundBack(QWidget):
                 pass
 
 
-def _opacity_effect(opacity: float):
-    eff = QGraphicsOpacityEffect()
-    try:
-        eff.setOpacity(max(0.05, min(1.0, float(opacity))))
-    except Exception:
-        eff.setOpacity(1.0)
-    return eff
-
-
 class SplashScreen(QWidget):
     """开屏动画：图标 + 名称 + 进度条，淡入 → 主窗就绪后淡出"""
 
@@ -1624,25 +1614,49 @@ class SplashScreen(QWidget):
         self._anim = a
 
 
+# 开屏最短展示时长：只为让淡入淡出动画看得见。窗口构造（各页面懒加载）本来就很快，
+# 不要为了动画白等——旧值是写死的 900ms，等于每次打开启动器都白等近 1 秒。
+_SPLASH_MIN_MS = 450
+
+
 def launch() -> int:
-    """入口：启动新版启动器"""
+    """启动器统一入口：全局样式 → 异常兜底 → 开屏动画 → 主窗口 → 事件循环。
+
+    run_launcher.py 只负责环境准备（sys.path / Live2D DLL / Qt 插件路径 / OpenGL 格式），
+    界面装配一律走这里，避免两个入口各写一遍、各走各的。
+    """
     from PyQt5.QtWidgets import QApplication
     from . import silicon_ui as _sui
     from .colors import current_theme_id
     app = QApplication.instance() or QApplication(sys.argv)
+
+    # 全局异常兜底：未捕获异常只记日志并跳过，不让启动器整进程消失
     try:
         from . import safety as _safety
         _safety.install("launcher")
     except Exception as _e:
         print(f"[NewUI] ⚠ 全局异常兜底不可用: {_e}")
-    if current_theme_id() == "silicon":
-        _sui.install(app, accent=THEME_COLORS.get(str(ACCENT_ID), {}).get("title_start", "#2f6fd0"))
+
+    # 全局样式（强调色跟随设置）：Silicon 外壳是当前唯一外壳，始终安装。
+    # 旧代码写的是 `if current_theme_id() == "silicon"`，而主题默认值是 classic，
+    # 结果默认配置下这套全局样式根本没装上（只有手动切到 silicon 主题才生效）。
+    try:
+        _acc = THEME_COLORS.get(str(ACCENT_ID), {}).get("title_start", "#4c8dff")
+        _sui.install(app, accent=_acc)
+        print(f"[NewUI] 界面风格: {current_theme_id()} · 强调色 {ACCENT_ID} ({_acc})")
+    except Exception as _e:
+        print(f"[NewUI] ⚠ 全局样式加载失败: {_e}")
+
     splash = SplashScreen()
     splash.show()
     splash.fade(1.0, 260)
     splash.set_progress(25, "加载界面样式…")
 
-    win = SiliconLauncher()
+    try:
+        win = SiliconLauncher()
+    except Exception:
+        splash.close()      # 先收掉开屏，再把异常抛给入口记日志（不吞异常）
+        raise
 
     def _ready():
         try:
@@ -1658,7 +1672,7 @@ def launch() -> int:
             except Exception:
                 pass
 
-    QTimer.singleShot(900, _ready)
+    QTimer.singleShot(_SPLASH_MIN_MS, _ready)
     return app.exec_()
 
 
