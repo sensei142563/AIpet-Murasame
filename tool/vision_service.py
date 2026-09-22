@@ -276,17 +276,13 @@ def describe(image_b64: str, prompt: str = "", max_new: int = 256,
              max_side_px: int = 0) -> str:
     """识别一张图（max_side_px>0 时按调用方要求压缩，越小越快）。
 
-    ⚠ 用完要不要马上把模型挪出显存：
-      · 打游戏/全屏时 → 立刻挪（把显卡让给游戏，这是主人要的）
-      · 平时 → **不挪**，保持常驻。以前默认 30 秒就卸，结果每 150 秒一次识别都要
-        重新把约 6G 模型搬上显卡，正好和语音合成抢显卡 ——
-        实测语音合成从 1.5~7 秒恶化成 24~54 秒，听起来就像"她没说话"。
+    ⚠ 显存策略：**保持常驻**，用完不卸。
+      主人要求"打游戏时识别也要快"，而卸了再用的代价是每次重新搬约 6G 上显卡（实测 7 秒）——
+      打游戏本来显卡就吃紧，再叠 7 秒就更慢了。所以统一交给 idle_guard 按闲置阈值处理
+      （默认 300 秒没人用才让出显存），想手动腾显存可以打 /unload。
     """
     with _lock:
-        out = _describe_locked(image_b64, prompt, max_new, max_side_px)
-    if _game_mode():                      # 打游戏中：用完立刻让出显存
-        _offload_now("全屏游戏/演示中，用完让出显存")
-    return out
+        return _describe_locked(image_b64, prompt, max_new, max_side_px)
 
 
 def _describe_locked(image_b64: str, prompt: str, max_new: int, max_side_px: int = 0) -> str:

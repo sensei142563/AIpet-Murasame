@@ -484,12 +484,46 @@ def vision_fast_size() -> int:
     视觉编码耗时随像素数近似平方增长，实测差距很大：
     1280px（1270 个图像 token）→ 40~70 秒；768px → 约十几秒。
     所以**自动识别也走这一档**（以前它没传参数，用了默认的 1280，慢到像卡住）。
-    想更快就调小 config 的 vision_fast_max_side（580 大约再快一倍）。
+
+    ★ 打游戏/全屏时再小一档（config 的 vision_game_max_side，默认 640）：
+      游戏本来就在抢显卡，图小一半、编码明显更快 —— 主人要求"打游戏也要识别快"。
+    想整体更快就调小 vision_fast_max_side（580 大约再快一倍）。
     """
     try:
-        return max(280, int(get_config("./config.json").get("vision_fast_max_side") or 768))
+        base = max(280, int(get_config("./config.json").get("vision_fast_max_side") or 768))
     except Exception:
-        return 768
+        base = 768
+    try:
+        from tool.perf_guard import game_mode
+        if game_mode():
+            try:
+                game = max(280, int(get_config("./config.json").get("vision_game_max_side") or 640))
+            except Exception:
+                game = 640
+            return min(base, game)
+    except Exception:
+        pass
+    return base
+
+
+def vision_fast_tokens() -> int:
+    """自动/按需看屏幕时让她最多输出多少 token。
+
+    ⚠ 这才是耗时大头：实测生成 87 个 token 约 30 秒（0.3 秒/token，显卡还被游戏占着），
+      而图缩到 768 也才省十几秒。所以描述要短——两三句话足够她接话。
+      打游戏/全屏时再短一点（64）。
+    """
+    try:
+        base = max(48, int(get_config("./config.json").get("vision_fast_max_new") or 80))
+    except Exception:
+        base = 80
+    try:
+        from tool.perf_guard import game_mode
+        if game_mode():
+            return min(base, 64)
+    except Exception:
+        pass
+    return base
 
 
 def _local_vision_describe(image_path: str, prompt: str = "",

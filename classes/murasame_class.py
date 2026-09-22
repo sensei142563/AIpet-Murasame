@@ -20,7 +20,8 @@ from PyQt5.QtWidgets import QLabel
 from classes.Worker_class import ScreenWorker
 from classes.Worker_class import qwen3_lora_Worker, cloud_API_Worker, CameraWorker
 from tool.config import get_config
-from tool.chat import ollama_qwen25vl, describe_image
+from tool.chat import (ollama_qwen25vl, describe_image,
+                       vision_fast_size, vision_fast_tokens)
 from tool.cloud_API_chat import cloud_vl
 from tool.generate import generate_fgimage
 from longtext.longtext_manager import LongTextManager
@@ -1391,7 +1392,7 @@ class Murasame(QLabel):
                     if self.force_stop:
                         print("[vision] 已中断生成")
                         return
-                    desc = describe_image(path, max_side=vision_fast_size(), max_new=110)
+                    desc = describe_image(path, max_side=vision_fast_size(), max_new=vision_fast_tokens())
                     if self.force_stop:
                         print("屏幕回复 已中断生成")
                         return
@@ -2344,7 +2345,7 @@ class Murasame(QLabel):
         try:
             import tempfile
             from tool.screen_capture import capture_qimage, is_blank as _is_blank_img
-            from tool.chat import describe_image, vision_fast_size
+            from tool.chat import describe_image, vision_fast_size, vision_fast_tokens
             from tool.screen_intent import build_screen_prompt
             # ⚠ 用 Win32 抓屏（tool.screen_capture）：这里跑在后台线程，
             #   Qt 的 QScreen.grabWindow 只能 GUI 线程用，在这里调会崩进程。
@@ -2361,7 +2362,7 @@ class Murasame(QLabel):
             fd.close()
             _img.save(tmp_name, "PNG")
             # 主人正在等 → 用快速档（896px：编码约 6~8 秒，比 1280px 快一倍多）
-            desc = describe_image(tmp_name, max_side=vision_fast_size(), max_new=140)
+            desc = describe_image(tmp_name, max_side=vision_fast_size(), max_new=vision_fast_tokens())
             if not str(desc or "").strip():
                 print("[桌宠] ⚠ 视觉识别没返回内容 → 退回普通回答")
                 self._request_dialog.emit(user_text, "user", False)
