@@ -619,6 +619,11 @@ def start_tts_api():
     cfg = get_config("./config.json")
     tts_type = cfg.get("tts_type", "local")
     if tts_type == "local":
+        # 「启用短语音」关掉时不必把服务拉起来：GPT-SoVITS 一启动就会把模型加载进显存，
+        # 白占几 GB。开关的语义是"不用短语音"，那就服务也别起。
+        if not as_bool(cfg.get("voice_synthesis_enable"), True):
+            log("短语音已在设置里关闭，跳过 GPT-SoVITS 服务启动。", "INFO")
+            return None
         log("检测到 tts_type = local", "INFO")
         python_path = os.path.abspath(r".\GPT-SoVITS\runtime\python.exe")
         script_path = os.path.abspath(r".\GPT-SoVITS\api_v2.py")
