@@ -8,10 +8,24 @@ from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtGui import QGuiApplication
 
 from tool.cloud_API_chat import cloud_portrait, cloud_translate, cloud_talk, cloud_emotion
-from tool.config import get_config
+from tool.config import as_bool, get_config
 from tool.chat import qwen3_lora, ollama_qwen3_sentence, ollama_qwen3_portrait, gpt_sovits_tts, ollama_qwen3_emotion, ollama_qwen3_translate
 
 portrait_type = get_config("./config.json")['portrait']
+
+
+def _voice_synthesis_enabled() -> bool:
+    """短语音合成开关（启动器 → 设置 → 语音合成与识别）。
+
+    两个 Worker（本地模型 / 云端模型）共用这一份判断 —— 之前两处各写一遍，
+    其中一处写成 bool(config值)，而配置里存的是字符串 "false"，
+    bool("false") == True → 关掉语音也照样合成，还因为 TTS 慢而拖住整轮回复。
+    每次都重新读配置，所以设置里改完立即生效。
+    """
+    try:
+        return as_bool(get_config("./config.json").get("voice_synthesis_enable"), True)
+    except Exception:
+        return True
 
 
 def current_portrait_type():
@@ -161,11 +175,7 @@ class qwen3_lora_Worker(QThread):
 
         # 并发执行所有TTS任务（索引定位结果，杜绝空句导致的错位）
         # 语音合成开关（启动器 设置→桌宠 可关）：关闭时跳过全部 TTS（合成较慢、会拖慢回复）
-        _voice_on = True
-        try:
-            _voice_on = bool(get_config("./config.json").get("voice_synthesis_enable", True))
-        except Exception:
-            _voice_on = True
+        _voice_on = _voice_synthesis_enabled()
         voices = [None] * len(translate)
         if not _voice_on:
             print("[tts] 语音合成已关闭（可在启动器 设置→桌宠 中开启），跳过 TTS")
@@ -261,18 +271,8 @@ class cloud_API_Worker(QThread):
             reply_list, translate_list, emotion_list, portrait_list)
 
         voices = [None] * len(translate_list)
-        # ⚠ 修复：设置里那个开关存的是**字符串** "false"（滑条写的就是 "true"/"false"），
-        #   而 bool("false") == True → 关了语音也照样合成，还会因为 TTS 服务慢而卡住整轮回复。
-        #   这里按字符串语义解析（false/0/off/no 都算关），并且每次都重新读配置（改完立即生效）。
-        _voice_on = True
-        try:
-            _v = get_config("./config.json").get("voice_synthesis_enable", True)
-            if isinstance(_v, str):
-                _voice_on = _v.strip().lower() in ("true", "1", "on", "yes", "开", "开启")
-            else:
-                _voice_on = bool(_v)
-        except Exception:
-            _voice_on = True
+        # 短语音开关（字符串语义解析见 _voice_synthesis_enabled，每次都重读配置）
+        _voice_on = _voice_synthesis_enabled()
         if not _voice_on:
             print("[tts] 语音合成已关闭（设置里可开启）→ 本轮不合成语音，直接出文字")
         else:

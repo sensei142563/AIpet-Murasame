@@ -268,6 +268,76 @@ def ensure_cpu_torch():
         return False
 
 
+def _want_cuda_torch(cfg) -> bool:
+    """是否需要给项目 venv 装 CUDA 版 torch。
+
+    只在「全局显卡加速开着」且下面任一成立时需要：
+      - 本地模型（model_type=local）要 GPU 推理；
+      - 长语音（F5-TTS）开着、且它自己的 GPU 加速也开着 —— F5 服务是用**项目解释器**
+        跑的，venv 里的 torch 不是 CUDA 版就永远上不了 GPU。
+    短语音（GPT-SoVITS）用的是整合包自带的解释器，跟本 venv 的 torch 无关。
+    """
+    if not as_bool(cfg.get("gpu_accel"), True):
+        return False
+    if str(cfg.get("model_type", "")).strip().lower() == "local":
+        return True
+    long_on = as_bool(cfg.get("longtext_enabled"), True) and as_bool(cfg.get("longtts_enable"), True)
+    return long_on and as_bool(cfg.get("longtts_gpu"), True)
+
+
+def _tts_use_gpu(cfg, key: str) -> bool:
+    """某个语音功能是否走 GPU：全局显卡加速 + 它自己的开关，都为真才走。"""
+    return as_bool(cfg.get("gpu_accel"), True) and as_bool(cfg.get(key), True)
+
+
+def _gsv_config_with_device(work_dir: str, use_gpu: bool):
+    """为 GPT-SoVITS 生成一份「改过 custom.device」的 tts_infer.yaml 副本，返回绝对路径。
+
+    - 只改 custom: 段 —— TTS_Config 只取这一段（TTS.py: `configs_.get("custom", ...)`）；
+    - **不改整合包里的原文件**（第三方文件，改坏了不好还原）；api_v2.py 支持 `-c` 指定配置路径；
+    - 写 cuda 也是安全的：TTS_Config 发现 torch.cuda.is_available() 为假时会自己回退 CPU
+      （并把 is_half 关掉），所以 A 卡/无 CUDA 机器不会因此崩；
+    - 解析不出来就返回 None（调用方退回整合包自带配置，并在日志里说明）。
+    """
+    src = os.path.join(work_dir, "GPT_SoVITS", "configs", "tts_infer.yaml")
+    if not os.path.isfile(src):
+        return None
+    try:
+        with open(src, "r", encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    except Exception:
+        return None
+
+    device = "cuda" if use_gpu else "cpu"
+    half = "true" if use_gpu else "false"
+    out, in_custom, patched_dev = [], False, False
+    for line in lines:
+        stripped = line.strip()
+        indent = len(line) - len(line.lstrip())
+        if indent == 0 and stripped and not stripped.startswith("#"):
+            in_custom = stripped.startswith("custom:")     # 顶层键：只看 custom 段
+        elif in_custom and indent > 0:
+            if stripped.startswith("device:"):
+                line = " " * indent + "device: " + device
+                patched_dev = True
+            elif stripped.startswith("is_half:"):
+                line = " " * indent + "is_half: " + half
+        out.append(line)
+
+    if not patched_dev:
+        return None
+    base = os.path.dirname(os.path.abspath(__file__))
+    dst = os.path.join(base, "tmp", "gsv_tts_infer_%s.yaml" % device)
+    try:
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        with open(dst, "w", encoding="utf-8") as f:
+            f.write("\n".join(out) + "\n")
+    except Exception as e:
+        log(f"写入 GPT-SoVITS 配置副本失败: {e}", "WARN")
+        return None
+    return dst
+
+
 def setup_runtime_and_pytorch(config_path="config.json", cfg=None, hardware_type=None):
     # Step 1️⃣ 判断配置文件
     if cfg is None and not os.path.exists(config_path):
@@ -290,16 +360,17 @@ def setup_runtime_and_pytorch(config_path="config.json", cfg=None, hardware_type
         log(f"未识别的 model_type: {model_type}，默认视为 DeepSeek 云端模式。", "WARN")
         return "deepseek"
 
-    if model_type == "deepseek":
-        log("检测到 DeepSeek 云端模式，跳过 PyTorch 安装。")
-        ensure_cpu_torch()
-        return "deepseek"
-    elif model_type == "qwen":
-        log("检测到 Qwen 云端模式，跳过 PyTorch 安装。")
-        ensure_cpu_torch()
-        return "qwen"
-
-    log("检测到本地运行模式。")
+    cloud = model_type in SUPPORTED_CLOUD_MODEL_TYPES
+    if cloud:
+        log(f"检测到 {model_type} 云端模式，跳过本地模型的 PyTorch 安装。")
+        if not _want_cuda_torch(cfg):
+            ensure_cpu_torch()
+            return model_type
+        # 云端对话本身不需要显卡，但**本地语音**（F5-TTS）开了 GPU 加速：
+        # F5 用项目解释器跑 → venv 里必须是 CUDA 版 torch，所以继续往下走显卡/CUDA 检测。
+        log("但长语音（F5-TTS）已开启 GPU 加速 → 继续检测显卡与 CUDA，改装 CUDA 版 PyTorch。", "INFO")
+    else:
+        log("检测到本地运行模式。")
 
     # 如果是CPU模式，直接跳过PyTorch安装
     if hardware_type is None:
@@ -470,8 +541,11 @@ def _find_f5tts_python():
 def start_f5tts_api():
     """启动 F5-TTS HTTP 服务（端口 9881，长文本模式中文语音合成）"""
     cfg = get_config("./config.json")
-    if cfg.get("longtext_enabled") != "true":
+    if not as_bool(cfg.get("longtext_enabled"), True):
         log("长文本模式已关闭，跳过 F5-TTS 服务启动。", "INFO")
+        return None
+    if not as_bool(cfg.get("longtts_enable"), True):
+        log("长语音已在设置里关闭，跳过 F5-TTS 服务启动。", "INFO")
         return None
 
     # F5-TTS 为可选语音库：多候选探测（runtime\venv → 系统 Python），谁有 f5_tts 用谁。
@@ -481,11 +555,17 @@ def start_f5tts_api():
         log("如需语音功能：安装 f5-tts 后重试（推荐在 runtime\\venv 内安装）。", "INFO")
         return None
 
-    log("检测到长文本模式已开启，启动 F5-TTS 服务（新控制台）...", "INFO")
+    # 设备 = 全局显卡加速 + 「长语音 GPU 加速」都为真才用 cuda；
+    # F5 服务内部还会再确认一次 torch.cuda.is_available()，不可用会自己回退 CPU。
+    _dev = "cuda" if _tts_use_gpu(cfg, "longtts_gpu") else "cpu"
+    _env = dict(os.environ)
+    _env["F5TTS_DEVICE"] = _dev
+    log(f"检测到长文本模式已开启，启动 F5-TTS 服务（新控制台，设备 {_dev.upper()}）...", "INFO")
     try:
         proc = subprocess.Popen(
             [f5_py, "-m", "longtext.f5tts_server"],
             cwd=os.path.dirname(os.path.abspath(__file__)),
+            env=_env,
             creationflags=(0x00000010 if os.name == "nt" else 0)
         )
         time.sleep(3)
@@ -498,7 +578,8 @@ def start_f5tts_api():
 
 def start_tts_api():
     """使用 GPT-SoVITS 自带解释器在新的控制台窗口中启动 TTS API。"""
-    tts_type = get_config("./config.json")["tts_type"]
+    cfg = get_config("./config.json")
+    tts_type = cfg.get("tts_type", "local")
     if tts_type == "local":
         log("检测到 tts_type = local", "INFO")
         python_path = os.path.abspath(r".\GPT-SoVITS\runtime\python.exe")
@@ -510,11 +591,24 @@ def start_tts_api():
             log("提示：将 GPT-SoVITS 整合包放入项目根目录，或 config 中 tts_type 改用 cloud。", "INFO")
             return None
 
+        # 设备 = 全局显卡加速 + 「短语音 GPU 加速」；改写的是 tmp/ 下的配置副本，
+        # 不动整合包里的原文件。整合包自己没装 CUDA 时，TTS_Config 会回退 CPU。
+        _gpu = _tts_use_gpu(cfg, "short_tts_gpu")
+        cmd = [python_path, script_path]
+        _cfg_copy = _gsv_config_with_device(work_dir, _gpu)
+        if _cfg_copy:
+            cmd += ["-c", _cfg_copy]
+            log(f"短语音设备: {'CUDA（GPU 加速）' if _gpu else 'CPU'}", "INFO")
+        elif not _gpu:
+            log("⚠ 未能改写 GPT-SoVITS 配置 → 短语音仍按整合包自带设置运行。", "WARN")
+            log("  如需强制 CPU，请手动把 GPT-SoVITS/GPT_SoVITS/configs/tts_infer.yaml "
+                "的 custom.device 改成 cpu。", "INFO")
+
         log(f"使用解释器 {python_path} 启动 TTS 服务（新控制台）...")
 
         try:
             proc = subprocess.Popen(
-                [python_path, script_path],
+                cmd,
                 cwd=work_dir,
                 creationflags=(0x00000010 if os.name == "nt" else 0)
             )

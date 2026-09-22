@@ -137,9 +137,21 @@ class PCLSettingsPanel(QWidget):
 
         # ===== ④ 语音与视觉识别 =====
         self._section("语音合成与识别", "🗣")
-        self._add_slider("voice_synthesis_enable", "启用语音合成（关闭可加快对话回复）",
+        # 短语音 = 日语 GPT-SoVITS（桌面短句）；长语音 = 中文 F5-TTS（长文本模式）
+        self._add_slider("voice_synthesis_enable", "启用短语音（日语）",
                          ["false", "true"], "true",
                          hint="开启时每条回复都会合成语音（较慢）；关闭后只显示文字，回复明显更快")
+        self._add_slider("short_tts_gpu", "短语音 GPU 加速", ["false", "true"], "true",
+                         hint="短语音（GPT-SoVITS）是否用 NVIDIA 显卡合成。\n"
+                              "开（默认）：用显卡；整合包没装 CUDA 时会自动回退 CPU。\n"
+                              "关：强制 CPU（更稳，但合成明显更慢）。")
+        self._add_slider("longtts_enable", "启用长语音（中文）", ["false", "true"], "true",
+                         hint="长语音 = 长文本模式用的 F5-TTS 中文语音服务。\n"
+                              "关闭后不启动该服务（长文本仍可纯文字显示）。")
+        self._add_slider("longtts_gpu", "长语音 GPU 加速", ["false", "true"], "true",
+                         hint="长语音（F5-TTS）是否用 NVIDIA 显卡合成。\n"
+                              "开（默认）：检测到 CUDA 就用显卡，否则自动回退 CPU；\n"
+                              "关：强制 CPU。")
         self._add_slider("tts_type", "TTS 语音合成", ["local", "cloud"], "local")
         self._add_model_combo(
             "vision_model_name", "视觉识别模型名",
@@ -506,6 +518,9 @@ class PCLSettingsPanel(QWidget):
             self._set_if("short_model_name", cfg.get("short_model_name", "qwen-plus"))
             self._set_slider("tts_type", cfg.get("tts_type", "local"))
             self._set_slider("voice_synthesis_enable", cfg.get("voice_synthesis_enable", "true"))
+            self._set_slider("short_tts_gpu", cfg.get("short_tts_gpu", "true"))
+            self._set_slider("longtts_enable", cfg.get("longtts_enable", "true"))
+            self._set_slider("longtts_gpu", cfg.get("longtts_gpu", "true"))
             self._set_slider("portrait_auto_switch", cfg.get("portrait_auto_switch", "true"))
             self._set_slider("portrait", cfg.get("portrait", "b"))
             self._set_slider("screen_type", cfg.get("screen_type", "false"))
@@ -579,6 +594,9 @@ class PCLSettingsPanel(QWidget):
             cfg["screen_type"] = self._get_slider("screen_type")
             cfg["voice_trigger"] = self._get_slider("voice_trigger")
             cfg["voice_synthesis_enable"] = self._get_slider("voice_synthesis_enable")
+            cfg["short_tts_gpu"] = self._get_slider("short_tts_gpu")
+            cfg["longtts_enable"] = self._get_slider("longtts_enable")
+            cfg["longtts_gpu"] = self._get_slider("longtts_gpu")
             cfg["portrait_auto_switch"] = self._get_slider("portrait_auto_switch")
             cfg["live2d_enabled"] = self._get_slider("live2d_enabled")
             cfg["longtext_enabled"] = self._get_slider("longtext_enabled")

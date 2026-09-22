@@ -682,6 +682,10 @@ main.py (PyQt5 主窗口 + FastAPI 28565 + 快捷键监听 + 托盘)
   "user_name": "你的名字",
   "model_type": "qwen",
   "tts_type": "local",
+  "voice_synthesis_enable": "true",
+  "short_tts_gpu": "true",
+  "longtts_enable": "true",
+  "longtts_gpu": "true",
   "gpu_accel": "true",
   "screen_type": "false",
   "voice_trigger": "false",
@@ -720,13 +724,17 @@ main.py (PyQt5 主窗口 + FastAPI 28565 + 快捷键监听 + 托盘)
 | 配置项 | 说明 |
 |--------|------|
 | `model_type` | 短文本对话族：`qwen`（推荐）/ `deepseek` / `local`（本地 Ollama） |
-| `gpu_accel` | 显卡加速开关（`"true"` 默认开）：开启时检测 NVIDIA 显卡 + CUDA 版本，并安装匹配的 CUDA 版 PyTorch；**不是 N 卡或没装 CUDA 会自动回退 CPU**。关闭则直接用 CPU 并跳过整套显卡检测。只影响本地模型 / 本地语音，云端对话、QQ、微信不受影响 |
+| `gpu_accel` | 显卡加速**总开关**（`"true"` 默认开）：开启时检测 NVIDIA 显卡 + CUDA 版本，并安装匹配的 CUDA 版 PyTorch；**不是 N 卡或没装 CUDA 会自动回退 CPU**。关闭则直接用 CPU 并跳过整套显卡检测。它与下面的 `short_tts_gpu` / `longtts_gpu` 是「总开关 × 各自开关」的关系——两个都为开，那个语音功能才走 GPU |
 | `short_model_name` | 短文本模型名（默认 `qwen-plus`；`deepseek` 族默认 `deepseek-v4-flash`） |
 | `longtext_model` | 长文本对话族：`qwen` / `deepseek`（默认） |
 | `longtext_model_name` | 长文本模型名（默认 `deepseek-v4-flash`；`qwen` 族默认 `qwen-plus`） |
 | `vision_model_name` | 视觉识别模型名（默认 `qwen3-vl-plus`，QQ识图/摄像头/微信识图统一使用） |
 | `reasoning_level` | 推理等级：`off`（默认，最省 token）/ `low` / `high` / `max`。DeepSeek 四档完整支持；Qwen3 系仅开关两档；不支持的模型自动忽略 |
 | `tts_type` | `local`（GPT-SoVITS）/ `cloud`（云端 TTS） |
+| `voice_synthesis_enable` | **短语音（日语 GPT-SoVITS）开关**，`"true"` 默认开。关掉后只出文字，回复明显更快 |
+| `short_tts_gpu` | 短语音是否用 NVIDIA 显卡合成（`"true"` 默认开）。整合包没装 CUDA 时会自动回退 CPU |
+| `longtts_enable` | **长语音（中文 F5-TTS）开关**，`"true"` 默认开。关掉后不启动 F5-TTS 服务（长文本仍可纯文字显示） |
+| `longtts_gpu` | 长语音是否用 NVIDIA 显卡合成（`"true"` 默认开）。检测不到 CUDA 会自动回退 CPU |
 | `longtext_enabled` | 长文本模式总开关（`"true"` 启用） |
 | `longtext_tts_type` | 长文本 TTS 引擎（当前仅 `f5tts`） |
 | `longtext_ref_voice` | F5-TTS 参考音频（音色克隆，3-5 秒最佳） |
