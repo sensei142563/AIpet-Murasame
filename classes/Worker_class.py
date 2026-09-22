@@ -184,6 +184,15 @@ def _handle_pc_control(reply: str, owner, is_auto: bool) -> str:
         _clean = _pc.strip(reply)
         if not _acts:
             return _clean
+        # ── 兜底：主人只是让你"陪着玩/陪你聊"时，不要真的去操作电脑 ──
+        #    （用户反馈：他说"陪我打火影"，桌宠却去点开始菜单想打开火影）
+        if not is_auto:
+            try:
+                if _pc.looks_like_chat_only(getattr(owner, "user_input", "")):
+                    print("[桌宠] 💬 主人只是要人陪 → 这轮不动手（已忽略指令）")
+                    return _clean or "好啊，你打我看——我在这儿。"
+            except Exception:
+                pass
         print(f"[桌宠] 她请求操作电脑：{len(_acts)} 个动作（{'自主' if is_auto else '受命'}）")
         print(f"[桌宠] 🖥 她要做的：{_pc.describe(_acts)}")
         _emit_status(owner, "正在操作电脑……")

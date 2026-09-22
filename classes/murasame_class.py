@@ -2119,24 +2119,33 @@ class Murasame(QLabel):
         except Exception as e:
             print(f"[桌宠] ⚠ 窗口尺寸兜底失败: {e}")
 
-    def _clamp_to_screen(self):
+    def _clamp_to_screen(self, size=None):
         """把窗口挪回屏幕内。
 
         立绘尺寸是「首次合成后锁死」的，而保存的位置是按**旧的窗口尺寸**算的 →
         启动时窗口一变宽/变高，右下角就跑到屏幕外，看起来"立绘只显示一半"（用户反馈）。
-        每次锁定尺寸/显示之后都调一次这个。
+
+        ⚠ size 一定要由调用方按"将要生效的尺寸"传进来（Qt 的 setFixedSize 是**异步**生效的，
+          紧接着读 self.height() 往往还是旧值）。以前就在这里读旧高度：
+          新窗口是 864 高，却按旧的 ~465 算，算出"最多只能放到 y=615"，
+          于是先把她放到 615，下一轮回复时高度已经是 864，又把她拉回 y=216 ——
+          用户看到的就是"对话时桌宠位置突然改变"（日志实锤 615/620/619 → 216）。
         """
         try:
             from PyQt5.QtGui import QGuiApplication
             scr = QGuiApplication.screenAt(self.frameGeometry().center()) or QGuiApplication.primaryScreen()
             g = scr.availableGeometry()
-            w, h = self.width(), self.height()
+            if size is not None:
+                w, h = int(size.width()), int(size.height())
+            else:
+                w, h = self.width(), self.height()
             x, y = self.x(), self.y()
             nx = min(max(x, g.x()), max(g.x(), g.x() + g.width() - w))
             ny = min(max(y, g.y()), max(g.y(), g.height() - h))
             if (nx, ny) != (x, y):
                 self.move(nx, ny)
-                print(f"[桌宠] 立绘尺寸变化 → 挪回屏幕内 ({x},{y}) → ({nx},{ny})")
+                print(f"[桌宠] 立绘尺寸变化 → 挪回屏幕内 ({x},{y}) → ({nx},{ny})"
+                      f"（按 {w}x{h} 算）")
             # ★ 启动自检：把关键几何打进日志，万一还出现"立绘只显示一半"，
             #   这一行就能看出是窗口、立绘还是屏幕对不上。
             if not getattr(self, "_geom_logged", False):
@@ -4231,7 +4240,9 @@ class Murasame(QLabel):
                 self._portrait_max_w = max(int(getattr(self, "_portrait_max_w", 0) or 0), _lock.width())
                 self.setFixedSize(_lock.size())
                 self._ensure_window_fits_pixmap(_lock)   # 窗口绝不能比图窄（否则右侧被裁）
-                self._clamp_to_screen()      # 尺寸变了可能有一部分跑到屏幕外
+                # ⚠ 传目标尺寸进去：setFixedSize 是异步生效的，这里读 self.height() 会是旧值
+                #   → 按旧高度算边界会把她放到屏幕下方，下一轮又拉回来（位置乱跳）。
+                self._clamp_to_screen(_lock.size())
                 # ★ 锁定尺寸后必须按"最终窗口宽度"重算字号：
                 #   字号是按文字区宽度算的，而首帧时窗口还是临时尺寸（比最终大一截），
                 #   不重算就会出现"刚出现的字比对话一次后大一圈"（用户反馈）。
