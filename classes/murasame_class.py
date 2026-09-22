@@ -600,7 +600,14 @@ class Murasame(QLabel):
         return bool(getattr(self, "_overlay_visible", False))
 
     def _set_overlay_click_through(self, enabled: bool):
-        """文字层点击穿透（Windows WS_EX_TRANSPARENT）：鼠标点击穿过文字层直达 Live2D 模型"""
+        """文字层点击穿透（Windows WS_EX_TRANSPARENT）：鼠标点击穿过文字层直达 Live2D 模型
+
+        ⚠ 只有 Live2D 模式才允许开：普通 2D 模式下开这个 = 把桌宠自己的窗口变成
+          鼠标穿透，点它、点按钮全都没反应，而且没有路径会关回来
+          （用户反馈"有时候点不了桌宠和按钮"，实测那时窗口扩展样式是 0x800A8）。
+        """
+        if enabled and not getattr(self, "_live2d_mode", False):
+            return
         if os.name != "nt":
             return
         try:
@@ -1595,6 +1602,33 @@ class Murasame(QLabel):
         """检查系统空闲时间并在阈值上触发对话"""
         idle_seconds = get_idle_seconds()
 
+        # ── 自愈①：非 Live2D 模式绝不该保持"点击穿透"（那会把整只桌宠变成点不到）──
+        #    只要有任何一条路径误开了它，这里每秒都会把它关回来。
+        try:
+            if not self._live2d_mode and getattr(self, "_overlay_click_through", False):
+                print("[桌宠] 🔧 检测到非 Live2D 模式还在点击穿透 → 已关闭（否则点不了桌宠）")
+                self._set_overlay_click_through(False)
+        except Exception:
+            pass
+
+        # ── 自愈②：没有在跑的线程、也没在放语音，却还挂着"她在说话" → 释放对话锁 ──
+        #    否则点她只会得到"她还在说话/思考"，看起来就是"点不了"。
+        try:
+            _w = getattr(self, "worker", None)
+            if ((_w is None or not _w.isRunning())
+                    and self._talking and not getattr(self, "_stream_playing", False)):
+                _since = float(getattr(self, "_busy_since", 0) or 0)
+                if not _since:
+                    self._busy_since = time.time()
+                elif time.time() - _since > 30:
+                    print("[桌宠] ⏱ 卡在「她还在说话」超过 30 秒 → 释放对话锁（点击恢复可用）")
+                    self._busy_since = 0
+                    self._clear_thinking_if_stuck()
+            else:
+                self._busy_since = 0
+        except Exception:
+            pass
+
         # 如果已经从离开状态回来，并且离开超过 60 秒，则问候一次“欢迎回来”
         if (
                 idle_seconds <= self.idle_thinking_seconds
@@ -1866,6 +1900,7 @@ class Murasame(QLabel):
             if _q2:
                 _t2, _r2 = _q2.pop(0)
                 print(f"[桌宠] ▶ 这一轮说完了，继续回排队的消息（剩 {len(_q2)}）：{str(_t2)[:20]}")
+                self._replaying = True          # 标记"这是队列回放"，不要再塞回队列
                 QTimer.singleShot(400, lambda: self.start_thread(_t2, _r2))
         except Exception as _e:
             print(f"[桌宠] ⚠ 处理排队消息失败: {_e}")
@@ -1992,6 +2027,18 @@ class Murasame(QLabel):
             if _busy:
                 if role == "user":
                     _q = getattr(self, "_pending_msgs", None)
+                    if getattr(self, "_replaying", False):
+                        # ★ 这条是从队列里回放的：她还忙着（多半在朗读）→ 过一会儿重试，
+                        #   绝不能又塞回队列。以前就是"取出 → 发现还忙 → 又排回去"来回打转，
+                        #   队列只涨不消、她永远显示忙碌，点她全被忽略（用户反馈"点不了桌宠"）。
+                        _try = int(getattr(self, "_replay_tries", 0) or 0)
+                        if _try < 15:
+                            self._replay_tries = _try + 1
+                            print(f"[桌宠] ⏳ 排队的消息等她说完再回（第 {_try + 1} 次等）")
+                            QTimer.singleShot(1200, lambda: self.start_thread(text, role))
+                            return
+                        self._replay_tries = 0
+                        print("[桌宠] ⚠ 排队的消息等太久 → 直接放行")
                     if _q is None:
                         _q = []
                         self._pending_msgs = _q
@@ -2003,6 +2050,12 @@ class Murasame(QLabel):
                 return
         except Exception as _e:
             print(f"[桌宠] ⚠ 排队判断失败（照常继续）: {_e}")
+        # 这条消息被接受了 → 清掉队列回放的标记
+        try:
+            self._replaying = False
+            self._replay_tries = 0
+        except Exception:
+            pass
         # 长文本模式下：识别触发（t=True）在流式输出中自动跳过，空闲时走长文本流式
         # ── 主人让我看屏幕 → 当场抓屏识别 ──
         # 以前只有「定时抓屏」和「截图按钮」会调用视觉模型；直接问她
@@ -3788,7 +3841,13 @@ class Murasame(QLabel):
             self.preedit_text = ""
             self._set_ime(False)
             try:
-                self._set_overlay_click_through(True)
+                # ⚠ 只有 Live2D 模式才该恢复"点击穿透"（那是给模型上层的文字层用的）。
+                #   普通 2D 模式下执行这句 = 把**桌宠自己的窗口**整个变成鼠标穿透，
+                #   点它、点按钮全都没反应，而且没有别的路径会把它关回来
+                #   （用户反馈"有时候点不了桌宠和按钮"，实测窗口扩展样式确实是 0x800A8，
+                #   含 WS_EX_TRANSPARENT）。
+                if self._live2d_mode:
+                    self._set_overlay_click_through(True)
             except Exception:
                 pass
             self.display_text = getattr(self, "_last_real_text", "") or ""
