@@ -167,6 +167,26 @@ def _compute_hash_embedding(face_img: np.ndarray) -> np.ndarray:
     """三哈希 3072 位 embedding（bool 数组）"""
     return _triple_hash(face_img)
 
+
+def _augment_image(face_img, brightness=(0.7, 1.0, 1.4), angles=(-15, -10, -5, 5, 10, 15)):
+    """数据增强变体（3 亮度 × 6 角度 = 18 张，不含原图）。
+
+    与 ArcFace 分支里内联的那段增强保持一致，这样「有 insightface」和
+    「没有 insightface 走哈希回退」两条路径的模板质量才不会差一截。
+    ⚠ 历史上这里调用的是一个从未定义过的同名函数，导致没装 insightface 的机器
+      一注册人脸就 NameError（被上层 try 吞掉，表现为「注册失败」）。
+    """
+    out = []
+    if face_img is None or getattr(face_img, "size", 0) == 0:
+        return out
+    rows, cols = face_img.shape[:2]
+    for bf in brightness:
+        bright = face_img.copy() if bf == 1.0 else cv2.convertScaleAbs(face_img, alpha=bf, beta=0)
+        for ang in angles:
+            M = cv2.getRotationMatrix2D((cols / 2, rows / 2), ang, 1.0)
+            out.append(cv2.warpAffine(bright, M, (cols, rows)))
+    return out
+
 def _cosine_sim(a: np.ndarray, b: np.ndarray) -> float:
     """余弦相似度（0~1），用于 ArcFace embedding"""
     a_norm = a / (np.linalg.norm(a) + 1e-10)

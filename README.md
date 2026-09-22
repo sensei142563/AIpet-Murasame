@@ -682,7 +682,7 @@ main.py (PyQt5 主窗口 + FastAPI 28565 + 快捷键监听 + 托盘)
   "user_name": "你的名字",
   "model_type": "qwen",
   "tts_type": "local",
-  "force_gpu_check": "false",
+  "gpu_accel": "true",
   "screen_type": "false",
   "voice_trigger": "false",
   "stt_model": "large-v3",
@@ -720,6 +720,7 @@ main.py (PyQt5 主窗口 + FastAPI 28565 + 快捷键监听 + 托盘)
 | 配置项 | 说明 |
 |--------|------|
 | `model_type` | 短文本对话族：`qwen`（推荐）/ `deepseek` / `local`（本地 Ollama） |
+| `gpu_accel` | 显卡加速开关（`"true"` 默认开）：开启时检测 NVIDIA 显卡 + CUDA 版本，并安装匹配的 CUDA 版 PyTorch；**不是 N 卡或没装 CUDA 会自动回退 CPU**。关闭则直接用 CPU 并跳过整套显卡检测。只影响本地模型 / 本地语音，云端对话、QQ、微信不受影响 |
 | `short_model_name` | 短文本模型名（默认 `qwen-plus`；`deepseek` 族默认 `deepseek-v4-flash`） |
 | `longtext_model` | 长文本对话族：`qwen` / `deepseek`（默认） |
 | `longtext_model_name` | 长文本模型名（默认 `deepseek-v4-flash`；`qwen` 族默认 `qwen-plus`） |

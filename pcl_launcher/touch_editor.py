@@ -16,13 +16,13 @@ import sys
 from PyQt5.QtCore import Qt, QRectF, QTimer, pyqtSignal
 from PyQt5.QtGui import QColor, QPainter, QPen, QPixmap, QFont
 from PyQt5.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFrame, QGroupBox,
-                             QHBoxLayout, QLabel, QMessageBox, QPushButton, QSizePolicy,
+                             QHBoxLayout, QLabel, QPushButton,
                              QVBoxLayout, QWidget)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from tool.touch_areas import (AREAS, AREA_KEYS, defaults as touch_defaults,  # noqa: E402
                               labels as touch_labels, get_pet_areas, touch_enabled,
-                              save_pet_areas, norm_rect, labels as _ta_labels,
+                              save_pet_areas, norm_rect,
                               add_pet_area, remove_pet_area, custom_keys, get_disabled,
                               LABELS as LABELS_DEFAULT)
 
@@ -997,6 +997,9 @@ class TouchAreaEditor(QWidget):
                 if not emo:
                     self.status.setText("⚠ 这个角色没有单图表情素材（没有可预览的整图）")
                     return
+                # 套装名与下面「多图拼合」分支取同一来源（历史上前者漏了这句，
+                # set_name 从未定义 → 单图角色点预览必报 NameError）
+                set_name = str(data.get("active") or "a")
                 args = ["preview_full", set_name or "a", emo]      # 全身 + 透明底
             else:
                 act = str(data.get("active") or "a")

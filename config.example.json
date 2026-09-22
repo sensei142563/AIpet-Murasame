@@ -15,7 +15,7 @@
   "model_type": "qwen",
   "short_model_name": "qwen-plus",
   "tts_type": "local",
-  "force_gpu_check": "false",
+  "gpu_accel": "true",
   "screen_type": "false",
   "voice_trigger": "false",
   "stt_model": "large-v3",

@@ -3,6 +3,7 @@
 import os
 import json
 import subprocess
+import time
 import urllib.request
 
 from PyQt5.QtCore import Qt, pyqtSignal
@@ -114,7 +115,13 @@ class PCLSettingsPanel(QWidget):
             hint="可编辑：仅限 deepseek/qwen 两族模型名"
         )
         self._add_slider("reasoning_level", "推理等级", ["off", "low", "high", "max"], "off")
-        self._add_slider("force_gpu_check", "强制 GPU 检查", ["false", "true"], "false")
+        # 显卡加速：开=检测 NVIDIA/CUDA 并走 GPU；不是 N 卡或没装 CUDA 时 run.py 自动回退 CPU
+        self._add_slider(
+            "gpu_accel", "显卡加速（NVIDIA）", ["false", "true"], "true",
+            hint="开（默认）：检测 NVIDIA 显卡与 CUDA，本地模型/本地语音用 GPU 加速；\n"
+                 "不是 N 卡或驱动没有 CUDA 会自动回退 CPU。\n"
+                 "关：直接用 CPU，跳过显卡检测（启动略快）。\n"
+                 "只影响本地模型与本地语音；云端对话/QQ/微信不受影响。")
 
         # ===== ③ 长文本输出 =====
         self._section("长文本输出", "📝")
@@ -495,6 +502,7 @@ class PCLSettingsPanel(QWidget):
             self._set_if("deepseek_api_key", cfg.get("APIKEY", {}).get("deepseek", ""))
             self._set_if("qwen_api_key", cfg.get("APIKEY", {}).get("qwen", ""))
             self._set_slider("model_type", cfg.get("model_type", "qwen"))
+            self._set_slider("gpu_accel", cfg.get("gpu_accel", "true"))
             self._set_if("short_model_name", cfg.get("short_model_name", "qwen-plus"))
             self._set_slider("tts_type", cfg.get("tts_type", "local"))
             self._set_slider("voice_synthesis_enable", cfg.get("voice_synthesis_enable", "true"))
@@ -503,7 +511,6 @@ class PCLSettingsPanel(QWidget):
             self._set_slider("screen_type", cfg.get("screen_type", "false"))
             self._set_slider("voice_trigger", cfg.get("voice_trigger", "false"))
             self._set_slider("live2d_enabled", cfg.get("live2d_enabled", "true"))
-            self._set_slider("force_gpu_check", cfg.get("force_gpu_check", "false"))
             self._set_slider("longtext_enabled", cfg.get("longtext_enabled", "true"))
             self._set_slider("longtext_model", cfg.get("longtext_model", "deepseek"))
             self._set_if("longtext_model_name", cfg.get("longtext_model_name", "deepseek-v4-flash"))
@@ -565,6 +572,7 @@ class PCLSettingsPanel(QWidget):
             cfg["APIKEY"]["qwen"] = self._get_text("qwen_api_key")
 
             cfg["model_type"] = self._get_slider("model_type")
+            cfg["gpu_accel"] = self._get_slider("gpu_accel")
             cfg["short_model_name"] = self._get_combo("short_model_name")
             cfg["tts_type"] = self._get_slider("tts_type")
             cfg["portrait"] = self._get_slider("portrait")
@@ -573,7 +581,6 @@ class PCLSettingsPanel(QWidget):
             cfg["voice_synthesis_enable"] = self._get_slider("voice_synthesis_enable")
             cfg["portrait_auto_switch"] = self._get_slider("portrait_auto_switch")
             cfg["live2d_enabled"] = self._get_slider("live2d_enabled")
-            cfg["force_gpu_check"] = self._get_slider("force_gpu_check")
             cfg["longtext_enabled"] = self._get_slider("longtext_enabled")
             cfg["longtext_model"] = self._get_slider("longtext_model")
             cfg["longtext_model_name"] = self._get_combo("longtext_model_name")
@@ -1906,6 +1913,191 @@ class PCLPetManager(QScrollArea):
 
 
 # ==================== Live2D 显示调参面板（本地滑块 + 点保存写入 pet.json） ====================
+
+
+class PCLLive2DTunePanel(QWidget):
+    """Live2D 显示调参：滑块只在本地改动，「保存到角色」写入 pet.json（桌宠运行中则同时实时应用）。
+    与设置页其他选项一致——不自动联网，避免卡顿。"""
+
+    _BASE = "http://localhost:28565"
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._sliders = {}
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, int(18 * S), 0, 0)
+        layout.setSpacing(int(10 * S))
+
+        title = QLabel("  🎭 Live2D 显示调参")
+        title.setFont(QFont("Microsoft YaHei", int(14 * S), QFont.Bold))
+        title.setStyleSheet(f"color: {Color1.name()};")
+        layout.addWidget(title)
+        desc = QLabel("拖动滑块设置数值，点击「保存到角色」写入 pet.json（下次启动生效；桌宠运行中会同时实时应用）。")
+        desc.setWordWrap(True)
+        desc.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(11 * S)}px;")
+        layout.addWidget(desc)
+
+        row = QHBoxLayout()
+        lbl_pet = QLabel("角色:")
+        lbl_pet.setStyleSheet(f"color: {Color1.name()}; font-size: {int(13*S)}px;")
+        self.combo = QComboBox()
+        self.combo.setMinimumWidth(int(160 * S))
+        try:
+            from pets.pet_registry import get_all_pets_summary, get_active_pet_id
+            active = get_active_pet_id()
+            for p in get_all_pets_summary():
+                self.combo.addItem(p.get("display_name") or p.get("name", "?"), p["id"])
+            idx = self.combo.findData(active)
+            if idx >= 0:
+                self.combo.setCurrentIndex(idx)
+        except Exception:
+            pass
+        self.combo.currentIndexChanged.connect(self._load_from_pet_json)
+        row.addWidget(lbl_pet)
+        row.addWidget(self.combo)
+        row.addStretch()
+        layout.addLayout(row)
+
+        self._add_slider(layout, "scale", "模型缩放", 0.1, 4.0, 0.05)
+        self._add_slider(layout, "offset_x", "模型水平偏移", -800, 800, 10)
+        self._add_slider(layout, "offset_y", "模型垂直偏移", -800, 800, 10)
+        self._add_slider(layout, "window_ratio", "窗口宽高比", 0.2, 2.0, 0.05)
+        self._add_slider(layout, "window_height_ratio", "窗口高度占屏比", 0.15, 0.95, 0.05)
+        self._add_slider(layout, "font_scale", "字号缩放", 0.05, 1.5, 0.05)
+        self._add_slider(layout, "text_offset_x", "文本框水平偏移", -600, 600, 20)
+        self._add_slider(layout, "text_offset_y", "文本框垂直偏移", -600, 600, 20)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(int(10 * S))
+        btn_live = QPushButton(" 🔄 读取桌宠当前值")
+        btn_save = QPushButton(" 💾 保存到角色")
+        btn_reset = QPushButton(" 🎯 重置位置")
+        for b in (btn_live, btn_save, btn_reset):
+            b.setStyleSheet(f"""
+                QPushButton {{ background: {Color6.name()}; color: {Color1.name()};
+                    border: 1px solid {Color5.name()}; padding: {int(8*S)}px {int(14*S)}px;
+                    font-size: {int(12*S)}px; font-family: 'Microsoft YaHei'; border-radius: {btn_radius()}px; }}
+                QPushButton:hover {{ background: {Color4.name()}; color: white; border: 1px solid {Color3.name()}; }}
+            """)
+        btn_live.clicked.connect(self._load_from_live)
+        btn_save.clicked.connect(self._save)
+        btn_reset.clicked.connect(self._reset)
+        btn_row.addWidget(btn_live)
+        btn_row.addWidget(btn_save)
+        btn_row.addWidget(btn_reset)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
+        self.lbl_status = QLabel("")
+        self.lbl_status.setWordWrap(True)
+        self.lbl_status.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(11*S)}px;")
+        layout.addWidget(self.lbl_status)
+
+        self._load_from_pet_json()
+
+    def _current_pet_id(self):
+        return self.combo.currentData()
+
+    def _add_slider(self, layout, key, label, lo, hi, step):
+        row = QHBoxLayout()
+        lbl = QLabel(label)
+        lbl.setFixedWidth(int(115 * S))
+        lbl.setStyleSheet(f"color: {Color1.name()}; font-size: {int(12*S)}px;")
+        slider = QSlider(Qt.Horizontal)
+        slider.setRange(int(lo / step), int(hi / step))
+        val = QLabel("")
+        val.setFixedWidth(int(60 * S))
+        val.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(11*S)}px;")
+        slider.valueChanged.connect(lambda v, lab=val, st=step: lab.setText(f"{v * st:g}"))
+        self._sliders[key] = (slider, step)
+        row.addWidget(lbl)
+        row.addWidget(slider, 1)
+        row.addWidget(val)
+        layout.addLayout(row)
+
+    def _current_values(self):
+        out = {}
+        for key, (slider, step) in self._sliders.items():
+            out[key] = round(slider.value() * step, 2)
+        return out
+
+    def _set_slider_value(self, key, value):
+        slider, step = self._sliders[key]
+        slider.blockSignals(True)
+        try:
+            slider.setValue(int(round(float(value) / step)))
+        except (TypeError, ValueError):
+            pass
+        slider.blockSignals(False)
+
+    def _load_from_pet_json(self):
+        """从角色 pet.json 本地读取显示参数（不联网、不卡顿）"""
+        pid = self._current_pet_id()
+        if not pid:
+            return
+        try:
+            from pets.pet_registry import get_live2d_display
+            d = get_live2d_display(pid)
+            for key in self._sliders:
+                if key in d:
+                    self._set_slider_value(key, d[key])
+            self.lbl_status.setText(f"已加载 {pid} 的已保存参数")
+        except Exception as e:
+            self.lbl_status.setText(f"读取失败: {e}")
+
+    def _post(self, path, payload=None):
+        try:
+            data = json.dumps(payload).encode("utf-8") if payload is not None else b""
+            req = urllib.request.Request(
+                f"{self._BASE}{path}", data=data, method="POST",
+                headers={"Content-Type": "application/json"})
+            urllib.request.urlopen(req, timeout=2).read()
+            return True
+        except Exception:
+            return False
+
+    def _get(self, path):
+        try:
+            with urllib.request.urlopen(f"{self._BASE}{path}", timeout=2) as r:
+                return json.loads(r.read().decode("utf-8"))
+        except Exception:
+            return None
+
+    def _save(self):
+        """写入 pet.json（核心）；桌宠运行中则同时实时应用"""
+        pid = self._current_pet_id()
+        if not pid:
+            return
+        try:
+            from pets.pet_registry import save_live2d_display
+            save_live2d_display(pid, **self._current_values())
+        except Exception as e:
+            self.lbl_status.setText(f"保存失败: {e}")
+            return
+        if self._post("/live2d/display", self._current_values()):
+            self.lbl_status.setText("✅ 已保存到 pet.json 并实时应用（桌宠 Live2D 模式可见）")
+        else:
+            self.lbl_status.setText("✅ 已保存到 pet.json（重启桌宠生效；当前桌宠未运行）")
+
+    def _reset(self):
+        self._set_slider_value("offset_x", 0)
+        self._set_slider_value("offset_y", 0)
+        self.lbl_status.setText("位置滑块已归零，点「保存到角色」生效")
+
+    def _load_from_live(self):
+        """手动读取运行中桌宠的当前参数（点击时才联网）"""
+        data = self._get("/live2d/display")
+        if not data or not isinstance(data.get("state"), dict):
+            self.lbl_status.setText("⚠ 无法读取（桌宠未运行？）")
+            return
+        state = data["state"]
+        for key in self._sliders:
+            if key in state:
+                self._set_slider_value(key, state[key])
+        self.lbl_status.setText("✅ 已读取桌宠当前显示参数")
+
+
+# ==================== 提示词编辑器 ====================
 
 
 class PCLPromptEditor(QWidget):

@@ -36,7 +36,7 @@ def _ensure_project_python():
 
 _ensure_project_python()
 
-from tool.config import get_config
+from tool.config import as_bool, get_config
 
 TORCH_OK = False        # 是否成功加载了 torch（云端模式不加载也能跑）
 
@@ -114,7 +114,6 @@ def load_runtime_config(config_path="config.json"):
         return {
             "model_type": "deepseek",
             "tts_type": "cloud",
-            "force_gpu_check": "false",
         }
 
     try:
@@ -125,7 +124,6 @@ def load_runtime_config(config_path="config.json"):
         return {
             "model_type": "deepseek",
             "tts_type": "cloud",
-            "force_gpu_check": "false",
         }
 
 
@@ -308,7 +306,11 @@ def setup_runtime_and_pytorch(config_path="config.json", cfg=None, hardware_type
         hardware_type = check_hardware()
 
     if hardware_type == "cpu":
-        log("检测到 CPU 模式，跳过 PyTorch 安装。", "INFO")
+        log("检测到 CPU 模式，跳过 CUDA 版 PyTorch 安装。", "INFO")
+        # 但 torch 本身还是得有：本地模型与本地语音都依赖它，而 requirements.txt
+        # 里并不含 torch（历史上由本函数管理）。ensure_cpu_torch() 已装则只做检测，
+        # 不会把已有的 CUDA 版降级；失败也只告警不退出。
+        ensure_cpu_torch()
         return "cpu"
 
     # Step 3️⃣ 检测 CUDA 环境
@@ -588,8 +590,13 @@ if __name__ == "__main__":
             pass
         sys.exit(0)
     cfg = load_runtime_config()
-    # 强制使用 CPU 模式，跳过所有显卡检测
-    hardware_type = "cpu"
+    # 显卡加速开关（默认开，启动器「设置 → 对话模型与推理 → 显卡加速（NVIDIA）」可改）：
+    #   开 → 传 None，由 setup_runtime_and_pytorch 按模式决定：
+    #        云端（deepseek/qwen）提前返回、压根不做显卡检测；
+    #        本地（local）才调 check_hardware()，N 卡走 CUDA，不是 N 卡/没 CUDA 回退 CPU。
+    #   关 → 传 "cpu"，直接跳过整套显卡检测，不装 CUDA 版 torch。
+    # ⚠ 别再写死 "cpu"：那会让本地 + N 卡的机器永远拿不到 CUDA 版 torch。
+    hardware_type = None if as_bool(cfg.get("gpu_accel"), True) else "cpu"
     check_python()
     install_requirements()
     setup_runtime_and_pytorch(cfg=cfg, hardware_type=hardware_type)
