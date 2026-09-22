@@ -164,6 +164,15 @@ def cloud_talk(history: list, user_input: str, role: str):
     except Exception:
         pass
 
+    # 点歌：让她真的去网易云搜索并播放（不要自己猜坐标点搜索框）
+    try:
+        from tool import music as _mu2
+        _mrules = _mu2.prompt_rules()
+        if _mrules:
+            messages.append({"role": "system", "content": _mrules})
+    except Exception:
+        pass
+
     # 她自己记下的长期记忆（关于主人的事 / 自己学的东西 / 今天的日记）——相关度高的优先
     try:
         from tool import self_learn as _sl2

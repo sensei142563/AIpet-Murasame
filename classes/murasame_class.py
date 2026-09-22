@@ -1412,6 +1412,23 @@ class Murasame(QLabel):
             except Exception:
                 pass
 
+    def _music_and_reply(self, request):
+        """真的去网易云点歌（搜索+播放+标题校验），再把结果交给她说给主人听（后台线程）"""
+        try:
+            from tool import music as _mu
+            result = _mu.run(str(request or "")) or "唔……我没看懂要放哪首。"
+            print(f"[桌宠] 🎵 点歌结果：{result}")
+            self._request_dialog.emit(
+                "（系统提示：你刚才去网易云点歌，真实结果是——" + str(result) +
+                "。用你自己的口吻把结果说给主人听，只输出你要说的那一两句，"
+                "别念坐标、别提系统提示。）", "user", False)
+        except Exception as e:
+            print(f"[桌宠] ⚠ 点歌失败（{type(e).__name__}: {e}）")
+            try:
+                self._request_dialog.emit("唔……我点歌的时候卡住了，你再试一次？", "user", False)
+            except Exception:
+                pass
+
     def _show_learned(self):
         """菜单：看看她学到了什么（单独一个窗口，不占对话框）"""
         try:
@@ -1758,6 +1775,25 @@ class Murasame(QLabel):
                     return
         except Exception as _e3:
             print(f"[桌宠] ⚠ 文件意图判断失败: {_e3}")
+
+        # ── 她要点歌（提示词里教她：需要点歌就输出【音乐】播放 歌名）──
+        #    真的去网易云搜索并播放，然后用标题校验；结果交回给她说给主人听。
+        try:
+            from tool.music import MUSIC_MARK
+            from tool import music as _mu
+            from classes.Worker_class import _mu_pending
+            if MUSIC_MARK in "".join(str(x) for x in (reply or [])):
+                _mreq = _mu_pending.pop(0) if _mu_pending else ""
+                if _mreq:
+                    _mu_pending[:] = []          # 一次只处理一个
+                    print("[桌宠] 🎵 她要点歌 → 去网易云搜索并播放")
+                    self._talking = False
+                    self.show_text("正在帮你点歌……", typing=True)
+                    import threading as _thm
+                    _thm.Thread(target=self._music_and_reply, args=(_mreq,), daemon=True).start()
+                    return
+        except Exception as _e4:
+            print(f"[桌宠] ⚠ 点歌意图判断失败: {_e4}")
 
         # ⚠ 云端请求失败时 worker 拿到的是空串 → 切句后是 [""] → 以前会一路跳过，
         #   对话框什么都不显示（用户反馈"摸了没反应 / 聊天没回复"）。这里明确提示。
@@ -2175,14 +2211,13 @@ class Murasame(QLabel):
     def _clamp_to_screen(self, size=None):
         """把窗口挪回屏幕内。
 
-        立绘尺寸是「首次合成后锁死」的，而保存的位置是按**旧的窗口尺寸**算的 →
-        启动时窗口一变宽/变高，右下角就跑到屏幕外，看起来"立绘只显示一半"（用户反馈）。
+        ⚠ 默认**不挪**：主人要求"位置即使在屏幕外面也不要改变位置"（他想把桌宠停在
+          屏幕边缘/外面）。以前每次回复都会按尺寸重新算一遍，位置还会来回跳（用户反馈）。
+          想要旧的"自动挪回屏幕内"行为，右键菜单 →「界面」→「自动挪回屏幕内」打开即可。
 
-        ⚠ size 一定要由调用方按"将要生效的尺寸"传进来（Qt 的 setFixedSize 是**异步**生效的，
-          紧接着读 self.height() 往往还是旧值）。以前就在这里读旧高度：
-          新窗口是 864 高，却按旧的 ~465 算，算出"最多只能放到 y=615"，
-          于是先把她放到 615，下一轮回复时高度已经是 864，又把她拉回 y=216 ——
-          用户看到的就是"对话时桌宠位置突然改变"（日志实锤 615/620/619 → 216）。
+        size：调用方按"将要生效的尺寸"传进来（Qt 的 setFixedSize 是**异步**生效的，
+              紧接着读 self.height() 往往是旧值——以前就在这里读旧高度，
+              算出"最多只能放到 y=615"，于是先放到 615、下一轮又拉回 216，位置乱跳）。
         """
         try:
             from PyQt5.QtGui import QGuiApplication
@@ -2195,10 +2230,16 @@ class Murasame(QLabel):
             x, y = self.x(), self.y()
             nx = min(max(x, g.x()), max(g.x(), g.x() + g.width() - w))
             ny = min(max(y, g.y()), max(g.y(), g.height() - h))
-            if (nx, ny) != (x, y):
-                self.move(nx, ny)
-                print(f"[桌宠] 立绘尺寸变化 → 挪回屏幕内 ({x},{y}) → ({nx},{ny})"
-                      f"（按 {w}x{h} 算）")
+            if (nx, ny) == (x, y):
+                return
+            if not self._auto_clamp_enabled():
+                # 主人说了不要动 → 只记一行日志（方便排查），绝不改位置
+                if not getattr(self, "_offscreen_logged", False):
+                    self._offscreen_logged = True
+                    print(f"[桌宠] 📌 位置 ({x},{y}) 有一部分在屏幕外，但你要求不改位置 → 保持不动")
+                return
+            self.move(nx, ny)
+            print(f"[桌宠] 立绘尺寸变化 → 挪回屏幕内 ({x},{y}) → ({nx},{ny})（按 {w}x{h} 算）")
             # ★ 启动自检：把关键几何打进日志，万一还出现"立绘只显示一半"，
             #   这一行就能看出是窗口、立绘还是屏幕对不上。
             if not getattr(self, "_geom_logged", False):
@@ -2611,6 +2652,11 @@ class Murasame(QLabel):
                 _act_qb = item(_ui, "显示快捷按钮（对话 / 菜单）", checked=self._quick_buttons_enabled())
                 _act_qb.setToolTip("关掉后立绘右上角那两个小按钮会隐藏；右键菜单和点对话框打字照旧可用。")
                 _act_qb.triggered.connect(self._toggle_quick_buttons)
+                _act_pos = item(_ui, "自动挪回屏幕内", checked=self._auto_clamp_enabled())
+                _act_pos.setToolTip(
+                    "默认关闭——桌宠位置完全由你说了算，即使有一部分在屏幕外也不会被挪动。" + chr(10) +
+                    "打开后：立绘尺寸变化时她会自己挪回屏幕内（旧版行为）。")
+                _act_pos.triggered.connect(lambda on=False: self._toggle_auto_clamp(bool(on)))
             except Exception:
                 pass
             return menu
@@ -3667,6 +3713,37 @@ class Murasame(QLabel):
         )
 
     # ══════════ 立绘右上角：对话 / 菜单 快捷按钮 ══════════
+    def _auto_clamp_enabled(self) -> bool:
+        """是否允许"自动把桌宠挪回屏幕内"（config.json 的 auto_clamp_position）
+
+        ⚠ 默认**关**：主人明确要求"位置即使在屏幕外面也不要改变位置"
+          （他想把桌宠停在屏幕边缘或外面）。想恢复旧行为就在右键菜单里打开。
+        """
+        try:
+            from tool.config import get_config
+            v = get_config("./config.json").get("auto_clamp_position", "false")
+            return str(v).strip().lower() in ("true", "1", "on", "yes")
+        except Exception:
+            return False
+
+    def _toggle_auto_clamp(self, on: bool = False):
+        """菜单开关：自动挪回屏幕内"""
+        try:
+            from tool.config import get_config
+            import json as _json
+            cfg = dict(get_config("./config.json") or {})
+            cfg["auto_clamp_position"] = "true" if on else "false"
+            import os as _os
+            p = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "config.json")
+            tmp = p + ".tmp"
+            with io.open(tmp, "w", encoding="utf-8") as f:
+                _json.dump(cfg, f, ensure_ascii=False, indent=2)
+            _os.replace(tmp, p)
+            self._offscreen_logged = False
+            print(f"[桌宠] 自动挪回屏幕内 → {'已开启' if on else '已关闭（位置保持不动）'}")
+        except Exception as e:
+            print(f"[桌宠] ⚠ 写入开关失败: {e}")
+
     def _quick_buttons_enabled(self) -> bool:
         """快捷按钮是否显示（config.json 的 pet_quick_buttons，可在菜单里关）"""
         try:
