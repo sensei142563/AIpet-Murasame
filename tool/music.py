@@ -167,51 +167,17 @@ def _foreground():
 def _focus(hwnd) -> bool:
     """把客户端窗口带到前台（成功返回 True）
 
-    前台锁：Windows 只让"当前前台/刚接收过用户输入"的进程抢焦点。桌宠是后台进程，
-    常规 SetForegroundWindow 会被忽略 —— 用 AttachThreadInput 把自己的输入队列
-    临时挂到前台线程上，这是最可靠的绕法。
+    ⚠ 这里**只用最朴素的做法**：ShowWindow + SetForegroundWindow。
+      曾经加过 AttachThreadInput 那种"绕前台锁"的写法，实测不但抢不到焦点，
+      还可能把调用线程和别人的输入队列挂在一起、在驱动/游戏全屏时卡住（
+      桌宠主线程就是这样被拖成"未响应"的），已经删掉。
     """
     try:
-        u, k32 = _u32(), ctypes.windll.kernel32
+        u = _u32()
         SW_RESTORE = 9
         u.ShowWindow(hwnd, SW_RESTORE)
         u.SetForegroundWindow(hwnd)
         time.sleep(0.25)
-        if _foreground() == int(hwnd):
-            return True
-        try:
-            u.GetWindowThreadProcessId.restype = ctypes.c_uint
-            fg = u.GetForegroundWindow()
-            t_fg = u.GetWindowThreadProcessId(fg, None)
-            t_me = k32.GetCurrentThreadId()
-            if t_fg and t_fg != t_me:
-                u.AttachThreadInput(t_fg, t_me, True)
-                try:
-                    u.ShowWindow(hwnd, SW_RESTORE)
-                    u.SetForegroundWindow(hwnd)
-                    try:
-                        u.BringWindowToTop(hwnd)
-                    except Exception:
-                        pass
-                finally:
-                    u.AttachThreadInput(t_fg, t_me, False)
-                time.sleep(0.3)
-        except Exception as e:
-            _log(f"（AttachThreadInput 绕前台失败：{e}）")
-        if _foreground() == int(hwnd):
-            return True
-        # 最后再试一次"模拟按 Alt"（让系统认为用户刚操作过）
-        try:
-            from pynput.keyboard import Controller as _K, Key
-            kb = _K()
-            kb.press(Key.alt)
-            time.sleep(0.05)
-            kb.release(Key.alt)
-            time.sleep(0.1)
-            u.SetForegroundWindow(hwnd)
-            time.sleep(0.3)
-        except Exception:
-            pass
         return _foreground() == int(hwnd)
     except Exception:
         return False
@@ -382,6 +348,18 @@ def play_song(query: str, dry_run: bool = False) -> str:
         hwnd = find_window()
     if not hwnd:
         return "我没找到网易云的窗口。"
+
+    # ⚠ 主人正在打全屏游戏时**不要去抢焦点**：
+    #   点歌要先把网易云切到最前面再敲键盘，这会把游戏切出去（画面一黑/掉帧），
+    #   而且实测这种情况下最容易把桌宠主线程卡住（"未响应"）。宁可不做。
+    try:
+        from tool.perf_guard import game_mode
+        if game_mode():
+            _log("检测到全屏游戏 → 不抢焦点，等主人打完")
+            return (f"你在打游戏，我不抢你的画面啦。等这局完了跟我说一声，"
+                    f"我马上给你放《{name}》。")
+    except Exception:
+        pass
 
     before = window_title(hwnd)
     prev_fg = _foreground()

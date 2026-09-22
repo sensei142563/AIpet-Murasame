@@ -805,6 +805,93 @@ def install_live2d_deps():
         log("Live2D 依赖已安装，长按 Shift 2 秒可切换 Live2D 模式。", "SUCCESS")
 
 
+def _find_main_window(pid: int):
+    """找这个进程自己的可见顶层窗口（桌宠是无边框窗口，MainWindowHandle 常为 0）"""
+    try:
+        import ctypes
+        u = ctypes.windll.user32
+        found = []
+        EnumProc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+
+        def _cb(hwnd, lp):
+            try:
+                p = ctypes.c_uint()
+                u.GetWindowThreadProcessId(hwnd, ctypes.byref(p))
+                if p.value == pid and u.IsWindowVisible(hwnd):
+                    ln = u.GetWindowTextLengthW(hwnd)
+                    found.append((int(hwnd), ln))
+            except Exception:
+                pass
+            return True
+
+        u.EnumWindows(EnumProc(_cb), None)
+        # 优先带标题的（桌宠窗口没标题，托盘消息窗有类名但没有可见性）→ 取第一个可见的
+        if found:
+            return found[0][0]
+    except Exception:
+        pass
+    return 0
+
+
+def _supervise_pet(cmd, **kw):
+    """跑桌宠并盯着它：窗口长时间不响应就自动重启（别让主人对着"未响应"干等）。
+
+    为什么要这个：桌宠偶尔会卡在原生调用里（界面完全不响应，但进程还活着）。
+    它跑在后台线程里的日志还在写，主人只看到一只点不动的桌宠。
+    这里每 10 秒问一次系统"这个窗口还响应吗"，连续 3 次不响应（约 30 秒）就
+    记一行日志、结束它、重新拉起 —— 自动恢复。
+    """
+    import time as _t
+    restart_limit = 2
+    restarts = 0
+    while True:
+        proc = subprocess.Popen(cmd, **kw)
+        hung_checks = 0
+        hwnd = 0
+        # Windows：IsHungAppWindow 是系统自己判断"未响应"的那个 API
+        try:
+            import ctypes
+            _u = ctypes.windll.user32
+            _IsHung = getattr(_u, "IsHungAppWindow", None)
+        except Exception:
+            _IsHung = None
+        while True:
+            try:
+                rc = proc.poll()
+            except Exception:
+                rc = None
+            if rc is not None:
+                break
+            _t.sleep(10)
+            if _IsHung is None:
+                continue
+            try:
+                if not hwnd:
+                    hwnd = _find_main_window(proc.pid)
+                if hwnd and _IsHung(hwnd):
+                    hung_checks += 1
+                    log(f"检测到桌宠窗口未响应（第 {hung_checks}/3 次）…", "WARN")
+                else:
+                    if hung_checks:
+                        hung_checks = 0
+            except Exception:
+                hung_checks = 0
+            if hung_checks >= 3:
+                log("桌宠窗口连续 30 秒未响应 → 结束它并自动重启（用户不用管）", "WARN")
+                try:
+                    proc.kill()
+                    proc.wait(timeout=8)
+                except Exception:
+                    pass
+                restarts += 1
+                break
+        if proc.returncode is not None and restarts and restarts <= restart_limit:
+            log(f"正在重新拉起桌宠（第 {restarts} 次自动重启）…", "INFO")
+            _t.sleep(2.0)
+            continue
+        return proc.returncode
+
+
 def run_main():
     script_path = os.path.abspath(r".\main.py")
 
@@ -824,9 +911,37 @@ def run_main():
                 _kw = {"stdout": _fo, "stderr": subprocess.STDOUT}
             except Exception:
                 _kw = {}
-        subprocess.run([_project_python(), "main.py"], creationflags=_console_flags(), **_kw)
-    except subprocess.CalledProcessError as e:
+        _supervise_pet([_project_python(), "main.py"], creationflags=_console_flags(), **_kw)
+    except Exception as e:
         log(f"桌宠启动失败: {e}", "ERROR")
+    finally:
+        # 桌宠退出 → 顺手把视觉/语音服务停掉，别让它们当孤儿继续占显存
+        try:
+            _cleanup_services()
+        except Exception:
+            pass
+
+
+def _cleanup_services():
+    """桌宠退出后收尾：停掉本脚本启动的视觉服务与语音服务（释放显存）"""
+    try:
+        import json as _json
+        port = 28460
+        try:
+            with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json"),
+                      encoding="utf-8") as _f:
+                port = int(_json.load(_f).get("vision_local_port") or 28460)
+        except Exception:
+            pass
+        try:
+            import urllib.request as _ur
+            _ur.urlopen(f"http://127.0.0.1:{port}/unload", timeout=3).read()
+            log("已让视觉服务释放显存", "INFO")
+        except Exception:
+            pass
+    except Exception:
+        pass
+
 
 def _already_running() -> bool:
     """单实例保护：桌宠 API 端口已被占用 → 说明已经有一个桌宠在跑。
