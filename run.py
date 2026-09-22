@@ -273,8 +273,13 @@ def _want_cuda_torch(cfg) -> bool:
 
     只在「全局显卡加速开着」且下面任一成立时需要：
       - 本地模型（model_type=local）要 GPU 推理；
-      - 长语音（F5-TTS）开着、且它自己的 GPU 加速也开着 —— F5 服务是用**项目解释器**
-        跑的，venv 里的 torch 不是 CUDA 版就永远上不了 GPU。
+      - 长语音（F5-TTS）开着、且它自己的 GPU 加速也开着 —— F5 服务由
+        `_find_f5tts_python()` 挑解释器（候选顺序：runtime\venv → 当前解释器），
+        与 `_project_python()` 的候选顺序一致，所以「装 CUDA 版 torch」会落在
+        F5 真正要用的那个解释器上。
+        ⚠ 开发机上通常没有 runtime\venv → 两者都落到**当前解释器**（往往是系统
+          Python）；而项目里那个 `.venv` 只是开发用的虚拟环境，F5 看不懂它
+          （在它里面找不到 f5_tts 时会直接判定「长语音不可用」）。
     短语音（GPT-SoVITS）用的是整合包自带的解释器，跟本 venv 的 torch 无关。
     """
     if not as_bool(cfg.get("gpu_accel"), True):
@@ -288,6 +293,29 @@ def _want_cuda_torch(cfg) -> bool:
 def _tts_use_gpu(cfg, key: str) -> bool:
     """某个语音功能是否走 GPU：全局显卡加速 + 它自己的开关，都为真才走。"""
     return as_bool(cfg.get("gpu_accel"), True) and as_bool(cfg.get(key), True)
+
+
+def _torch_cuda_mismatch(torch_cuda, driver_cuda) -> bool:
+    """已装的 torch 是否需要换一个 CUDA 版本？
+
+    - torch 是 CPU 版、但机器有 CUDA → 需要（最常见的「有 N 卡却跑在 CPU 上」）；
+    - torch 的 CUDA 主版本**高于**驱动支持的版本 → 需要（装新了，加载会失败）；
+    - torch 的 CUDA 主版本**低于或等于**驱动 → **不需要**：CUDA 向后兼容，
+      驱动 13.1 上跑 cu128 构建完全正常。
+
+    ⚠ 旧逻辑要求「主版本相同」，于是把好好的 cu128 判成不匹配（驱动报 13.1）
+      → 白白重下几个 GB 的 torch，还得多重启一次。现在只按「装新了」判。
+    """
+    dc = str(driver_cuda or "").strip()
+    if not dc:
+        return False
+    tc = str(torch_cuda or "").strip().upper()
+    if tc in ("", "CPU", "NONE"):
+        return True
+    try:
+        return int(tc.split(".")[0]) > int(dc.split(".")[0])
+    except Exception:
+        return False
 
 
 def _gsv_config_with_device(work_dir: str, use_gpu: bool):
@@ -419,22 +447,19 @@ def setup_runtime_and_pytorch(config_path="config.json", cfg=None, hardware_type
     if not cuda_version:
         log("未检测到 CUDA，将使用 CPU 模式。", "WARN")
 
-    # Step 4️⃣ 选择正确的 PyTorch 安装源
+    # Step 4️⃣ 选择 PyTorch 安装源（这里只决定「万一要装时用哪个源」，
+    # 是否真的要装由下面的版本匹配判定决定 —— 所以别在这里就说"将安装"，会误导排查）
     if not cuda_version:
         torch_url = "https://download.pytorch.org/whl/cpu"
-        log("未检测到 CUDA，安装 CPU 版本 PyTorch。")
     elif cuda_version.startswith("13"):
         torch_url = "https://download.pytorch.org/whl/cu130"
-        log("检测到 CUDA 13.x，将安装 cu130 版本。")
     elif cuda_version.startswith("12"):
         torch_url = "https://download.pytorch.org/whl/cu128"
-        log("检测到 CUDA 12.x，将安装 cu128 版本。")
     elif cuda_version.startswith("11"):
         torch_url = "https://download.pytorch.org/whl/cu128"
-        log("检测到 CUDA 11.x，将安装 cu128 版本。")
     else:
         torch_url = "https://download.pytorch.org/whl/cpu"
-        log(f"未识别的 CUDA 版本 {cuda_version}，将安装 CPU 版本。", "WARN")
+        log(f"未识别的 CUDA 版本 {cuda_version}，如需安装将使用 CPU 版。", "WARN")
 
     # Step 5️⃣ 检查 PyTorch 是否已安装
     try:
@@ -443,17 +468,17 @@ def setup_runtime_and_pytorch(config_path="config.json", cfg=None, hardware_type
         torch_cuda_version = torch.version.cuda or "CPU"
         log(f"已检测到 PyTorch {installed_version} (CUDA {torch_cuda_version})", "SUCCESS")
 
-        # 检查版本匹配情况
-        mismatch = False
-        if torch_cuda_version == "CPU" and cuda_version:  # 系统有 CUDA，但 torch 是 CPU 版
-            mismatch = True
-            log(f"检测到系统 CUDA {cuda_version}，但已安装的 PyTorch 为 CPU 版。", "WARN")
-        elif cuda_version and not torch_cuda_version.startswith(cuda_version.split('.')[0]):
-            mismatch = True
-            log(f"当前 CUDA 版本为 {cuda_version}，但 PyTorch 构建基于 CUDA {torch_cuda_version}。", "WARN")
+        # 检查版本匹配情况（判定规则见 _torch_cuda_mismatch 的文档）
+        mismatch = _torch_cuda_mismatch(torch_cuda_version, cuda_version)
+        if mismatch:
+            if str(torch_cuda_version).strip().upper() in ("", "CPU", "NONE"):
+                log(f"检测到系统 CUDA {cuda_version}，但已安装的 PyTorch 为 CPU 版。", "WARN")
+            else:
+                log(f"已安装的 PyTorch 基于 CUDA {torch_cuda_version}，高于驱动支持的 "
+                    f"CUDA {cuda_version} → 需要换一个匹配的版本。", "WARN")
 
         if mismatch:
-            log("开始安装与当前 CUDA 版本匹配的 PyTorch...", "INFO")
+            log(f"开始安装与当前 CUDA 版本匹配的 PyTorch（源：{torch_url}）...", "INFO")
             try:
                 subprocess.run([
                     _project_python(), "-m", "pip", "install", "-U",
