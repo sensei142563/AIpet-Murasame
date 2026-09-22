@@ -103,6 +103,19 @@ def qwen3_lora(history, user_input, role):
     filtered_history, high_observations, identity_msg = _prepare_priority_messages(history)
 
     messages = []
+    # 1. system 身份（优先保留已有的 system，否则用默认身份）
+    if identity_msg:
+        messages.append(identity_msg)
+    else:
+        messages.append({"role": "system", "content": identity})
+
+    # 2. 正常对话历史
+    messages.extend(filtered_history)
+
+    # ★ 能力规则放在**历史之后、主人这句话之前** —— 位置很关键：
+    #   以前这些规则插在历史之前，等于离生成点隔了几百条消息，
+    #   长对话里她根本不照做（实测 406 条历史时，主人说「帮我打开哔哩哔哩」，
+    #   她只回一句「这次真给你开」就没了；挪到最后之后她才会真的动手）。
     try:
         from tool.screen_intent import SCREEN_REQUEST_RULE
         messages.append({"role": "system", "content": SCREEN_REQUEST_RULE})
@@ -117,11 +130,6 @@ def qwen3_lora(history, user_input, role):
             messages.append({"role": "system", "content": _rules})
     except Exception:
         pass
-    # 1. system 身份（优先保留已有的 system，否则用默认身份）
-    if identity_msg:
-        messages.append(identity_msg)
-    else:
-        messages.append({"role": "system", "content": identity})
 
     # 你现在穿的是什么（桌宠窗口每次重画立绘都会记下来）——主人问起穿着时按这个答
     try:
@@ -132,7 +140,7 @@ def qwen3_lora(history, user_input, role):
     except Exception:
         pass
 
-    # 2. 高权重「最近的观察」（识别触发的内容，仅本轮有高权重）
+    # 3. 高权重「最近的观察」（识别触发的内容，仅本轮有高权重）
     if high_observations:
         obs_text = "\n".join(f"- {obs}" for obs in high_observations[-5:])
         messages.append({
@@ -144,9 +152,6 @@ def qwen3_lora(history, user_input, role):
             ),
         })
 
-    # 3. 正常对话历史
-    messages.extend(filtered_history)
-
     time_ctx = build_time_context()
     wx_note = ""
     try:
@@ -154,15 +159,24 @@ def qwen3_lora(history, user_input, role):
         wx_note = weather_note_if_asked(user_input) or ""
     except Exception:
         pass
+    # ★ 每轮贴在主人这句话后面的「现在就动手」提醒（只贴给模型，不写进历史）。
+    #   系统提示词离得太远，长对话里她的老习惯会盖过规则：主人让她打开哔哩哔哩，
+    #   她只回「这次真给你开」却一条指令都不输出（实测真实历史 406 条时必现）。
+    _remind = ""
+    try:
+        from tool import pc_control as _pcr
+        _remind = _pcr.turn_reminder()
+    except Exception:
+        pass
     if role != "system":
         if wx_note:
-            user_input = f"[{time_ctx}]\n{wx_note}\n{user_input}"
+            _send = f"[{time_ctx}]\n{wx_note}\n{user_input}"
         else:
-            user_input = f"[{time_ctx}]{user_input}"
-        history.append({"role": role, "content": user_input})
-        messages.append({"role": role, "content": user_input})
+            _send = f"[{time_ctx}]{user_input}"
+        history.append({"role": role, "content": _send})
+        messages.append({"role": role, "content": _send + _remind})
     else:
-        messages.append({"role": role, "content": user_input})
+        messages.append({"role": role, "content": user_input + _remind})
     print(f"[{now_time()}] [qwen3-lora] Prompt:{messages}")
     try:
         # 首次加载 LoRA 模型可能很慢（分钟级），给足超时但避免无限挂起

@@ -131,6 +131,14 @@ def cloud_talk(history: list, user_input: str, role: str):
     else:
         messages.append({"role": "system", "content": identity_default})
 
+    # 2. 正常对话历史
+    messages.extend(filtered_history)
+
+    # ★ 能力规则放在**历史之后、主人这句话之前** —— 位置很关键：
+    #   以前这些规则插在历史之前，等于离生成点隔了几百条消息，
+    #   长对话里她根本不照做（实测真实历史 406 条时，主人说「帮我打开哔哩哔哩」，
+    #   她只回「白天说了一遍，晚上又一遍。这次真给你开。」一条指令都没有；
+    #   放到最后之后她才会真的动手）。
     # 她需要看屏幕时可以自己开口（输出【看屏幕】标记）→ 桌宠会截屏识别后再让她回答
     try:
         from tool.screen_intent import SCREEN_REQUEST_RULE
@@ -156,7 +164,7 @@ def cloud_talk(history: list, user_input: str, role: str):
     except Exception:
         pass
 
-    # 2. 高权重「最近的观察」（识别触发的内容，仅本轮有高权重）
+    # 3. 高权重「最近的观察」（识别触发的内容，仅本轮有高权重）
     if high_observations:
         obs_text = "\n".join(f"- {obs}" for obs in high_observations[-5:])  # 最多注入最近 5 条
         messages.append({
@@ -168,9 +176,6 @@ def cloud_talk(history: list, user_input: str, role: str):
             ),
         })
 
-    # 3. 正常对话历史
-    messages.extend(filtered_history)
-
     # 当前时间（精确到分钟）+ 命中天气提问时注入实时天气：
     # 模型据此如实回答"现在几点/今天天气"，不再靠猜或含糊其辞
     time_ctx = build_time_context()
@@ -180,19 +185,28 @@ def cloud_talk(history: list, user_input: str, role: str):
         wx_note = weather_note_if_asked(user_input) or ""
     except Exception:
         pass
+    # ★ 每轮贴在主人这句话后面的「现在就动手」提醒（只贴给模型，不写进历史）。
+    #   系统提示词离得太远，长对话里她的老习惯会盖过规则：主人让她打开哔哩哔哩，
+    #   她只回「这次真给你开」却一条指令都不输出（实测真实历史 406 条时必现）。
+    _remind = ""
+    try:
+        from tool import pc_control as _pcr
+        _remind = _pcr.turn_reminder()
+    except Exception:
+        pass
     if role != "system":
         if wx_note:
-            user_input = f"[{time_ctx}]\n{wx_note}\n{user_input}"
+            _send = f"[{time_ctx}]\n{wx_note}\n{user_input}"
         else:
-            user_input = f"[{time_ctx}]{user_input}"
-        history.append({"role": role, "content": user_input})
-        messages.append({"role": role, "content": user_input})
+            _send = f"[{time_ctx}]{user_input}"
+        history.append({"role": role, "content": _send})
+        messages.append({"role": role, "content": _send + _remind})
     else:
         # system 角色消息改为 user 角色发送，避免被 Qwen 忽略
         if wx_note:
-            messages.append({"role": "user", "content": f"[{time_ctx}]\n{wx_note}\n{user_input}"})
+            messages.append({"role": "user", "content": f"[{time_ctx}]\n{wx_note}\n{user_input}" + _remind})
         else:
-            messages.append({"role": "user", "content": f"[{time_ctx}]\n{user_input}"})
+            messages.append({"role": "user", "content": f"[{time_ctx}]\n{user_input}" + _remind})
 
     payload = {
         "messages": messages,
