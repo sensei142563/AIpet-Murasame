@@ -563,8 +563,8 @@ def shot_is_blank(pixmap) -> bool:
 
 
 class ScreenWorker(QThread):
-    # 发出临时文件路径（主线程负责删除）
-    screenshot_captured = pyqtSignal(str)
+    # 发出临时文件路径 + 画面指纹（主线程负责删除文件；指纹用来判断屏幕有没有变）
+    screenshot_captured = pyqtSignal(str, int)
 
     def __init__(self, interval_sec=3.0, parent=None):
         super().__init__(parent)
@@ -583,7 +583,7 @@ class ScreenWorker(QThread):
             pass
 
     def run(self):
-        from tool.screen_capture import capture_qimage, is_blank as _is_blank_img
+        from tool.screen_capture import capture_qimage, is_blank as _is_blank_img, quick_hash as _qhash
         while not self.isInterruptionRequested():
             # 抓屏（Win32 BitBlt：任何线程都能调，毫秒级）
             # ⚠ 以前这里用 QScreen.grabWindow()——那是 GUI 线程专用的 API，
@@ -613,8 +613,12 @@ class ScreenWorker(QThread):
             except Exception as e:
                 print(f"[vision] ⚠ 存截图失败: {e}")
                 continue
-            # 发信号，让主线程去处理（网络调用等）
-            self.screenshot_captured.emit(tmp_name)
+            # 发信号，让主线程去处理（网络调用等）；带上画面指纹，屏幕没变时可复用上次描述
+            try:
+                _h = _qhash(img)
+            except Exception:
+                _h = 0
+            self.screenshot_captured.emit(tmp_name, int(_h))
             # sleep 可被 requestInterruption() 打断（间隔相对宽松）
             # 另外：桌宠发现"她在忙、这轮识别没做成"时会调 wake()，让我们早点重来
             self._wake.clear()

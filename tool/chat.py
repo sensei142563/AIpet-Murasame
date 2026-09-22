@@ -479,15 +479,17 @@ def vision_local_url() -> str:
 
 
 def vision_fast_size() -> int:
-    """「主人正在等」的时候用多大图（越小越快）。
+    """自动/按需看屏幕时用多大图（越小越快）。
 
-    视觉编码耗时随像素数近似平方增长：1280 → 约 17~20s，896 → 约 6~8s。
-    主人主动让你看屏幕时用快速档，别让他等半分钟。
+    视觉编码耗时随像素数近似平方增长，实测差距很大：
+    1280px（1270 个图像 token）→ 40~70 秒；768px → 约十几秒。
+    所以**自动识别也走这一档**（以前它没传参数，用了默认的 1280，慢到像卡住）。
+    想更快就调小 config 的 vision_fast_max_side（580 大约再快一倍）。
     """
     try:
-        return max(280, int(get_config("./config.json").get("vision_fast_max_side") or 896))
+        return max(280, int(get_config("./config.json").get("vision_fast_max_side") or 768))
     except Exception:
-        return 896
+        return 768
 
 
 def _local_vision_describe(image_path: str, prompt: str = "",

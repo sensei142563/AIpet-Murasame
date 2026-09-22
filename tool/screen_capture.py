@@ -167,6 +167,45 @@ def is_blank(img) -> bool:
         return False
 
 
+def quick_hash(img) -> int:
+    """画面指纹（16x16 平均哈希，256 位）：用来判断"屏幕有没有变化"。
+
+    为什么要它：每 150 秒重描述一遍**没变过的屏幕**纯属浪费——视觉模型要占显卡 10 秒以上，
+    还会和语音合成抢显卡（实测语音被拖到 25 秒）。有了指纹就能复用上次的描述，
+    既快又不抢显卡（用户反馈"屏幕识别太慢"）。
+    """
+    try:
+        from PyQt5.QtCore import Qt
+        if img is None or (hasattr(img, "isNull") and img.isNull()):
+            return 0
+        if hasattr(img, "toImage"):
+            img = img.toImage()
+        small = img.scaled(16, 16, Qt.IgnoreAspectRatio, Qt.FastTransformation)
+        vals = []
+        for y in range(16):
+            for x in range(16):
+                c = small.pixelColor(x, y)
+                vals.append((c.red() * 299 + c.green() * 587 + c.blue() * 114) // 1000)
+        if not vals:
+            return 0
+        avg = sum(vals) / float(len(vals))
+        bits = 0
+        for i, v in enumerate(vals):
+            if v >= avg:
+                bits |= (1 << i)
+        return bits
+    except Exception:
+        return 0
+
+
+def hash_distance(a: int, b: int) -> int:
+    """两个指纹差多少位（0~256，越小越像）"""
+    try:
+        return bin((int(a) ^ int(b)) & 0xFFFFFFFFFFFFFFFF).count("1")
+    except Exception:
+        return 999
+
+
 def last_capture_ms() -> float:
     """上一次抓屏耗时（毫秒），排查"卡一下"时很有用"""
     return float(_last["ms"] or 0.0)

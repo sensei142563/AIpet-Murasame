@@ -1311,7 +1311,7 @@ class Murasame(QLabel):
     def is_dnd_enabled(self) -> bool:
         return getattr(self, "_dnd_enabled", False)
 
-    def on_screenshot_captured(self, image_path):
+    def on_screenshot_captured(self, image_path, shot_hash: int = 0):
         # 勿扰模式下完全忽略截图结果
         if self.is_dnd_enabled():
             try:
@@ -1321,21 +1321,61 @@ class Murasame(QLabel):
             return
         model_type = get_config("./config.json")["model_type"]
 
-        def task(path):
+        def task(path, _hash):
+            def _emit_reply(desc, reused: bool = False):
+                """把描述发回主线程让她开口（reused=True 表示屏幕没变、复用上次描述）"""
+                _tag = "（屏幕和上次一样，没有变化）" if reused else ""
+                propmt = (
+                    "【重要系统指令】你刚刚通过屏幕截图看到了主人当前的真实状态。"
+                    "以下是对主人屏幕内容的描述，这是你亲眼所见的事实，你必须围绕这个内容展开对话：\n"
+                    "=== 屏幕内容描述开始 ===\n"
+                    f"{desc}\n"
+                    "=== 屏幕内容描述结束 ===\n"
+                    f"{_tag}"
+                    f"（截图里那个桌宠窗口就是你本人，不是别人。）"
+                    f"请以{self.pet_name}的身份，自然地观察并评论主人正在做什么。你的回复必须紧密围绕上述描述，"
+                    "可以表达关心、好奇、或撒娇——但要让人感觉你真的看到了主人的屏幕。"
+                    "如果屏幕和上次一样，就别说重复的话，可以聊点别的或者只是陪着。"
+                    "只输出你自己要说的话（JSON 数组），不要写「主人：」也不要替主人说话，不要续写下一轮。"
+                )
+                try:                      # 记下"她最近聊过"，屏幕没变时用来避免连着复读
+                    _h, _d, _t, _ = getattr(self, "_last_shot_info", (0, "", 0.0, 0.0))
+                    self._last_shot_info = (_h or int(_hash or 0), _d or str(desc or ""), _t, time.time())
+                except Exception:
+                    pass
+                self._request_dialog.emit(propmt, "system", True)
+
             try:
                 # 长文本输出中 → 直接丢弃（不调用视觉 API，节省资源；finally 会删临时截图）
                 if self.long_text_mode and self._stream_playing:
                     print("[AIpet] 长文本输出中，跳过截图识别")
                     return
-                # 正在思考/说话时也跳过：视觉识别要占显卡 40~50 秒，而这一轮回复的
-                # 语音合成同样要用显卡 → 抢起来会让"回复"变成等好几分钟（像不回话）。
-                # 一轮结束后的下一次抓屏（150 秒后）识别照常。
+                # ── 屏幕没变就别再跑一次视觉（省显卡、也省时间）──
+                #   实测：每 150 秒重描述一遍没变的屏幕，视觉要占显卡 10 秒以上，
+                #   还会和语音合成抢显卡（语音被拖到 25 秒）。指纹一样就复用上次描述：
+                #   · 刚评论过（3 分钟内）→ 这轮什么都不做
+                #   · 久没说话了 → 复用描述、正常评论（不用再识别）
+                try:
+                    from tool.screen_capture import hash_distance
+                    _ph, _pdesc, _pts, _ptalk = getattr(self, "_last_shot_info", (0, "", 0.0, 0.0))
+                    _same = (_hash and _ph and hash_distance(_hash, _ph) <= 12)
+                    if _same:
+                        _age = time.time() - float(_pts or 0)
+                        _since_talk = time.time() - float(_ptalk or 0)
+                        if _since_talk < 180:
+                            print("[AIpet] 屏幕没变化，刚聊过 → 这轮不打扰（也没占用显卡）")
+                            return
+                        if _pdesc and _age < 900:
+                            print(f"[AIpet] 屏幕没变化 → 复用上次描述（省一次视觉识别，{_age:.0f} 秒前看的）")
+                            _emit_reply(_pdesc, reused=True)
+                            return
+                except Exception as _he:
+                    print(f"[AIpet] ⚠ 画面比对失败（照常识别）: {_he}")
+
+                # 正在思考/说话时先不识别：视觉要占显卡十几秒，而这一轮回复的语音合成
+                # 同样要用显卡 → 抢起来会让回复变成等好几分钟。但**不丢弃**：让她稍后重试。
                 try:
                     if self.is_busy_reply() or getattr(self, "_screen_look_busy", False):
-                        # ⚠ 关键：不要"丢弃"，而是**稍后马上重试**。
-                        #   以前这里直接 return（丢掉这一轮），下次要等整个间隔（150 秒）；
-                        #   而她说话/合成语音经常要几十秒 → 大部分屏幕观察都被丢掉，
-                        #   表现就是"她从来不主动看屏幕说话"（用户反馈）。
                         print("[AIpet] 她正在回复中 → 本轮屏幕识别稍后重试（不丢）")
                         try:
                             if self._screenshot_worker is not None:
@@ -1351,23 +1391,18 @@ class Murasame(QLabel):
                     if self.force_stop:
                         print("[vision] 已中断生成")
                         return
-                    desc = describe_image(path)
-                    propmt = (
-                        "【重要系统指令】你刚刚通过屏幕截图看到了主人当前的真实状态。"
-                        "以下是对主人屏幕内容的描述，这是你亲眼所见的事实，你必须围绕这个内容展开对话：\n"
-                        "=== 屏幕内容描述开始 ===\n"
-                        f"{desc}\n"
-                        "=== 屏幕内容描述结束 ===\n"
-                        f"（截图里那个桌宠窗口就是你本人，不是别人。）"
-                        f"请以{self.pet_name}的身份，自然地观察并评论主人正在做什么。你的回复必须紧密围绕上述描述，"
-                        "可以表达关心、好奇、或撒娇——但要让人感觉你真的看到了主人的屏幕。"
-                        "只输出你自己要说的话（JSON 数组），不要写「主人：」也不要替主人说话，不要续写下一轮。"
-                    )
+                    desc = describe_image(path, max_side=vision_fast_size(), max_new=110)
                     if self.force_stop:
                         print("屏幕回复 已中断生成")
                         return
+                    # 记住这一屏的描述与指纹：屏幕没变时下次直接复用（省一次视觉识别）
+                    try:
+                        self._last_shot_info = (int(_hash or 0), str(desc or ""),
+                                               time.time(), time.time())
+                    except Exception:
+                        pass
                     # 跨线程安全：发信号回主线程触发对话
-                    self._request_dialog.emit(propmt, "system", True)
+                    _emit_reply(desc)
                 except Exception as e:
                     print(f"[AIpet] 截图分析失败: {e}")
             finally:
@@ -1376,7 +1411,7 @@ class Murasame(QLabel):
                 except Exception:
                     pass
 
-        self._screenshot_executor.submit(task, image_path)
+        self._screenshot_executor.submit(task, image_path, int(shot_hash or 0))
 
     def pause_all_ai(self, stop_voice: bool = True):
         """用户输入/点击桌宠时：停止截图线程；stop_voice=True 时一并中断语音播放。

@@ -206,6 +206,31 @@ if __name__ == "__main__":
     app.aboutToQuit.connect(lambda: save_screen_type(pet))
     # 退出时记录桌宠位置（下次启动回到原位置；配合启动器「重置桌宠位置」按钮）
     app.aboutToQuit.connect(lambda: save_window_pos(pet))
+
+    # ★ 退出看门狗：任何后台任务卡住都不该让主人看着"未响应"
+    #   Python 退出时会等非守护线程（截图/语音的线程池就是），它们可能正卡在一次
+    #   网络请求或几十秒的语音合成上 → 进程就僵在那儿（实测：启动器发了关闭请求，
+    #   进程还活着、窗口不动）。这里在退出流程一开始就挂个守护线程，几秒后强制收尾。
+    def _start_exit_watchdog():
+        import threading as _thx
+        import os as _osx
+        import time as _tx
+
+        def _boom(sec=6.0):
+            _tx.sleep(sec)
+            print("[AIpet] ⏱ 退出超时（后台任务没停干净）→ 强制结束进程", flush=True)
+            try:
+                _osx._exit(0)
+            except Exception:
+                pass
+
+        print("[AIpet] 正在退出…（最多等 6 秒，之后强制结束）", flush=True)
+        _thx.Thread(target=_boom, daemon=True).start()
+
+    try:
+        app.aboutToQuit.connect(_start_exit_watchdog)
+    except Exception:
+        pass
     # 显示窗口：等第一帧立绘（服装）合成好再显示，避免先露出"没穿好衣服"的样子；
     # 最多等 5 秒（合成失败/纯 Live2D 时也要把窗口显示出来）
     def _show_when_ready(waited=0):
@@ -905,6 +930,13 @@ if __name__ == "__main__":
                 pass
             try:
                 save_window_pos(pet)
+            except Exception:
+                pass
+            # 丢掉排队中的截图分析任务（正在跑的那个仍然会等，但不会再有新的堆积）
+            try:
+                _ex = getattr(pet, "_screenshot_executor", None)
+                if _ex is not None:
+                    _ex.shutdown(wait=False)
             except Exception:
                 pass
             QTimer.singleShot(400, app.quit)
