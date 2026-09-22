@@ -1625,9 +1625,7 @@ class Murasame(QLabel):
         """检查系统空闲时间并在阈值上触发对话"""
         idle_seconds = get_idle_seconds()
 
-        # ── 游戏/全屏（勿扰）时自动降级：打游戏不该被桌宠拖累 ──
-        #    暂停定时截屏识别（不再反复调视觉模型抢显卡）、让视觉服务腾出显存、
-        #    不主动搭话、把自己的进程优先级降到最低；游戏一结束自动恢复。
+        # ── 游戏/全屏：只降优先级（主人要求屏幕识别与主动搭话都不许动）──
         try:
             from tool import perf_guard as _pg
             _g = _pg.game_mode()
@@ -1668,9 +1666,7 @@ class Murasame(QLabel):
         except Exception:
             pass
 
-        # 游戏/全屏期间：自愈检查照做（上面两段），但不再主动搭话/识别触发
-        if getattr(self, "_game_mode", False):
-            return
+        # 游戏/全屏期间也照常搭话、照常看屏幕（主人明确要求不改），这里不做任何跳过
 
         # 如果已经从离开状态回来，并且离开超过 60 秒，则问候一次“欢迎回来”
         if (
@@ -3740,50 +3736,25 @@ class Murasame(QLabel):
 
     # ══════════ 立绘右上角：对话 / 菜单 快捷按钮 ══════════
     def _enter_game_mode(self):
-        """进游戏：腾显卡、停识别、降优先级（她还在，只是安静下来）"""
+        """游戏/全屏时：只把桌宠自己的进程优先级降到最低。
+
+        ⚠ 主人明确要求：**不要动屏幕识别，也要继续主动搭话**。
+          所以这里不暂停截屏/摄像头线程、不卸载视觉模型——只降优先级，
+          让调度器优先伺候游戏，她该看屏幕、该搭话都照旧。
+        """
         try:
             from tool import perf_guard as _pg
-            self._game_screen_was_on = bool(self._screenshot_worker and self._screenshot_worker.isRunning())
-            try:
-                self.stop_screenshot_worker()
-            except Exception:
-                pass
-            try:                                # 摄像头识别线程也一起停
-                _cw = getattr(self, "_camera_worker", None)
-                if _cw is not None and _cw.isRunning():
-                    self._game_camera_was_on = True
-                    _cw.requestInterruption()
-                    _cw.quit()
-                    _cw.wait(1500)
-                    self._camera_worker = None
-            except Exception:
-                pass
-            _pg.unload_vision_now()             # 视觉模型移出显存（8G 卡上那是 6G）
             _pg.set_process_priority(True)      # Idle：永远排在游戏后面
-            print("[桌宠] 🎮 已降级：暂停屏幕识别、腾出显存、优先级降到最低")
+            print("[桌宠] 🎮 游戏/全屏中：桌宠进程优先级降到最低（识别与搭话照常）")
         except Exception as e:
             print(f"[桌宠] ⚠ 进入游戏模式失败: {e}")
 
     def _exit_game_mode(self):
-        """游戏结束：恢复原来的识别与优先级"""
+        """游戏结束：优先级回到"低于正常"（其余本来就没改）"""
         try:
             from tool import perf_guard as _pg
             _pg.set_process_priority(False)
-            if getattr(self, "_game_screen_was_on", False):
-                try:
-                    self.start_screenshot_worker(self._screen_interval_seconds())
-                except Exception:
-                    pass
-            self._game_screen_was_on = False
-            if getattr(self, "_game_camera_was_on", False):
-                self._game_camera_was_on = False
-                try:
-                    from tool.config import get_config
-                    _ci = float(get_config("./config.json").get("camera_interval") or 100)
-                    self.start_camera_worker(_ci)
-                except Exception:
-                    pass
-            print("[桌宠] ▶ 已恢复：屏幕识别与优先级回到正常")
+            print("[桌宠] ▶ 游戏结束：优先级恢复（低于正常）")
         except Exception as e:
             print(f"[桌宠] ⚠ 退出游戏模式失败: {e}")
 
