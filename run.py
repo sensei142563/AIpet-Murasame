@@ -286,7 +286,7 @@ def _want_cuda_torch(cfg) -> bool:
         return False
     if str(cfg.get("model_type", "")).strip().lower() == "local":
         return True
-    long_on = as_bool(cfg.get("longtext_enabled"), True) and as_bool(cfg.get("longtts_enable"), True)
+    long_on = as_bool(cfg.get("longtext_enabled"), True)
     return long_on and as_bool(cfg.get("longtts_gpu"), True)
 
 
@@ -579,11 +579,10 @@ def _find_f5tts_python():
 def start_f5tts_api():
     """启动 F5-TTS HTTP 服务（端口 9881，长文本模式中文语音合成）"""
     cfg = get_config("./config.json")
+    # 长语音没有独立开关：它跟着「长文本模式」走（longtext_enabled 原本就是这条链的门禁）。
+    # ⚠ 别再为「是否启动长语音」加第二个开关 —— 那是重复的。
     if not as_bool(cfg.get("longtext_enabled"), True):
         log("长文本模式已关闭，跳过 F5-TTS 服务启动。", "INFO")
-        return None
-    if not as_bool(cfg.get("longtts_enable"), True):
-        log("长语音已在设置里关闭，跳过 F5-TTS 服务启动。", "INFO")
         return None
 
     # F5-TTS 为可选语音库：多候选探测（runtime\venv → 系统 Python），谁有 f5_tts 用谁。

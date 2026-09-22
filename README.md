@@ -684,7 +684,6 @@ main.py (PyQt5 主窗口 + FastAPI 28565 + 快捷键监听 + 托盘)
   "tts_type": "local",
   "voice_synthesis_enable": "true",
   "short_tts_gpu": "true",
-  "longtts_enable": "true",
   "longtts_gpu": "true",
   "gpu_accel": "true",
   "screen_type": "false",
@@ -733,9 +732,8 @@ main.py (PyQt5 主窗口 + FastAPI 28565 + 快捷键监听 + 托盘)
 | `tts_type` | `local`（GPT-SoVITS）/ `cloud`（云端 TTS） |
 | `voice_synthesis_enable` | **短语音（日语 GPT-SoVITS）开关**，`"true"` 默认开。关掉后只出文字，回复明显更快 |
 | `short_tts_gpu` | 短语音是否用 NVIDIA 显卡合成（`"true"` 默认开）。整合包没装 CUDA 时会自动回退 CPU |
-| `longtts_enable` | **长语音（中文 F5-TTS）开关**，`"true"` 默认开。关掉后不启动 F5-TTS 服务（长文本仍可纯文字显示） |
-| `longtts_gpu` | 长语音是否用 NVIDIA 显卡合成（`"true"` 默认开）。检测不到 CUDA 会自动回退 CPU |
-| `longtext_enabled` | 长文本模式总开关（`"true"` 启用） |
+| `longtts_gpu` | 长语音是否用 NVIDIA 显卡合成（`"true"` 默认开）。检测不到 CUDA 会自动回退 CPU。**长语音本身没有独立开关**，它跟着 `longtext_enabled` 走 |
+| `longtext_enabled` | 长文本模式总开关（`"true"` 默认开）。**同时门禁长语音**：关掉后长文本对话与 F5-TTS 长语音服务都不会启用 |
 | `longtext_tts_type` | 长文本 TTS 引擎（当前仅 `f5tts`） |
 | `longtext_ref_voice` | F5-TTS 参考音频（音色克隆，3-5 秒最佳） |
 | `longtext_ref_text` | 参考音频对应文本 |

@@ -17,7 +17,6 @@
   "tts_type": "local",
   "voice_synthesis_enable": "true",
   "short_tts_gpu": "true",
-  "longtts_enable": "true",
   "longtts_gpu": "true",
   "gpu_accel": "true",
   "screen_type": "false",

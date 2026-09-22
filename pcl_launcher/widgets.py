@@ -125,7 +125,10 @@ class PCLSettingsPanel(QWidget):
 
         # ===== ③ 长文本输出 =====
         self._section("长文本输出", "📝")
-        self._add_slider("longtext_enabled", "长文本输出模式", ["false", "true"], "true")
+        # 长文本总开关同时门禁长语音服务（F5-TTS）—— 长语音不再单独设开关
+        self._add_slider("longtext_enabled", "长文本模式（含长语音）", ["false", "true"], "true",
+                         hint="开启：长文本对话可用，并启动长语音（F5-TTS 中文）服务。\n"
+                              "关闭：长文本对话关闭，长语音服务也不会启动（省显存）。")
         self._add_slider("longtext_model", "长文本对话模型", ["qwen", "deepseek"], "deepseek")
         self._add_model_combo(
             "longtext_model_name", "长文本模型名",
@@ -145,9 +148,6 @@ class PCLSettingsPanel(QWidget):
                          hint="短语音（GPT-SoVITS）是否用 NVIDIA 显卡合成。\n"
                               "开（默认）：用显卡；整合包没装 CUDA 时会自动回退 CPU。\n"
                               "关：强制 CPU（更稳，但合成明显更慢）。")
-        self._add_slider("longtts_enable", "启用长语音（中文）", ["false", "true"], "true",
-                         hint="长语音 = 长文本模式用的 F5-TTS 中文语音服务。\n"
-                              "关闭后不启动该服务（长文本仍可纯文字显示）。")
         self._add_slider("longtts_gpu", "长语音 GPU 加速", ["false", "true"], "true",
                          hint="长语音（F5-TTS）是否用 NVIDIA 显卡合成。\n"
                               "开（默认）：检测到 CUDA 就用显卡，否则自动回退 CPU；\n"
@@ -519,7 +519,6 @@ class PCLSettingsPanel(QWidget):
             self._set_slider("tts_type", cfg.get("tts_type", "local"))
             self._set_slider("voice_synthesis_enable", cfg.get("voice_synthesis_enable", "true"))
             self._set_slider("short_tts_gpu", cfg.get("short_tts_gpu", "true"))
-            self._set_slider("longtts_enable", cfg.get("longtts_enable", "true"))
             self._set_slider("longtts_gpu", cfg.get("longtts_gpu", "true"))
             self._set_slider("portrait_auto_switch", cfg.get("portrait_auto_switch", "true"))
             self._set_slider("portrait", cfg.get("portrait", "b"))
@@ -595,7 +594,6 @@ class PCLSettingsPanel(QWidget):
             cfg["voice_trigger"] = self._get_slider("voice_trigger")
             cfg["voice_synthesis_enable"] = self._get_slider("voice_synthesis_enable")
             cfg["short_tts_gpu"] = self._get_slider("short_tts_gpu")
-            cfg["longtts_enable"] = self._get_slider("longtts_enable")
             cfg["longtts_gpu"] = self._get_slider("longtts_gpu")
             cfg["portrait_auto_switch"] = self._get_slider("portrait_auto_switch")
             cfg["live2d_enabled"] = self._get_slider("live2d_enabled")
