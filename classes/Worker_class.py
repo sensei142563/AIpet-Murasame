@@ -168,10 +168,13 @@ class qwen3_lora_Worker(QThread):
             from tool import pc_control as _pc
             _acts = _pc.parse(reply)
             if _acts:
-                print(f"[桌宠] 她请求操作电脑：{len(_acts)} 个动作")
+                # 识别触发/系统观察那一轮 = 她自己在看屏幕，属于"自主行动"
+                _auto_turn = bool(getattr(self, "t", False)) or str(getattr(self, "role", "")) == "system"
+                print(f"[桌宠] 她请求操作电脑：{len(_acts)} 个动作（自主={_auto_turn}）")
                 if _pc.enabled():
                     import threading as _thpc
-                    _thpc.Thread(target=_pc.execute, args=(_acts,), daemon=True).start()
+                    _thpc.Thread(target=_pc.execute, args=(_acts,),
+                                 kwargs={"auto": _auto_turn}, daemon=True).start()
                 else:
                     print("[桌宠] 操控电脑未开启（右键菜单可打开）→ 只解析不执行")
                 reply = _pc.strip(reply) or "……好，我试试。"
@@ -310,10 +313,12 @@ class cloud_API_Worker(QThread):
             from tool import pc_control as _pc
             _acts = _pc.parse(reply_json)
             if _acts:
-                print(f"[桌宠] 她请求操作电脑：{len(_acts)} 个动作")
+                _auto_turn = bool(getattr(self, "t", False)) or str(getattr(self, "role", "")) == "system"
+                print(f"[桌宠] 她请求操作电脑：{len(_acts)} 个动作（自主={_auto_turn}）")
                 if _pc.enabled():
                     import threading as _thpc
-                    _thpc.Thread(target=_pc.execute, args=(_acts,), daemon=True).start()
+                    _thpc.Thread(target=_pc.execute, args=(_acts,),
+                                 kwargs={"auto": _auto_turn}, daemon=True).start()
                 else:
                     print("[桌宠] 操控电脑未开启（右键菜单可打开）→ 只解析不执行")
                 reply_json = _pc.strip(reply_json) or "……好，我试试。"

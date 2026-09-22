@@ -112,8 +112,9 @@ def qwen3_lora(history, user_input, role):
     # 允许操控电脑时，把键鼠操作说明也交给她（菜单里可开关）
     try:
         from tool import pc_control as _pc2
-        if _pc2.enabled():
-            messages.append({"role": "system", "content": _pc2.PROMPT_RULES})
+        _rules = _pc2.prompt_rules()      # 含「自主行动」说明（开了自主操作才会有）
+        if _rules:
+            messages.append({"role": "system", "content": _rules})
     except Exception:
         pass
     # 1. system 身份（优先保留已有的 system，否则用默认身份）

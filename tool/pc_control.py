@@ -61,6 +61,21 @@ _MODMAP = {"ctrl": "ctrl", "control": "ctrl", "shift": "shift", "alt": "alt",
            "win": "cmd", "cmd": "cmd", "super": "cmd"}
 
 
+# 自主行动的最小间隔（分钟）：她"自己想动手"时，两次之间至少要隔这么久
+DEFAULT_AUTO_MINUTES = 3
+# 上次自主行动的时间戳（内存记录，重启后重置）
+_last_auto_ts = [0.0]
+
+AUTO_RULES = (
+    "【自主行动的权限（已开启）】主人没有开口时，你也可以**自己判断**要不要动手，"
+    "不必每次等主人吩咐；但只在确实能帮上忙的时候动手，不要为了动而动。例如："
+    "屏幕上有个明显的报错/弹窗需要点掉、主人正要把东西拖来拖去、聊天窗口空着可以帮他打句招呼。"
+    "动手前如果不确定画面，先输出「【看屏幕】」看清再决定。"
+    "动手时照旧用「【键鼠】动作 参数」指令；不需要动手就正常说话，别硬找事做。"
+    "主人明确让你做事时不受此限制，直接动手即可。"
+)
+
+
 def _cfg_path() -> str:
     return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.json")
 
@@ -105,6 +120,62 @@ def set_enabled(on: bool) -> bool:
     except Exception as e:
         _log_line(f"⚠ 写入开关失败: {e}")
         return False
+
+
+def auto_enabled() -> bool:
+    """是否允许她**自己主动**操作电脑（不等主人开口）：config.json 的 pc_auto_enabled"""
+    try:
+        from tool.config import get_config
+        v = get_config("./config.json").get("pc_auto_enabled", "false")
+        return str(v).strip().lower() in ("true", "1", "yes", "on")
+    except Exception:
+        return False
+
+
+def set_auto_enabled(on: bool) -> bool:
+    try:
+        from tool.config import get_config
+        import json
+        cfg = dict(get_config("./config.json") or {})
+        cfg["pc_auto_enabled"] = "true" if on else "false"
+        p = _cfg_path()
+        tmp = p + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, p)
+        _log_line(f"自主操作 → {'已开启' if on else '已关闭'}")
+        return True
+    except Exception as e:
+        _log_line(f"⚠ 写入自主开关失败: {e}")
+        return False
+
+
+def auto_minutes() -> float:
+    try:
+        from tool.config import get_config
+        return max(0.5, float(get_config("./config.json").get("pc_auto_minutes") or DEFAULT_AUTO_MINUTES))
+    except Exception:
+        return float(DEFAULT_AUTO_MINUTES)
+
+
+def prompt_rules() -> str:
+    """按开关拼出要给模型的说明（允许操控 + 是否自主）"""
+    if not enabled():
+        return ""
+    txt = PROMPT_RULES
+    if auto_enabled():
+        txt = txt + chr(10) + AUTO_RULES
+    return txt
+
+
+def auto_cooldown_left() -> float:
+    """距离下次可以自主行动还剩几秒（0 = 可以动手）"""
+    try:
+        gap = auto_minutes() * 60.0
+        left = gap - (time.time() - float(_last_auto_ts[0] or 0.0))
+        return max(0.0, left)
+    except Exception:
+        return 0.0
 
 
 def parse(text: str) -> list:
@@ -177,9 +248,12 @@ def _resolve_key(name: str):
     return getattr(Key, n, None)
 
 
-def execute(actions: list, dry_run: bool = False) -> list:
+def execute(actions: list, dry_run: bool = False, auto: bool = False) -> list:
     """执行动作。dry_run=True 只做校验和日志，不动真实键鼠（自测用）。
 
+    auto=True 表示这是**她自己主动**要动手（主人没开口）：
+      * 需要在菜单里额外打开「自主操作」
+      * 有最小间隔（config 的 pc_auto_minutes，默认 3 分钟），避免她自己反复点
     返回实际执行成功的动作列表。
     """
     if not actions:
@@ -187,6 +261,16 @@ def execute(actions: list, dry_run: bool = False) -> list:
     if not dry_run and not enabled():
         _log_line("操控电脑未开启（右键菜单可打开）→ 本轮动作已忽略")
         return []
+    if not dry_run and auto:
+        if not auto_enabled():
+            _log_line("她主动想动手，但「自主操作」没开 → 已忽略（菜单里可打开）")
+            return []
+        left = auto_cooldown_left()
+        if left > 0:
+            _log_line(f"她主动想动手，但距离上次自主行动还差 {left:.0f} 秒 → 已忽略")
+            return []
+        _last_auto_ts[0] = time.time()
+        _log_line("⭐ 她主自动手（主人没开口）")
     x0, y0, sw, sh = _screen_size()
     done = []
     try:
