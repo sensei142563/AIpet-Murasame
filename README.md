@@ -700,10 +700,7 @@ main.py (PyQt5 主窗口 + FastAPI 28565 + 快捷键监听 + 托盘)
   "camera_id": 0,
   "face_recognition_enabled": "false",
   "longtext_enabled": "true",
-  "longtext_tts_type": "f5tts",
   "longtext_max_history_turns": 12,
-  "longtext_ref_voice": "reference_voices/long_chinese/953244.wav",
-  "longtext_ref_text": "能和老师在一起，我真的，好高兴！",
   "longtext_model": "deepseek",
   "qq_owner_id": "你的大号QQ号",
   "qq_enabled": "false",
@@ -734,9 +731,6 @@ main.py (PyQt5 主窗口 + FastAPI 28565 + 快捷键监听 + 托盘)
 | `short_tts_gpu` | 短语音是否用 NVIDIA 显卡合成（`"true"` 默认开）。整合包没装 CUDA 时会自动回退 CPU |
 | `longtts_gpu` | 长语音是否用 NVIDIA 显卡合成（`"true"` 默认开）。检测不到 CUDA 会自动回退 CPU。**长语音本身没有独立开关**，它跟着 `longtext_enabled` 走 |
 | `longtext_enabled` | 长文本模式总开关（`"true"` 默认开）。**同时门禁长语音**：关掉后长文本对话与 F5-TTS 长语音服务都不会启用 |
-| `longtext_tts_type` | 长文本 TTS 引擎（当前仅 `f5tts`） |
-| `longtext_ref_voice` | F5-TTS 参考音频（音色克隆，3-5 秒最佳） |
-| `longtext_ref_text` | 参考音频对应文本 |
 | `qq_owner_id` | 主人 QQ 号（大号私聊共享记忆，且 `/clear` 指令仅大号可用） |
 | `qq_enabled` | QQ 功能总开关（PCL 显示「启动 QQ AIpet」按钮） |
 | `qq_napcat_ws` | NapCat WebSocket 地址（默认 `ws://127.0.0.1:3001`） |
@@ -754,6 +748,12 @@ main.py (PyQt5 主窗口 + FastAPI 28565 + 快捷键监听 + 托盘)
 | `live2d_enabled` | Live2D 模式开关（需 pip install live2d-py） |
 
 > 关闭人脸识别后注册信息不会清除，重新开启即可恢复。
+
+> 📎 **长语音的参考音频是「按角色」配置的**，不再有全局配置键：写在
+> `pets/<角色>/pet.json` 的 `voices.long_ref_audio` / `long_ref_text`
+> （用启动器「角色向导 → 语音」填写，3-5 秒最佳）。
+> 历史文档里的 `longtext_ref_voice` / `longtext_ref_text` / `longtext_tts_type`
+> 三个全局键**没有任何代码读取**，已删除以免误导。
 
 ---
 ## 📁 文件与数据位置（重要）
