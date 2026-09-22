@@ -208,11 +208,14 @@ class Murasame(QLabel):
     # 跨线程安全触发对话：worker 线程（截图/摄像头）只发信号，
     # 主线程槽函数才执行 start_thread（内部含大量 Qt GUI 操作，必须在主线程）
     _request_dialog = pyqtSignal(str, str, bool)
+    # 电脑操作真做完之后（Worker 线程发）→ 主线程让她说一句"我做了什么"
+    _pc_done = pyqtSignal(str)
 
     # 初始
     def __init__(self):
         super().__init__()
         self._request_dialog.connect(self.start_thread)
+        self._pc_done.connect(self._on_pc_done)
         # 文字
         self.full_text = ""  # 打字机效果用到的整体字符串
         from pets.pet_registry import get_pet_config, get_fgimages_dir
@@ -498,10 +501,18 @@ class Murasame(QLabel):
         # 自主学习 / 电脑近况：每 4 分钟看一眼（内部自己限速：≥20 分钟才动手、
         # 主人刚说完话或她正忙就跳过；都在后台线程，界面不会卡）
         self._last_user_ts = 0.0
+        self._last_pc_narrate = 0.0
         self._learn_timer = QTimer(self)
         self._learn_timer.setInterval(4 * 60 * 1000)
         self._learn_timer.timeout.connect(self._learn_tick)
         self._learn_timer.start()
+
+        # 电脑操作"做完了说一句"：Worker 线程里发信号 → 主线程让她说一句
+        try:
+            from tool import pc_control as _pcn
+            _pcn.set_narrator(lambda acts: self._pc_done.emit(_pcn.describe(acts)))
+        except Exception as _en:
+            print(f"[桌宠] ⚠ 注册操作完成回调失败: {_en}")
 
         # 勿扰模式：开启后关闭截图与空闲检测，并禁止主动搭话
         self._dnd_enabled = False
@@ -1383,28 +1394,72 @@ class Murasame(QLabel):
                 pass
 
     def _show_learned(self):
-        """菜单：看看她学到了什么"""
+        """菜单：看看她学到了什么（单独一个窗口，不占对话框）"""
         try:
-            from tool import self_learn as _sl
-            txt = _sl.summary_text()
-            print("[学习] " + txt.replace(chr(10), " ｜ "))
-            self.show_text(txt[:300], typing=False)
+            from classes.learn_window import LearnWindow
+            w = getattr(self, "_learn_window", None)
+            if w is None:
+                w = LearnWindow(self, on_study=lambda: self._study_now(silent=True))
+                self._learn_window = w
+            else:
+                w.refresh()
+            w.showNormal()
+            w.raise_()
+            w.activateWindow()
+            try:
+                from tool import self_learn as _sl
+                print(f"[学习] 记忆窗口已打开（{_sl._store_path()}）")
+            except Exception:
+                pass
         except Exception as e:
-            print(f"[学习] ⚠ 查看失败: {e}")
+            print(f"[学习] ⚠ 打开记忆窗口失败: {e}")
 
-    def _study_now(self):
-        """菜单：让她现在学点什么（立刻自习一次）"""
+    def _study_now(self, silent: bool = False):
+        """菜单/窗口：让她现在学点什么（立刻自习一次）"""
         try:
             from tool import self_learn as _sl
             if not _sl.enabled():
                 print("[学习] 自主学习没开 → 先去菜单打开")
-                self.show_text("先打开「自主学习」我才能自己学哦。", typing=True)
+                if not silent:
+                    self.show_text("先打开「自主学习」我才能自己学哦。", typing=True)
                 return
-            self.show_text("唔……那我去看看书。", typing=True)
+            if not silent:
+                self.show_text("唔……那我去看看书。", typing=True)
             import threading as _thl
             _thl.Thread(target=self._learn_cycle, kwargs={"force": True}, daemon=True).start()
         except Exception as e:
             print(f"[学习] ⚠ 立即自习失败: {e}")
+
+    def _on_worker_status(self, text):
+        """Worker 报告"正在操作电脑……" → 在对话框显示一行状态（她不是哑巴）"""
+        try:
+            t = str(text or "").strip()
+            if not t:
+                return
+            self.show_text(t, typing=False)
+        except Exception:
+            pass
+
+    def _on_pc_done(self, desc):
+        """她真的把电脑操作做完了 → 让她用一句话说说自己干了什么 / 接下来想干什么"""
+        try:
+            desc = str(desc or "")
+            if not desc:
+                return
+            print(f"[桌宠] ✅ 电脑操作完成：{desc}")
+            import time as _t3
+            if _t3.time() - float(getattr(self, "_last_pc_narrate", 0) or 0) < 8:
+                return                       # 别连着刷（同一批动作只汇报一次）
+            self._last_pc_narrate = _t3.time()
+            # ⚠ 这一轮按「主人派下来的活」算（role="user"）：用 system 会被当成自主行动，
+            #   她接着想再动一步就会被 1 分钟的自主间隔拦住（"事情做到一半做不下去"）。
+            self._request_dialog.emit(
+                "（系统提示：你刚刚真的把电脑操作做完了——" + desc +
+                "。用你自己的口吻跟主人说一句：说你做了什么、或者接下来还想干什么。"
+                "一句话就够，别念坐标、别提系统提示、别重复刚才已经说过的话。"
+                "如果这件事还没做完，现在可以接着做。）", "user", False)
+        except Exception as e:
+            print(f"[桌宠] ⚠ 操作完成汇报失败: {e}")
 
     def _model_ready(self) -> bool:
         """现在有可用的对话模型吗（自主学习要用）"""
@@ -1432,12 +1487,19 @@ class Murasame(QLabel):
             if not what:
                 return
             print(f"[学习] 这一轮：{what}")
-            if force:
-                self._request_dialog.emit(
-                    "（系统提示：你刚刚自己" + ("学了一点东西" if what.startswith("自习") else "记了点东西")
-                     + "：" + what + "。用你自己的口吻跟主人提一句，一句话、别太得意。）", "system", False)
+            # 结果只显示在「她的记忆与自学」窗口里，不占用对话框（用户要求）
+            self._refresh_learn_window()
         except Exception as e:
             print(f"[学习] ⚠ 学习循环失败（{type(e).__name__}: {e}）")
+
+    def _refresh_learn_window(self):
+        """记忆窗口开着的话刷新一下内容"""
+        try:
+            w = getattr(self, "_learn_window", None)
+            if w is not None and w.isVisible():
+                w.refresh()
+        except Exception:
+            pass
 
     def _pc_info_tick(self):
         """采一次电脑近况，写进她的「观察」——她聊到相关话题时自然用得上（后台线程）"""
@@ -1578,7 +1640,7 @@ class Murasame(QLabel):
                     self._last_self_look = _t2.time()
                     print("[桌宠] 👀 她自己要求看屏幕 → 抓屏识别后重新回答")
                     self._talking = False
-                    self.show_text("唔……我看看。", typing=True)
+                    self.show_text("正在观看屏幕……", typing=True)
                     self._screen_look_busy = True
                     import threading as _th2
                     _th2.Thread(target=self._look_screen_and_reply,
@@ -1603,7 +1665,7 @@ class Murasame(QLabel):
                 if _req:
                     print("[桌宠] 📂 她想看文件 → 去翻一下再回答")
                     self._talking = False
-                    self.show_text("唔……我翻翻看。", typing=True)
+                    self.show_text("正在查看电脑文件……", typing=True)
                     import threading as _thf
                     _thf.Thread(target=self._file_read_and_reply,
                                 args=(_req[0], getattr(self, "_last_user_text", "")
@@ -1887,7 +1949,7 @@ class Murasame(QLabel):
                 if needs_screen_look(text):
                     self._screen_look_busy = True
                     print("[桌宠] 👀 主人让我看屏幕 → 当场抓屏识别")
-                    self.show_text("正在看你的屏幕......", typing=False)
+                    self.show_text("正在观看屏幕……", typing=False)
                     import threading as _th
                     _th.Thread(target=self._look_screen_and_reply,
                                args=(text,), daemon=True).start()
@@ -1963,6 +2025,11 @@ class Murasame(QLabel):
             )
 
         self.worker.finished.connect(self.on_reply)
+        try:
+            # Worker 报告"正在操作电脑……/正在查看电脑文件……" → 对话框显示一行状态
+            self.worker.status.connect(self._on_worker_status)
+        except Exception:
+            pass
         self.worker.start()
 
     def _ensure_window_fits_pixmap(self, pm):
@@ -2236,7 +2303,7 @@ class Murasame(QLabel):
         没有服装素材的角色（例如「每个表情一张整图」）不显示换装项。"""
         try:
             from PyQt5.QtWidgets import QMenu
-            from tool.pet_menu import StoryMenu, section, item, submenu
+            from tool.pet_menu import StoryMenu, section, item, submenu, separator
             from tool.portrait_outfit import SETS, load_outfit
             # ⚠ 服装/动作必须按【这个桌宠自己的表】取：以前这里用的是内置的丛雨表，
             #   于是任何角色右键看到的都是丛雨的 制服/睡衣/私服/刀服。
@@ -2300,9 +2367,11 @@ class Murasame(QLabel):
             except Exception:
                 cur_acts = []
             menu = StoryMenu(self)
+            # ★ 顶层只放三个分类，具体开关收进子菜单（以前十几项平铺，菜单太长）
+            # ── ① 换装与立绘 ▸ ──
+            _dress = submenu(menu, "换装与立绘")
             if cloths:
-                section(menu, f"切换服装　{cur_set} 立绘 · 当前：{cur_name}")
-                menu.addSeparator()
+                _cloth_sub = submenu(_dress, "切换服装（当前：%s）" % (cur_name or "默认"))
                 for name, cid, _h in cloths:
                     # 勾号要能对上：菜单名和"当前穿着"可能一个叫"刀装"一个叫"刀服"，
                     # 先各自归一化再比（用户反馈勾号不见了）
@@ -2311,15 +2380,14 @@ class Murasame(QLabel):
                         _same = (_rc(name) or name) == (_rc(cur_name) or cur_name)
                     except Exception:
                         _same = (name == cur_name)
-                    act = item(menu, name, checked=_same)
+                    act = item(_cloth_sub, name, checked=_same)
                     act.triggered.connect(lambda checked=False, n=name: self._switch_cloth(n))
             if cur_acts:
-                menu.addSeparator()
-                sub = submenu(menu, "切换动作（手臂姿势）")
-                act0 = item(sub, "默认姿势", checked=not cur_act)
+                _acts_sub = submenu(_dress, "切换动作（手臂姿势）")
+                act0 = item(_acts_sub, "默认姿势", checked=not cur_act)
                 act0.triggered.connect(lambda checked=False: self._switch_action(0))
                 for name, aid, _b in cur_acts:
-                    a2 = item(sub, name, checked=(name == cur_act))
+                    a2 = item(_acts_sub, name, checked=(name == cur_act))
                     a2.triggered.connect(lambda checked=False, n=name: self._switch_action(n))
             # 装饰：单独一页（可滚动）——装饰多了不会把菜单撑得满屏
             try:
@@ -2328,93 +2396,95 @@ class Murasame(QLabel):
             except Exception:
                 _decs = []
             if _decs:
-                menu.addSeparator()
-                sub = submenu(menu, "装饰（可多选）")
-                self._fill_decor_menu(sub, cur_set, _decs, cur)
-
+                _decor_sub = submenu(_dress, "装饰（可多选）")
+                self._fill_decor_menu(_decor_sub, cur_set, _decs, cur)
             # a / b 切换：只有这个角色确实有两套素材时才给
             _avail = [x for x in SETS if self._has_fgimages_set(x)]
             if len(_avail) >= 2:
-                if cloths:
-                    menu.addSeparator()
-                sub = submenu(menu, "切换立绘类型（a / b）")
+                _set_sub = submenu(_dress, "切换立绘类型（a / b）")
                 for s in SETS:
                     if s not in _avail:
                         continue
-                    act = item(sub, f"{s} 立绘", checked=(s == cur_set))
+                    act = item(_set_sub, f"{s} 立绘", checked=(s == cur_set))
                     act.triggered.connect(lambda checked=False, ss=s: self._switch_portrait_set(ss))
-                # 自动切换立绘类型 开关（写入 config.json，立即生效）
-                # 调试模式：无条件服从（仅开发版显示；正式版不提供）
-                act_dbg = (item(menu, "调试模式（无条件服从）", checked=self._debug_obey())
-                           if self._debug_available() else None)
-                if act_dbg is not None:
-                    act_dbg.setToolTip("开启后她无条件听你的：换装不再要求明确指令、AI 挑的服装与姿势一律照做、不再保持同款连贯。仅调试用。")
-                    act_dbg.triggered.connect(self._toggle_debug_obey)
-                    menu.addSeparator()
-                act_auto = item(menu, "自动切换立绘类型", checked=self._auto_switch_enabled())
-                act_auto.triggered.connect(self._toggle_auto_switch)
-            # 快捷按钮（立绘右上角的 对话 / 菜单）开关
             try:
-                menu.addSeparator()
-                _act_qb = item(menu, "显示快捷按钮（对话 / 菜单）", checked=self._quick_buttons_enabled())
-                _act_qb.setToolTip("关掉后立绘右上角那两个小按钮会隐藏；右键菜单和点对话框打字照旧可用。")
-                _act_qb.triggered.connect(self._toggle_quick_buttons)
+                separator(_dress)
+                act_auto = item(_dress, "自动切换立绘类型", checked=self._auto_switch_enabled())
+                act_auto.triggered.connect(self._toggle_auto_switch)
             except Exception:
                 pass
-            # ── 电脑操作（让她自己动键鼠）开关 ──
-            # 默认关闭。开启后她可以移动/点击鼠标、滚轮、输入文字、按组合键；
-            # 每轮最多 8 个动作、坐标必须在屏幕内，所有操作写进 data/pc_control.log。
+            # 调试模式：无条件服从（仅开发版显示；正式版不提供）
+            if self._debug_available():
+                try:
+                    separator(_dress)
+                    act_dbg = item(_dress, "调试模式（无条件服从）", checked=self._debug_obey())
+                    act_dbg.setToolTip("开启后她无条件听你的：换装不再要求明确指令、"
+                                       "AI 挑的服装与姿势一律照做、不再保持同款连贯。仅调试用。")
+                    act_dbg.triggered.connect(self._toggle_debug_obey)
+                except Exception:
+                    pass
+
+            # ── ② 电脑与学习 ▸ ──
+            # 电脑操作：她能移动/点击鼠标、滚轮、输入、组合键；坐标必须在屏幕内，
+            #           不做数量限制（限制会让她做到一半停下），所有操作写 data/pc_control.log。
+            # 读取文件：只读（不写不改不删），只允许用户目录与桌面/文档/下载这些地方，
+            #           系统目录一律拒绝；日志在 data/file_access.log。
+            # 自主学习：她自己归纳长期记忆、空闲自习、写日记，存在
+            #           pets/<角色>/memory/learned.json（「看看她学到了什么」可以直接看）。
             try:
                 from tool import pc_control as _pc
-                menu.addSeparator()
-                _act_pc = item(menu, "允许操控电脑（键鼠）", checked=_pc.enabled())
+                from tool import file_access as _fa
+                from tool import self_learn as _sl
+                _ai = submenu(menu, "电脑与学习")
+                _act_pc = item(_ai, "允许操控电脑（键鼠）", checked=_pc.enabled())
                 _act_pc.setToolTip(
-                    "开启后她可以自己操作键鼠：点击 / 双击 / 右键 / 滚轮 / 输入文字 / 组合键（Ctrl+S 等）/ 等待。\n"
-                    "她看不到画面时可以自己输出「【看屏幕】」先看一眼再动手（移动鼠标→看清楚→点击）。\n"
-                    "每轮最多 8 个动作，坐标必须在屏幕内；所有操作都会记到 data/pc_control.log。\n"
-                    "随时可以在这里关掉（关掉后立刻停止执行）。")
+                    "开启后她可以自己操作键鼠：点击 / 双击 / 右键 / 滚轮 / 输入文字 / 组合键（Ctrl+S 等）/ 等待。" + chr(10) +
+                    "要连续操作时她可以写多条指令，不限条数（不会做到一半停下）。" + chr(10) +
+                    "她看不到画面时可以自己输出「【看屏幕】」先看一眼再动手（移动鼠标→看清楚→点击）。" + chr(10) +
+                    "坐标必须在屏幕内；操作时对话框会显示「正在操作电脑……」，做完会把做了什么说出来；" + chr(10) +
+                    "所有操作都记到 data/pc_control.log。随时可以在这里关掉（关掉后立刻停止执行）。")
                 _act_pc.triggered.connect(lambda on=False: _pc.set_enabled(bool(on)))
-                _act_auto = item(menu, "自主操作（不用主人开口）", checked=_pc.auto_enabled())
+                _act_auto = item(_ai, "自主操作（不用主人开口）", checked=_pc.auto_enabled())
                 _act_auto.setToolTip(
                     "开启后她会自己判断要不要动手（看你屏幕上的情况），不必每次等你吩咐。" + chr(10) +
                     "有最小间隔（默认 1 分钟一次，config 的 pc_auto_minutes 可调），避免她自己反复点；" + chr(10) +
                     "只是移动鼠标不算做事、也不占用间隔；你明确让她做事时不受这个间隔限制。" + chr(10) +
                     "所有操作都记在 data/pc_control.log（她没做成的原因也写在那里）。")
                 _act_auto.triggered.connect(lambda on=False: _pc.set_auto_enabled(bool(on)))
-            except Exception as _epc:
-                print(f"[桌宠] ⚠ 电脑操作菜单项失败: {_epc}")
-            # ── 电脑文件 / 自主学习开关 ──
-            # 读取文件：只读（不写不改不删），只允许用户目录与桌面/文档/下载这些地方，
-            # 系统目录一律拒绝；日志在 data/file_access.log。
-            # 自主学习：她自己归纳长期记忆、空闲自习、写日记，存在
-            # pets/<角色>/memory/learned.json（"看看她学到了什么"可以直接看）。
-            try:
-                from tool import file_access as _fa
-                from tool import self_learn as _sl
-                menu.addSeparator()
-                _act_fa = item(menu, "允许读取电脑文件", checked=_fa.enabled())
+                separator(_ai)
+                _act_fa = item(_ai, "允许读取电脑文件", checked=_fa.enabled())
                 _act_fa.setToolTip(
                     "开启后她能看看你电脑里的文件（只读，不会改动、删除任何东西）。" + chr(10) +
                     "你能这样用：「我桌面上有什么」「下载里那个笔记写了啥」；" + chr(10) +
                     "她也会自己偶尔了解一下电脑近况（磁盘、桌面、开着的窗口）当聊天话题。" + chr(10) +
                     "只看桌面／文档／下载／图片／音乐／视频和桌宠自己的目录，系统目录一律拒绝；" + chr(10) +
-                    "每次最多读一个文件（≤200KB）或列 60 个条目，记录在 data/file_access.log。")
+                    "名字里带密码/密钥/token 这类字样的文件不读；记录在 data/file_access.log。")
                 _act_fa.triggered.connect(lambda on=False: _fa.set_enabled(bool(on)))
-                _act_learn = item(menu, "自主学习（自己记东西）", checked=_sl.enabled())
+                _act_learn = item(_ai, "自主学习（自己记东西）", checked=_sl.enabled())
                 _act_learn.setToolTip(
                     "开启后她会自己学东西：" + chr(10) +
                     "① 聊完一段自己归纳「关于主人的事」和心情，存成长期记忆（聊天时会自动用上）；" + chr(10) +
                     "② 你不在的时候挑个话题自己补课（约 20 分钟一次，你刚说过话就不打扰）；" + chr(10) +
-                    "③ 每天写一段日记。全部存在 pets/角色/memory/learned.json，可以随时看。")
+                    "③ 每天写一段日记。全部存在 pets/角色/memory/learned.json。")
                 _act_learn.triggered.connect(lambda on=False: _sl.set_enabled(bool(on)))
-                _act_seen = item(menu, "看看她学到了什么")
-                _act_seen.setToolTip("把她记住的事、学到的东西和最近几天的日记显示出来。")
+                separator(_ai)
+                _act_seen = item(_ai, "看看她学到了什么")
+                _act_seen.setToolTip("单独开一个小窗口，显示她记住的事、学到的东西和最近的日记。")
                 _act_seen.triggered.connect(self._show_learned)
-                _act_study = item(menu, "让她现在学点什么")
-                _act_study.setToolTip("立刻让她自习一次（要先打开上面的「自主学习」）。")
+                _act_study = item(_ai, "让她现在学点什么")
+                _act_study.setToolTip("立刻让她自习一次，结果显示在小窗口里（要先打开上面的「自主学习」）。")
                 _act_study.triggered.connect(self._study_now)
-            except Exception as _efa:
-                print(f"[桌宠] ⚠ 文件/学习菜单项失败: {_efa}")
+            except Exception as _epc:
+                print(f"[桌宠] ⚠ 电脑与学习菜单项失败: {_epc}")
+
+            # ── ③ 界面 ▸ ──
+            try:
+                _ui = submenu(menu, "界面")
+                _act_qb = item(_ui, "显示快捷按钮（对话 / 菜单）", checked=self._quick_buttons_enabled())
+                _act_qb.setToolTip("关掉后立绘右上角那两个小按钮会隐藏；右键菜单和点对话框打字照旧可用。")
+                _act_qb.triggered.connect(self._toggle_quick_buttons)
+            except Exception:
+                pass
             return menu
         except Exception as e:
             print(f"[桌宠] ⚠ 构造换装菜单失败: {e}")

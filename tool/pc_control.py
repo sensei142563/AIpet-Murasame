@@ -21,7 +21,8 @@
     【键鼠】点击 800 250，然后输入 你好                  （一条写多个动作）
 
 安全限制：
-    * 每轮最多 8 个动作（防止模型跑飞反复点击）
+    * 不限制每轮动作条数（限制会让她"做到一半停下"）；只留防跑飞的保险丝
+    * 同一个动作 90 秒内重复的会被丢掉（她做过没看到变化时容易反复点同一处）
     * 坐标必须落在屏幕内，越界直接丢弃并记日志
     * 每个动作写一行日志（data/pc_control.log + 控制台），随时可查她做了什么
     * 动作之间留 120ms 间隔，避免鼠标瞬移导致对方程序来不及响应
@@ -32,8 +33,96 @@ import os
 import re
 import time
 
-# 每轮动作上限
-MAX_ACTIONS = 8
+# 安全限制
+# ⚠ 不再限制每轮动作条数：限制会让她"做到一半停下"（用户反馈）。
+#   这里只留一个防跑飞的保险丝（正常一轮几十条都用不到）。
+SAFETY_MAX = 500
+# 重复抑制窗口（秒）：同一个动作在这么短时间内又来一遍 → 只做一次，其余丢掉。
+# 为什么：她做过一次没看到变化，会以为没成功，于是一轮一轮重复点同一个地方（用户反馈）。
+DUP_WINDOW = 90
+# 连续重复到这个次数，就明确告诉她"别再重复了，换办法或说实话"
+DUP_REPEAT_LIMIT = 2
+_recent_acts = []          # [(指纹, 时间)]
+_dup_hits = [0]
+# 做完之后的"说一句"回调（桌宠注册，用来让她汇报自己干了什么；Worker 线程里调用）
+_narrator = [None]
+
+
+def set_narrator(fn):
+    """桌宠注册：动作真正做完后回调 done 列表，用来让她说一句"我做了什么/接下来想干什么"。"""
+    _narrator[0] = fn
+
+
+def _act_key(a: dict) -> str:
+    """动作指纹：用来判断"她是不是又在重复同一件事"（坐标抖动 20px 以内算同一处）"""
+    t = str(a.get("type") or "")
+    if t in ("move", "click", "double", "right"):
+        return "%s@%d,%d" % (t, int(a.get("x", 0)) // 20, int(a.get("y", 0)) // 20)
+    if t == "type":
+        return "type:" + str(a.get("text") or "")[:40]
+    if t == "key":
+        return "key:" + str(a.get("key") or "")
+    if t == "hotkey":
+        return "hotkey:" + "+".join(a.get("keys") or [])
+    if t == "scroll":
+        return "scroll:" + ("up" if a.get("up") else "down")
+    return t
+
+
+def _is_dup(a: dict) -> bool:
+    """这个动作是不是刚做过（DUP_WINDOW 秒内同一个动作）→ True 表示应当跳过。
+
+    坐标类动作按容差比较（±24px 算同一处）：她每次估的坐标都会抖几像素，
+    分桶比较在边界上会漏（实测 540 和 534 落进了不同的桶）。
+    """
+    try:
+        t = str(a.get("type") or "")
+        if t == "wait":
+            return False
+        now = time.time()
+        _recent_acts[:] = [(k, ts) for k, ts in _recent_acts if now - ts < DUP_WINDOW]
+        if t in ("move", "click", "double", "right"):
+            x, y = int(a.get("x", 0)), int(a.get("y", 0))
+            for kk, _ts in _recent_acts:
+                try:
+                    kt, pos = kk.split("@", 1)
+                    px, py = pos.split(",")
+                    if kt == t and abs(int(px) - x) <= 24 and abs(int(py) - y) <= 24:
+                        return True
+                except Exception:
+                    continue
+            _recent_acts.append(("%s@%d,%d" % (t, x, y), now))
+            return False
+        k = _act_key(a)
+        if any(kk == k for kk, _ in _recent_acts):
+            return True
+        _recent_acts.append((k, now))
+        return False
+    except Exception:
+        return False
+
+
+def describe(actions: list) -> str:
+    """把动作列表说成人话（给她汇报 / 给日志用）"""
+    _names = {"move": "移动鼠标", "click": "点击", "double": "双击", "right": "右键单击",
+              "scroll": "滚轮", "type": "输入文字", "key": "按键", "hotkey": "按组合键",
+              "wait": "等待"}
+    out = []
+    for a in (actions or [])[:12]:
+        t = str(a.get("type") or "")
+        n = _names.get(t, t)
+        if t in ("move", "click", "double", "right"):
+            n += " (%s,%s)" % (a.get("x"), a.get("y"))
+        elif t == "type":
+            n += "「%s」" % str(a.get("text") or "")[:20]
+        elif t == "key":
+            n += " %s" % a.get("key")
+        elif t == "hotkey":
+            n += " %s" % "+".join(a.get("keys") or [])
+        elif t == "scroll":
+            n += " %s %s 下" % ("上" if a.get("up") else "下", a.get("n", 1))
+        out.append(n)
+    return "、".join(out) if out else "（什么都没做）"
 # 动作间隔（秒）
 STEP_DELAY = 0.12
 # 日志文件
@@ -119,6 +208,10 @@ PROMPT_RULES = (
     "那样执行不了。方位词：中央／左上／右上／左下／右下／顶部／底部／任务栏／开始菜单／托盘／桌面。\n"
     "★ 位置估不准时的正确做法：先「【键鼠】移动 800 250」把鼠标挪过去，再「【看屏幕】」"
     "看清鼠标底下是什么，确认后再「【键鼠】点击 800 250」。\n"
+    "★ 边说话边动手：动手那一轮也要说一句人话（例如「好，我来点」「点掉了，你看看」），"
+    "不能只留一行指令——只发指令的回合主人什么都听不到，会以为你哑了。\n"
+    "★ 同一件事只做一次：做过之后如果画面没变化，别一遍遍重复同一个动作（重复的会被丢掉）。"
+    "换个办法——先「【看屏幕】」看清，或者直接告诉主人你做不了、让他自己来。\n"
     "★ 只写「移动」等于什么都没做（那只是把鼠标挪过去），不许拿它敷衍。"
     "一条指令只做一个动作，要做两件事就写两行；指令那一行不会被念出来。"
 )
@@ -447,7 +540,7 @@ def scan(text: str):
             acts.extend(got)
         elif str(seg).strip():
             _log_line(f"⚠ 这条指令看不懂，已跳过: {str(seg).strip()[:60]}")
-    val = (acts[:MAX_ACTIONS], spans)
+    val = (acts[:SAFETY_MAX] if SAFETY_MAX else acts, spans)
     _SCAN_CACHE["src"] = src
     _SCAN_CACHE["val"] = val
     return val
@@ -560,8 +653,22 @@ def execute(actions: list, dry_run: bool = False, auto: bool = False, notify=Non
         _drop(f"键鼠控制不可用（pynput: {e}）→ 本轮动作已忽略")
         return []
 
-    for a in list(actions)[:MAX_ACTIONS]:
+    _acts = list(actions)
+    if SAFETY_MAX and len(_acts) > SAFETY_MAX:
+        _acts = _acts[:SAFETY_MAX]
+    for a in _acts:
         t = a.get("type")
+        # ── 重复抑制：同一件事刚做过就别再做了 ──
+        # 她做过一次（没看到变化）会以为没成功，于是反复点同一个地方；
+        # 这里把 90 秒内重复的同一个动作直接丢掉，连续重复还会明确提醒她换办法。
+        if not dry_run and _is_dup(a):
+            _dup_hits[0] += 1
+            _log_line(f"⏭ 这个动作刚做过（{_act_key(a)}）→ 跳过，不重复")
+            if _dup_hits[0] >= DUP_REPEAT_LIMIT:
+                _dup_hits[0] = 0
+                _drop("你在反复做同一个动作（%s）。它已经做过了，再做也不会有变化——"
+                      "换个办法，或者直接跟主人说你做不了。" % _act_key(a))
+            continue
         try:
             if t in ("move", "click", "double", "right"):
                 x, y = int(a["x"]), int(a["y"])
@@ -643,8 +750,15 @@ def execute(actions: list, dry_run: bool = False, auto: bool = False, notify=Non
         # 动作之间留点间隔，别让鼠标瞬移
         if not dry_run and t not in ("wait",):
             time.sleep(STEP_DELAY)
-    if not dry_run and len(done) < len(list(actions)[:MAX_ACTIONS]):
-        _log_line(f"⚠ 本轮 {len(actions)} 个动作里只做成了 {len(done)} 个")
+    if not dry_run and len(done) < len(_acts):
+        _log_line(f"⚠ 本轮 {len(_acts)} 个动作里只做成了 {len(done)} 个"
+                  f"（有重复的、坐标越界的或没做成的）")
+    # 做完了 → 让桌宠给她一次"说一句"的机会（我做了什么 / 接下来想干什么）
+    if not dry_run and done and _narrator[0]:
+        try:
+            _narrator[0](done)
+        except Exception:
+            pass
     return done
 
 

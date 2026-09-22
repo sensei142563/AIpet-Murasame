@@ -137,6 +137,38 @@ def _align_lists(reply_list, translate_list, emotion_list, portrait_list):
     return t, e, p
 
 
+def _emit_status(owner, text: str):
+    """给对话框报一行状态（"正在操作电脑……"）——Worker 线程里发信号，主线程显示"""
+    try:
+        owner.status.emit(str(text))
+    except Exception:
+        pass
+
+
+# 她只发了指令、没留台词时，按动作补一句（不然她"变哑巴"，主人什么都听不到）
+_PC_FALLBACK = {
+    "click": "好，我点一下。", "double": "好，我双击一下。", "right": "我右键点一下。",
+    "type": "我来打字。", "key": "我按一下键。", "hotkey": "我按个组合键。",
+    "scroll": "我滚一下。", "move": "我把鼠标挪过去看看。", "wait": "等一下下。",
+}
+
+
+def _pc_fallback_line(acts: list) -> str:
+    """从动作里挑一句像她会说的话（只发指令的回合用）"""
+    try:
+        for a in (acts or []):
+            t = str(a.get("type") or "")
+            if t in ("click", "double", "right", "type", "key", "hotkey", "scroll"):
+                return _PC_FALLBACK[t]
+        for a in (acts or []):
+            t = str(a.get("type") or "")
+            if t in _PC_FALLBACK:
+                return _PC_FALLBACK[t]
+    except Exception:
+        pass
+    return "……好，我试试。"
+
+
 def _handle_pc_control(reply: str, owner, is_auto: bool) -> str:
     """她要求操作键鼠：把【键鼠】指令抽出来执行，返回剥离指令后的文字。
 
@@ -153,6 +185,8 @@ def _handle_pc_control(reply: str, owner, is_auto: bool) -> str:
         if not _acts:
             return _clean
         print(f"[桌宠] 她请求操作电脑：{len(_acts)} 个动作（{'自主' if is_auto else '受命'}）")
+        print(f"[桌宠] 🖥 她要做的：{_pc.describe(_acts)}")
+        _emit_status(owner, "正在操作电脑……")
         if _pc.enabled():
             import threading as _thpc
             _thpc.Thread(target=_pc.execute, args=(_acts,),
@@ -161,7 +195,8 @@ def _handle_pc_control(reply: str, owner, is_auto: bool) -> str:
                          daemon=True).start()
         else:
             print("[桌宠] 操控电脑未开启（右键菜单可打开）→ 只解析不执行")
-        return _clean or "……好，我试试。"
+        # ★ 只发指令、没留台词 → 补一句，别让她"变哑巴"
+        return _clean or _pc_fallback_line(_acts)
     except Exception as _epc:
         print(f"[桌宠] 处理电脑操作失败: {_epc}")
         return reply
@@ -169,6 +204,7 @@ def _handle_pc_control(reply: str, owner, is_auto: bool) -> str:
 
 class qwen3_lora_Worker(QThread):
     finished = pyqtSignal(list, list, list, list, list, list)  # (AI回复, 立绘, history, 立绘历史, 语音, 情绪列表)
+    status = pyqtSignal(str)      # 临时状态（"正在操作电脑……"）→ 对话框显示
 
     def __init__(self, history, portrait_history, user_input, role="user", t = False,
                  portrait_type=None):
@@ -265,6 +301,8 @@ class qwen3_lora_Worker(QThread):
         reply_raw = list(reply)          # 清洗前的原始句（句内【标签】从这里提取）
         translate = [clean_sentence(t) for t in translate]
         reply = _tidy_sentences(reply)
+        if any("【文件】" in str(x) for x in reply):
+            _emit_status(self, "正在查看电脑文件……")
 
         # 对齐：以中文回复句数为准（翻译/情绪/立绘可能与回复句数不一致）
         translate, emotion_list, portrait_list = _align_lists(
@@ -307,6 +345,7 @@ class qwen3_lora_Worker(QThread):
 
 class cloud_API_Worker(QThread):
     finished = pyqtSignal(list, list, list, list, list, list)
+    status = pyqtSignal(str)      # 临时状态（"正在操作电脑……"）→ 对话框显示
 
     def __init__(self, history, portrait_history, user_input, role="user", t = False,
                  portrait_type=None):
@@ -394,6 +433,8 @@ class cloud_API_Worker(QThread):
             reply_list_raw = split_sentences(reply)
         # 清理 + 去空句 + 保留【看屏幕】标记（下游翻译/情绪/立绘都按这份列表走）
         reply_list_raw = _tidy_sentences(reply_list_raw)
+        if any("【文件】" in str(x) for x in reply_list_raw):
+            _emit_status(self, "正在查看电脑文件……")
         reply_json = json.dumps(reply_list_raw, ensure_ascii=False)
         # 历史里只留她**实际说出口**的话：cloud_talk 早先把带指令的原文写进历史了，
         # 她会照着自己的历史学成「只回一行【键鼠】不说话」，而且显示/朗读也会对不上。
