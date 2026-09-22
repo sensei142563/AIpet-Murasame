@@ -518,6 +518,12 @@ class Murasame(QLabel):
             _pcn.set_narrator(lambda acts: self._pc_done.emit(_pcn.describe(acts)))
         except Exception as _en:
             print(f"[桌宠] ⚠ 注册操作完成回调失败: {_en}")
+        # 性能：桌宠平时就跑在"低于正常"优先级，别和主人正在用的程序抢 CPU
+        try:
+            from tool import perf_guard as _pg0
+            _pg0.set_process_priority(False)
+        except Exception:
+            pass
         # 任务循环（连着做完一件事）的状态与收尾 → 也走信号回主线程
         try:
             from tool import pc_task as _ptn
@@ -1619,6 +1625,22 @@ class Murasame(QLabel):
         """检查系统空闲时间并在阈值上触发对话"""
         idle_seconds = get_idle_seconds()
 
+        # ── 游戏/全屏（勿扰）时自动降级：打游戏不该被桌宠拖累 ──
+        #    暂停定时截屏识别（不再反复调视觉模型抢显卡）、让视觉服务腾出显存、
+        #    不主动搭话、把自己的进程优先级降到最低；游戏一结束自动恢复。
+        try:
+            from tool import perf_guard as _pg
+            _g = _pg.game_mode()
+            if _g != getattr(self, "_game_mode", None):
+                self._game_mode = _g
+                _pg.note_state(_g)
+                if _g:
+                    self._enter_game_mode()
+                else:
+                    self._exit_game_mode()
+        except Exception as _eg:
+            pass
+
         # ── 自愈①：非 Live2D 模式绝不该保持"点击穿透"（那会把整只桌宠变成点不到）──
         #    只要有任何一条路径误开了它，这里每秒都会把它关回来。
         try:
@@ -1645,6 +1667,10 @@ class Murasame(QLabel):
                 self._busy_since = 0
         except Exception:
             pass
+
+        # 游戏/全屏期间：自愈检查照做（上面两段），但不再主动搭话/识别触发
+        if getattr(self, "_game_mode", False):
+            return
 
         # 如果已经从离开状态回来，并且离开超过 60 秒，则问候一次“欢迎回来”
         if (
@@ -3713,6 +3739,62 @@ class Murasame(QLabel):
         )
 
     # ══════════ 立绘右上角：对话 / 菜单 快捷按钮 ══════════
+    def _enter_game_mode(self):
+        """进游戏：腾显卡、停识别、降优先级（她还在，只是安静下来）"""
+        try:
+            from tool import perf_guard as _pg
+            self._game_screen_was_on = bool(self._screenshot_worker and self._screenshot_worker.isRunning())
+            try:
+                self.stop_screenshot_worker()
+            except Exception:
+                pass
+            try:                                # 摄像头识别线程也一起停
+                _cw = getattr(self, "_camera_worker", None)
+                if _cw is not None and _cw.isRunning():
+                    self._game_camera_was_on = True
+                    _cw.requestInterruption()
+                    _cw.quit()
+                    _cw.wait(1500)
+                    self._camera_worker = None
+            except Exception:
+                pass
+            _pg.unload_vision_now()             # 视觉模型移出显存（8G 卡上那是 6G）
+            _pg.set_process_priority(True)      # Idle：永远排在游戏后面
+            print("[桌宠] 🎮 已降级：暂停屏幕识别、腾出显存、优先级降到最低")
+        except Exception as e:
+            print(f"[桌宠] ⚠ 进入游戏模式失败: {e}")
+
+    def _exit_game_mode(self):
+        """游戏结束：恢复原来的识别与优先级"""
+        try:
+            from tool import perf_guard as _pg
+            _pg.set_process_priority(False)
+            if getattr(self, "_game_screen_was_on", False):
+                try:
+                    self.start_screenshot_worker(self._screen_interval_seconds())
+                except Exception:
+                    pass
+            self._game_screen_was_on = False
+            if getattr(self, "_game_camera_was_on", False):
+                self._game_camera_was_on = False
+                try:
+                    from tool.config import get_config
+                    _ci = float(get_config("./config.json").get("camera_interval") or 100)
+                    self.start_camera_worker(_ci)
+                except Exception:
+                    pass
+            print("[桌宠] ▶ 已恢复：屏幕识别与优先级回到正常")
+        except Exception as e:
+            print(f"[桌宠] ⚠ 退出游戏模式失败: {e}")
+
+    def _screen_interval_seconds(self) -> float:
+        """定时截屏的间隔（config 的 screen_interval，秒）"""
+        try:
+            from tool.config import get_config
+            return max(10.0, float(get_config("./config.json").get("screen_interval") or 150))
+        except Exception:
+            return 150.0
+
     def _auto_clamp_enabled(self) -> bool:
         """是否允许"自动把桌宠挪回屏幕内"（config.json 的 auto_clamp_position）
 

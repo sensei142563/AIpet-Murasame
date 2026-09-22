@@ -108,6 +108,25 @@ _model = {"qwen": None, "ip": None, "tok": None, "device": "cpu", "model_dir": "
 _lock = threading.Lock()   # 一次只跑一个识别：就一张显卡，排队比互相抢显存稳
 
 
+def _offload_now(reason: str = "") -> bool:
+    """立刻把模型移出显存（打游戏/用完时用）。返回是否真的做了搬运。"""
+    try:
+        import torch
+        with _lock:
+            if _model["qwen"] is None or _model["offloaded"]:
+                return False
+            if _model["device"] != "cuda":
+                return False
+            _model["qwen"].to("cpu")
+            torch.cuda.empty_cache()
+            _model["offloaded"] = True
+        print(f"[vision] 模型已移出显存（{reason or '手动'}），下次识别自动搬回来", flush=True)
+        return True
+    except Exception as e:
+        print(f"[vision] ⚠ 移出显存失败：{type(e).__name__}: {e}", flush=True)
+        return False
+
+
 def idle_guard():
     """后台盯着：长时间没人用就把模型移出显存，把显卡让给语音合成。"""
     import torch
@@ -122,13 +141,7 @@ def idle_guard():
                 continue
             if time.time() - float(_model["last_use"] or 0) < idle:
                 continue
-            with _lock:
-                if _model["offloaded"] or time.time() - float(_model["last_use"] or 0) < idle:
-                    continue
-                _model["qwen"].to("cpu")
-                torch.cuda.empty_cache()
-                _model["offloaded"] = True
-                print(f"[vision] 闲置超过 {idle:.0f}s，模型已移出显存（下次识别自动搬回来）", flush=True)
+            _offload_now(f"闲置超过 {idle:.0f}s")
         except Exception as e:
             print(f"[vision] ⚠ 显存回收失败：{type(e).__name__}: {e}", flush=True)
 
@@ -306,6 +319,10 @@ def main():
                 pass
 
         def do_GET(self):
+            path = str(getattr(self, "path", "/") or "/")
+            # GET /unload → 立刻把模型移出显存（打游戏前/用完就卸，别占着显卡）
+            if path.startswith("/unload"):
+                return self._json({"ok": True, "unloaded": _offload_now("外部请求")})
             self._json({"ok": _model["qwen"] is not None, "loading": not ready_event.is_set(),
                         "error": _model["error"], "model": _model["model_dir"],
                         "device": _model["device"]})
@@ -316,6 +333,8 @@ def main():
                 req = json.loads(self.rfile.read(n).decode("utf-8") or "{}")
             except Exception:
                 return self._json({"ok": False, "error": "请求体不是 JSON"}, 400)
+            if str(getattr(self, "path", "") or "").startswith("/unload"):
+                return self._json({"ok": True, "unloaded": _offload_now("外部请求")})
             img = req.get("image_b64") or ""
             if not img:
                 return self._json({"ok": False, "error": "缺少 image_b64"}, 400)
