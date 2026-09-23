@@ -395,86 +395,44 @@ class HomePage(QWidget):
         row.addStretch()
         cl.addLayout(row)
 
-        # 这里原来还有一句"启动桌宠后可用下方按钮实时控制；QQ 首次使用需扫码登录"——
-        # 前半句控制面板自己已经写明，后半句与「开始使用」引导③重复，故删掉（首页减法）。
+        tip = QLabel("启动桌宠后可用下方按钮实时控制；QQ 首次使用需扫码登录（需要手机 QQ）。")
+        tip.setStyleSheet(f"color: {Gray2.name()}; font-size: 12px;")
+        cl.addWidget(tip)
         outer.addWidget(card)
 
         # ── 控制面板卡片 ──
-        # 分成两组，因为这两类的语义完全不同（后端 api.py 也确实是两回事）：
-        #   · 开关：longtext / live2d —— 点一次切一次，状态由桌宠维护（/control 的 status）
-        #   · 动作：camera / screenshot / voice / reset_position —— 点一次做一次
-        # 原来全混在一排且开关没有状态显示，用户看不出"现在是开还是关"。
         ctl = Card()
         cl2 = QVBoxLayout(ctl)
         cl2.setContentsMargins(18, 14, 18, 16)
-        cl2.setSpacing(8)
+        cl2.setSpacing(10)
         cl2.addWidget(silicon_ui.section_title("桌宠控制面板", accent))
-
-        def _cap(text, hint=""):
-            lb = QLabel(text)
-            lb.setStyleSheet(f"color: {Gray3.name()}; font-size: 11px;"
-                             f" font-family: '{silicon_ui.M.font}';")
-            if hint:
-                lb.setToolTip(hint)
-            return lb
-
-        # —— 实时开关（状态跟随桌宠）——
-        cl2.addWidget(_cap("实时开关（点一下切换；下面的显示是桌宠的真实状态）"))
-        sw_row = QHBoxLayout()
-        self._switch_btns = {}
-        for text, feat in (("📝 长文本模式", "longtext"), ("🎭 Live2D", "live2d")):
-            b = QPushButton(text)
-            b.setCheckable(True)
-            b.setCursor(Qt.PointingHandCursor)
-            b.setStyleSheet(_switch_btn_qss(accent))
-            b.setMinimumHeight(38)
-            b.setToolTip("需要先启动桌宠")
-            b.toggled.connect(lambda on, btn=b, t=text: btn.setText(
-                "%s：%s" % (t, "开" if on else "关")))
-            b.clicked.connect(lambda _=False, f=feat: self._on_switch_clicked(f))
-            self._switch_btns[feat] = (b, text)
-            sw_row.addWidget(b)
-        sw_row.addStretch()
-        cl2.addLayout(sw_row)
-
-        # —— 立即执行（点一次做一次）——
-        cl2.addWidget(_cap("立即执行（点一次做一次，不是开关）"))
-        act_row = QHBoxLayout()
-        self._action_btns = []
-        for text, feat, tip in (("📷 摄像头识别一次", "camera", "立刻用摄像头识别一次（不是常开开关）"),
-                                ("🖥 屏幕识别一次", "screenshot", "立刻截屏识别一次")):
+        grid = QHBoxLayout()
+        for text, feat in (("📝 长文本模式", "longtext"), ("🎭 Live2D", "live2d"),
+                           ("📷 摄像头识别", "camera"), ("🖥 屏幕识别", "screenshot"),
+                           ("🎤 按住说话", "voice")):
             b = QPushButton(text)
             b.setStyleSheet(_ghost_btn_qss())
             b.setMinimumHeight(38)
-            b.setToolTip(tip)
-            b.clicked.connect(lambda _=False, f=feat: self._on_action_clicked(f))
-            self._action_btns.append((b, feat))
-            act_row.addWidget(b)
-        # 按住说话：press/release 两个事件
-        # ⚠ 桌宠侧只有 config 的 voice_trigger="true" 时才真的录音（main.py:910），
-        #   否则按下去什么都不发生（只打印一行"已关闭"）。所以这里按下就先看配置，
-        #   关着就**直接说清楚**，而不是装作在录音。
-        self.btn_voice = QPushButton("🎤 按住说话")
-        self.btn_voice.setStyleSheet(_hold_btn_qss(accent))
-        self.btn_voice.setMinimumHeight(38)
-        self.btn_voice.setToolTip("按住不放说话，松开结束并识别")
-        self.btn_voice.pressed.connect(self._on_voice_press)
-        self.btn_voice.released.connect(self._on_voice_release)
-        self._action_btns.append((self.btn_voice, "voice"))
-        act_row.addWidget(self.btn_voice)
+            if feat == "voice":
+                b.pressed.connect(lambda: _send_control("voice/start"))
+                b.released.connect(lambda: _send_control("voice/end"))
+            else:
+                b.clicked.connect(lambda _=False, f=feat: _send_control(f))
+            grid.addWidget(b)
         # 重置桌宠位置：桌宠跑到屏幕外 / 找不到时一键回到屏幕中央
         self.btn_reset_pos = QPushButton("🎯 重置桌宠位置")
         self.btn_reset_pos.setStyleSheet(_ghost_btn_qss())
         self.btn_reset_pos.setMinimumHeight(38)
         self.btn_reset_pos.setToolTip("把桌宠移回屏幕中央（找不到桌宠时点这里）")
         self.btn_reset_pos.clicked.connect(self.reset_pet_pos)
-        self._action_btns.append((self.btn_reset_pos, "reset_position"))
-        act_row.addWidget(self.btn_reset_pos)
-        act_row.addStretch()
-        cl2.addLayout(act_row)
+        grid.addWidget(self.btn_reset_pos)
+        grid.addStretch()
+        cl2.addLayout(grid)
         # 控制面板下面的一行状态提示
         self.status_lbl = QLabel("")
         self.status_lbl.setStyleSheet(f"color: {Gray2.name()}; font-size: 12px;")
+        # 拉起 NapCat 的提示比较长（"…二维码在 NapCat 窗口里，也保存在 …\cache\qrcode.png"）
+        # → 必须换行，否则被裁掉一半
         self.status_lbl.setWordWrap(True)
         cl2.addWidget(self.status_lbl)
         outer.addWidget(ctl)
@@ -495,52 +453,17 @@ class HomePage(QWidget):
             b = QPushButton(text)
             b.setStyleSheet(_ghost_btn_qss())
             b.clicked.connect(slot)
+            if "NapCat WebUI" in text:
+                self.btn_webui = b      # 拉起 NapCat 时要改它的文案/置灰（不能让局部变量带走）
             tr.addWidget(b)
-            if "WebUI" in text:
-                self.btn_webui = b          # 供"拉起 NapCat 时"改按钮文案/置灰
         tr.addStretch()
         tl.addLayout(tr)
         outer.addWidget(tools)
-
-        # ── 「开始使用」引导卡 ──
-        # 目的：把首页下方那片空白变成"还差哪一步"，且每步都能**直接点**。
-        # 三步全做完 → 整张卡隐藏（不占地方、不啰嗦），符合"首页减法"。
-        self.guide = Card()
-        gl = QVBoxLayout(self.guide)
-        gl.setContentsMargins(18, 14, 18, 16)
-        gl.setSpacing(8)
-        gl.addWidget(silicon_ui.section_title("开始使用", accent))
-        hint = QLabel("下面只列出还差的事，做完就消失；每一条都能直接点。")
-        hint.setStyleSheet(f"color: {Gray3.name()}; font-size: 11px;")
-        gl.addWidget(hint)
-        self._guide_rows = []          # [(行控件, 序号/勾, 按钮, 说明)]
-        for _i, _title in enumerate(("启动 AIpet 桌宠", "填写对话模型 API Key", "启动 QQ AIpet")):
-            row = QWidget()
-            rl = QHBoxLayout(row)
-            rl.setContentsMargins(0, 0, 0, 0)
-            rl.setSpacing(10)
-            mark = QLabel("①")
-            mark.setFixedWidth(20)
-            mark.setStyleSheet(f"color: {Color3.name()}; font-size: 13px; font-weight: bold;")
-            btn = QPushButton(_title)
-            btn.setStyleSheet(_ghost_btn_qss())
-            btn.setMinimumHeight(34)
-            lab = QLabel("")
-            lab.setStyleSheet(f"color: {Gray2.name()}; font-size: 12px;")
-            rl.addWidget(mark)
-            rl.addWidget(btn)
-            rl.addWidget(lab, 1)
-            gl.addWidget(row)
-            self._guide_rows.append((row, mark, btn, lab))
-        # 三步各自的动作（按钮文字在 _apply_status 里按状态微调）
-        self._guide_rows[0][2].clicked.connect(self.toggle_pet)
-        self._guide_rows[1][2].clicked.connect(self._open_settings_page)
-        self._guide_rows[2][2].clicked.connect(self.start_qq)
-        self.guide.hide()               # 默认隐藏，状态刷新后决定要不要显示
-        outer.addWidget(self.guide)
         outer.addStretch()
 
         self._probe_signal.connect(self._apply_status)
+        # 拉起 NapCat 的过程文案（"正在检查 NapCat…"/"已在运行"/"正在等待扫码…"）打在状态行上；
+        # 结束回调决定"继续启动 QQ / 打开 WebUI"还是"弹窗说明为什么没就绪"
         self._napcat_progress.connect(self.status_lbl.setText)
         self._napcat_done.connect(self._on_napcat_done)
         self._timer = QTimer(self)
@@ -548,6 +471,7 @@ class HomePage(QWidget):
         self._timer.start(6000)
 
     # ── 状态 ──
+
     def refresh_status(self):
         """后台线程探测运行状态（绝不在 UI 线程做网络探测 → 不卡界面）"""
         if getattr(self, "_probe_busy", False):
@@ -564,16 +488,7 @@ class HomePage(QWidget):
                     tts_ok = s.connect_ex(("127.0.0.1", 9880)) == 0
             except Exception:
                 pass
-            # 桌宠在跑时顺带取一次功能状态（GET /control 的 status：live2d/longtext 是
-            # 真开/关状态，camera/screenshot 是上次动作的结果），供首页开关显示用
-            ctrl = {}
-            if alive:
-                try:
-                    with urllib.request.urlopen(_CONTROL_BASE, timeout=3) as r:
-                        ctrl = (json.loads(r.read().decode("utf-8", "replace")) or {}).get("status") or {}
-                except Exception:
-                    ctrl = {}
-            self._probe_result = (alive, tts_ok, ctrl, self._read_cfg_quick())
+            self._probe_result = (alive, tts_ok)
             try:
                 self._probe_signal.emit()
             except Exception:
@@ -582,46 +497,10 @@ class HomePage(QWidget):
         import threading
         threading.Thread(target=_work, daemon=True).start()
 
-    @staticmethod
-    def _read_cfg_quick() -> dict:
-        """读一次 config.json（给"开始使用"引导判"API Key 填了没"）。
-
-        放在探测线程里读，不占 UI 线程；失败就返回空 dict（当作"还没填"）。
-        """
-        try:
-            with open(os.path.join(_app_base_dir(), "config.json"), "r", encoding="utf-8") as f:
-                return json.load(f) or {}
-        except Exception:
-            return {}
-
-    def _open_settings_page(self):
-        """跳到设置页的「模型与语音」那一栏（填 API Key 的地方）"""
-        try:
-            self.shell._goto("settings")
-            cfgp = self.shell.pages.get("settings")
-            if cfgp is not None and hasattr(cfgp, "_switch_cat"):
-                cfgp._switch_cat("ai")
-        except Exception as e:
-            print(f"[NewUI] ⚠ 打开设置页失败: {e}")
-
-    def _api_key_ok(self, cfg: dict) -> tuple:
-        """对话模型有没有可用的 API Key。返回 (是否就绪, 缺哪个/说明)"""
-        mt = str((cfg or {}).get("model_type") or "qwen").strip().lower()
-        if mt == "local":
-            # 本地模型（Ollama）不需要 Key；这里不拦人，交给桌宠侧自己报错
-            return True, ""
-        keyname = "deepseek_api_key" if mt == "deepseek" else "qwen_api_key"
-        label = "DeepSeek" if mt == "deepseek" else "Qwen"
-        if str((cfg or {}).get(keyname) or "").strip():
-            return True, ""
-        return False, label
-
     def _apply_status(self):
         """探测结果回到 UI 线程再更新（信号触发）"""
         try:
-            alive, tts_ok, ctrl, cfg = getattr(self, "_probe_result",
-                                               (False, False, {}, {}))
-            self._last_cfg = cfg          # 供「按住说话」判断 voice_trigger 是否开启
+            alive, tts_ok = getattr(self, "_probe_result", (False, False))
             self._probe_busy = False
             self.chip_pet.set_text("桌宠：运行中" if alive else "桌宠：未运行", alive)
             # 「正在关闭/启动中」期间不要被状态刷新覆盖文案
@@ -629,135 +508,21 @@ class HomePage(QWidget):
                 self.btn_pet.setText("  ⏹ 关闭桌宠" if alive else "  启动 AIpet 桌宠")
             accent = THEME_COLORS.get(str(ACCENT_ID), {}).get("title_start", "#2f6fd0")
             self.btn_pet.setStyleSheet(_accent_btn_qss(accent, danger=alive))
-            # 桌宠没跑 → 控制按钮置灰（点了也没反应，不如明确置灰）
             try:
-                for _feat, (b, _t) in getattr(self, "_switch_btns", {}).items():
-                    b.setEnabled(alive)
-                    b.setToolTip("" if alive else "需要先启动桌宠")
-                for b, _feat in getattr(self, "_action_btns", []):
-                    b.setEnabled(alive)
-                    if not alive and _feat != "reset_position":
-                        b.setToolTip("需要先启动桌宠")
-                # 开关显示桌宠的真实状态（未知时显示"—"，不要瞎猜成"关"）
-                for _feat, (b, title) in getattr(self, "_switch_btns", {}).items():
-                    val = str((ctrl or {}).get(_feat, "") or "").lower()
-                    if not alive or val not in ("on", "off"):
-                        b.setChecked(False)
-                        b.setText("%s：—" % title)
-                    else:
-                        b.setChecked(val == "on")
-                        b.setText("%s：%s" % (title, "开" if val == "on" else "关"))
-                # 一次性动作的上次结果放进 tooltip（不新增控件、不挤版面）
-                _res = {"triggered": "上次：已触发", "failed": "上次：失败",
-                        "off": "上次：未触发"}
-                for b, _feat in getattr(self, "_action_btns", []):
-                    v = str((ctrl or {}).get(_feat, "") or "").lower()
-                    if _feat in ("camera", "screenshot") and v:
-                        b.setToolTip("%s（%s）" % (
-                            "立刻用摄像头识别一次（不是常开开关）" if _feat == "camera"
-                            else "立刻截屏识别一次", _res.get(v, v)))
+                self.btn_reset_pos.setEnabled(alive)
+                if self.btn_reset_pos.isEnabled():
+                    self.btn_reset_pos.setText("🎯 重置桌宠位置")
             except Exception:
                 pass
             qq_on = self.shell._qq_proc is not None and self.shell._qq_proc.poll() is None
             self.chip_qq.set_text("QQ：运行中" if qq_on else "QQ：未运行", qq_on)
             self.chip_tts.set_text("语音服务：在线" if tts_ok else "语音服务：未启动", tts_ok)
-            # 桌宠没跑时给一句人话（不覆盖"正在关闭桌宠…"这类临时提示）
-            try:
-                if alive:
-                    if self.status_lbl.text().startswith("桌宠未运行"):
-                        self.status_lbl.setText("")
-                elif not self.status_lbl.text().strip():
-                    self.status_lbl.setText("桌宠未运行 —— 先点上面的「启动 AIpet 桌宠」，"
-                                            "下面的开关和按钮才有反应。")
-            except Exception:
-                pass
-            # ── 开始使用引导（只列还差的步骤；都齐了整张卡隐藏）──
-            try:
-                api_ok, api_label = self._api_key_ok(cfg)
-                qq_on = self.shell._qq_proc is not None and self.shell._qq_proc.poll() is None
-                # (已完成?, 按钮文字, 说明)
-                steps = [
-                    (alive, "启动 AIpet 桌宠",
-                     "点一下就跑起来；右下角托盘可退出" if not alive else ""),
-                    (api_ok, "填写对话模型 API Key",
-                     ("还差 %s 的 Key（设置 → 模型与语音）" % api_label) if not api_ok else ""),
-                    (qq_on, "启动 QQ AIpet",
-                     "首次需要手机 QQ 扫码登录" if not qq_on else ""),
-                ]
-                marks = ("①", "②", "③")
-                pending = 0
-                for i, (row, mark, btn, lab) in enumerate(self._guide_rows):
-                    done, title, note = steps[i]
-                    if done:
-                        row.hide()
-                        continue
-                    pending += 1
-                    row.show()
-                    mark.setText(marks[pending - 1])       # 序号按"还差的第几条"重排
-                    mark.setStyleSheet(f"color: {Color3.name()}; font-size: 13px; font-weight: bold;")
-                    btn.setText(title)
-                    btn.setEnabled(True)
-                    lab.setText(note)
-                self.guide.setVisible(pending > 0)
-            except Exception as _e:
-                print(f"[NewUI] ⚠ 引导卡更新失败: {_e}")
         except Exception as e:
             print(f"[NewUI] ⚠ 状态更新失败: {e}")
 
-    # ── 控制面板：开关 / 动作 ──
-    def _on_switch_clicked(self, feat: str):
-        """开关：发一次切换指令，然后尽快回读真实状态（按钮的 checked 只是暂时乐观显示）"""
-        _send_control(feat)
-        QTimer.singleShot(700, self.refresh_status)
-        QTimer.singleShot(2500, self.refresh_status)
-
-    def _on_action_clicked(self, feat: str):
-        """一次性动作：发一次指令 + 回读结果（结果会显示在按钮 tooltip 上）"""
-        _send_control(feat)
-        QTimer.singleShot(1200, self.refresh_status)
-        QTimer.singleShot(4000, self.refresh_status)
-
-    # ── 按住说话 ──
-    def _voice_enabled(self) -> bool:
-        """语音识别（voice_trigger）在配置里开着吗？这就是桌宠侧真正读的那个键。"""
-        cfg = getattr(self, "_last_cfg", None) or {}
-        return str(cfg.get("voice_trigger") or "").strip().lower() == "true"
-
-    def _on_voice_press(self):
-        """按下：开着就显示"录音中"，关着就直接说清楚为什么没反应"""
-        self._voice_recording = True
-        if not self._voice_enabled():
-            self.status_lbl.setText("语音识别是关的 → 设置 → 语音合成与识别 → 打开「语音识别」，"
-                                    "再按住说话才有效。")
-            self.btn_voice.setText("🎤 按住说话（未开启）")
-            return
-        self.btn_voice.setText("🎤 录音中…（松开结束）")
-        self.status_lbl.setText("正在录音…… 松开鼠标结束并识别。")
-        _send_control("voice/start")
-
-    def _on_voice_release(self):
-        """松开：显示"识别中…"，几秒后回到初始文案（识别结果由桌宠自己弹出来）"""
-        was = getattr(self, "_voice_recording", False)
-        self._voice_recording = False
-        if not self._voice_enabled():
-            self.btn_voice.setText("🎤 按住说话")
-            return
-        if was:
-            _send_control("voice/end")
-            self.btn_voice.setText("🎤 识别中…")
-            self.status_lbl.setText("录音结束，正在识别……（识别完桌宠会直接回复）")
-        QTimer.singleShot(6000, self._voice_reset)
-
-    def _voice_reset(self):
-        try:
-            self.btn_voice.setText("🎤 按住说话")
-            if self.status_lbl.text().startswith(("录音结束", "正在录音")):
-                self.status_lbl.setText("")
-        except Exception:
-            pass
-
     # ── 启动/关闭 ──
     # ── 启动/关闭：进行中按钮置灰 + 文案，防止连点 ──
+
     def _busy_btn(self, btn, text: str, ms: int = 6000):
         try:
             btn.setEnabled(False)
@@ -829,6 +594,89 @@ class HomePage(QWidget):
         self._busy_btn(self.btn_qq, "⏳ 正在检查 NapCat…", 120000)
         self._ensure_napcat("start_qq")
 
+    def start_wechat(self):
+        base = _app_base_dir()
+        py = _find_python(base)
+        if not py or not os.path.exists(os.path.join(base, "run_wechat.py")):
+            QMessageBox.information(self, "微信 AIpet", "未找到微信模块（run_wechat.py）")
+            return
+        self._busy_btn(self.btn_wx, "⏳ 正在启动微信…", 12000)
+        try:
+            self.shell._wx_proc = subprocess.Popen([py, os.path.join(base, "run_wechat.py")], cwd=base,
+                                                   creationflags=subprocess.CREATE_NEW_CONSOLE)
+        except Exception as e:
+            QMessageBox.warning(self, "启动失败", str(e))
+
+    # ── 工具 ──
+
+    def open_studio(self):
+        try:
+            from .portrait_studio import PortraitStudio
+            # 挂在外壳上：换肤重建总览页后仍是同一个工坊实例
+            self._studio = getattr(self.shell, "_portrait_studio", None) or PortraitStudio(self.window())
+            self.shell._portrait_studio = self._studio
+            self._studio.show(); self._studio.raise_(); self._studio.activateWindow()
+        except Exception as e:
+            QMessageBox.warning(self, "立绘工坊", f"打开失败：{e}")
+
+    def open_pet_settings(self):
+        try:
+            from .pet_wizard import PCLPetWizard
+            from pets.pet_registry import get_active_pet_id
+            dlg = PCLPetWizard(get_active_pet_id(), self.window())
+            dlg.show(); dlg.raise_(); dlg.activateWindow()   # 非模态，避免锁住预览窗口
+        except Exception as e:
+            QMessageBox.warning(self, "桌宠设置", f"打开失败：{e}")
+
+    def open_napcat_webui(self):
+        """打开 NapCat WebUI。**没在跑就先把它拉起来**，而不是弹一个打不开的对话框。
+
+        用户要求：点这个按钮应该拉起 NapCat。所以现在是
+        「探端口 → 没跑就 launcher-user.bat 拉起来并等待 → 就绪后直接打开带 token 的面板」；
+        只有真的拉不起来（缺脚本/超时）才提示，而且提示是主题一致的消息框（正文高对比、
+        路径可复制、不用 emoji —— QMessageBox 里的 emoji 在部分机器上会渲染成方块）。
+
+        端口/token 仍从 NapCat 自己的 webui.json 读（config.json 里没有 WebUI token）。
+        """
+        self._busy_btn(getattr(self, "btn_webui", self.btn_reset_pos),
+                       "⏳ 正在启动 NapCat…", 120000)
+        self._ensure_napcat("open_webui")
+
+    def napcat_relogin(self):
+        """强制拉起 NapCat 重新扫码（跟「启动 QQ」用的是同一条脚本）。"""
+        bat = _napcat_launcher_bat()
+        if os.path.exists(bat):
+            try:
+                subprocess.Popen([bat], cwd=os.path.dirname(bat),
+                                 creationflags=subprocess.CREATE_NEW_CONSOLE)
+                self._msg("重新扫码登录",
+                          "已打开 NapCat 登录窗口，请用手机 QQ 扫描窗口里的二维码。",
+                          "二维码也保存在：" + os.path.join(
+                              _app_base_dir(), "NapCat.Shell.Windows.OneKey", "NapCat",
+                              "cache", "qrcode.png"))
+            except Exception as e:
+                self._msg("重新登录", "拉起 NapCat 失败。", str(e))
+        else:
+            self._msg("重新登录", "没找到 NapCat 的启动脚本。", bat)
+
+    def open_app_dir(self):
+        try:
+            os.startfile(_app_base_dir())    # noqa
+        except Exception as e:
+            print(f"[NewUI] 打开目录失败: {e}")
+
+    def open_changelog(self):
+        import glob
+        base = _app_base_dir()
+        files = sorted(glob.glob(os.path.join(base, "更新日志", "*")), reverse=True)
+        if not files:
+            QMessageBox.information(self, "更新日志", "未找到更新日志文件")
+            return
+        try:
+            os.startfile(files[0])           # noqa
+        except Exception as e:
+            QMessageBox.information(self, "更新日志", f"打开失败：{e}")
+
     def _do_start_qq(self):
         base = _app_base_dir()
         py = _find_python(base)
@@ -845,6 +693,30 @@ class HomePage(QWidget):
             self.refresh_status()
 
     # ── 确保 NapCat 在跑（拉起 + 等待就绪）──
+
+    def _do_open_webui(self):
+        try:
+            from qq.qq_config import discover_webui_url
+            info = discover_webui_url()
+        except Exception as e:
+            info = {"url": "http://127.0.0.1:6099/webui", "port": 6099, "token": "", "source": str(e)}
+        port = int(info.get("port") or 6099)
+        if not _local_port_open(port):
+            # 起来了但面板端口还没监听（多半还在等扫码）→ 说清现状与下一步
+            self._msg("NapCat WebUI 还没就绪",
+                      "NapCat 已经在运行，但 WebUI 端口 %d 还没开始监听（通常是因为还没扫码登录）。"
+                      % port,
+                      "请在弹出的 NapCat 窗口里用手机 QQ 扫码登录，登录成功后再点一次这个按钮。\n"
+                      "二维码文件：" + os.path.join(
+                          _app_base_dir(), "NapCat.Shell.Windows.OneKey", "NapCat",
+                          "cache", "qrcode.png"))
+            print(f"[NewUI] NapCat WebUI 未打开：{port} 端口无监听")
+            return
+        import webbrowser
+        webbrowser.open(info["url"])
+        print("[NewUI] 已打开 NapCat WebUI：端口 %d，token %s（来源：%s）"
+              % (port, "已带" if info.get("token") else "无", info.get("source")))
+
     def _ensure_napcat(self, action: str, timeout_s: int = None):
         """没跑就把 NapCat 拉起来（可见控制台：二维码在那个窗口里），并等待它**这次要用的**端口就绪。
 
@@ -947,112 +819,6 @@ class HomePage(QWidget):
             _m(self.window(), title, text, detail)
         except Exception as e:
             print(f"[NewUI] ⚠ 消息框失败: {e}")
-
-    def start_wechat(self):
-        base = _app_base_dir()
-        py = _find_python(base)
-        if not py or not os.path.exists(os.path.join(base, "run_wechat.py")):
-            QMessageBox.information(self, "微信 AIpet", "未找到微信模块（run_wechat.py）")
-            return
-        self._busy_btn(self.btn_wx, "⏳ 正在启动微信…", 12000)
-        try:
-            self.shell._wx_proc = subprocess.Popen([py, os.path.join(base, "run_wechat.py")], cwd=base,
-                                                   creationflags=subprocess.CREATE_NEW_CONSOLE)
-        except Exception as e:
-            QMessageBox.warning(self, "启动失败", str(e))
-
-    # ── 工具 ──
-    def open_studio(self):
-        try:
-            from .portrait_studio import PortraitStudio
-            # 挂在外壳上：换肤重建总览页后仍是同一个工坊实例
-            self._studio = getattr(self.shell, "_portrait_studio", None) or PortraitStudio(self.window())
-            self.shell._portrait_studio = self._studio
-            self._studio.show(); self._studio.raise_(); self._studio.activateWindow()
-        except Exception as e:
-            QMessageBox.warning(self, "立绘工坊", f"打开失败：{e}")
-
-    def open_pet_settings(self):
-        try:
-            from .pet_wizard import PCLPetWizard
-            from pets.pet_registry import get_active_pet_id
-            dlg = PCLPetWizard(get_active_pet_id(), self.window())
-            dlg.show(); dlg.raise_(); dlg.activateWindow()   # 非模态，避免锁住预览窗口
-        except Exception as e:
-            QMessageBox.warning(self, "桌宠设置", f"打开失败：{e}")
-
-    def open_napcat_webui(self):
-        """打开 NapCat WebUI。**没在跑就先把它拉起来**，而不是弹一个打不开的对话框。
-
-        用户要求：点这个按钮应该拉起 NapCat。所以现在是
-        「探端口 → 没跑就 launcher-user.bat 拉起来并等待 → 就绪后直接打开带 token 的面板」；
-        只有真的拉不起来（缺脚本/超时）才提示，而且提示是主题一致的消息框（正文高对比、
-        路径可复制、不用 emoji —— QMessageBox 里的 emoji 在部分机器上会渲染成方块）。
-
-        端口/token 仍从 NapCat 自己的 webui.json 读（config.json 里没有 WebUI token）。
-        """
-        self._busy_btn(getattr(self, "btn_webui", self.btn_reset_pos),
-                       "⏳ 正在启动 NapCat…", 120000)
-        self._ensure_napcat("open_webui")
-
-    def _do_open_webui(self):
-        try:
-            from qq.qq_config import discover_webui_url
-            info = discover_webui_url()
-        except Exception as e:
-            info = {"url": "http://127.0.0.1:6099/webui", "port": 6099, "token": "", "source": str(e)}
-        port = int(info.get("port") or 6099)
-        if not _local_port_open(port):
-            # 起来了但面板端口还没监听（多半还在等扫码）→ 说清现状与下一步
-            self._msg("NapCat WebUI 还没就绪",
-                      "NapCat 已经在运行，但 WebUI 端口 %d 还没开始监听（通常是因为还没扫码登录）。"
-                      % port,
-                      "请在弹出的 NapCat 窗口里用手机 QQ 扫码登录，登录成功后再点一次这个按钮。\n"
-                      "二维码文件：" + os.path.join(
-                          _app_base_dir(), "NapCat.Shell.Windows.OneKey", "NapCat",
-                          "cache", "qrcode.png"))
-            print(f"[NewUI] NapCat WebUI 未打开：{port} 端口无监听")
-            return
-        import webbrowser
-        webbrowser.open(info["url"])
-        print("[NewUI] 已打开 NapCat WebUI：端口 %d，token %s（来源：%s）"
-              % (port, "已带" if info.get("token") else "无", info.get("source")))
-
-    def napcat_relogin(self):
-        """强制拉起 NapCat 重新扫码（跟「启动 QQ」用的是同一条脚本）。"""
-        bat = _napcat_launcher_bat()
-        if os.path.exists(bat):
-            try:
-                subprocess.Popen([bat], cwd=os.path.dirname(bat),
-                                 creationflags=subprocess.CREATE_NEW_CONSOLE)
-                self._msg("重新扫码登录",
-                          "已打开 NapCat 登录窗口，请用手机 QQ 扫描窗口里的二维码。",
-                          "二维码也保存在：" + os.path.join(
-                              _app_base_dir(), "NapCat.Shell.Windows.OneKey", "NapCat",
-                              "cache", "qrcode.png"))
-            except Exception as e:
-                self._msg("重新登录", "拉起 NapCat 失败。", str(e))
-        else:
-            self._msg("重新登录", "没找到 NapCat 的启动脚本。", bat)
-
-    def open_app_dir(self):
-        try:
-            os.startfile(_app_base_dir())    # noqa
-        except Exception as e:
-            print(f"[NewUI] 打开目录失败: {e}")
-
-    def open_changelog(self):
-        import glob
-        base = _app_base_dir()
-        files = sorted(glob.glob(os.path.join(base, "更新日志", "*")), reverse=True)
-        if not files:
-            QMessageBox.information(self, "更新日志", "未找到更新日志文件")
-            return
-        try:
-            os.startfile(files[0])           # noqa
-        except Exception as e:
-            QMessageBox.information(self, "更新日志", f"打开失败：{e}")
-
 
 # ══════════════════════ 主窗口 ══════════════════════
 class SiliconLauncher(QWidget):
@@ -1976,6 +1742,22 @@ def _ulog(msg: str):
         pass
 
 
+def _widget_alive(w) -> bool:
+    """Qt 对象还活着吗？
+
+    换肤会**重建当前页**（旧页面 deleteLater），而挂钩里用 QTimer 排的"稍后再透明化"
+    可能落在那之后 → 再去碰已销毁的 C++ 对象就是
+    `RuntimeError: wrapped C/C++ object of type ... has been deleted` 刷屏。
+    """
+    try:
+        w.isHidden()          # 随便碰一下，触发 C++ 侧访问
+        return True
+    except RuntimeError:
+        return False
+    except Exception:
+        return True
+
+
 def _hook_repaint_transparency(page):
     """页面内容会被重建（刷新桌宠列表 / 重扫插件）→ 重建后再次透明化，
     否则新建出来的卡片带回不透明背景，又把主题壁纸挡住（打开向导后复现的那个问题）。"""
@@ -1994,10 +1776,13 @@ def _hook_repaint_transparency(page):
                     def _inner(*a, **kw):
                         r = orig(*a, **kw)
                         try:
-                            _make_transparent(owner)          # 立即
                             from PyQt5.QtCore import QTimer   # Qt 可能晚一步重建 → 再补两次
-                            QTimer.singleShot(150, lambda: _make_transparent(owner))
-                            QTimer.singleShot(450, lambda: _make_transparent(owner))
+                            def _redo(o=owner):
+                                if _widget_alive(o):          # 页面已被重建/销毁就别碰了
+                                    _make_transparent(o)
+                            _redo()                            # 立即
+                            QTimer.singleShot(150, _redo)
+                            QTimer.singleShot(450, _redo)
                             _ulog(f"{owner.__class__.__name__}.{mname} → 已重新透明化（防止卡片遮挡背景）")
                         except Exception:
                             pass

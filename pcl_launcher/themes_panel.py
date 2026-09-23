@@ -12,7 +12,7 @@ import json
 import shutil
 import zipfile
 
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal
+from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (
     QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QScrollArea,
     QFrame, QMessageBox, QFileDialog, QDialog, QInputDialog
@@ -611,9 +611,10 @@ class PCLThemesPanel(QScrollArea):
         cfg["ui_theme"] = meta["id"]
         _save_config(cfg)
         self.theme_applied.emit(meta["id"])
-        # 「当前使用」标记要立刻跟上（以前不刷新列表 → 点完还标着旧主题，像没生效）
-        # 延到下一轮事件循环再重建：此刻还在卡片按钮的信号里，直接删自己会崩
-        QTimer.singleShot(0, self._reload)
+        # ⚠ 这里**不要**再自己排一次 _reload()：外壳换肤会把当前页整个重建
+        # （旧面板被销毁），而 _reload 被挂钩过、会再排两个延时回调 —— 落在销毁之后就是
+        #   `RuntimeError: wrapped C/C++ object of type PCLThemesPanel has been deleted` 刷屏。
+        # 「当前使用」标记由重建后的新面板自己读 current_theme_id() 标出来。
 
     def _export(self, meta):
         path, _ = QFileDialog.getSaveFileName(self, "导出主题", f"{meta['id']}_theme.zip",
