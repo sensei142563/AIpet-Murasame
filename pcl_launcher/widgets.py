@@ -6,11 +6,11 @@ import subprocess
 import time
 import urllib.request
 
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal
-from PyQt5.QtGui import QColor, QFont, QPixmap
+from PyQt5.QtCore import Qt, QTimer, QSize, pyqtSignal
+from PyQt5.QtGui import QColor, QFont, QPainter, QPixmap
 from PyQt5.QtWidgets import (
     QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QSpinBox, QScrollArea,
-    QLineEdit, QSlider, QDoubleSpinBox, QComboBox, QTextEdit,
+    QLineEdit, QSlider, QDoubleSpinBox, QComboBox, QTextEdit, QAbstractButton,
     QDialog, QPlainTextEdit, QMessageBox, QFileDialog
 )
 
@@ -21,6 +21,60 @@ from .colors import _app_base_dir
 from .portrait_studio import PortraitStudio  # noqa: F401
 
 S = 1.0
+
+
+class BoolSwitch(QAbstractButton):
+    """开/关开关——替掉"用滑块表示 true/false"。
+
+    为什么不用 QCheckBox：设置页里 20 多个布尔项排成一列，小勾要凑近才看得出
+    开还是关；开关一眼就能看出状态，点一下就是切换。
+
+    接口刻意做成 QSlider 的**子集**（value / setValue / valueChanged），
+    所以设置页原有的三处调用一行都不用改：
+      · _set_slider()    → setValue(0/1)
+      · _get_slider()    → options[value()]
+      · _wire_autosave() → valueChanged
+    """
+
+    valueChanged = pyqtSignal(int)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setCheckable(True)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFixedSize(int(52 * S), int(24 * S))
+        self.toggled.connect(lambda _on: self.update())
+        self.toggled.connect(lambda on: self.valueChanged.emit(1 if on else 0))
+
+    # ── QSlider 兼容接口 ──
+    def value(self):
+        return 1 if self.isChecked() else 0
+
+    def setValue(self, v):
+        self.setChecked(bool(v))
+
+    def sizeHint(self):
+        return QSize(int(52 * S), int(24 * S))
+
+    def paintEvent(self, _ev):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        w, h = self.width(), self.height()
+        radius = h / 2.0
+        on = self.isChecked()
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(GreenDark) if on else QColor(Gray5))
+        p.drawRoundedRect(0, 0, w, h, int(radius), int(radius))
+        knob = h - int(4 * S)
+        x = (w - knob - int(2 * S)) if on else int(2 * S)
+        p.setBrush(QColor(255, 255, 255))
+        p.drawEllipse(x, int(2 * S), knob, knob)
+        # 状态字放在旋钮另一边，避免和旋钮重叠
+        p.setPen(QColor(255, 255, 255))
+        p.setFont(QFont("Microsoft YaHei", int(9 * S), QFont.Bold))
+        free = self.rect().adjusted(0, 0, -(knob + int(4 * S)), 0) if on \
+            else self.rect().adjusted(knob + int(4 * S), 0, 0, 0)
+        p.drawText(free, Qt.AlignCenter, "开" if on else "关")
 
 # ==================== 标题栏 ====================
 
@@ -173,7 +227,9 @@ class PCLSettingsPanel(QWidget):
         self._section("Live2D 与立绘", "🎭")
         # 人脸识别相关设置已迁移至「插件 → 人脸识别 → 设置」（face_recognition_enabled/
         # camera_enabled/camera_id/camera_interval 由插件设置界面统一管理）
-        self._add_slider("live2d_enabled", "Live2D 模式", ["false", "true"], "true")
+        # 默认值必须和 config.example.json / run.py / main.py 一致（都是 "false"）：
+        # 键缺失时面板若显示"开"，而 run.py 其实不会加载 Live2D → 开关显示不真实
+        self._add_slider("live2d_enabled", "Live2D 模式", ["false", "true"], "false")
         self._add_slider("portrait", "立绘类型", ["a", "b"], "b")
         # 立绘自动切换（a/b 两套之间的灵动切换）属于「Live2D 与立绘」这一区
         self._add_slider("portrait_auto_switch", "自动切换立绘类型（a / b 两套）",
@@ -530,6 +586,9 @@ class PCLSettingsPanel(QWidget):
         obj.wheelEvent = lambda e: e.ignore()
 
     def _add_slider(self, key, label, options, default, hint=None):
+        # 布尔项一律改用开关（见 _add_switch）：滑块表示 true/false 要拖一下才知道状态
+        if list(options) == ["false", "true"]:
+            return self._add_switch(key, label, default, hint)
         row = QHBoxLayout()
         lbl = QLabel(f"{label}：{default}")
         lbl.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(14*S)}px; min-width: 120px;")
@@ -552,6 +611,29 @@ class PCLSettingsPanel(QWidget):
         row.addStretch()
         self._cur_layout.addLayout(row)
         self._widgets[key] = (slider, options, lbl)
+
+    def _add_switch(self, key, label, default, hint=None):
+        """布尔项：一行「设置名 + 开关」，状态一眼可读。
+
+        仍然把 self._widgets[key] 存成 (控件, options, label) —— 和滑块同一个形状，
+        这样 _set_slider / _get_slider / 自动保存都不用区分类型。
+        """
+        row = QHBoxLayout()
+        lbl = QLabel(label)
+        lbl.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(14*S)}px; min-width: 160px;")
+        row.addWidget(lbl)
+        sw = BoolSwitch()
+        sw.setChecked(str(default) == "true")
+
+        def _sync_tip(on, _w=sw, _h=hint or ""):
+            _w.setToolTip((_h + "\n" if _h else "") + "当前：%s（点击切换）" % ("开" if on else "关"))
+
+        sw.toggled.connect(_sync_tip)
+        _sync_tip(sw.isChecked())
+        row.addWidget(sw)
+        row.addStretch()
+        self._cur_layout.addLayout(row)
+        self._widgets[key] = (sw, ["false", "true"], lbl)
 
     def _add_spin(self, key, label, min_val, max_val, default, hint=None):
         row = QHBoxLayout()
@@ -629,7 +711,7 @@ class PCLSettingsPanel(QWidget):
             self._set_slider("portrait", cfg.get("portrait", "b"))
             self._set_slider("screen_type", cfg.get("screen_type", "false"))
             self._set_slider("voice_trigger", cfg.get("voice_trigger", "false"))
-            self._set_slider("live2d_enabled", cfg.get("live2d_enabled", "true"))
+            self._set_slider("live2d_enabled", cfg.get("live2d_enabled", "false"))
             self._set_slider("longtext_enabled", cfg.get("longtext_enabled", "true"))
             self._set_slider("longtext_model", cfg.get("longtext_model", "deepseek"))
             self._set_if("longtext_model_name", cfg.get("longtext_model_name", "deepseek-v4-flash"))
@@ -677,6 +759,8 @@ class PCLSettingsPanel(QWidget):
             slider, options, lbl = entry
             idx = options.index(val) if val in options else 0
             slider.setValue(idx)
+            if isinstance(slider, BoolSwitch):
+                return          # 开关自己画「开/关」，标签上不再追加 "：true"
             lbl.setText(lbl.text().split("：")[0] + f"：{options[idx]}")
 
     def _get_text(self, key):
