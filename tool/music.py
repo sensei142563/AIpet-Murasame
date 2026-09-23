@@ -33,12 +33,36 @@ _APP_HINTS = (
 
 _LINE = re.compile("[【\\[]\\s*音乐\\s*[】\\]]\\s*([^\"\\]\\n]{1,80})")
 
+# 同一个播放请求同时只能跑一个（她自己会连着催；两个自动化抢鼠标键盘谁都点不成）
+_busy = [False]
+# 每首歌的尝试时间戳：短时间内试太多次就不试了，免得"一直重复搜索"
+_attempts = {}
+_ATTEMPT_WINDOW = 300      # 5 分钟内
+_ATTEMPT_LIMIT = 2         # 同一首歌最多试 2 次
+
 
 def _log(msg: str):
     try:
         print(f"[音乐] {msg}")
     except Exception:
         pass
+
+
+# 主人这句话是不是在"点歌/控制音乐"（自然语言判断，parse() 只看标记，不够用）
+_MUSIC_WORDS = ("点歌", "放一首", "放首歌", "放歌", "来一首", "来首歌", "来首", "听歌",
+                "放音乐", "放点音乐", "换首歌", "换一首", "下一首", "上一首",
+                "暂停音乐", "继续放", "别放歌", "关掉音乐")
+
+
+def looks_like_music_request(text: str) -> bool:
+    """主人是不是在让你点歌/控制音乐（用来避免键鼠任务循环跟点歌抢操作）"""
+    try:
+        t = str(text or "")
+        if not t:
+            return False
+        return any(w in t for w in _MUSIC_WORDS)
+    except Exception:
+        return False
 
 
 def prompt_rules() -> str:
@@ -49,6 +73,10 @@ def prompt_rules() -> str:
         "【音乐】暂停 / 【音乐】继续 / 【音乐】下一首 / 【音乐】上一首\n"
         "★ 主人说「帮我点歌」「放一首…」「来首…」时就用这个，不要自己去点搜索框猜坐标。\n"
         "★ 一次只点一首；点完用你自己的话跟他说放的是哪首（桌宠会把真正的歌名告诉你）。\n"
+        "★ 用这个的时候**不要再写【键鼠】指令**：桌宠点歌时会自己操作搜索框和回车，"
+        "你再动手就会两边抢鼠标，结果谁都点不成（实测就是这么失败的）。\n"
+        "★ 如果桌宠告诉你「没放上 / 没能确认播放」，**不要自己重复点歌**（重复请求会被拒绝）："
+        "如实跟主人说没点上、让他手动按一下播放键，或者等他再喊你一次。\n"
         "★ 标记那一行不会念出来，也不会显示给主人看。"
     )
 
@@ -334,6 +362,30 @@ def play_song(query: str, dry_run: bool = False) -> str:
     q = _norm(query)
     if not q:
         return "你没说歌名呀。"
+    # 同一个东西同时在跑 → 别再起一个（两个自动化抢鼠标键盘，谁都点不成）
+    if _busy[0]:
+        _log("已经在点歌了 → 这次请求先不重复执行")
+        return "我正在给你弄呢，等一下下。"
+    # 同一首歌短时间内试太多次就别试了（"一直重复搜索"就是这么来的）
+    try:
+        _now = time.time()
+        _hist = [t for t in (_attempts.get(q) or []) if _now - t < _ATTEMPT_WINDOW]
+        if len(_hist) >= _ATTEMPT_LIMIT:
+            _log(f"「{q}」{_ATTEMPT_WINDOW // 60} 分钟内已试过 {len(_hist)} 次 → 不再重复")
+            return (f"《{q}》我刚试过两次都没放上，先不重复了——"
+                    f"你再喊我一次我再试，或者你自己点一下播放键。")
+        _hist.append(_now)
+        _attempts[q] = _hist
+    except Exception:
+        pass
+    _busy[0] = True
+    try:
+        return _play_song_locked(q)
+    finally:
+        _busy[0] = False
+
+
+def _play_song_locked(q: str, dry_run: bool = False) -> str:
     hits = search(q, limit=5)
     if not hits:
         return f"搜不到「{q}」这首歌，换个写法试试？"
@@ -404,8 +456,9 @@ def play_song(query: str, dry_run: bool = False) -> str:
         _log(f"✅ 播放成功：{window_title(hwnd)}")
         return f"给你放上了：《{name}》{artist}。"
     _log(f"⚠ 没能确认播放（标题：{window_title(hwnd) or '空'}，点之前是「{before}」）")
-    return (f"我搜到了《{name}》{artist}，但没能替你按上播放——"
-            f"你点一下网易云的搜索框、再说一声，我就放。")
+    return (f"我搜到了《{name}》{artist}，但没能替你按上播放。"
+            f"别自己重复点歌了：直接跟主人说「没点上、你手动按一下播放」，"
+            f"或者等主人再喊你一次。")
 
 
 def _title_hit(title: str, name: str) -> bool:

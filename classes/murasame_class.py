@@ -1831,6 +1831,21 @@ class Murasame(QLabel):
                                 daemon=True).start()
                     return
                 print("[桌宠] ⏭ 她又要求看屏幕（刚看过，忽略）")
+                # ⚠ 忽略这次看屏幕，但**必须把标记从要显示的词里去掉**：
+                #   以前这里直接往下走，标记就跟着台词一起显示到对话框里了
+                #   ——用户看到的「对话框出现看屏幕」就是这个分支漏的（用户反馈）。
+                try:
+                    _stripped = []
+                    for _it in (reply or []):
+                        if SCREEN_LOOK_MARK in str(_it):
+                            _tail = str(_it).replace(SCREEN_LOOK_MARK, "").strip()
+                            if _tail:
+                                _stripped.append(_tail)
+                            continue
+                        _stripped.append(_it)
+                    reply = _stripped
+                except Exception:
+                    pass
         except Exception as _e2:
             print(f"[桌宠] ⚠ 自主要求看屏幕判断失败: {_e2}")
 

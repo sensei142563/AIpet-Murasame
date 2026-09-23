@@ -207,6 +207,16 @@ def _handle_pc_control(reply: str, owner, is_auto: bool) -> str:
                     return _clean or "好啊，你打我看——我在这儿。"
             except Exception:
                 pass
+        # ── 这一轮她还在点歌 → 【键鼠】指令一律不执行 ──
+        #    点歌本来就要自己操作搜索框/回车；她再发键鼠指令，两边会抢鼠标键盘，
+        #    结果"每次都点不成、她再重试"（实测日志里就是这个循环）。
+        try:
+            from tool.music import MUSIC_MARK as _MM
+            if _MM in str(reply):
+                print("[桌宠] 🎵 这一轮有点歌 → 忽略同时写出的键鼠指令（避免两边抢操作）")
+                return _clean
+        except Exception:
+            pass
         print(f"[桌宠] 她请求操作电脑：{len(_acts)} 个动作（{'自主' if is_auto else '受命'}）")
         print(f"[桌宠] 🖥 她要做的：{_pc.describe(_acts)}")
         _emit_status(owner, "正在操作电脑……")
@@ -219,13 +229,25 @@ def _handle_pc_control(reply: str, owner, is_auto: bool) -> str:
             # 受命动手 → 开「连着做完」的任务循环：每步只花一次小调用，
 # 不再一步等一整轮对话（实测一步 25~45 秒、一次任务要五分钟，用户反馈"效率太低"）。
             if not is_auto:
+                _skip_task = False
                 try:
-                    from tool import pc_task as _pt
-                    _pt.start_task(getattr(owner, "history", None) or [],
-                                   str(getattr(owner, "user_input", "") or ""),
-                                   is_auto=False, done_note=_pc.describe(_acts))
-                except Exception as _et:
-                    print(f"[桌宠] ⚠ 任务循环启动失败: {_et}")
+                    # ⚠ 主人的要求里如果是"点歌"，不要开键鼠任务循环：
+                    #   那会让任务循环也去点搜索框/回车，和点歌自动化两边抢操作，
+                    #   结果"一直重复搜索、一次也没点上"（实测日志里就是这个循环）。
+                    from tool import music as _mu3
+                    if _mu3.looks_like_music_request(str(getattr(owner, "user_input", "") or "")):
+                        _skip_task = True
+                        print("[桌宠] 🎵 主人的要求是点歌 → 不开键鼠任务循环（交给点歌流程）")
+                except Exception:
+                    pass
+                if not _skip_task:
+                    try:
+                        from tool import pc_task as _pt
+                        _pt.start_task(getattr(owner, "history", None) or [],
+                                       str(getattr(owner, "user_input", "") or ""),
+                                       is_auto=False, done_note=_pc.describe(_acts))
+                    except Exception as _et:
+                        print(f"[桌宠] ⚠ 任务循环启动失败: {_et}")
         else:
             print("[桌宠] 操控电脑未开启（右键菜单可打开）→ 只解析不执行")
         # ★ 只发指令、没留台词 → 补一句，别让她"变哑巴"
