@@ -450,6 +450,7 @@ print("  [目录] data/ face_shibie/ 已创建")
 # guild1.db 等是作者本机的登录数据，绝不能进分发包 → 复制时全部排除，
 # 用户拿到的是「全新」NapCat，首次扫码登录后自行配置（与官方一键包一致）。
 napcat_src = os.path.join(os.getcwd(), "NapCat.Shell.Windows.OneKey")
+napcat_dst = os.path.join(out_dir, "NapCat.Shell.Windows.OneKey")   # ← 加版本核对时漏过这行
 
 
 def _napcat_version_check(src: str):
@@ -510,9 +511,7 @@ def _napcat_version_check(src: str):
 
 
 if os.path.exists(napcat_src) and not os.path.exists(napcat_dst):
-    _napcat_version_check(napcat_src)
-napcat_dst = os.path.join(out_dir, "NapCat.Shell.Windows.OneKey")
-if os.path.exists(napcat_src) and not os.path.exists(napcat_dst):
+    _napcat_version_check(napcat_src)      # 复制前先核对锁定版本（详见该函数说明）
     print("  [复制] NapCat.Shell.Windows.OneKey/ ...")
     shutil.copytree(
         napcat_src, napcat_dst,
