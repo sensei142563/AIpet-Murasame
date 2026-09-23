@@ -16,6 +16,7 @@
     【音乐】暂停 / 继续 / 下一首 / 上一首 / 停止
 """
 import ctypes
+import ctypes.wintypes as wt
 import os
 import re
 import time
@@ -316,14 +317,52 @@ def _launch_client() -> bool:
 
 
 def _win_rect(hwnd):
-    """窗口的屏幕矩形 (left, top, right, bottom)"""
+    """窗口的屏幕矩形 (left, top, right, bottom)；拿不到就返回全 0（调用方必须判）
+
+    ⚠ 以前这里写的是 `import ctypes as _c; _c.wintypes.RECT()` —— 而模块只 import 了
+      ctypes，干净环境下 **ctypes.wintypes 根本不存在** → 每次都抛异常被吞掉 →
+      返回 (0,0,0,0) → 搜索框候选位置全变成 (0,22) → 点歌每次都点到屏幕左上角，
+      也就是用户看到的"点击点到别的窗口上"。现在用模块顶部的 ctypes.wintypes，并且
+      调用方对 0 值必须直接放弃（_click_in_window 会拦）。
+    """
     try:
-        import ctypes as _c
-        r = _c.wintypes.RECT()
-        _u32().GetWindowRect(hwnd, _c.byref(r))
+        u = _u32()
+        u.GetWindowRect.argtypes = [ctypes.c_void_p, ctypes.POINTER(wt.RECT)]
+        u.GetWindowRect.restype = ctypes.c_int
+        r = wt.RECT()
+        if not u.GetWindowRect(ctypes.c_void_p(int(hwnd)), ctypes.byref(r)):
+            return 0, 0, 0, 0
         return int(r.left), int(r.top), int(r.right), int(r.bottom)
-    except Exception:
+    except Exception as e:
+        _log(f"⚠ 读窗口位置失败: {type(e).__name__}: {e}")
         return 0, 0, 0, 0
+
+
+def _rect_ok(rect) -> bool:
+    """窗口矩形有效吗（0 或负尺寸都算无效）"""
+    try:
+        l, t, r, b = rect
+        return (r - l) > 50 and (b - t) > 50
+    except Exception:
+        return False
+
+
+def _click_in_window(hwnd, x: int, y: int) -> bool:
+    """只在**这个窗口的范围之内**点击；窗口位置读不到就直接不点（返回 False）。
+
+    为什么：以前会把候选坐标算在 (0,22) 这种地方，一点就点到别的窗口上去了
+    （用户反馈"有时候点击会点到别的窗口上"）。宁可这一轮说做不了，也不乱点。
+    """
+    rect = _win_rect(hwnd)
+    if not _rect_ok(rect):
+        _log("⚠ 读不到网易云窗口的位置 → 这次不点（绝不乱点屏幕）")
+        return False
+    l, t, r, b = rect
+    if not (l <= x <= r and t <= y <= b):
+        _log(f"⚠ 目标点 ({x},{y}) 不在窗口 {rect} 内 → 放弃这次点击")
+        return False
+    _click(x, y)
+    return True
 
 
 def _click(x: int, y: int):
@@ -341,17 +380,34 @@ def _click(x: int, y: int):
 
 
 def _search_box_candidates(hwnd) -> list:
-    """搜索框可能的几个位置（相对窗口：网易云的搜索框在顶部偏左/居中）
+    """搜索框可能的几个位置（相对窗口：网易云的搜索框在顶部条偏左/居中）
 
-    实测拿不到它内部控件（CEF 界面不暴露无障碍元素），所以给几个候选点位挨个试，
-    用"窗口标题是否变成这首歌"来判定成功。都是顶部条区域，点错了也只是切换页面，安全。
+    实测这台机器上窗口是 377,95~1544,847（1167x752）：搜索框在顶部条上，
+    横向大约在窗口宽度的 33%/45%/55%/25% 处、纵向距顶 22px。挨个试，用
+    "窗口标题是否变成这首歌"来判定成功。点之前都会校验在窗口范围内（见 _click_in_window）。
     """
     l, t, r, b = _win_rect(hwnd)
+    if not _rect_ok((l, t, r, b)):
+        return []
     w = max(1, r - l)
     out = []
     for fx in (0.33, 0.45, 0.55, 0.25):
         out.append((int(l + w * fx), int(t + 22)))
     return out
+def _play_button_pos(hwnd):
+    """搜索结果页上「播放」按钮的位置（用无障碍接口量出来的真实布局）
+
+    实测这台机器（窗口 377,95~1544,847 = 1167x752）：
+      搜索结果的「播放」按钮 bounds=[691,285,64,28] → 相对窗口 (314,190) = (0.269w, 0.253h)
+      第一条结果行             bounds=[703,330,101,20] → 相对窗口 (326,235) = (0.279w, 0.313h)
+    ★ 点这个按钮才是"真的播放"——以前只瞎按回车，运气好才播上（用户反馈"只搜索没播放"）。
+      窗口尺寸变了比例依然成立（CEF 布局按比例锚定），点之前还会校验在窗口内。
+    """
+    l, t, r, b2 = _win_rect(hwnd)
+    if not _rect_ok((l, t, r, b2)):
+        return None
+    w, h = max(1, r - l), max(1, b2 - t)
+    return int(l + w * 0.269), int(t + h * 0.253)
 
 
 def play_song(query: str, dry_run: bool = False) -> str:
@@ -421,7 +477,8 @@ def _play_song_locked(q: str, dry_run: bool = False) -> str:
         keyword = f"{name} {artist}".strip()
         for i, (bx, by) in enumerate(_search_box_candidates(hwnd), 1):
             _log(f"试第 {i} 个搜索框位置 ({bx},{by})")
-            _click(bx, by)                  # 点搜索框：既定位光标也把窗口带到前面
+            if not _click_in_window(hwnd, bx, by):
+                continue                    # 坐标不可信/越界 → 不点，换下一个候选
             if not _set_clipboard(keyword):
                 return "剪贴板打不开，没法帮你打歌名。"
             _keys(("ctrl", "a"))            # 清掉搜索框里已有的字
@@ -434,17 +491,43 @@ def _play_song_locked(q: str, dry_run: bool = False) -> str:
                 time.sleep(0.3)
                 _log("（演练：只搜不播）")
                 return f"（演练）搜到了《{name}》{artist}，没有真的播放。"
-            _keys("enter")                  # 播放第一条结果
+            # 播放第一条结果：**优先点搜索结果页上那个「播放」按钮**（真实布局量出来的），
+            # 只按回车在多数版本里只会翻页/选中，不会播放（这就是"只搜索没播放"的原因）。
+            _pb = _play_button_pos(hwnd)
+            if _pb:
+                _log(f"点搜索结果里的「播放」按钮 {_pb}")
+                _click_in_window(hwnd, _pb[0], _pb[1])
+                time.sleep(1.4)
+                if _title_hit(window_title(hwnd), name):
+                    ok = True
+                    break
+            _keys("enter")                  # 退路一：回车
+            time.sleep(1.2)
+            if _title_hit(window_title(hwnd), name):
+                ok = True
+                break
+            _keys("down")                   # 退路二：↓ 选中第一条再回车
+            _keys("enter")
             time.sleep(1.3)
             if _title_hit(window_title(hwnd), name):
                 ok = True
                 break
-            _keys("down")                   # 有的版本要 ↓ 选中第一条再回车
-            _keys("enter")
-            time.sleep(1.4)
-            if _title_hit(window_title(hwnd), name):
-                ok = True
-                break
+            # 退路三：双击第一条结果行（有些版本双击才播）
+            try:
+                l_, t_, r_, b_ = _win_rect(hwnd)
+                if _rect_ok((l_, t_, r_, b_)):
+                    rx = int(l_ + (r_ - l_) * 0.279)
+                    ry = int(t_ + (b_ - t_) * 0.313)
+                    _log(f"双击第一条结果 {rx},{ry}")
+                    _click_in_window(hwnd, rx, ry)
+                    time.sleep(0.12)
+                    _click_in_window(hwnd, rx, ry)
+                    time.sleep(1.4)
+                    if _title_hit(window_title(hwnd), name):
+                        ok = True
+                        break
+            except Exception as _e3:
+                _log(f"（双击退路失败：{_e3}）")
     finally:
         try:                                # 把鼠标/前台还给主人
             if prev_fg and prev_fg != int(hwnd):

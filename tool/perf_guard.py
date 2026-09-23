@@ -19,6 +19,7 @@
 两次识别间隔比闲置阈值还短，视觉模型**会一直留在显存里**，打游戏时直接跟游戏抢显存。
 """
 import ctypes
+import ctypes.wintypes as wt
 import os
 import time
 
@@ -46,9 +47,8 @@ def fullscreen_foreground() -> bool:
         h = u.GetForegroundWindow()
         if not h:
             return False
-        import ctypes as _c
-        r = _c.wintypes.RECT()
-        u.GetWindowRect(h, _c.byref(r))
+        r = wt.RECT()
+        u.GetWindowRect(h, ctypes.byref(r))
         w, hh = int(r.right - r.left), int(r.bottom - r.top)
         if w <= 0 or hh <= 0:
             return False
@@ -60,12 +60,12 @@ def fullscreen_foreground() -> bool:
         mon = u.MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST)
         class MONITORINFO(ctypes.Structure):
             _fields_ = [("cbSize", ctypes.c_ulong),
-                        ("rcMonitor", _c.wintypes.RECT),
-                        ("rcWork", _c.wintypes.RECT),
+                        ("rcMonitor", wt.RECT),
+                        ("rcWork", wt.RECT),
                         ("dwFlags", ctypes.c_ulong)]
         mi = MONITORINFO()
         mi.cbSize = ctypes.sizeof(MONITORINFO)
-        if not u.GetMonitorInfoW(mon, _c.byref(mi)):
+        if not u.GetMonitorInfoW(mon, ctypes.byref(mi)):
             return False
         sw = int(mi.rcMonitor.right - mi.rcMonitor.left)
         sh = int(mi.rcMonitor.bottom - mi.rcMonitor.top)
