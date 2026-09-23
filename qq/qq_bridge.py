@@ -982,7 +982,7 @@ class QQBotBridge:
         超限时优先淘汰更早的自动收藏（不挤掉用户手动收藏）。"""
         try:
             from qq.qq_config import get_qq_config as _g
-            if not _g().get("auto_learn_sticker_save", True):
+            if not _g().get("auto_learn_sticker_save", False):
                 return
             url, _summary = self._sticker_url_from_seg(message)
             if not url:

@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "kind": "feature",
   "desc": "桌宠摄像头人脸识别：识别到已登记的人脸时触发对应互动。人脸库在插件设置里管理。",
-  "default": true,
+  "default": false,
   "config_key": "face_recognition_enabled",
   "extra_keys": [],
   "settings": [
@@ -16,7 +16,7 @@
       "key": "camera_enabled",
       "label": "常开摄像头识别",
       "type": "checkbox",
-      "default": true
+      "default": false
     },
     {
       "key": "camera_id",

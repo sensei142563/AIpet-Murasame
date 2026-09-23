@@ -108,7 +108,9 @@ def scan_plugins():
                     meta.setdefault("kind", "feature")
                     meta.setdefault("config_key", None)
                     meta.setdefault("extra_keys", [])
-                    meta.setdefault("default", True)
+                    # 默认**停用**：plugin.json 没写 default 的（含以后导入的插件）
+                    # 一律按关处理，装了不会自己开始联网/学习；要用的自己去插件页开。
+                    meta.setdefault("default", False)
                     # 官方插件（随包自带）= builtin true；导入的第三方插件导入时写 false
                     meta.setdefault("builtin", True)
                     meta["_dir"] = d

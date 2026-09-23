@@ -425,7 +425,7 @@ def chat_once(user_text: str, use_sticker: bool = True, vision_desc: str = None,
     # 2d. 网络用语/梗 自动查询（短黑话或"什么意思"式提问时联网查词义，失败静默）
     try:
         from qq.qq_config import get_qq_config as _gq_slang
-        if _gq_slang().get("slang_allowed", True):
+        if _gq_slang().get("slang_allowed", False):
             from qq.qq_slang import lookup as _slang_lookup
             _slang_note = _slang_lookup(user_text)
             if _slang_note:
@@ -448,7 +448,7 @@ def chat_once(user_text: str, use_sticker: bool = True, vision_desc: str = None,
             # 插件总开关：启动器「插件」页可停用整个 Galgame 玩法
             try:
                 from qq.qq_config import get_qq_config as _gq_g
-                _gal_allowed = _gq_g().get("galgame_allowed", True)
+                _gal_allowed = _gq_g().get("galgame_allowed", False)
             except Exception:
                 _gal_allowed = True
             # 按人开启：只有开启者本人才进入玩法语境（不会别人开了连你也生效）

@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "kind": "feature",
   "desc": "说「点歌 歌名」(歌名支持模糊) 即可从网易云搜索并把歌曲作为 QQ 语音消息发出来。",
-  "default": true,
+  "default": false,
   "config_key": "qq_music_enable",
   "extra_keys": [],
   "settings": [

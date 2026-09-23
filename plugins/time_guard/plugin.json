@@ -4,7 +4,7 @@
   "version": "1.1.0",
   "kind": "tool",
   "desc": "每 3 分钟检测本地时间偏差，超过 4 秒自动校时——修复 QQ 发送「网络连接异常」与 NapCat [ServerTime] 警告。",
-  "default": true,
+  "default": false,
   "config_key": null,
   "extra_keys": [],
   "settings": [

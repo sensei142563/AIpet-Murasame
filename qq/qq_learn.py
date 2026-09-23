@@ -352,7 +352,7 @@ def handle(text, msg_ctx=None):
             return "想点什么歌？对我说「点歌 晴天」试试～", []
         try:
             from qq.qq_config import get_qq_config as _mc
-            if not _mc().get("music_enabled", True):
+            if not _mc().get("music_enabled", False):
                 return "点歌功能已被停用（可在启动器「插件」页开启）", []
         except Exception:
             pass

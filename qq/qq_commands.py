@@ -124,7 +124,7 @@ def handle_qq_command(text: str, session_key: str, user_id) -> str:
         _hit_off = any(w in _low2 for w in _OFF)
         if _hit_on or _hit_off or "galgame模式" in _low2 or "好感度模式" in _low2:
             from qq.qq_config import get_qq_config as _gq_cfg
-            if not _gq_cfg().get("galgame_allowed", True):
+            if not _gq_cfg().get("galgame_allowed", False):
                 return "🎮 Galgame 玩法已被停用（可在启动器「插件」页重新启用）"
             if not (_hit_on or _hit_off):
                 return "跟我说「开启galgame模式」就能开始好感度养成哦~（详细玩法见 /help）"
@@ -152,7 +152,7 @@ def handle_qq_command(text: str, session_key: str, user_id) -> str:
             if not _cur_gid:
                 return "这个玩法要在群里 @我 才能玩哦~"
             from qq.qq_config import get_qq_config as _gq_cfg2
-            if not _gq_cfg2().get("galgame_allowed", True):
+            if not _gq_cfg2().get("galgame_allowed", False):
                 return "🎮 Galgame 玩法已被停用（可在启动器「插件」页重新启用）"
             if not _me(_cur_gid, user_id):
                 return ("🎮 你还没开启 Galgame 模式哦～ 先在这个群里对我说「开启galgame模式」，"
@@ -171,7 +171,7 @@ def handle_qq_command(text: str, session_key: str, user_id) -> str:
                 return "在群里 @我 才能查看好感度哦~"
             _gid = _cur_gid
             from qq.qq_config import get_qq_config as _gq_cfg3
-            if not _gq_cfg3().get("galgame_allowed", True):
+            if not _gq_cfg3().get("galgame_allowed", False):
                 return "🎮 Galgame 玩法已被停用（可在启动器「插件」页重新启用）"
             from qq.qq_galgame import member_enabled as _me2
             if not _me2(_gid, user_id):

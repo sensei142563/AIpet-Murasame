@@ -4,7 +4,7 @@
   "version": "1.1.0",
   "kind": "feature",
   "desc": "群内好感度养成：成员可 @ 开启模式，聊天/约会增减好感（0~100），高好感解锁亲密互动；含查看好感度与 60 分钟约会冷却。",
-  "default": true,
+  "default": false,
   "config_key": "qq_galgame_enable",
   "extra_keys": [],
   "settings": [
