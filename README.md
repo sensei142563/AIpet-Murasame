@@ -181,13 +181,20 @@ python run_launcher.py
 
 ### 准备 NapCat
 
-1. 下载 NapCat Releases 的 **`NapCat.Shell.Windows.OneKey.zip`**：https://github.com/NapNeko/NapCatQQ/releases
+> ⚠️ **版本已锁定：NapCat `v4.18.14` + QQ `9.9.22-40990`。请不要更新。**
+> 上游新版（以及超出支持表的 QQ 版本）实测不稳定，本项目只在这个组合上验证过。
+> 详细说明与锚文件见项目根目录 `NAPCAT_VERSION.txt`。
+> **尤其不要在 NapCat WebUI 里点「更新」**——那会把钉住的版本换成 latest。
+
+1. 下载 NapCat Releases 的 **`NapCat.Shell.Windows.OneKey.zip`**（**固定用这个 tag，不要用 latest**）：https://github.com/NapNeko/NapCatQQ/releases/tag/v4.18.14
 2. 解压后放置到项目根目录 `NapCat.Shell.Windows.OneKey/`
-3. **下载 `NapCat.Shell.zip`**（运行时本体），解压后放入 `NapCat.Shell.Windows.OneKey/NapCat/`
-4. **下载 QQ Windows 版安装程序**（如 `QQ_9.9.33_x64.exe`），放入 `NapCat.Shell.Windows.OneKey/`
+3. **下载同一 tag 下的 `NapCat.Shell.zip`**（运行时本体），解压后放入 `NapCat.Shell.Windows.OneKey/NapCat/`
+4. **下载 QQ Windows 版安装程序**（用 `9.9.22-40990`，或任何 **≤ 9.9.32-50969** 的版本；版本太高 NapCat 会报「不支持当前QQ版本架构」），放入 `NapCat.Shell.Windows.OneKey/`
 5. 运行 `NapCat.Shell.Windows.OneKey/bootmain/napcat.bat` 首次自动解压（若 404 则手动用 7z 解压 QQ 安装包到 `bootmain/`，QQ.exe 需在 `bootmain/QQ.exe`）
 6. 运行 **`NapCat.Shell.Windows.OneKey/start_napcat.bat`**（专用启动脚本，无需注册表）→ 弹出二维码 → 手机 QQ 扫码登录小号
 7. 确认控制台出现 `WebSocket服务: 127.0.0.1:3001 已启动`
+
+> 💡 **用绿色版/安装包的可以直接跳过 1~5 步**：包里已经带好锁定版本的 NapCat，别自己再下一份覆盖它。
 
 ### 启动 QQ 聊天
 
@@ -734,7 +741,7 @@ main.py (PyQt5 主窗口 + FastAPI 28565 + 快捷键监听 + 托盘)
 | `qq_owner_id` | 主人 QQ 号（大号私聊共享记忆，且 `/clear` 指令仅大号可用） |
 | `qq_enabled` | QQ 功能总开关（PCL 显示「启动 QQ AIpet」按钮） |
 | `qq_napcat_ws` | NapCat WebSocket 地址（默认 `ws://127.0.0.1:3001`） |
-| `qq_napcat_http` | NapCat HTTP API 地址（默认 `http://127.0.0.1:6099`） |
+| `qq_napcat_http` | NapCat **WebUI 面板**地址（默认 `http://127.0.0.1:6099`）。⚠️ 它不是 OneBot 接口口——QQ 消息全走 `qq_napcat_ws`(3001)，这个值只在 NapCat 自己的 `webui.json` 读不到时给「NapCat WebUI」按钮当兜底 |
 | `qq_send_sticker` | QQ 回复是否附带表情包 gif |
 | `qq_send_voice` | QQ 回复是否附带 F5-TTS 语音（需 9881 服务运行） |
 | `qq_vision_enabled` | QQ 私聊图片识别（收到图片用视觉模型识别并回应，模型见 `vision_model_name`） |

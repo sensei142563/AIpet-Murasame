@@ -539,9 +539,35 @@ class HomePage(QWidget):
             QMessageBox.warning(self, "桌宠设置", f"打开失败：{e}")
 
     def open_napcat_webui(self):
+        """打开 NapCat WebUI（端口/token 从 NapCat 自己的 webui.json 读，不硬编码）。
+
+        为什么改：原来写死 `http://127.0.0.1:6099` 且不带 token，还提示
+        「Token 见 config.json」——config.json 里没有 WebUI token（它在
+        NapCat/config/webui.json），端口也是 NapCat 那边可改的。
+        现在：① 自动读端口与 token 拼 `/webui?token=...`；② 打开前先探端口，
+        NapCat 没启动就给一句人话（而不是弹一个打不开的死链接）。
+        """
+        try:
+            from qq.qq_config import discover_webui_url
+            info = discover_webui_url()
+        except Exception as e:
+            info = {"url": "http://127.0.0.1:6099/webui", "port": 6099, "token": "", "source": str(e)}
+        port = int(info.get("port") or 6099)
+        if not _local_port_open(port):
+            QMessageBox.information(
+                self, "NapCat 没在运行",
+                "本机 %d 端口没有程序在监听，所以 WebUI 打不开。\n\n"
+                "NapCat 是随包自带的（NapCat.Shell.Windows.OneKey\\ 目录里），"
+                "但需要先启动它：\n"
+                "  · 点这一行的「📱 重新扫码登录」会拉起 NapCat 并显示二维码，或\n"
+                "  · 手动运行 NapCat.Shell.Windows.OneKey\\start_napcat.bat\n\n"
+                "启动后再点一次这个按钮即可。" % port)
+            print(f"[NewUI] NapCat WebUI 未打开：{port} 端口无监听")
+            return
         import webbrowser
-        webbrowser.open("http://127.0.0.1:6099")
-        print("[NewUI] 已打开 NapCat WebUI（默认 6099，Token 见 config.json）")
+        webbrowser.open(info["url"])
+        print("[NewUI] 已打开 NapCat WebUI：端口 %d，token %s（来源：%s）"
+              % (port, "已带" if info.get("token") else "无", info.get("source")))
 
     def napcat_relogin(self):
         base = _app_base_dir()
@@ -1630,6 +1656,26 @@ def _soft_blur(pm: QPixmap, strength: int) -> QPixmap:
             return small.scaled(pm.size(), Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
         except Exception:
             return pm
+
+
+def _local_port_open(port: int, timeout: float = 0.4) -> bool:
+    """本机端口有人在监听吗（NapCat WebUI 是否已启动）。
+
+    注意用 connect_ex 探测本机监听口是可靠的（立刻返回 0/10061）；
+    ⚠ 别拿去探"对端握手"类的口——那种会因非阻塞返回 10035 而稳定误判。
+    """
+    import socket
+    s = socket.socket()
+    s.settimeout(timeout)
+    try:
+        return s.connect_ex(("127.0.0.1", int(port))) == 0
+    except Exception:
+        return False
+    finally:
+        try:
+            s.close()
+        except Exception:
+            pass
 
 
 def _page_block_alpha() -> float:

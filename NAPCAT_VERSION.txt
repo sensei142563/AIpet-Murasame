@@ -1,0 +1,17 @@
+# NapCat / QQ 版本锚（本项目的 NapCat 已锁定，请勿更新）
+#
+# 为什么锁：NapCat 自身带一个更新器（WebUI 里的「更新」按钮会去 GitHub 拉
+#   releases/latest 并覆盖 NapCat.Shell.zip），而新版实测不稳定；同时 NapCat
+#   4.18.14 的 QQ 包体支持表上限是 9.9.32-50969，QQ 版本过高会报
+#   「不支持当前QQ版本架构」。所以 NapCat 与 QQ 两个版本都要钉住。
+#
+# 谁读这个文件：
+#   · build_launcher.py   —— 打包绿色版前比对本机 NapCat 实际版本，不一致就大声警告
+#   · tool/pack/verify_installer.py —— 校验装出来的包里的版本对不对
+#   · README「准备 NapCat」章节 —— 手动安装的用户按这里的版本下载
+#
+# 格式：每行 key=value，# 开头是注释。版本值必须与 NapCat/napcat.mjs 内的一致。
+
+napcat=4.18.14
+qq=9.9.22-40990
+qq_max_supported=9.9.32-50969

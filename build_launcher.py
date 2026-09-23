@@ -16,6 +16,8 @@
 import subprocess
 import sys
 import os
+import json
+import re
 import shutil
 
 # 强制 stdout 使用 UTF-8（避免在管道/GBK 控制台下打印 emoji(✅) 时报 UnicodeEncodeError）
@@ -448,6 +450,67 @@ print("  [目录] data/ face_shibie/ 已创建")
 # guild1.db 等是作者本机的登录数据，绝不能进分发包 → 复制时全部排除，
 # 用户拿到的是「全新」NapCat，首次扫码登录后自行配置（与官方一键包一致）。
 napcat_src = os.path.join(os.getcwd(), "NapCat.Shell.Windows.OneKey")
+
+
+def _napcat_version_check(src: str):
+    """打包前核对 NapCat 版本是否还是锁定值（NapCat 自带更新器，容易被动升级）。
+
+    锚文件：项目根 NAPCAT_VERSION.txt（napcat= / qq= / qq_max_supported=）。
+    只警告不中止：万一用户确实要用别的版本，也不该卡住打包；
+    但必须**大声**说出来，否则"悄悄换版本分发出去"没人会发现。
+    """
+    try:
+        anchor = {}
+        ap = os.path.join(os.getcwd(), "NAPCAT_VERSION.txt")
+        if os.path.isfile(ap):
+            for ln in open(ap, encoding="utf-8"):
+                ln = ln.split("#")[0].strip()
+                if "=" in ln:
+                    k, v = ln.split("=", 1)
+                    anchor[k.strip()] = v.strip()
+        else:
+            print("  [版本] ⚠ 没找到 NAPCAT_VERSION.txt，跳过版本核对")
+            return
+        want = anchor.get("napcat", "")
+        # NapCat 版本写在 napcat.mjs 里：... && "4.18.14" || "1.0.0-dev"
+        mjs = os.path.join(src, "NapCat", "napcat.mjs")
+        got = ""
+        if os.path.isfile(mjs):
+            with open(mjs, "r", encoding="utf-8", errors="replace") as f:
+                head = f.read(4_000_000)
+            m = re.search(r'&&\s*"(\d+\.\d+\.\d+)"', head)
+            if m:
+                got = m.group(1)
+        if got and want and got != want:
+            print("  [版本] " + "!" * 56)
+            print(f"  [版本] ⚠⚠ NapCat 版本被改过：锁定 {want}，实际 {got}")
+            print("  [版本] ⚠⚠ 你（或 NapCat 的自动更新）把它升级了。")
+            print("  [版本] ⚠⚠ 请还原为锁定版本再分发，否则用户拿到的是未验证版本。")
+            print("  [版本] " + "!" * 56)
+        elif got:
+            print(f"  [版本] NapCat {got} ✅（与 NAPCAT_VERSION.txt 一致）")
+        else:
+            print("  [版本] ⚠ 没能从 napcat.mjs 读出 NapCat 版本（结构可能变了）")
+        # QQ 侧：bootmain/versions/config.json 的 curVersion
+        vj = os.path.join(src, "bootmain", "versions", "config.json")
+        qq_ok = anchor.get("qq_max_supported", "")
+        if os.path.isfile(vj):
+            try:
+                _d = json.load(open(vj, encoding="utf-8"))
+                _cur = str(_d.get("curVersion") or _d.get("baseVersion") or "")
+                print(f"  [版本] 绿色 QQ {_cur or '未知'}"
+                      + (f"（支持上限 {qq_ok}）" if qq_ok else ""))
+                if _cur and qq_ok and _cur > qq_ok:
+                    print("  [版本] ⚠ 这个 QQ 版本超出 NapCat 支持表，会报"
+                          "「不支持当前QQ版本架构」→ 建议换成 ≤ " + qq_ok)
+            except Exception as _e:
+                print(f"  [版本] ⚠ 读取环境内 QQ 版本失败: {_e}")
+    except Exception as e:
+        print(f"  [版本] ⚠ 版本核对失败（不影响打包）: {e}")
+
+
+if os.path.exists(napcat_src) and not os.path.exists(napcat_dst):
+    _napcat_version_check(napcat_src)
 napcat_dst = os.path.join(out_dir, "NapCat.Shell.Windows.OneKey")
 if os.path.exists(napcat_src) and not os.path.exists(napcat_dst):
     print("  [复制] NapCat.Shell.Windows.OneKey/ ...")

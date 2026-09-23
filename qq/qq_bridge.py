@@ -2,10 +2,11 @@
 """
 NapCat WebSocket 桥 — 连接 OneBot11 协议，收发 QQ 消息。
 
-- 正向 WS（ws://127.0.0.1:3001）：接收 QQ 事件上报（消息/群@等）
-- HTTP API（http://127.0.0.1:6099）：发送消息/图片/语音
-  注意：6099 是 NapCat WebUI 面板端口，OneBot API 与 WS 同端。
-  实际发消息通过 WS 发送 API 调用（send_msg 等），HTTP 备用。
+- 正向 WS（ws://127.0.0.1:3001）：接收 QQ 事件上报（消息/群@等），**API 调用也走这条**
+- HTTP：config.json 的 qq_napcat_http（默认 http://127.0.0.1:6099）**不是** OneBot 接口，
+  6099 是 NapCat 的 WebUI 面板端口；本文件不发 HTTP 请求，它只在启动器
+  「NapCat WebUI」按钮读不到 NapCat/config/webui.json 时当兜底地址用。
+  （旧注释写成"HTTP API：发送消息/图片/语音"，是误导：真实发送全走 WS。）
 
 实际实现：
 - 连接正向 WebSocket 3001（OneBot11 事件上报 + API 调用共用）
