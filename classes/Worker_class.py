@@ -52,6 +52,8 @@ def split_sentences(text):
 
 # 点歌请求暂存（Worker 解析到【音乐】标记时放进来，主线程取走后真的去网易云点）
 _mu_pending = []
+# 提醒请求暂存（【提醒】标记同理）
+_rm_pending = []
 
 
 def _tidy_sentences(items):
@@ -79,6 +81,14 @@ def _tidy_sentences(items):
             if _fa.FILE_MARK in s:
                 _fa.set_pending(s)          # 请求暂存，"列出 桌面"这种内容不进台词
                 out.append(_fa.FILE_MARK)
+                continue
+        except Exception:
+            pass
+        try:
+            from tool import reminder as _rm
+            if _rm.REMIND_MARK in s:
+                _rm_pending.append(s)
+                out.append(_rm.REMIND_MARK)
                 continue
         except Exception:
             pass

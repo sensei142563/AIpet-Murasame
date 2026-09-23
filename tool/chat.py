@@ -140,6 +140,15 @@ def qwen3_lora(history, user_input, role):
     except Exception:
         pass
 
+    # 提醒/待办：她能帮主人记事（到点由桌宠叫她开口）
+    try:
+        from tool import reminder as _rm2
+        _rrules = _rm2.prompt_rules()
+        if _rrules:
+            messages.append({"role": "system", "content": _rrules})
+    except Exception:
+        pass
+
     # 点歌：让她真的去网易云搜索并播放（不要自己猜坐标点搜索框）
     try:
         from tool import music as _mu2

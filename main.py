@@ -270,6 +270,23 @@ if __name__ == "__main__":
                     pass
                 if waited >= 5000:
                     print("[桌宠] ⚠ 立绘合成较慢，先显示窗口（稍后会自行补上）")
+                # ★ 启动问候：在一起第几天 + 今天挂着的提醒（参考 HealthMate/PetAI 的开机问候）
+                try:
+                    if not getattr(pet, "_startup_greeted", False):
+                        pet._startup_greeted = True
+
+                        def _say_hello():
+                            try:
+                                from tool import care as _care
+                                _p = _care.startup_line(getattr(pet, "pet_name", "我"))
+                                if _p:
+                                    pet.start_thread(_p, role="system", t=True)
+                            except Exception as _e:
+                                print(f"[AIpet] ⚠ 启动问候失败: {_e}")
+
+                        QTimer.singleShot(2500, _say_hello)
+                except Exception:
+                    pass
                 return
         except Exception:
             pet.show()

@@ -66,6 +66,16 @@ class LearnWindow(QDialog):
                 txt += chr(10) + chr(10) + "【她能自己做到哪一步】" + chr(10) + _au.summary_text()
             except Exception:
                 pass
+            try:
+                from tool import reminder as _rm
+                txt += chr(10) + chr(10) + "【挂着的提醒】" + chr(10) + _rm.list_text()
+            except Exception:
+                pass
+            try:
+                from tool import care as _care
+                txt += chr(10) + chr(10) + "【陪伴】" + _care.summary_text()
+            except Exception:
+                pass
             self.view.setPlainText(txt)
         except Exception as e:
             self.view.setPlainText("读取失败：%s" % e)

@@ -1398,6 +1398,12 @@ class Murasame(QLabel):
                     except Exception:
                         pass
                     _ok2, _sc3, _why2 = _att.should_speak(screen_change_bits=_dist)
+                    try:
+                        from tool import care as _c3
+                        if _ok2 and _c3.quiet_now():
+                            _ok2, _why2 = False, "会议/演示中，保持安静"
+                    except Exception:
+                        pass
                     print(f"[AIpet] 看屏幕后开口评分 {_sc3:.1f}（{_why2}）→ {'开口' if _ok2 else '安静陪着'}")
                     if not _ok2:
                         return
@@ -1689,8 +1695,29 @@ class Murasame(QLabel):
             print(f"[桌宠] ⚠ 电脑近况采集失败: {e}")
 
     def _learn_tick(self):
-        """定时器：自主学习 + 电脑近况（都在后台线程，界面不卡）"""
+        """定时器：自主学习 + 电脑近况 + 主动关怀（都在后台线程，界面不卡）"""
         try:
+            # 主动关怀：深夜/久坐（带冷却，不会唠叨）
+            try:
+                from tool import care as _care
+                import time as _t4
+                _now = _t4.time()
+                if not getattr(self, "_session_start", 0):
+                    self._session_start = _now
+                _active = _now - float(self._session_start or _now)
+                _why = _care.check(now_ts=_now, active_sec=_active)
+                if _why:
+                    print(f"[桌宠] 💗 主动关怀：{_why}")
+                    self._request_dialog.emit(_care.nudge_prompt(_why, self.pet_name), "system", True)
+            except Exception as _ec:
+                print(f"[桌宠] ⚠ 关怀检查失败: {_ec}")
+            # 连续使用时长：离开超过 10 分钟就重新计时
+            try:
+                import time as _t5
+                if get_idle_seconds() > 600:
+                    self._session_start = _t5.time()
+            except Exception:
+                pass
             if self.is_busy_reply() or getattr(self, "input_mode", False):
                 return
             import threading as _th
@@ -1702,6 +1729,23 @@ class Murasame(QLabel):
     def check_idle_state(self):
         """检查系统空闲时间并在阈值上触发对话"""
         idle_seconds = get_idle_seconds()
+
+        # ── 到点提醒：每 20 秒看一眼（1 秒一次太频繁，读文件不值当）──
+        try:
+            _n = int(getattr(self, "_rm_tick", 0) or 0) + 1
+            self._rm_tick = _n
+            if _n % 20 == 0:
+                from tool import reminder as _rm2
+                _due = _rm2.take_due()
+                if _due:
+                    _w = "；".join(str(x.get("what")) for x in _due[:3])
+                    print(f"[桌宠] ⏰ 到点提醒：{_w}")
+                    self._request_dialog.emit(
+                        "（系统提示：到点了，你该提醒主人这些事——" + _w +
+                        "。用你自己的口吻说出来（一句话），可以顺便关心一句，别念标记。）",
+                        "system", True)
+        except Exception as _em:
+            print(f"[桌宠] ⚠ 提醒检查失败: {_em}")
 
         # ── 游戏/全屏：只降优先级（主人要求屏幕识别与主动搭话都不许动）──
         try:
@@ -1795,6 +1839,13 @@ class Murasame(QLabel):
                 from tool import attention as _att, perf_guard as _pg
                 _ok, _sc, _why = _att.should_speak(user_idle_sec=idle_seconds,
                                                    fullscreen=_pg.game_mode())
+                try:
+                    from tool import care as _c2
+                    if _ok and _c2.quiet_now():
+                        _ok = False
+                        _why = "会议/演示中，保持安静"
+                except Exception:
+                    pass
                 print(f"[AIpet] 空闲搭话评分 {_sc:.1f}（{_why}）→ {'开口' if _ok else '这次先不说'}")
                 if not _ok:
                     self.idle_thinking_triggered = False   # 下次再评
@@ -1877,6 +1928,45 @@ class Murasame(QLabel):
                     pass
         except Exception as _e2:
             print(f"[桌宠] ⚠ 自主要求看屏幕判断失败: {_e2}")
+
+        # ── 她帮主人记提醒（提示词里教她：【提醒】30分钟后 喝水）──
+        try:
+            from tool.reminder import REMIND_MARK
+            from tool import reminder as _rm
+            from classes.Worker_class import _rm_pending
+            if REMIND_MARK in "".join(str(x) for x in (reply or [])):
+                _rreq = _rm_pending.pop(0) if _rm_pending else ""
+                _rm_pending[:] = []
+                _txt = _rm.clean_for_speech(str(_rreq or ""))
+                _acts = _rm.parse(_txt)
+                _res = ""
+                for _k, _arg in _acts:
+                    if _k == "list":
+                        _res = _rm.list_text()
+                    elif _k == "cancel":
+                        _n = _rm.cancel(str(_arg))
+                        _res = f"取消了 {_n} 条提醒。" if _n else "没找到要取消的提醒。"
+                    elif _k == "pomodoro":
+                        _res = _rm.pomodoro(int(_arg or 25))
+                    elif _k in ("once", "daily"):
+                        try:
+                            _rm.add(float(_arg.get("at")), str(_arg.get("what")),
+                                    daily=(_k == "daily"))
+                            _res = ("记下了：%s%s。到点我叫你。"
+                                    % ("每天 " if _k == "daily" else "",
+                                       _rm._fmt_ts(_arg.get("at"))))
+                        except Exception as _e1:
+                            _res = f"提醒没记上（{type(_e1).__name__}）。"
+                if _res:
+                    print("[桌宠] ⏰ 提醒操作：" + str(_res)[:60])
+                    self._request_dialog.emit(
+                        "（系统提示：你刚才帮主人记/查了提醒，结果：" + str(_res) +
+                        "。用你自己的口吻跟他说一声，一两句话，别念标记。）", "user", False)
+                    return
+                if _txt:
+                    reply = [_txt] + [x for x in (reply or []) if REMIND_MARK not in str(x)]
+        except Exception as _er:
+            print(f"[桌宠] ⚠ 提醒处理失败: {_er}")
 
         # ── 她想看看电脑里的文件（提示词里教她：需要时输出【文件】列出 桌面）──
         #    和【看屏幕】一个套路：真去翻，翻完把内容交回给她接着说。
@@ -2787,7 +2877,7 @@ class Murasame(QLabel):
                     "③ 每天写一段日记。全部存在 pets/角色/memory/learned.json。")
                 _act_learn.triggered.connect(lambda on=False: _sl.set_enabled(bool(on)))
                 separator(_ai)
-                _act_seen = item(_ai, "看看她学到了什么")
+                _act_seen = item(_ai, "她的状态 / 记忆 / 提醒")
                 _act_seen.setToolTip("单独开一个小窗口，显示她记住的事、学到的东西和最近的日记。")
                 _act_seen.triggered.connect(self._show_learned)
                 _act_study = item(_ai, "让她现在学点什么")
