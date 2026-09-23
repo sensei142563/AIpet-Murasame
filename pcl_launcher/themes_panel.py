@@ -12,7 +12,7 @@ import json
 import shutil
 import zipfile
 
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtWidgets import (
     QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QScrollArea,
     QFrame, QMessageBox, QFileDialog, QDialog, QInputDialog
@@ -611,6 +611,9 @@ class PCLThemesPanel(QScrollArea):
         cfg["ui_theme"] = meta["id"]
         _save_config(cfg)
         self.theme_applied.emit(meta["id"])
+        # 「当前使用」标记要立刻跟上（以前不刷新列表 → 点完还标着旧主题，像没生效）
+        # 延到下一轮事件循环再重建：此刻还在卡片按钮的信号里，直接删自己会崩
+        QTimer.singleShot(0, self._reload)
 
     def _export(self, meta):
         path, _ = QFileDialog.getSaveFileName(self, "导出主题", f"{meta['id']}_theme.zip",

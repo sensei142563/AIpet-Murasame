@@ -1332,7 +1332,8 @@ class SiliconLauncher(QWidget):
                 self.back.update()
             except Exception:
                 pass
-            self.reload_background()
+            # 背景重载**不在这里**做：它必须无条件执行（见 apply_theme_live 里的调用），
+            # 放在这个 try 里一旦前面某步抛异常就会被跳过 → 旧主题的视频还会继续播。
         except Exception as e:
             print(f"[NewUI] ⚠ 外壳重设样式失败: {e}")
 
@@ -1464,6 +1465,13 @@ class SiliconLauncher(QWidget):
             self._silicon = theme_id == "silicon"
             cur_key = self._current_page_key()
             self._restyle_chrome()
+            # 换肤后**必须**重载背景（放在这里、且单独 try —— 不能被外壳样式那段的异常跳过）：
+            # 主题可能是"视频 → 无背景/图片"，不重载就会留着旧主题的视频线程继续播，
+            # 而新主题的遮罩色又会被套到旧画面上 → 用户看到的"切了主题背景没变，只多一层蒙版"。
+            try:
+                self.reload_background()
+            except Exception as e:
+                print(f"[NewUI] ⚠ 换肤后重载背景失败: {e}")
             self._discard_other_pages(cur_key)
             # 当前页重建延迟到信号返回之后（避免删除正在发信号的控件）
             if cur_key:
@@ -1714,6 +1722,14 @@ class SiliconLauncher(QWidget):
             except Exception:
                 self._bg_scrim = 0.55
             if not src:
+                # 新主题没有背景声明 → **显式清空底板**。
+                # 以前这里是直接 return：底板还留着上一个主题的视频最后一帧，
+                # 看起来就像"背景没变"（用户报的现象之一）。
+                try:
+                    self.back.set_bg(QPixmap())
+                    self.back.update()
+                except Exception:
+                    pass
                 return
             if btype == "image":
                 # 不建独立控件：壁纸交给圆角底板绘制（这样四角才是圆的）
@@ -1824,6 +1840,10 @@ class SiliconLauncher(QWidget):
         """
         try:
             if img is None or img.isNull():
+                return
+            # 已经不在放视频了（换主题/停播）→ 丢掉迟到的那一帧。
+            # 兜底：万一停止路径出问题，旧主题的视频也不能画到新主题的背景上。
+            if getattr(self, "_bg_reader", None) is None:
                 return
             self._bg_video_frame = img           # 供 Live2D 预览区同步为 GL 纹理
             self._bg_video_serial += 1

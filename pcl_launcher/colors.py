@@ -59,6 +59,10 @@ def _resolve_theme_dir() -> str:
 
 THEME_DIR = _resolve_theme_dir()
 
+# 内存里"当前真正在用的主题"：apply_theme_live() 换肤时写，current_theme_id() 优先用它。
+# 空串 = 还没换过肤（启动阶段）→ 回退读 config.json 的 ui_theme。
+_ACTIVE_THEME_ID = ""
+
 
 def _list_themes():
     """扫描 themes/ 目录返回 [{"id","name","builtin","desc","accent"}...]（按目录名排序）"""
@@ -103,6 +107,15 @@ def _load_theme_palette(theme_id: str) -> dict:
 
 
 def current_theme_id() -> str:
+    """当前主题 id：**以内存里正在用的为准**，其次才看 config.json。
+
+    为什么不能只读 config.json：换肤是"先改内存色板、config 稍后才落盘"（预览时
+    甚至 persist=False 不落盘）。而主题背景/资源（background_info / theme_asset /
+    nav_icon_path）都要按"当前主题"去查目录 —— 只看 config 就会拿到**上一个**主题的背景，
+    于是切到没有背景的主题后，旧主题的视频还在继续播（用户报的"切了主题背景没变"）。
+    """
+    if _ACTIVE_THEME_ID and os.path.isdir(os.path.join(THEME_DIR, _ACTIVE_THEME_ID)):
+        return _ACTIVE_THEME_ID
     cfg = _config()
     tid = str(cfg.get("ui_theme", "classic") or "classic").strip()
     # 主题目录不存在时回退经典
@@ -397,12 +410,15 @@ def apply_theme_live(theme_id: str) -> dict:
 
     返回新色板（含 accent）。调用方随后重建外壳样式与当前页面。
     """
-    global _PAL, ACCENT_ID
+    global _PAL, ACCENT_ID, _ACTIVE_THEME_ID
     theme_id = str(theme_id or "").strip() or "silicon"
+    if not os.path.isdir(os.path.join(THEME_DIR, theme_id)):
+        theme_id = "classic"
     pal = _derive_from_base(_load_theme_palette(theme_id))
     _apply_palette_inplace(pal)
     _PAL = pal
     ACCENT_ID = str(pal.get("accent", "blue") or "blue")
+    _ACTIVE_THEME_ID = theme_id        # 背景/图标资源都要按这个主题查目录
     print(f"[Colors] 主题已实时切换 → {theme_id}（强调色 {ACCENT_ID}）")
     return pal
 
