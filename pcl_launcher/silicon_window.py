@@ -17,6 +17,7 @@ import re
 import subprocess
 import sys
 import threading
+import time
 import urllib.request
 
 from PyQt5.QtCore import Qt, QTimer, QSize, QUrl, QThread, pyqtSignal
@@ -607,6 +608,10 @@ class HomePage(QWidget):
 class SiliconLauncher(QWidget):
     """AIpet 启动器 · 新版外壳"""
 
+    # 视频背景解码线程 → GUI 线程的帧通道
+    # （普通线程里 emit 这个信号，Qt 会自动排队到主线程执行槽，别直接碰控件）
+    _video_frame_signal = pyqtSignal(object)
+
     def __init__(self):
         super().__init__()
         _ensure_src_on_path()        # 冻结版：页面懒加载用得到随包源码
@@ -619,6 +624,7 @@ class SiliconLauncher(QWidget):
         self._bg_video_frame = None   # 最新一帧（Live2D 预览区同步取用）
         self._bg_video_serial = 0
         self._bg_frame_busy = False
+        self._video_frame_signal.connect(self._on_bg_video_frame)
 
         self.setWindowTitle("AIpet 丛雨桌宠 · 启动器")
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
@@ -1341,10 +1347,9 @@ class SiliconLauncher(QWidget):
         try:
             self._stop_video_background()
             self._bg_video_opacity = float(opacity or 1.0)
-            self._bg_reader = _VideoBgReader(src, self)
+            self._bg_reader = _VideoBgReader(src, self._video_frame_signal.emit)
             # 解码线程按窗口大小先缩好再送（cover 裁切），GUI 线程只负责贴图
             self._bg_reader.set_target(self.back.width(), self.back.height())
-            self._bg_reader.frame_ready.connect(self._on_bg_video_frame)
             self._bg_reader.start()
             print(f"[NewUI] 主题背景视频（OpenCV 解码）: {os.path.basename(src)}")
         except Exception as e:
@@ -1536,7 +1541,7 @@ def _hook_repaint_transparency(page):
                 print(f"[NewUI] ⚠ 挂钩 {name} 失败: {e}")
 
 
-class _VideoBgReader(QThread):
+class _VideoBgReader:
     """主题视频背景解码线程（OpenCV/ffmpeg）。
 
     为什么不用 QtMultimedia：本机实测 Qt5.15 的 WMF/DirectShow 引擎打不开 H.264 mp4
@@ -1544,18 +1549,27 @@ class _VideoBgReader(QThread):
     duration=0），而 cv2 能稳定解出 30fps/1900 帧。老版本就是这么做的（当时写在这段
     代码的注释里），后来换成 QMediaPlayer 才坏的。
 
+    ⚠ 用**守护线程 + 信号回调**，不用 QThread：
+      原来写成 QThread 后，只要窗口没走 closeEvent 就被销毁（比如启动器直接
+      sys.exit、或者自动化脚本建完窗口就退），Qt 会打印
+      `QThread: Destroyed while thread is still running` 然后**整个进程 fail-fast
+      崩溃（0xC0000409）**——实测 smoke_pages 稳定复现。守护线程不会有这个问题：
+      它不在 Qt 的对象树里，进程退出时自然结束。
     线程内就做 cover 缩放（缩到窗口尺寸再发），GUI 线程只贴图 —— 否则
     1920×1080 的帧每帧在主线程缩放会明显掉帧。
     """
 
-    frame_ready = pyqtSignal(object)
-
-    def __init__(self, path, parent=None):
-        super().__init__(parent)
+    def __init__(self, path, emit_frame):
         self._path = path
+        self._emit = emit_frame          # 一般是 QObject 的 signal.emit（跨线程会走队列）
         self._running = True
         self._lock = threading.Lock()
-        self._tw, self._th = 0, 0          # 目标尺寸（窗口大小，0=不缩）
+        self._tw, self._th = 0, 0        # 目标尺寸（窗口大小，0=不缩）
+        self._t = threading.Thread(target=self._run, daemon=True,
+                                   name="apet-video-bg")
+
+    def start(self):
+        self._t.start()
 
     def set_target(self, w, h):
         """窗口尺寸变化时告知目标大小（下一次解码生效）"""
@@ -1565,11 +1579,11 @@ class _VideoBgReader(QThread):
     def stop(self):
         self._running = False
         try:
-            self.wait(2000)
+            self._t.join(timeout=2.0)    # 守护线程；等不到也不阻塞退出
         except Exception:
             pass
 
-    def run(self):
+    def _run(self):
         cap = None
         try:
             import cv2
@@ -1601,8 +1615,12 @@ class _VideoBgReader(QThread):
                 h, w = rgb.shape[:2]
                 img = QImage(rgb.data, w, h, 3 * w, QImage.Format_RGB888).copy()
                 if self._running:
-                    self.frame_ready.emit(img)
-                self.msleep(int(period * 1000))
+                    try:
+                        self._emit(img)
+                    except RuntimeError:
+                        # 宿主窗口已经被销毁（PyQt 会抛 wrapped C/C++ object deleted）
+                        return
+                time.sleep(period)           # 普通线程没有 msleep，用 time.sleep
         except Exception as e:
             print(f"[NewUI] ⚠ 视频解码线程异常: {type(e).__name__}: {e}")
         finally:
