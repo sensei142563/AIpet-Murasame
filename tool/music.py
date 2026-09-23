@@ -230,6 +230,81 @@ def _foreground():
         return 0
 
 
+# ───── 最小化的窗口 UIA 读不到任何控件 → 临时还原、干完放回（不抢焦点）─────
+# 实测（本机网易云 Store 版）：窗口最小化时 UIA 树里只剩窗口自己一个元素，
+# 搜索框、播放按钮全读不到 → 日志里的「UIA：没找到搜索框」就是这么来的，
+# 也就是说**网易云最小化时点歌必然失败**。所以动手前先悄悄还原它。
+_restore_min = set()          # 我们临时还原过的窗口（干完要放回最小化）
+
+_SWP_NOSIZE = 0x0001
+_SWP_NOMOVE = 0x0002
+_SWP_NOACTIVATE = 0x0010
+_HWND_BOTTOM = 1
+
+
+def window_minimized(hwnd) -> bool:
+    try:
+        return bool(_u32().IsIconic(int(hwnd)))
+    except Exception:
+        return False
+
+
+def _uia_children(hwnd) -> int:
+    """窗口 UIA 树里的元素数（最小化时是 1，正常时几百）"""
+    try:
+        from tool import uia as _u
+        root = _u.root_for(hwnd)
+        if root is None:
+            return 0
+        return _u.children_count(root, max_depth=3, limit=30)
+    except Exception:
+        return 0
+
+
+def ensure_uia(hwnd) -> bool:
+    """确保 UIA 能读到窗口里的控件（返回是否可用）。
+
+    为什么需要：网易云最小化时读不到任何子控件，点歌/暂停/切歌全都会静默失败。
+    做法：SW_SHOWNOACTIVATE 还原 + 压到 Z 序最底 —— **不激活、不置顶、不抢焦点**
+    （你打字不会被打断），干完由 unensure_uia() 放回最小化，桌面恢复原样。
+    """
+    if not hwnd:
+        return False
+    if _uia_children(hwnd) > 1:
+        return True                      # 本来就读得到（窗口没最小化）
+    if not window_minimized(hwnd):
+        return False                     # 不是最小化还读不到 → 真没法
+    try:
+        u = _u32()
+        u.ShowWindow(int(hwnd), 4)       # SW_SHOWNOACTIVATE：还原但不激活
+        # 压到最底层：别挡着主人正在看的窗口（已实测这样 UIA 照样能操作）
+        u.SetWindowPos(int(hwnd), _HWND_BOTTOM, 0, 0, 0, 0,
+                       _SWP_NOSIZE | _SWP_NOMOVE | _SWP_NOACTIVATE)
+        _restore_min.add(int(hwnd))
+        for _ in range(6):               # 等 UIA 树重建（通常半秒内就好）
+            time.sleep(0.25)
+            if _uia_children(hwnd) > 1:
+                _log("网易云是最小化的 → 临时还原（没抢焦点、压在最后）才能后台操作")
+                return True
+        _log("⚠ 还原了网易云却还是读不到控件")
+        return False
+    except Exception as e:
+        _log(f"⚠ 还原最小化窗口失败: {type(e).__name__}: {e}")
+        return False
+
+
+def unensure_uia(hwnd):
+    """把临时还原过的窗口放回最小化（保持主人原来的桌面）"""
+    try:
+        h = int(hwnd or 0)
+        if h and h in _restore_min:
+            _restore_min.discard(h)
+            _u32().ShowWindow(h, 6)      # SW_MINIMIZE
+            _log("已把网易云放回最小化（保持你原来的样子）")
+    except Exception:
+        pass
+
+
 def _keys(*seq):
     """发组合键/单键（退路用）"""
     from pynput.keyboard import Controller as _K, Key
@@ -402,22 +477,27 @@ def progress_value(hwnd) -> float:
     return -1.0
 
 
-def is_playing(hwnd) -> bool:
-    """在不在播放 —— 看播放条上那个按钮叫 play（暂停中）还是 pause（在放）。
+def is_playing(hwnd):
+    """在不在播放：True（在放）/ False（暂停着）/ **None（读不到，不知道）**。
 
-    实测：这个按钮的 name 会随状态变（暂停时是 play、播放时是 pause），
+    实测：播放条上那个按钮的 name 会随状态变（暂停时是 play、播放时是 pause），
     比读进度滑块可靠得多（那个元素经常读不到或已经失效）。
+    ★ 关键：网易云**最小化**时整个 UIA 树是空的 → 这时绝不能断言"没在放"
+    （否则她会以为没歌、又去点一首）。读不到就返回 None，让调用方别乱猜。
     """
-    for _el, nm, _r in _walk_buttons(hwnd):
+    btns = _walk_buttons(hwnd)
+    for _el, nm, _r in btns:
         n = nm.lower()
         if n == "pause":
             return True
         if n == "play":
             return False
-    # 读不到按钮就退回进度判断
+    if not btns:
+        return None                      # 一个控件都读不到 → 最小化/没开/还在加载
+    # 有控件但没找到播放按钮 → 退回进度判断
     a = progress_value(hwnd)
     if a < 0:
-        return False
+        return None
     time.sleep(1.2)
     b = progress_value(hwnd)
     return b > a and b >= 0
@@ -514,7 +594,7 @@ def play_play_all(hwnd) -> bool:
 # ─────────────────────── 后台点歌 ───────────────────────
 
 def _uia_play(name: str, artist: str) -> str:
-    """后台点歌（UIA）：'ok' 成功 / 'fail' 没成 / '' 不可用"""
+    """后台点歌（UIA）：'ok' 成功 / 'other:<歌名>' 点上了但不是这首 / 'fail' 没成 / '' 不可用"""
     try:
         U = _uia()
         if not U.available():
@@ -525,44 +605,82 @@ def _uia_play(name: str, artist: str) -> str:
         root = U.root_for(hwnd)
         if root is None:
             return ""
+        _before = window_title(hwnd)
         box = U.top_bar_edit(root, hwnd)
         if box is None:
             _log("UIA：没找到搜索框")
             return "fail"
         if not U.set_value(box, f"{name} {artist}".strip()):
+            _log("UIA：写不进搜索框")
             return "fail"
         _log("UIA：已把歌名写进搜索框（窗口没切到前台）")
         btn = U.find(root, control_type=U.CT_BUTTON, contains="search")
         if btn is not None:
             U.invoke(btn)
             _log("UIA：已提交搜索")
-        time.sleep(1.4)
-        root2 = U.root_for(hwnd)
+        else:
+            _log("UIA：没找到 search 按钮（不按了，免得放出旧结果）")
+            return "fail"
+        # ── ① 先确认"结果页真的出了这首歌" ──
+        #    为什么：搜索没生效时页面还停着上一次的结果，直接点第一个「播放」
+        #    就会放出一首你没点的歌（2026-09-23 实测踩到：想放《夜空中最亮的星》，
+        #    结果放了《起风了》）。所以宁可不点，也不放错。
+        got = False
         cands = []
-        for el, nm, ct, aid in U.walk(root2):
-            if ct == U.CT_BUTTON and "播放" in nm and "全部" not in nm:
-                r = U.rect_of(el)
-                if r:
-                    cands.append((r[1], el, nm, r))
+        for _try in range(14):
+            time.sleep(0.5)
+            cands = []
+            for el, nm, ct, aid in U.walk(U.root_for(hwnd)):
+                s = str(nm)
+                if ct == U.CT_BUTTON and "播放" in s and "全部" not in s:
+                    r = U.rect_of(el)
+                    if r:
+                        cands.append((r[1], el, s, r))
+                elif _name_hit(s, name):
+                    got = True
+            if got and cands:
+                if _try:
+                    _log(f"UIA：等了 {(_try + 1) * 0.5:.1f} 秒，结果页出来了")
+                break
         if not cands:
             _log("UIA：结果页没找到「播放」按钮")
+            return "fail"
+        if not got:
+            _log(f"UIA：结果页没出现「{name}」→ 不点播放（否则会放出旧结果里的歌）")
             return "fail"
         cands.sort(key=lambda x: x[0])
         _log(f"UIA：按第一条结果的按钮「{cands[0][2][:20]}」{cands[0][3]}")
         if not U.invoke(cands[0][1]):
             return "fail"
         time.sleep(1.5)
-        if _title_hit(window_title(hwnd), name) or is_playing(hwnd):
+        if _title_hit(window_title(hwnd), name):
             return "ok"
         for _r, _el, _nm, _rc in cands[1:4]:
             U.invoke(_el)
             time.sleep(1.3)
             if _title_hit(window_title(hwnd), name):
                 return "ok"
+        # ② 歌换了但不是要的那首 → 如实说，不冒充成功
+        _now = window_title(hwnd)
+        if _now and _now != _before:
+            _log(f"⚠ 点上了，但放的不是《{name}》，而是《{_now}》")
+            return "other:" + str(_now)
         return "fail"
     except Exception as e:
         _log(f"UIA 点歌出错: {type(e).__name__}: {e}")
         return ""
+
+
+def _name_hit(text: str, name: str) -> bool:
+    """结果页里出现这首歌了吗（歌名或其前 4 个字命中；排除界面本身的"搜索"字样）"""
+    s = str(text or "")
+    n = str(name or "").strip()
+    if not s or not n:
+        return False
+    if n in s:
+        return True
+    key = n[:4]
+    return len(key) >= 3 and key in s
 
 
 def _title_hit(title: str, name: str) -> bool:
@@ -597,6 +715,7 @@ def play_song(query: str) -> str:
     except Exception:
         pass
     _busy[0] = True
+    _hwnd0 = 0
     try:
         hits = search(q, limit=5)
         if not hits:
@@ -611,7 +730,12 @@ def play_song(query: str) -> str:
             hwnd = find_window()
         if not hwnd:
             return "我没找到网易云的窗口。"
+        _hwnd0 = hwnd
         _prev_fg = _foreground()
+        # 最小化时 UIA 读不到控件 → 先悄悄还原（不抢焦点），点完再放回去
+        if not ensure_uia(hwnd):
+            return (f"我搜到了《{name}》{artist}，但网易云这会儿读不到界面"
+                    f"（大概刚最小化/正在加载）——你把它点开一下，我再给你放。")
         _u = _uia_play(name, artist)
         if _u == "ok":
             _log(f"✅ 播放成功（后台 UIA）：{window_title(hwnd)}")
@@ -621,6 +745,15 @@ def play_song(query: str) -> str:
             except Exception:
                 pass
             return f"给你放上了：《{name}》{artist}。"
+        if str(_u).startswith("other:"):
+            _wrong = str(_u).split(":", 1)[1]
+            try:
+                if _prev_fg and _prev_fg != int(hwnd):
+                    _restore_foreground(_prev_fg)
+            except Exception:
+                pass
+            return (f"我点上了，但放出来的是《{_wrong}》，不是你要的《{name}》——"
+                    f"可能网易云那边的搜索结果不太对，你手动挑一下，或者换个写法喊我。")
         if not uia_ready():
             return media("play_pause") or f"我搜到了《{name}》{artist}，但没法后台播放。"
         return (f"我搜到了《{name}》{artist}，但没能替你按上播放。"
@@ -628,17 +761,22 @@ def play_song(query: str) -> str:
                 f"或者等主人再喊你一次。")
     finally:
         _busy[0] = False
+        unensure_uia(_hwnd0 or find_window())
 
 
 # ─────────────────────── 状态与统一入口 ───────────────────────
 
 def status_text() -> str:
-    """现在放的是什么、在不在放、循环方式"""
+    """现在放的是什么、在不在放、循环方式（读不到就如实说读不到，不瞎猜）"""
     hwnd = find_window()
     if not hwnd:
         return "网易云没开着。"
     t = window_title(hwnd) or "（不知道）"
-    state = "在放" if is_playing(hwnd) else "没在放（或已暂停）"
+    pl = is_playing(hwnd)
+    if pl is None:
+        _log("读不到播放状态（网易云最小化着？）→ 只报歌名")
+        return f"现在放的是《{t}》（最小化着我读不到在不在放）"
+    state = "在放" if pl else "没在放（或已暂停）"
     mode = current_loop_mode(hwnd)
     return f"现在{state}：《{t}》" + (f"，循环方式{_LOOP_MODES.get(mode, mode)}" if mode else "")
 
@@ -650,6 +788,7 @@ def run(text: str) -> str:
         return ""
     kind, arg = acts[0]
     _fg_before = _foreground()
+    _hwnd_before = find_window()
     try:
         _r = _run_locked(kind, arg)
     except Exception as e:
@@ -662,6 +801,8 @@ def run(text: str) -> str:
             _restore_foreground(_fg_before)
     except Exception:
         pass
+    # ★ 为了操作而临时还原的最小化窗口 → 放回最小化（保持主人原来的桌面）
+    unensure_uia(_hwnd_before or find_window())
     return _r
 
 
@@ -718,17 +859,31 @@ def _run_locked(kind: str, arg: str) -> str:
             if kind in mp:
                 return media(mp[kind])
             return "这台机器上后台控制不可用（没装 comtypes），我只能用系统媒体键。"
+        # 最小化时 UIA 读不到控件 → 先悄悄还原（不抢焦点），run() 结束时放回去
+        if not ensure_uia(hwnd):
+            return "网易云这会儿读不到界面（最小化着或者刚在加载），你先点开它一下。"
         # ── 播放控制（全部后台，不切窗口）──
         if kind in ("pause", "resume", "play_pause"):
             cur_playing = is_playing(hwnd)
-            if kind == "pause" and not cur_playing:
+            if kind == "pause" and cur_playing is False:
                 return "现在就是暂停着的。"
-            if kind == "resume" and cur_playing:
+            if kind == "resume" and cur_playing is True:
                 return "本来就在放着呢。"
-            _invoke_player(hwnd, ["play"])
+            # ★ 那个按钮是**切换键**：在放的时候它叫 pause、暂停时叫 play。
+            #   以前只找 "play" → 正在播放时找不到按钮，暂停就静默失败了
+            #   （还会谎报"给你接着放了"）。这里两个名字都认。
+            if not _invoke_player(hwnd, ["play", "pause"]):
+                _log("⚠ 没找到播放/暂停按钮")
+                return "我没找到播放条上那个按钮——你手动按一下吧。"
             time.sleep(1.0)
             now_playing = is_playing(hwnd)
-            return "给你暂停了。" if not now_playing else "给你接着放了。"
+            if now_playing is None:
+                return "我按了一下播放条，但读不到状态——你听一下有没有响。"
+            if kind == "pause":
+                return "给你暂停了。" if now_playing is False else "按了暂停，但好像还在放——你再喊我一次。"
+            if kind == "resume":
+                return "给你接着放了。" if now_playing is True else "按了播放，但好像没响——你再喊我一次。"
+            return "给你暂停了。" if now_playing is False else "给你接着放了。"
         if kind == "next":
             _invoke_player(hwnd, ["next"])
             time.sleep(1.3)

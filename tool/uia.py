@@ -166,18 +166,47 @@ def invoke(el) -> bool:
         return False
 
 
-def top_bar_edit(root, hwnd):
-    """找顶部工具条里的那个输入框（搜索框）：所有 Edit 里最靠上的那个"""
+def children_count(root, max_depth: int = 3, limit: int = 30) -> int:
+    """数一下树里有多少元素（用来判断"这棵树是不是空的"）。
+
+    实测：网易云**窗口最小化**时，UIA 树里只剩窗口自己一个元素（子控件全没了）
+    → 一看就知道是"读不到"而不是"没有搜索框"，调用方可据此先还原窗口。
+    """
+    n = 0
+    for _ in walk(root, max_depth=max_depth, limit=limit):
+        n += 1
+    return n
+
+
+def top_bar_edit(root, hwnd=None):
+    """找顶部工具条里的那个输入框（搜索框）。
+
+    ★ 实测教训（2026-09-23）：**不能按名字认**。这台机器上网易云有两个 Edit：
+        name='苦茶子 - Starling8'  rect=(703,116,915,146)   ← 顶部搜索框（内容就是歌名）
+        name='搜索'                rect=(1463,378,1503,408) ← 别处的框（名字反倒像"搜索"）
+      按名字挑会挑错 → 搜错 → 放了别的歌。所以**认位置**：最靠上的那个就是顶栏。
+
+    有 Edit 但一个位置都读不到时，才退回"名字/标识带 search/搜索"的那个。
+    注意：窗口最小化时一个 Edit 都读不到（UIA 树是空的）——那不是这里的锅，
+    调用方应先把窗口还原（见 tool/music.py 的 ensure_uia）。
+    """
     cands = []
-    for el, nm, ct, aid in walk(root):
-        if ct == CT_EDIT:
-            r = rect_of(el)
-            if r:
-                cands.append((r[1], el, nm, r))
-    if not cands:
-        return None
-    cands.sort(key=lambda x: x[0])
-    return cands[0][1]
+    hint = None
+    for idx, (el, nm, ct, aid) in enumerate(walk(root, limit=2000)):
+        if ct != CT_EDIT:
+            continue
+        blob = f"{nm} {aid}".lower()
+        if hint is None and ("search" in blob or "搜索" in blob):
+            hint = el
+        r = rect_of(el)
+        cands.append((r[1] if r else None, idx, el))
+    heightable = [c for c in cands if c[0] is not None]
+    if heightable:
+        heightable.sort(key=lambda x: (x[0], x[1]))
+        return heightable[0][2]          # 顶栏 = 最靠上的输入框
+    if hint is not None:
+        return hint
+    return cands[0][2] if cands else None
 
 
 if __name__ == "__main__":

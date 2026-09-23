@@ -1588,18 +1588,12 @@ class Murasame(QLabel):
             print(f"[桌宠] ⚠ 切换活跃度失败: {e}")
 
     def _show_learned(self):
-        """菜单：看看她学到了什么（单独一个窗口，不占对话框）"""
+        """菜单：看看她的状态 / 记忆 / 提醒（剧情模式风格的独立窗口，不占对话框）"""
         try:
-            from classes.learn_window import LearnWindow
-            w = getattr(self, "_learn_window", None)
-            if w is None:
-                w = LearnWindow(self, on_study=lambda: self._study_now(silent=True))
-                self._learn_window = w
-            else:
-                w.refresh()
-            w.showNormal()
-            w.raise_()
-            w.activateWindow()
+            from classes.status_window import show_status_window
+            # parent 传 None：这扇窗是独立的（不跟着桌宠窗口一起最小化/置顶，
+            # 任务栏里有自己的条目）；模块里持有单例，不会被回收。
+            show_status_window(None, on_study=lambda: self._study_now(silent=True))
             try:
                 from tool import self_learn as _sl
                 print(f"[学习] 记忆窗口已打开（{_sl._store_path()}）")
@@ -1745,9 +1739,9 @@ class Murasame(QLabel):
     def _do_refresh_learn_window(self):
         """主线程里真正刷新窗口（由 _learn_refresh 信号触发）"""
         try:
-            w = getattr(self, "_learn_window", None)
-            if w is not None and w.isVisible():
-                w.refresh()
+            from classes.status_window import _window as _sw
+            if _sw is not None and _sw.isVisible():
+                _sw.refresh()
         except Exception:
             pass
 

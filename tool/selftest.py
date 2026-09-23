@@ -33,7 +33,7 @@ def check_modules(results):
             "tool.state", "tool.attention", "tool.experience", "tool.autonomy",
             "tool.reminder", "tool.care", "tool.desire",
             "tool.web_search", "tool.plugins", "tool.game", "classes.Worker_class", "classes.murasame_class",
-            "classes.learn_window", "main")
+            "classes.learn_window", "classes.status_window", "main")
     bad = []
     for m in mods:
         try:
@@ -99,6 +99,18 @@ def check_wiring(results):
         ("通知接线（关怀）", 'self._notify("她说"' in src_m),
         ("托盘交给桌宠", "pet._tray" in inspect.getsource(MAIN)),
         ("摄像头疲劳关怀", "是不是没睡好" in inspect.getsource(MAIN)),
+        ("状态窗换剧情模式风格", "show_status_window" in src_m
+         and "剧情模式" in inspect.getsource(__import__("classes.status_window", fromlist=["x"]))),
+        ("状态窗数据卡（6 张）", "她能自己做到哪一步" in inspect.getsource(
+            __import__("classes.status_window", fromlist=["x"]))),
+        ("音乐：最小化时临时还原", "def ensure_uia" in inspect.getsource(
+            __import__("tool.music", fromlist=["x"]))),
+        ("音乐：搜索框认位置不认名字", "不能按名字认" in inspect.getsource(
+            __import__("tool.uia", fromlist=["x"]).top_bar_edit)),
+        ("音乐：先确认结果页再点播放", "_name_hit" in inspect.getsource(
+            __import__("tool.music", fromlist=["x"])._uia_play)),
+        ("音乐：暂停认两个按钮名", '["play", "pause"]' in inspect.getsource(
+            __import__("tool.music", fromlist=["x"])._run_locked)),
     ]
     missing = [n for n, ok in checks if not ok]
     results.append(("关键接线（%d 处）" % len(checks), not missing,
