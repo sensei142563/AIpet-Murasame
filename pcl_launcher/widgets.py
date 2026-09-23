@@ -106,8 +106,8 @@ class PCLSettingsPanel(QWidget):
         # ===== ① 基础信息与密钥 =====
         self._section("基础信息与密钥", "🔑")
         self._add_text_input("user_name", "使用者名称", "")
-        self._add_text_input("deepseek_api_key", "DeepSeek API Key", "", placeholder="sk-...")
-        self._add_text_input("qwen_api_key", "Qwen API Key", "", placeholder="sk-...")
+        self._add_text_input("deepseek_api_key", "DeepSeek API Key", "", placeholder="sk-...", secure=True)
+        self._add_text_input("qwen_api_key", "Qwen API Key", "", placeholder="sk-...", secure=True)
 
         # ===== ② 对话模型与推理 =====
         self._section("对话模型与推理", "🤖")
@@ -490,7 +490,39 @@ class PCLSettingsPanel(QWidget):
                 background: rgba(255,255,255,190); font-family: 'Microsoft YaHei'; }}
             QLineEdit:focus {{ border: 1px solid {Color3.name()}; }}
         """)
-        self._cur_layout.addWidget(inp)
+        if not secure:
+            self._cur_layout.addWidget(inp)
+        else:
+            # 密钥默认打码：截图 / 录屏 / 旁边有人时不会把 key 整串摊在界面上。
+            # 需要核对自己填了什么时点「显示」临时明文，再点一次回到打码。
+            row = QHBoxLayout()
+            row.setSpacing(int(6 * S))
+            row.addWidget(inp, 1)
+            eye = QPushButton("显示")
+            eye.setCheckable(True)
+            eye.setCursor(Qt.PointingHandCursor)
+            eye.setFixedWidth(int(76 * S))
+            eye.setToolTip("临时显示明文（再点一次恢复打码）")
+            eye.setStyleSheet(f"""
+                QPushButton {{ background: rgba(255,255,255,170); color: {Gray1.name()};
+                    border: 1px solid {Gray5.name()}; padding: {int(6*S)}px 0;
+                    font-size: {int(12*S)}px; border-radius: {int(4*S)}px;
+                    font-family: 'Microsoft YaHei'; }}
+                QPushButton:hover {{ background: rgba(255,255,255,235); }}
+                QPushButton:checked {{ background: {Color3.name()}; color: white;
+                    border-color: {Color3.name()}; }}
+            """)
+
+            def _toggle_echo(on, _w=inp, _b=eye):
+                _w.setEchoMode(QLineEdit.Normal if on else QLineEdit.Password)
+                _b.setText("隐藏" if on else "显示")
+
+            eye.toggled.connect(_toggle_echo)
+            if not hasattr(self, "_eye_btns"):
+                self._eye_btns = {}
+            self._eye_btns[key] = eye
+            row.addWidget(eye)
+            self._cur_layout.addLayout(row)
         self._widgets[key] = inp
 
     def _block_wheel(self, obj):
