@@ -25,6 +25,7 @@
 """
 import json
 import os
+import re
 import threading
 import time
 
@@ -521,23 +522,144 @@ def _look() -> str:
         return f"（看画面失败：{type(e).__name__}）"
 
 
+def _norm_txt(s: str) -> str:
+    """归一化标题/名字（大小写、空格、常见符号、**零宽字符**都不算差异）。
+
+    ⚠ 实测踩到：窗口标题里常夹零宽空格（"Microsoft\\u200b Edge"）→ 不去掉就匹配不上。
+    """
+    t = str(s or "")
+    t = re.sub(r"[\u200b-\u200f\ufeff\u00ad]", "", t)      # 零宽/软连字符
+    return re.sub(r"[\s\-_·、,，.。:：|/()（）\[\]【】]+", "", t).lower()
+
+
+# 这些窗口不是"游戏"（系统/输入法/我们自己的桌宠）
+_NOT_GAME = ("program manager", "windows 输入体验", "microsoft text input", "default ime",
+             "candidate", "snippingtool", "aipet", "丛雨桌宠", "启动器", "任务管理器",
+             "rainmeter", "壁纸引擎", "nexus", "nxdock", "twinkle", "截图工具",
+             "zcode", "资源管理器", "文件资源管理器")
+
+
+def _visible_windows(limit: int = 60):
+    """当前可见的窗口 [(hwnd, 标题)]（过滤掉系统窗口和我们自己的桌宠窗口）"""
+    out = []
+    try:
+        import ctypes
+        from ctypes import wintypes as _wt
+
+        def _cb(hwnd, _):
+            try:
+                u = ctypes.windll.user32
+                if not u.IsWindowVisible(hwnd):
+                    return True
+                ln = u.GetWindowTextLengthW(hwnd)
+                if ln <= 0:
+                    return True
+                buf = ctypes.create_unicode_buffer(ln + 2)
+                u.GetWindowTextW(hwnd, buf, ln + 2)
+                t = (buf.value or "").strip()
+                if not t:
+                    return True
+                low = t.lower()
+                if any(n in low for n in _NOT_GAME):
+                    return True
+                cls = ctypes.create_unicode_buffer(128)      # Qt 画的窗口=我们桌宠自己
+                u.GetClassNameW(hwnd, cls, 128)
+                if str(cls.value or "").startswith("Qt"):
+                    return True
+                out.append((int(hwnd), t))
+            except Exception:
+                pass
+            return True
+
+        CB = ctypes.WINFUNCTYPE(ctypes.c_bool, _wt.HWND, _wt.LPARAM)
+        ctypes.windll.user32.EnumWindows(CB(_cb), 0)
+    except Exception:
+        pass
+    return out[:limit]
+
+
+def _foreground_window():
+    """前台窗口 (hwnd, 标题)；是系统窗口/桌宠自己就返回 (0, '')"""
+    try:
+        import ctypes
+        u = ctypes.windll.user32
+        h = int(u.GetForegroundWindow() or 0)
+        if not h:
+            return 0, ""
+        ln = u.GetWindowTextLengthW(h)
+        if ln <= 0:
+            return 0, ""
+        buf = ctypes.create_unicode_buffer(ln + 2)
+        u.GetWindowTextW(h, buf, ln + 2)
+        t = (buf.value or "").strip()
+        if not t or any(n in t.lower() for n in _NOT_GAME):
+            return 0, ""
+        cls = ctypes.create_unicode_buffer(128)
+        u.GetClassNameW(h, cls, 128)
+        if str(cls.value or "").startswith("Qt"):
+            return 0, ""
+        return h, t
+    except Exception:
+        return 0, ""
+
+
+def find_game_window(name: str = ""):
+    """找"要玩的游戏"的窗口 → (hwnd, 标题)；找不到返回 (0, '')。
+
+    为什么要有这一步（2026-09-24 用户反馈）：她说"开始玩了"，可**游戏根本没打开** ——
+    对着桌面一轮轮乱点、还一直说在游玩。现在开始前先确认窗口：
+      ① 按名字在可见窗口里模糊匹配（"ATRI" 能对上 "ATRI -My Dear Moments-"）；
+      ② 名字对不上就用**前台窗口**（主人说"玩这个游戏"时指的是眼前这个）；
+      ③ 都不行 → 返回空，调用方老实说"没找到游戏窗口"，**不进入"在玩"状态**。
+    """
+    wins = _visible_windows()
+    key = _norm_txt(name)
+    if key:
+        for hwnd, t in wins:
+            nt = _norm_txt(t)
+            if nt and (key in nt or nt in key):
+                return hwnd, t
+    fg_h, fg_t = _foreground_window()
+    if fg_h:
+        return fg_h, fg_t
+    return 0, ""
+
+
+def _window_alive(hwnd) -> bool:
+    """这个窗口还开着吗（游戏被关掉了就该停手）"""
+    try:
+        if not hwnd:
+            return True          # 没记窗口 → 不因为这事停
+        import ctypes
+        u = ctypes.windll.user32
+        return bool(u.IsWindow(int(hwnd))) and bool(u.IsWindowVisible(int(hwnd)))
+    except Exception:
+        return True
+
+
 def start(name: str, goal: str = "", controls: str = "", minutes: int = None,
           pet_name: str = "我") -> str:
-    """开始看着画面玩"""
+    """开始看着画面玩（**先确认游戏真的开着**）"""
     if not enabled():
         return "主人没让我玩游戏（菜单里可以打开「允许她玩游戏」）。"
     if not name:
         return "要玩哪个游戏呀？"
+    hwnd, title = find_game_window(name)
+    if not hwnd:
+        _log(f"没找到「{name}」的窗口，而且前台也不是游戏 → 不开玩")
+        return f"我没找到「{name}」的窗口——你先把它打开、让它在最前面，我再上手。"
     with _lock:
         if _state["running"]:
             return "我手上还玩着别的呢，等一下。"
         _state.update({"running": True, "stop": False, "name": str(name)[:24],
                        "goal": str(goal or "")[:120], "controls": str(controls or "")[:200],
-                       "round": 0, "started": time.time(), "log": [], "reason": ""})
+                       "round": 0, "started": time.time(), "log": [], "reason": "",
+                       "hwnd": int(hwnd), "title": str(title)[:60]})
     mins = float(minutes or DEFAULT_MINUTES)
     _start_hotkey()
     threading.Thread(target=_loop, args=(mins, pet_name), daemon=True).start()
-    return (f"好，我来玩「{name}」——我大概十几秒动一次手，"
+    _log(f"开始玩「{name}」→ 窗口《{title[:40]}》(hwnd={hwnd})")
+    return (f"好，我来玩「{name}」（窗口是《{title[:30]}》）——我大概十几秒动一次手，"
             f"打不过或者你觉得烦就按 F12，或者直接跟我说「停」。")
 
 
@@ -572,6 +694,14 @@ def _loop(minutes: float, pet_name: str):
                 break
             if time.time() - float(_state["started"]) > minutes * 60:
                 reason = "这局玩得有点久了，我先歇会儿，你想让我接着玩就说一声。"
+                break
+            # ★ 游戏被关掉了？（用户要求："如果游戏关掉了应该做出对应的回复"）
+            #   以前不管游戏在不在都一轮轮"玩"下去，还一直说在游玩 —— 现在当场停手如实说。
+            if not _window_alive(_state.get("hwnd")):
+                _log("游戏窗口不见了 → 停止并如实说")
+                reason = (f"《{str(_state.get('title') or _state.get('name'))[:24]}》"
+                          f"好像关掉了，我就不玩了。想再玩就把它打开喊我。")
+                ok = False
                 break
             _state["round"] = rnd
             _say_status(f"正在玩 {name}……第 {rnd} 轮")

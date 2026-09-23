@@ -175,6 +175,12 @@ def check_wiring(results):
          and "_ensure_local_vision()" in inspect.getsource(C.describe_image)),
         ("看游戏画面时忽略桌宠自己", "那是**你自己**，请忽略它" in inspect.getsource(
             __import__("tool.game", fromlist=["x"])._look)),
+        ("游戏：开始前确认窗口真的开着", "def find_game_window" in inspect.getsource(
+            __import__("tool.game", fromlist=["x"]))
+         and "find_game_window(name)" in inspect.getsource(
+            __import__("tool.game", fromlist=["x"]).start)),
+        ("游戏：关掉了就停手并如实说", "_window_alive(_state.get" in inspect.getsource(
+            __import__("tool.game", fromlist=["x"])._loop)),
         ("视觉小说：直接开始、别问主人", "视觉小说 / 文字冒险" in inspect.getsource(
             __import__("tool.game", fromlist=["x"])._planner_system)
          and "视觉小说 / 文字冒险" in inspect.getsource(
