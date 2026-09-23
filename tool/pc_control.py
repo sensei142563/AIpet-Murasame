@@ -722,6 +722,28 @@ def execute(actions: list, dry_run: bool = False, auto: bool = False, notify=Non
     _acts = list(actions)
     if SAFETY_MAX and len(_acts) > SAFETY_MAX:
         _acts = _acts[:SAFETY_MAX]
+    # ── 自主行动分档：打字/按键这类只在主人开口时做（见 tool/autonomy.py）──
+    if not dry_run and auto:
+        try:
+            from tool import autonomy as _au
+            _kept = []
+            for _a in _acts:
+                _ok, _why = _au.allowed(_a, True)
+                if _ok:
+                    _kept.append(_a)
+                else:
+                    _log_line(f"🛡 自主模式下拦下这个动作（{_a.get('type')}）：{_why}")
+                    if notify:
+                        try:
+                            notify(_why)
+                        except Exception:
+                            pass
+            if len(_kept) != len(_acts):
+                _acts = _kept
+                if not _acts:
+                    return []
+        except Exception as _ea:
+            _log_line(f"⚠ 分档检查失败（照常执行）: {_ea}")
     for a in _acts:
         t = a.get("type")
         # ── 立刻停手：主人喊停 / 任务中止 ──

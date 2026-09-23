@@ -89,15 +89,34 @@ def _store_path() -> str:
 
 
 def _load() -> dict:
+    """读记忆库。
+
+    四层结构（参考 AgentPet / Miru 的做法）：
+      working   正在做的事（最近一次任务与结果）
+      episodic  情节记忆：发生过的具体事件（带时间）
+      semantic  语义记忆：从经历里提炼出来的事实与偏好（就是原来的 notes）
+      sensory   感官：当前屏幕/会话里的即时信息 —— 放在对话历史里，不落盘（会过期）
+    """
     p = _store_path()
+    base = {"notes": [], "diary": {}, "topic_ideas": [],
+            "episodes": [], "working": {}, "profile": {}}
     try:
         with open(p, "r", encoding="utf-8") as f:
             d = json.load(f)
-        if isinstance(d, dict) and isinstance(d.get("notes"), list):
-            return d
+        if isinstance(d, dict):
+            base.update(d)
+            if not isinstance(base.get("notes"), list):
+                base["notes"] = []
+            if not isinstance(base.get("episodes"), list):
+                base["episodes"] = []
+            if not isinstance(base.get("working"), dict):
+                base["working"] = {}
+            if not isinstance(base.get("profile"), dict):
+                base["profile"] = {}
+            return base
     except Exception:
         pass
-    return {"notes": [], "diary": {}, "topic_ideas": []}
+    return base
 
 
 def _save(d: dict):
@@ -132,6 +151,74 @@ def add_note(kind: str, text: str, topic: str = "") -> bool:
     return True
 
 
+def add_episode(text: str, kind: str = "event") -> bool:
+    """记一条情节记忆（发生过的事：任务、成败、互动），只留最近 200 条 / 30 天"""
+    text = str(text or "").strip()
+    if not text:
+        return False
+    try:
+        d = _load()
+        eps = list(d.get("episodes") or [])
+        eps.append({"ts": time.time(), "kind": kind, "text": text[:200]})
+        cut = time.time() - 30 * 86400
+        eps = [e for e in eps if float(e.get("ts") or 0) >= cut][-200:]
+        d["episodes"] = eps
+        _save(d)
+        return True
+    except Exception as e:
+        _log(f"⚠ 记情节失败: {e}")
+        return False
+
+
+def episodes(n: int = 5) -> list:
+    try:
+        eps = list(_load().get("episodes") or [])
+        eps.sort(key=lambda x: float(x.get("ts") or 0))
+        return eps[-max(1, int(n)):]
+    except Exception:
+        return []
+
+
+def set_working(task: str, ok: bool = True, note: str = ""):
+    """记"刚才在做什么、成没成"（工作记忆层）"""
+    try:
+        d = _load()
+        d["working"] = {"ts": time.time(), "task": str(task)[:120],
+                        "ok": bool(ok), "note": str(note)[:120]}
+        _save(d)
+    except Exception:
+        pass
+
+
+def working() -> dict:
+    try:
+        return dict(_load().get("working") or {})
+    except Exception:
+        return {}
+
+
+def set_profile(key: str, value: str):
+    """记一条关于主人的画像（语义层，键值式，稳定不易变）"""
+    try:
+        d = _load()
+        prof = dict(d.get("profile") or {})
+        prof[str(key)[:20]] = str(value)[:80]
+        d["profile"] = prof
+        _save(d)
+    except Exception:
+        pass
+
+
+def profile_text() -> str:
+    try:
+        prof = _load().get("profile") or {}
+        if not prof:
+            return ""
+        return "；".join(f"{k}：{v}" for k, v in list(prof.items())[:8])
+    except Exception:
+        return ""
+
+
 def notes(kind: str = "") -> list:
     ns = _load().get("notes") or []
     return [n for n in ns if (not kind or n.get("kind") == kind)]
@@ -158,8 +245,33 @@ def _set_diary(day: str, text: str):
 def summary_text(limit: int = 10) -> str:
     """给人看的一页摘要（菜单里点「看看她学到了什么」时用）"""
     d = _load()
+    head = []
+    try:
+        from tool import state as _st
+        head.append("【她现在】" + _st.summary())
+    except Exception:
+        pass
+    w = working()
+    try:
+        if w:
+            head.append("【手上的事】" + str(w.get("task"))[:60]
+                        + ("（做成了）" if w.get("ok") else "（没做成）"))
+    except Exception:
+        pass
+    prof = profile_text()
+    if prof:
+        head.append("【对主人的印象】" + prof)
+    eps = episodes(5)
+    if eps:
+        head.append("【最近发生的事】")
+        for e in eps:
+            try:
+                ts = time.strftime("%m-%d %H:%M", time.localtime(float(e.get("ts") or 0)))
+            except Exception:
+                ts = ""
+            head.append("· " + ts + " " + str(e.get("text"))[:100])
     ns = (d.get("notes") or [])[-limit:]
-    lines = ["她的长期记忆（最近 %d 条）：" % len(ns)]
+    lines = head + ["", "她的长期记忆（最近 %d 条）：" % len(ns)]
     for n in ns:
         tag = {"fact": "关于主人", "knowledge": "学到", "diary": "心情"}.get(n.get("kind"), "记")
         lines.append("· [%s] %s" % (tag, str(n.get("text"))[:120]))
@@ -174,35 +286,69 @@ def summary_text(limit: int = 10) -> str:
 # ─────────────────────── 给聊天用的记忆注入 ───────────────────────
 
 def memory_note(user_text: str = "", limit: int = 6) -> str:
-    """拼一段"你记住的事"交给模型（和主人这句话相关的优先）"""
+    """拼一段"你记住的事"交给模型（按相关度挑，分四层组织）
+
+    分层给：语义（稳定事实/画像）→ 情节（最近发生过的事）→ 工作（刚才在做什么）→ 日记。
+    和主人这句话相关的排前面（关键词命中加权 + 新的略优先）。
+    """
     try:
         if not enabled():
             return ""
-        ns = notes()
-        if not ns:
-            return ""
         u = str(user_text or "")
-        scored = []
-        for n in ns:
+        picked = []
+        for n in notes():
             t = str(n.get("text") or "")
-            score = n.get("ts", 0) / 1e9        # 新的略优先
+            if not t.strip():
+                continue
+            try:
+                sc = float(n.get("ts") or 0) / 1e9
+            except Exception:
+                sc = 0.0
             if u:
                 for w in _keywords(t):
                     if w and w in u:
-                        score += 1.5
+                        sc += 1.5
             if n.get("kind") == "fact":
-                score += 0.4
-            scored.append((score, t, n.get("kind")))
-        scored.sort(key=lambda x: -x[0])
-        picked = [s for s in scored[:limit] if s[1].strip()]
-        if not picked:
+                sc += 0.4
+            picked.append((sc, t))
+        picked.sort(key=lambda x: -x[0])
+        lines = [t for _s, t in picked[:max(1, int(limit))]]
+
+        ep_lines = []
+        for e in episodes(3):
+            try:
+                ts = time.strftime("%m-%d %H:%M", time.localtime(float(e.get("ts") or 0)))
+            except Exception:
+                ts = ""
+            ep_lines.append("· " + ts + " " + str(e.get("text"))[:120])
+
+        w = working()
+        w_line = ""
+        try:
+            if w and (time.time() - float(w.get("ts") or 0)) < 6 * 3600:
+                w_line = ("· 刚才在忙：" + str(w.get("task"))[:80]
+                          + ("（做成了）" if w.get("ok") else "（没做成）"))
+        except Exception:
+            pass
+
+        if not (lines or ep_lines or w_line):
             return ""
-        body = "\n".join("· " + s[1][:160] for s in picked)
-        txt = ("【你记住的事（长期记忆，自然使用，不要念出来）】\n" + body)
+        out = []
+        if lines:
+            out.append("【你记住的事（长期记忆，自然使用，不要念出来）】")
+            out.extend("· " + t[:160] for t in lines)
+        prof = profile_text()
+        if prof:
+            out.append("【你对主人的印象】" + prof)
+        if ep_lines:
+            out.append("【最近发生的事】")
+            out.extend(ep_lines)
+        if w_line:
+            out.append("【手上的事】" + w_line)
         day = diary_of()
         if day:
-            txt += "\n【今天的日记（你自己写的）】" + day[:200]
-        return txt
+            out.append("【今天的日记（你自己写的）】" + day[:200])
+        return chr(10).join(out)
     except Exception:
         return ""
 
@@ -397,6 +543,68 @@ def diary(history: list, pet_name: str = "我") -> str:
     return out
 
 
+def consolidate(history: list, pet_name: str = "我") -> str:
+    """夜间整理（参考 Miru 的 SleepAgent / AgentPet 的记忆整理）
+
+    把最近一天的情节记忆 + 日记交给模型：合并重复、丢掉一次性的小事，
+    提炼成 3~5 条**值得长期记住的事实**，再写一份关于主人的画像。
+    每天只做一次（catch-up：桌宠夜里没开，第二天起来也会补做）。
+    """
+    try:
+        d = _load()
+        today = time.strftime("%Y-%m-%d")
+        if str(d.get("last_consolidate_day") or "") == today:
+            return ""
+        raw = []
+        for e in episodes(60):
+            try:
+                ts = time.strftime("%m-%d %H:%M", time.localtime(float(e.get("ts") or 0)))
+            except Exception:
+                ts = ""
+            raw.append(ts + " " + str(e.get("text"))[:100])
+        for day, txt in sorted((d.get("diary") or {}).items())[-3:]:
+            raw.append(f"（{day} 的日记）" + str(txt)[:150])
+        if not raw:
+            d["last_consolidate_day"] = today
+            _save(d)
+            return ""
+        convo = chr(10).join(raw)[-3000:]
+        out = _ask(
+            f"你是{pet_name}，现在在整理自己的记忆（夜里做的事）。下面是最近发生的事和你的日记。"
+            "请做两件事，用 JSON 输出：\"facts\" 是 3~5 条值得长期记住的事"
+            "（关于主人的喜好/习惯/正在忙的事，合并重复、丢掉一次性的小事）；"
+            "\"profile\" 是 1~4 条对主人的印象（键值对，例如 {{\"常做的事\": \"写代码\"}}）。"
+            "格式：{\"facts\": [\"…\"], \"profile\": {\"键\": \"值\"}}，只输出 JSON。",
+            convo, max_tokens=500)
+        facts, prof = [], {}
+        try:
+            import re as _re
+            m = _re.search("\{.*\}", str(out), _re.S)
+            obj = json.loads(m.group(0)) if m else {}
+            if isinstance(obj, dict):
+                _f = obj.get("facts") or []
+                facts = [str(x).strip() for x in _f if str(x).strip()][:6]
+                _p = obj.get("profile") or {}
+                if isinstance(_p, dict):
+                    prof = {str(k)[:16]: str(v)[:60] for k, v in list(_p.items())[:4]}
+        except Exception as e:
+            _log(f"⚠ 整理结果解析失败: {e}")
+        n = 0
+        for f in facts:
+            if add_note("fact", f):
+                n += 1
+        for k, v in prof.items():
+            set_profile(k, v)
+        d = _load()
+        d["last_consolidate_day"] = today
+        _save(d)
+        _log(f"整理完成：新增 {n} 条长期记忆、{len(prof)} 条画像")
+        return f"整理 {n} 条" if n else ""
+    except Exception as e:
+        _log(f"⚠ 整理失败: {type(e).__name__}: {e}")
+        return ""
+
+
 def maybe_cycle(history: list, pet_name: str = "我", last_user_ts: float = 0.0,
                 has_model: bool = True) -> str:
     """主循环调用：到点、空闲、开着开关 → 干一件（归纳 / 自习 / 日记）。
@@ -412,6 +620,14 @@ def maybe_cycle(history: list, pet_name: str = "我", last_user_ts: float = 0.0,
         if last_user_ts and (now - float(last_user_ts)) < IDLE_NEED_SEC:
             return ""          # 主人刚说过话，别抢
         _last_cycle[0] = now
+        # ① 每天一次的"夜间整理"（把昨天的事提炼成长期记忆 + 画像）
+        try:
+            _c = consolidate(history, pet_name)
+            if _c:
+                return _c
+        except Exception as _ec:
+            _log(f"⚠ 整理跳过: {_ec}")
+        # ② 日记
         if diary(history, pet_name):
             return "日记"
         convo = _recent_history_text(history, 10)

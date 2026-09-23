@@ -19,7 +19,7 @@ class LearnWindow(QDialog):
 
     def __init__(self, parent=None, on_study=None):
         super().__init__(parent)
-        self.setWindowTitle("她的记忆与自学")
+        self.setWindowTitle("她的状态、记忆与自学")
         self.setMinimumSize(520, 420)
         self.resize(600, 480)
         self._on_study = on_study
@@ -55,7 +55,18 @@ class LearnWindow(QDialog):
     def refresh(self):
         try:
             from tool import self_learn as sl
-            self.view.setPlainText(sl.summary_text(limit=40))
+            txt = sl.summary_text(limit=40)
+            try:
+                from tool import experience as _exp
+                txt += chr(10) + chr(10) + "【她学会的做法（任务经验）】" + chr(10) + _exp.summary_text(8)
+            except Exception:
+                pass
+            try:
+                from tool import autonomy as _au
+                txt += chr(10) + chr(10) + "【她能自己做到哪一步】" + chr(10) + _au.summary_text()
+            except Exception:
+                pass
+            self.view.setPlainText(txt)
         except Exception as e:
             self.view.setPlainText("读取失败：%s" % e)
 

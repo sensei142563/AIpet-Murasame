@@ -1386,6 +1386,24 @@ class Murasame(QLabel):
                         return
                 except Exception:
                     pass
+                # ── 开口时机打分（心情 / 多久没说话 / 这一小时说过几次 / 屏幕变化）──
+                #    分数不够就连视觉识别都不跑：省显卡，也免得变成话痨。
+                try:
+                    from tool import attention as _att, screen_capture as _sc2
+                    _dist = None
+                    try:
+                        _ph, _pd, _pt, _pk = getattr(self, "_last_shot_info", (0, "", 0.0, 0.0))
+                        if _hash and _ph:
+                            _dist = _sc2.hash_distance(_hash, _ph)
+                    except Exception:
+                        pass
+                    _ok2, _sc3, _why2 = _att.should_speak(screen_change_bits=_dist)
+                    print(f"[AIpet] 看屏幕后开口评分 {_sc3:.1f}（{_why2}）→ {'开口' if _ok2 else '安静陪着'}")
+                    if not _ok2:
+                        return
+                except Exception as _ea2:
+                    print(f"[AIpet] ⚠ 开口评分失败（照常）: {_ea2}")
+
                 try:
                     # ★ 视觉走哪边由设置决定（视觉模型来源：本地服务 / 云端 API），
                     #   以前只看对话模型 model_type，装不了本地视觉就没得选。
@@ -1772,6 +1790,17 @@ class Murasame(QLabel):
         # 超过发呆阈值
         if idle_seconds >= self.idle_thinking_seconds and not self.idle_thinking_triggered:
             self.idle_thinking_triggered = True
+            # 开口时机打分（心情、多久没说话、屏幕变化、这一小时说过几次…）
+            try:
+                from tool import attention as _att, perf_guard as _pg
+                _ok, _sc, _why = _att.should_speak(user_idle_sec=idle_seconds,
+                                                   fullscreen=_pg.game_mode())
+                print(f"[AIpet] 空闲搭话评分 {_sc:.1f}（{_why}）→ {'开口' if _ok else '这次先不说'}")
+                if not _ok:
+                    self.idle_thinking_triggered = False   # 下次再评
+                    return
+            except Exception as _ea:
+                print(f"[AIpet] ⚠ 开口评分失败（照常说）: {_ea}")
             print(f"[AIpet] 空闲超过 {self.idle_thinking_seconds} 秒")
             prompt = (
                 "系统提示：用户已经有一段时间没有对电脑进行输入操作。忽视最近的对话。"
@@ -2026,6 +2055,13 @@ class Murasame(QLabel):
 
         show_next_sentence(index=0)
         self.worker = None  # 线程结束后清空引用
+        try:      # 记一笔"跟她说过话"，开口评分与心情基线都要用
+            from tool import state as _st2, attention as _att2
+            _st2.note_talk()
+            if str(getattr(self, "_last_turn_role", "")) == "system":
+                _att2.note_spoke()          # 她自己主动搭的话才算"她开口"
+        except Exception:
+            pass
 
         # 这一轮播完了 → 继续处理排队中的消息
         try:
@@ -2124,8 +2160,25 @@ class Murasame(QLabel):
             pass
 
     def start_thread(self, text, role, t=False):
+        try:
+            self._last_turn_role = str(role)
+        except Exception:
+            pass
         if role == "user":
             self._last_user_ts = time.time()   # 自主学习用它判断"主人是不是刚说过话"
+            # 心情/好感：被夸会高兴、被凶会难过（人设里她在意的词）
+            try:
+                from tool import state as _st3
+                _t = str(text or "")
+                if any(w in _t for w in ("可爱", "厉害", "喜欢你", "乖", "谢谢", "好看", "聪明")):
+                    _st3.feel(6, 0.5, "主人夸了她")
+                if any(w in _t for w in ("飞机场", "搓衣板", "锉刀", "幼刀", "钝刀", "幽灵",
+                                         "笨蛋", "蠢", "烦人", "闭嘴", "滚")):
+                    _st3.feel(-12, -0.8, "主人说了她在意的坏话")
+                else:
+                    _st3.feel(0.6, 0.06, "")     # 正常聊天慢慢升温
+            except Exception:
+                pass
             # ── 主人叫停：她正在操控电脑时，立刻停手 + 回一句话 ──
             try:
                 from tool import pc_task as _pt2
@@ -3712,6 +3765,13 @@ class Murasame(QLabel):
         except Exception:
             pass
         """触发触摸反应：把「主人摸了摸你的XX」交给模型（与摸头同一条通路）"""
+        try:      # 心情/好感：被摸头/被摸都会高兴（长期状态）
+            from tool import state as _stt
+            _up = 3.0 if str(key) == "head" else 2.0
+            _af = 0.3 if str(key) == "head" else 0.15
+            _stt.feel(_up, _af, "主人摸了摸她（%s）" % key)
+        except Exception:
+            pass
         try:
             from tool.touch_areas import reaction
             from pets.pet_registry import get_active_pet_id as _ap

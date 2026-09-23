@@ -173,6 +173,15 @@ def cloud_talk(history: list, user_input: str, role: str):
     except Exception:
         pass
 
+    # 她此刻的心情与和主人的关系（情绪状态机：影响语气，别一直一个调子）
+    try:
+        from tool import state as _stm
+        _sn = _stm.prompt_note()
+        if _sn:
+            messages.append({"role": "system", "content": _sn})
+    except Exception:
+        pass
+
     # 她自己记下的长期记忆（关于主人的事 / 自己学的东西 / 今天的日记）——相关度高的优先
     try:
         from tool import self_learn as _sl2

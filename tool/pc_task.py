@@ -128,7 +128,7 @@ def _pet_name() -> str:
         return "桌宠"
 
 
-def _planner_system(pet: str) -> str:
+def _planner_system(pet: str, task: str = "") -> str:
     try:
         from tool import pc_control as _pc
         brief = _pc.screen_brief()
@@ -146,7 +146,27 @@ def _planner_system(pet: str) -> str:
         "★ 任务做完了 → 输出：完成：<一句给主人说的话>（用你的口吻，可以带点小情绪）\n"
         "★ 确实做不了（找不到、没有权限、界面不认）→ 输出：失败：<一句给主人说的话>\n"
         f"{brief}\n{rules}"
+        + chr(10) + _exp_note(task)
+        + chr(10) + _auto_note()
     )
+
+
+def _exp_note(task: str) -> str:
+    """以前做成过的同类任务 → 直接把动作序列给她（经验沉淀）"""
+    try:
+        from tool import experience as _exp
+        return _exp.note_for(task) or ""
+    except Exception:
+        return ""
+
+
+def _auto_note() -> str:
+    """她能自己做到哪一步（自主分档）"""
+    try:
+        from tool import autonomy as _au
+        return _au.note()
+    except Exception:
+        return ""
 
 
 # ─────────────────────── 主循环 ───────────────────────
@@ -220,10 +240,11 @@ def _look_once() -> str:
 def _loop(history: list, task: str, done_note: str = ""):
     from tool import pc_control as _pc
     pet = _pet_name()
-    system = _planner_system(pet)
+    system = _planner_system(pet, task)
     last = done_note or "（还没有动作）"
     obs = ""
     ok, final = False, ""
+    done_steps = []          # 这次用过的动作（成功后当经验存起来）
     try:
         for step in range(1, MAX_STEPS + 1):
             if _stopped():
@@ -277,6 +298,7 @@ def _loop(history: list, task: str, done_note: str = ""):
                 ok, final = False, "好，停了。"
                 break
             print(f"[任务] 执行：{_pc.describe(acts)}")
+            done_steps.append(_pc.describe(acts))
             last = _exec_step(acts)
             print(f"[任务] 结果：{last[:120]}")
         else:
@@ -292,6 +314,22 @@ def _loop(history: list, task: str, done_note: str = ""):
             _pc.clear_abort()
         except Exception:
             pass
+        # ── 沉淀：经验 / 工作记忆 / 情节 / 心情 ──
+        try:
+            from tool import experience as _exp, self_learn as _sl, state as _st
+            if done_steps:
+                _exp.learn(task, done_steps, ok and not stopped)
+                _sl.set_working(task, bool(ok and not stopped),
+                                "主人叫停" if stopped else (final[:40] if final else ""))
+                _sl.add_episode(("做成：" if ok else "没做成：") + task[:60], "task")
+                if stopped:
+                    _st.feel(-2, 0, "任务被主人叫停")
+                elif ok:
+                    _st.feel(5, 0.4, "帮主人做成一件事")
+                else:
+                    _st.feel(-3, 0, "有件事没做成")
+        except Exception as _es:
+            print(f"[任务] ⚠ 沉淀失败: {_es}")
         if stopped:
             _say_finish("好，停了。", False)
         else:
