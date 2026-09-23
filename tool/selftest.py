@@ -32,7 +32,7 @@ def check_modules(results):
             "tool.pc_info", "tool.self_learn", "tool.music", "tool.uia", "tool.perf_guard",
             "tool.state", "tool.attention", "tool.experience", "tool.autonomy",
             "tool.reminder", "tool.care", "tool.desire",
-            "tool.web_search", "tool.plugins", "tool.game", "classes.Worker_class", "classes.murasame_class",
+            "tool.web_search", "tool.plugins", "tool.habits", "classes.Worker_class", "classes.murasame_class",
             "classes.learn_window", "classes.status_window", "main")
     bad = []
     for m in mods:
@@ -83,9 +83,6 @@ def check_wiring(results):
         ("会议静音", "会议/演示中，保持安静" in src_m),
         ("动机层（她自己想做什么）", "她自己想" in src_m),
         ("联网搜索标记", "SEARCH_MARK" in src_w),
-        ("游戏标记", "GAME_MARK" in src_w),
-        ("游戏模式处理", "GAME_MARK" in inspect.getsource(M.Murasame.on_reply)),
-        ("主人说话停游戏", "先停手让位" in inspect.getsource(M.Murasame.start_thread)),
         ("插件标记", "【插件:" in src_w),
         ("插件执行", "_plugin_and_reply" in src_m or hasattr(M.Murasame, "_plugin_and_reply")),
         ("自主活跃度菜单", "自主活跃度" in src_m),
@@ -95,11 +92,6 @@ def check_wiring(results):
         ("失败重规划（卡住换法子）", "stall_hint" in inspect.getsource(PT._loop)),
         ("自主分档（执行）", "autonomy" in inspect.getsource(PC.execute)),
         ("夜间整理（学习循环）", "consolidate" in inspect.getsource(__import__("tool.self_learn", fromlist=["x"]).maybe_cycle)),
-        ("自主玩游戏（动机层）", '"play"' in inspect.getsource(__import__("tool.desire", fromlist=["x"]).wants)),
-        ("自主玩游戏（桌宠执行）", "_gm9.start" in src_m or "自主玩游戏失败" in src_m),
-        ("玩游戏算自主行为（提示词）", "自主行为" in inspect.getsource(__import__("tool.game", fromlist=["x"]).prompt_rules)),
-        ("盯屏触发（解析）", "trigger" in inspect.getsource(__import__("tool.game", fromlist=["x"]).parse)),
-        ("盯屏触发（执行）", "trigger" in inspect.getsource(M.Murasame.on_reply)),
         ("系统通知", "def _notify" in src_m and "showMessage" in src_m),
         ("通知接线（提醒）", 'self._notify("提醒"' in src_m),
         ("通知接线（关怀）", 'self._notify("她说"' in src_m),
@@ -174,66 +166,30 @@ def check_wiring(results):
             __import__("tool.music", fromlist=["x"]))),
         ("视觉服务挂了能自愈", "def _ensure_local_vision" in inspect.getsource(C)
          and "_ensure_local_vision()" in inspect.getsource(C.describe_image)),
-        ("看游戏画面时忽略桌宠自己", "AI 桌宠窗口" in inspect.getsource(
-            __import__("tool.game", fromlist=["x"])._look)),
-        ("游戏：开始前确认窗口真的开着", "def find_game_window" in inspect.getsource(
-            __import__("tool.game", fromlist=["x"]))
-         and "find_game_window(name)" in inspect.getsource(
-            __import__("tool.game", fromlist=["x"]).start)),
-        ("游戏：状态卡住会自愈（心跳）", "_state.get(\"beat\")" in inspect.getsource(
-            __import__("tool.game", fromlist=["x"]).start)),
-        ("游戏：点按窗口换算（方位词）", "set_click_frame" in inspect.getsource(
-            __import__("tool.game", fromlist=["x"]).start)
-         and "_frame[\"rect\"]" in inspect.getsource(
-            __import__("tool.pc_control", fromlist=["x"])._anchor_xy)),
-        ("后台点击（PostMessage，不动真鼠标）", "def _post_click" in inspect.getsource(
-            __import__("tool.pc_control", fromlist=["x"]))),
-        ("后台点击无效 → 真鼠标重试", "改用真鼠标重点一次" in inspect.getsource(
-            __import__("tool.game", fromlist=["x"])._loop)),
-        ("菜单不再有「允许她玩游戏」", 'item(_ai, "允许她玩游戏"' not in src_m
-         and "def enabled" in inspect.getsource(__import__("tool.game", fromlist=["x"]))),
         ("整轮回复算忙（对话不被顶掉）", "_reply_active" in inspect.getsource(M.Murasame.on_reply)
          and "_reply_active" in inspect.getsource(M.Murasame.is_busy_reply)),
-        ("游戏：只截游戏窗口（画面干净）", "capture_window_qimage" in inspect.getsource(
-            __import__("tool.game", fromlist=["x"])._look)),
-        ("游戏：动作后校验（act→verify）", "def _verify_changed" in inspect.getsource(
-            __import__("tool.game", fromlist=["x"]))
-         and "_verify_changed()" in inspect.getsource(
-            __import__("tool.game", fromlist=["x"])._loop)),
         ("队列去重（系统提示只留最新）", "队列里同类的系统提示已合并" in src_m),
         ("状态等她说完再显示（不挤台词）", "_pending_status" in inspect.getsource(M.Murasame._on_worker_status)
          and "_flush_pending_status" in src_m
          and "_flush_pending_status" in inspect.getsource(M.Murasame.__init__)),
         ("干活时主人说话优先（打断碎碎念）", "_chatter_turn" in src_m and QSOUND_OK),
-        ("游戏：找不到就接手最上面那个窗口", "wins[0][0], wins[0][1], False" in inspect.getsource(
-            __import__("tool.game", fromlist=["x"]).find_game_window)),
-        ("游戏：结果立刻显示（不等模型）", "self.show_text(str(_msg), typing=True)" in inspect.getsource(M.Murasame)
-         or "show_text(str(_msg)" in inspect.getsource(M.Murasame)),
-        ("游戏：快进模式（重复上一步提速）", "FAST_REPEAT" in inspect.getsource(
-            __import__("tool.game", fromlist=["x"]))
-         and "_fast_ok" in inspect.getsource(__import__("tool.game", fromlist=["x"]))),
-        ("游戏：每轮按名字复查窗口（关掉就停）", "allow_foreground=False" in inspect.getsource(
-            __import__("tool.game", fromlist=["x"])._loop)),
         ("点歌文案是中性的「正在点歌」", "正在点歌……" in inspect.getsource(M.Murasame)
          and "正在帮你点歌" not in inspect.getsource(M.Murasame)),
-        ("内部提示不算主人开口（不再掐停游戏）", "_is_internal" in inspect.getsource(
+        ("内部提示不算主人开口", "_is_internal" in inspect.getsource(
             M.Murasame.start_thread)),
-        ("状态文案不带轮数/步数", "正在玩 {name}……\")" in inspect.getsource(
-            __import__("tool.game", fromlist=["x"])._loop)
-         and "正在操作电脑……\")" in inspect.getsource(
+        ("状态文案不带步数", "正在操作电脑……\")" in inspect.getsource(
             __import__("tool.pc_task", fromlist=["x"])._loop)),
+        ("习惯记录（自主学习）", "def note_app" in inspect.getsource(
+            __import__("tool.habits", fromlist=["x"]))
+         and "habits as _hb" in src_c and "habits as _hb" in src_ca),
+        ("状态窗顶部分类页", "TABS" in inspect.getsource(
+            __import__("classes.status_window", fromlist=["x"]).StatusWindow)
+         and "QStackedWidget" in inspect.getsource(
+            __import__("classes.status_window", fromlist=["x"]))),
         ("音乐：她自己的口味（我想听）", "def remember_own" in inspect.getsource(
             __import__("tool.music", fromlist=["x"]))
          and "def own_taste_text" in inspect.getsource(__import__("tool.music", fromlist=["x"]))
          and '("mine"' in inspect.getsource(__import__("tool.music", fromlist=["x"]).parse)),
-        ("过程说话（say 通道）", "def _say_progress" in inspect.getsource(M.Murasame)
-         and "say=lambda s: self._say_progress" in inspect.getsource(M.Murasame)),
-        ("游戏：关掉了就停手并如实说", "_window_alive(_state.get" in inspect.getsource(
-            __import__("tool.game", fromlist=["x"])._loop)),
-        ("视觉小说：直接开始、别问主人", "视觉小说 / 文字冒险" in inspect.getsource(
-            __import__("tool.game", fromlist=["x"])._planner_system)
-         and "视觉小说 / 文字冒险" in inspect.getsource(
-            __import__("tool.game", fromlist=["x"]).prompt_rules)),
         ("寒暄提示词带标记（自动 no_act）", "只是寒暄" in inspect.getsource(M.Murasame.start_thread)),
         ("问候语禁止写操作指令", "只是寒暄" in inspect.getsource(
             __import__("tool.care", fromlist=["x"]).startup_line)),
@@ -263,12 +219,15 @@ def check_runtime(results):
     _try(lambda: (autonomy.tier_of_action({"type": "click"}) == "safe", autonomy.summary_text().splitlines()[0][:40]), "行动分档（autonomy）", results)
     _try(lambda: (bool(reminder.parse("【提醒】30分钟后 喝水")), reminder.list_text().splitlines()[0]), "提醒（reminder）", results)
     _try(lambda: (care.companion_days() >= 1, care.summary_text()[:50]), "陪伴/关怀（care）", results)
-    from tool import web_search, plugins, game as _game
-    _try(lambda: (True, "开关 %s｜解析 %s" % (_game.enabled(), _game.parse("【游戏】连按 J 3 次"))) ,
-         "游戏模式（game）", results)
-    _try(lambda: (bool(_game.parse("【游戏】盯着 800 400 100 50 变化就 按键 space")),
-                  "盯屏：%s" % _game.parse("【游戏】盯着 800 400 100 50 变化就 按键 space")),
-         "盯屏触发（game.trigger）", results)
+    from tool import web_search, plugins
+    try:
+        from tool import habits as _hb
+        _try(lambda: (True, "已记录 %d 天、%d 次互动｜%s" % (
+            len(_hb._load().get("days") or {}), int(_hb._load().get("total") or 0),
+            (_hb.summary_text().splitlines() or ["（还没观察到）"])[0][:60])),
+             "主人习惯（habits）", results)
+    except Exception as _eh:
+        results.append(("主人习惯（habits）", False, str(_eh)[:60]))
     _try(lambda: (True, "开关 %s｜Bing/百度可用（实测）" % web_search.enabled()), "联网搜索（web_search）", results)
     _try(lambda: (True, "开关 %s｜已装 %d 个：%s" % (
         plugins.enabled(), len(plugins.list_plugins()),

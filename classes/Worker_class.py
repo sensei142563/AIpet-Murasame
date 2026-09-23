@@ -120,7 +120,7 @@ _ws_pending = []
 # 插件请求暂存（【插件:标记】）
 _pl_pending = []
 # 游戏模式请求暂存（【游戏】）
-_gm_pending = []
+_gm_pending = []      # （保留名字：老代码可能有引用；不再往里放东西）
 
 
 def _tidy_sentences(items):
@@ -155,14 +155,6 @@ def _tidy_sentences(items):
             if "【插件:" in s or "［插件:" in s or "[插件:" in s:
                 _pl_pending.append(s)
                 out.append("【插件】")
-                continue
-        except Exception:
-            pass
-        try:
-            from tool import game as _gm
-            if _gm.GAME_MARK in s:
-                _gm_pending.append(s)
-                out.append(_gm.GAME_MARK)
                 continue
         except Exception:
             pass

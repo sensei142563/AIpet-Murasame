@@ -23,7 +23,7 @@ from PyQt5.QtCore import QPointF, QPropertyAnimation, QRectF, Qt, pyqtProperty
 from PyQt5.QtGui import (QBrush, QColor, QFont, QFontDatabase, QLinearGradient, QPainter,
                          QPainterPath, QPen, QPixmap, QPolygonF)
 from PyQt5.QtWidgets import (QDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea,
-                             QSizeGrip, QVBoxLayout, QWidget)
+                             QSizeGrip, QStackedWidget, QVBoxLayout, QWidget)
 
 # ── 剧情模式配色（与 engine.css / tool/pet_menu.py 完全一致）──
 CREAM_TOP = QColor(244, 236, 229, 250)
@@ -137,6 +137,17 @@ QPushButton {
 }
 QPushButton:hover { background: #fffdfb; }
 QPushButton:pressed { background: #f0e2d2; }
+/* 顶部分类页按钮：没选中的低调一点，选中的用金色底 + 深红字（剧情模式的选中感） */
+QPushButton#tabBtn {
+    color: #6b5850; padding: 5px 14px; border-radius: 7px;
+    border: 1px solid rgba(160,58,53,60); background: transparent;
+}
+QPushButton#tabBtn:hover { background: rgba(255,253,251,200); color: #7e2b27; }
+QPushButton#tabBtn:checked {
+    color: #7e2b27; font-weight: bold;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(255,253,251,255), stop:1 rgba(246,236,223,255));
+    border: 1px solid rgba(201,163,95,230);
+}
 QScrollBar:vertical { width: 8px; background: transparent; margin: 2px 0 2px 0; }
 QScrollBar::handle:vertical { background: rgba(160,58,53,120); border-radius: 4px; min-height: 26px; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
@@ -185,18 +196,21 @@ class _Card(QFrame):
 
 
 class StatusWindow(QDialog):
-    """她的状态 / 记忆 / 提醒（剧情模式风格的独立窗口）。"""
+    """她的状态 / 习惯 / 记忆 / 提醒（剧情模式风格的独立窗口 + 顶部分类页）。"""
+
+    TABS = ("状态", "习惯", "记忆", "提醒")
 
     def __init__(self, parent=None, on_study=None):
         super().__init__(parent)
         self._on_study = on_study
-        self.setWindowTitle("丛雨 · 状态 · 记忆 · 提醒")
+        self.setWindowTitle("丛雨 · 状态 · 习惯 · 记忆 · 提醒")
         self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setStyleSheet(QSS)
-        self.setMinimumSize(560, 420)
-        self.resize(680, 620)
+        self.setMinimumSize(560, 460)
+        self.resize(700, 640)
         self._drag = None
+        self._tab_idx = 0
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(SHADOW + 6, SHADOW + 6, SHADOW + 6, SHADOW + 6)
@@ -212,7 +226,7 @@ class StatusWindow(QDialog):
         d2.setPixmap(_diamond(GOLD, 11))
         d2.setFixedSize(11, 11)
         head.addWidget(d2)
-        self.lb_title = QLabel("状态 · 记忆 · 提醒", self)
+        self.lb_title = QLabel("她的状态", self)
         self.lb_title.setObjectName("cardTitle")
         _tf = _ui_font(12, True)
         _tf.setLetterSpacing(QFont.AbsoluteSpacing, 2.0)
@@ -236,18 +250,39 @@ class StatusWindow(QDialog):
         self.lb_sub.setWordWrap(True)
         self._box.addWidget(self.lb_sub)
 
-        # ── 中间：卡片列表 ──
-        self.area = QScrollArea(self)
-        self.area.setWidgetResizable(True)
-        self.area.setFrameShape(QFrame.NoFrame)
-        self._holder = QWidget(self.area)
-        self._holder.setObjectName("panel")
-        self._cards = QVBoxLayout(self._holder)
-        self._cards.setContentsMargins(2, 2, 4, 2)
-        self._cards.setSpacing(10)
-        self._cards.addStretch(1)
-        self.area.setWidget(self._holder)
-        self._box.addWidget(self.area, 1)
+        # ── ★ 顶部分类页（用户要求：属性分类预览）──
+        tab_row = QHBoxLayout()
+        tab_row.setSpacing(6)
+        self.tab_btns = []
+        for i, name in enumerate(self.TABS):
+            b = QPushButton(name, self)
+            b.setObjectName("tabBtn")
+            b.setCheckable(True)
+            b.setChecked(i == 0)
+            b.setFont(_ui_font(9))
+            b.clicked.connect(lambda _=False, k=i: self.set_tab(k))
+            tab_row.addWidget(b)
+            self.tab_btns.append(b)
+        tab_row.addStretch(1)
+        self._box.addLayout(tab_row)
+
+        # ── 每页一个滚动区（各自独立滚动，互不影响）──
+        self.stack = QStackedWidget(self)
+        self.pages = []          # [(scroll, cards_layout, holder)]
+        for _name in self.TABS:
+            area = QScrollArea(self)
+            area.setWidgetResizable(True)
+            area.setFrameShape(QFrame.NoFrame)
+            holder = QWidget(area)
+            holder.setObjectName("panel")
+            cards = QVBoxLayout(holder)
+            cards.setContentsMargins(2, 2, 4, 2)
+            cards.setSpacing(10)
+            cards.addStretch(1)
+            area.setWidget(holder)
+            self.stack.addWidget(area)
+            self.pages.append((area, cards, holder))
+        self._box.addWidget(self.stack, 1)
 
         # ── 底部按钮（一律横排）──
         row = QHBoxLayout()
@@ -277,6 +312,18 @@ class StatusWindow(QDialog):
             self._anim.start()
         except Exception:
             self.setWindowOpacity(1.0)
+
+    # ── 分类页 ──
+    def set_tab(self, idx: int):
+        try:
+            idx = max(0, min(len(self.TABS) - 1, int(idx)))
+            self._tab_idx = idx
+            self.stack.setCurrentIndex(idx)
+            for i, b in enumerate(self.tab_btns):
+                b.setChecked(i == idx)
+            self.lb_title.setText("她的" + self.TABS[idx] if idx else "她的状态")
+        except Exception:
+            pass
 
     # ── 自己画外框：奶油渐变面板 + 暗红描边 + 金色左饰条 + 投影 ──
     def paintEvent(self, ev):
@@ -320,11 +367,12 @@ class StatusWindow(QDialog):
 
     # ── 数据 → 卡片 ──
     def _clear(self):
-        while self._cards.count():
-            it = self._cards.takeAt(0)
-            w = it.widget()
-            if w is not None:
-                w.setParent(None)
+        for _area, cards, _holder in self.pages:
+            while cards.count():
+                it = cards.takeAt(0)
+                w = it.widget()
+                if w is not None:
+                    w.setParent(None)
 
     def _subtitle(self) -> str:
         bits = []
@@ -346,8 +394,13 @@ class StatusWindow(QDialog):
             pass
         return "　·　".join(bits)
 
+    def _cards_of(self, idx: int):
+        """第 idx 页的卡片容器（返回 (cards_layout, holder)）"""
+        _area, cards, holder = self.pages[max(0, min(len(self.pages) - 1, int(idx)))]
+        return cards, holder
+
     def refresh(self):
-        """重新采集数据并铺卡片"""
+        """重新采集数据，按分类页铺卡片"""
         try:
             self._clear()
             try:
@@ -355,7 +408,8 @@ class StatusWindow(QDialog):
             except Exception:
                 pass
 
-            # ① 现在
+            # ══════ 第 1 页：状态 ══════
+            cards, holder = self._cards_of(0)
             tags, body = [], []
             try:
                 from tool import state as _st
@@ -394,23 +448,45 @@ class StatusWindow(QDialog):
             except Exception:
                 pass
             if body or tags:
-                self._cards.addWidget(_Card("现在", "\n".join(body), tags, self._holder))
-
-            # ② 念头
+                cards.addWidget(_Card("现在", chr(10).join(body), tags, holder))
             try:
                 from tool import desire as _dz
-                self._cards.addWidget(_Card("她现在的念头", _dz.summary_text(), (), self._holder))
+                cards.addWidget(_Card("她现在的念头", _dz.summary_text(), (), holder))
             except Exception:
                 pass
-
-            # ③ 提醒
             try:
-                from tool import reminder as _rm
-                self._cards.addWidget(_Card("挂着的提醒", _rm.list_text(), (), self._holder))
+                from tool import autonomy as _au
+                cards.addWidget(_Card("她能自己做到哪一步", _au.summary_text(), (), holder))
             except Exception:
                 pass
+            cards.addStretch(1)
 
-            # ④ 记忆（印象 / 最近发生的事 / 日记 / 爱听的歌）
+            # ══════ 第 2 页：习惯（自主学习记录的主人习惯）══════
+            cards, holder = self._cards_of(1)
+            try:
+                from tool import habits as _hb
+                cards.addWidget(_Card("主人的习惯（她自己观察攒的）",
+                                      _hb.summary_text(), (), holder))
+                # 分卡片展示，看起来清楚
+                sch = _hb.schedule_text()
+                hrs = _hb.hours_text()
+                if sch or hrs:
+                    cards.addWidget(_Card("作息与活跃时段",
+                                          (("【作息】" + sch) if sch else "")
+                                          + (chr(10) + "【活跃时段】" + hrs if hrs else ""),
+                                          (), holder))
+                apps = _hb.apps_text(6)
+                if apps:
+                    cards.addWidget(_Card("常用软件", apps, (), holder))
+                mus = _hb.music_text()
+                if mus:
+                    cards.addWidget(_Card("爱听的歌", mus, (), holder))
+            except Exception as _e1:
+                cards.addWidget(_Card("习惯", f"（读不到：{type(_e1).__name__}）", (), holder))
+            cards.addStretch(1)
+
+            # ══════ 第 3 页：记忆 ══════
+            cards, holder = self._cards_of(2)
             mem = []
             try:
                 from tool import self_learn as _sl
@@ -435,33 +511,38 @@ class StatusWindow(QDialog):
                     pass
             except Exception:
                 pass
-            try:      # 她记住的听歌口味（点歌时会优先放主人爱听的那一版）
+            try:
                 from tool import music as _mu
                 fav = _mu.favorites_text(8)
                 if fav:
                     mem.append("【爱听的歌】" + fav)
             except Exception:
                 pass
-            self._cards.addWidget(_Card("她记下的事", "\n".join(mem) or "（还什么都没记下）",
-                                        (), self._holder))
-
-            # ⑤ 学会的做法（任务经验）
+            cards.addWidget(_Card("她记下的事", chr(10).join(mem) or "（还什么都没记下）",
+                                  (), holder))
             try:
                 from tool import experience as _exp
-                self._cards.addWidget(_Card("她学会的做法（任务经验）",
-                                            _exp.summary_text(8), (), self._holder))
+                cards.addWidget(_Card("她学会的做法（任务经验）",
+                                      _exp.summary_text(8), (), holder))
             except Exception:
                 pass
+            cards.addStretch(1)
 
-            # ⑥ 能自己做到哪一步
+            # ══════ 第 4 页：提醒 ══════
+            cards, holder = self._cards_of(3)
             try:
-                from tool import autonomy as _au
-                self._cards.addWidget(_Card("她能自己做到哪一步", _au.summary_text(),
-                                            (), self._holder))
+                from tool import reminder as _rm
+                cards.addWidget(_Card("挂着的提醒", _rm.list_text(), (), holder))
             except Exception:
                 pass
+            try:
+                from tool import care as _care
+                cards.addWidget(_Card("关怀与陪伴", _care.summary_text(), (), holder))
+            except Exception:
+                pass
+            cards.addStretch(1)
 
-            self._cards.addStretch(1)
+            self.set_tab(self._tab_idx)
             try:
                 from tool import self_learn as _sl
                 print(f"[状态窗] 已刷新（记忆文件：{_sl._store_path()}）")

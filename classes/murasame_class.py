@@ -542,12 +542,6 @@ class Murasame(QLabel):
                         say=lambda s: self._say_progress(str(s)))
         except Exception as _etn:
             print(f"[桌宠] ⚠ 注册任务循环回调失败: {_etn}")
-        try:      # 游戏模式也用同一套状态/收尾通道
-            from tool import game as _gmn
-            _gmn.set_ui(status=lambda s: self._task_status.emit(str(s)),
-                        finish=lambda s, ok=True: self._task_finish.emit(str(s), bool(ok)),
-                        say=lambda s: self._say_progress(str(s)))
-        except Exception as _egn:
             print(f"[桌宠] ⚠ 注册游戏回调失败: {_egn}")
 
         # 勿扰模式：开启后关闭截图与空闲检测，并禁止主动搭话
@@ -1806,6 +1800,13 @@ class Murasame(QLabel):
         """采一次电脑近况，写进她的「观察」——她聊到相关话题时自然用得上（后台线程）"""
         try:
             from tool import pc_info as _pi
+            # ★ 记录主人的习惯（常用软件）：只记"窗口标题出现次数"，不读内容，
+            #   所以**不受**「允许读取电脑文件」开关影响（用户要求：自主学习要记习惯）。
+            try:
+                from tool import habits as _hb
+                _hb.note_apps_block(_pi._running_apps())
+            except Exception:
+                pass
             from tool import file_access as _fa
             if not _fa.enabled():
                 return
@@ -1860,23 +1861,6 @@ class Murasame(QLabel):
                     _w = _dz.wants(music_playing=_mp, user_idle_sec=_idle)
                     if _w:
                         print(f"[桌宠] 💭 她自己想：{_w.get('text')}")
-                        if _w.get("kind") == "play":
-                            # 自主玩游戏：真的开一局短局（挑最近玩过的那个游戏）
-                            try:
-                                from tool import game as _gm9
-                                games = _gm9.known_games()
-                                if games:
-                                    _gname = max(games, key=lambda k: float((games[k] or {}).get("ts") or 0))
-                                    _h = games.get(_gname) or {}
-                                    _msg = _gm9.start(_gname, str(_h.get("goal") or ""),
-                                                      str(_h.get("controls") or ""),
-                                                      minutes=5, pet_name=self.pet_name)
-                                    print(f"[桌宠] 🎮 她自己开始玩「{_gname}」：{_msg[:40]}")
-                                    if str(_msg).startswith("好，我来玩"):    # 真开起来了才说
-                                        self.show_text("唔……你不在，我自己玩会儿。", typing=False)
-                                        return
-                            except Exception as _eg9:
-                                print(f"[桌宠] ⚠ 自主玩游戏失败: {_eg9}")
                         self._request_dialog.emit(_w.get("prompt") or "", "system", True)
                         return
             except Exception as _ed:
@@ -2119,53 +2103,6 @@ class Murasame(QLabel):
                     pass
         except Exception as _e2:
             print(f"[桌宠] ⚠ 自主要求看屏幕判断失败: {_e2}")
-
-        # ── 游戏模式（她自己上手玩：回合制/挂机/刷材料）──
-        try:
-            from tool.game import GAME_MARK
-            from tool import game as _gm
-            from classes.Worker_class import _gm_pending
-            if GAME_MARK in "".join(str(x) for x in (reply or [])):
-                _greq = _gm_pending.pop(0) if _gm_pending else ""
-                _gm_pending[:] = []
-                _acts = _gm.parse(str(_greq or ""))
-                if _acts:
-                    _kind, _arg = _acts[0]
-                    if _kind == "stop":
-                        _was = _gm.running()
-                        _gm.stop("主人叫停")
-                        _msg = "好，停了。" if _was else "我没在玩呀。"
-                    elif _kind == "list":
-                        from tool.game import summary_text as _gsum
-                        _msg = "我会玩的：" + chr(10) + _gsum()
-                    elif _kind == "macro":
-                        print(f"[桌宠] 🎮 固定循环：{_arg[:40]}")
-                        _msg = _gm.macro(_arg)
-                    elif _kind == "trigger":
-                        print(f"[桌宠] 🎮 盯屏触发：{_arg[:50]}")
-                        _msg = _gm.trigger(_arg)
-                    else:
-                        _p = _gm._parse_start(_arg)
-                        _hist = _gm.recall(_p["name"])
-                        _p["goal"] = _p["goal"] or str(_hist.get("goal") or "")
-                        _p["controls"] = _p["controls"] or str(_hist.get("controls") or "")
-                        _msg = _gm.start(_p["name"], _p["goal"], _p["controls"],
-                                         minutes=_p.get("minutes"), pet_name=self.pet_name)
-                    print("[桌宠] 🎮 游戏：" + str(_msg)[:60])
-                    # ★ 先把结果**直接显示**在对话框（不等模型）：她忙的时候那句会被排队，
-                    #   主人会以为"点了没反应"（用户反馈）。这样至少立刻看得到发生了什么。
-                    try:
-                        self._talking = False
-                        self.show_text(str(_msg), typing=True)
-                    except Exception:
-                        pass
-                    self._request_dialog.emit(
-                        "（系统提示：你刚接下了「陪主人玩游戏」这件事，结果：" + str(_msg) +
-                        "。用你自己的口吻跟他说一句（一两句），别念标记、别提系统提示。）",
-                        "user", False)
-                    return
-        except Exception as _eg:
-            print(f"[桌宠] ⚠ 游戏处理失败: {_eg}")
 
         # ── 插件（主人自己装的能力，标记长这样：【插件:天气】北京）──
         try:
@@ -2575,11 +2512,9 @@ class Murasame(QLabel):
             self._chatter_turn = False     # 主人（或她自己发起之外）真的开口 → 清掉 marker
         if role == "user" and not _is_internal:
             self._last_user_ts = time.time()   # 自主学习用它判断"主人是不是刚说过话"
-            try:      # 她在玩游戏时，主人一开口就停下来让位
-                from tool import game as _gm2
-                if _gm2.running():
-                    _gm2.stop("主人开口说话了")
-                    print("[桌宠] 🎮 主人说话 → 先停手让位")
+            try:      # ★ 记一次活跃：作息（每天起止）、活跃时段（小时分布）
+                from tool import habits as _hb
+                _hb.note_active()
             except Exception:
                 pass
             # 心情/好感：被夸会高兴、被凶会难过（人设里她在意的词）

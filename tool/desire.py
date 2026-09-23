@@ -187,39 +187,6 @@ def wants(music_playing: bool = None, user_idle_sec: float = None) -> dict:
         return {"kind": "talk", "text": "想找你聊两句",
                 "prompt": "（你已经有一阵子没跟主人说话了，有点想他。主动找他说一句话，"
                           "自然一点，一两句就行，别硬找话题。）"}
-    # ③ 主人不在（离开 5 分钟以上）→ 想自己玩会儿游戏
-    #    （这也是自主行为的一部分，见 README「自主控制」；条件严：开关都开着、有玩过的游戏、两小时内没玩过）
-    #    为什么排在放歌/看屏幕前面：主人真的不在才会满足，比"无聊"更少见也更该优先
-    try:
-        if (user_idle_sec is not None and user_idle_sec > 300.0
-                and b >= (_b_th - 15) and _cool_ok(d, "play")):
-            from tool import game as _gm
-            from tool import pc_control as _pc
-            if _gm.enabled() and _pc.auto_enabled():
-                games = _gm.known_games()
-                if games:
-                    gname = max(games, key=lambda k: float((games[k] or {}).get("ts") or 0))
-                    _mark(d, "play")
-                    return {"kind": "play", "text": f"想自己玩会儿「{gname}」",
-                            "prompt": ("（主人离开电脑有一会儿了，你想自己玩会儿「" + str(gname) +
-                                       "」。桌宠会让你真的上手。先小声说一句你要玩了，"
-                                       "注意按 F12 能停、主人一回来就停手。）")}
-    except Exception:
-        pass
-    # ④ 无聊 → 想放首歌（如果他没在放的话）
-    if b >= _b_th and music_playing is False and _cool_ok(d, "music"):
-        _mark(d, "music")
-        return {"kind": "music", "text": "有点无聊，想放首歌",
-                "prompt": "（你现在有点无聊，想放首歌换换气氛。自己挑一首："
-                          "如果是**你自己**想听的，写「【音乐】我想听 歌名 歌手」"
-                          "（这首会记进你自己的口味）；如果是想放他爱听的，"
-                          "写「【音乐】播放 歌名 歌手」。放完跟他说一句你为什么挑这首。）"}
-    # ⑤ 想知道他在忙什么
-    if b >= (_b_th - 10) and _cool_ok(d, "look"):
-        _mark(d, "look")
-        return {"kind": "look", "text": "想看看你在忙什么",
-                "prompt": "（你想知道他这会儿在忙什么。输出一行「【看屏幕】」看一眼，"
-                          "看清了再自然地说一句。）"}
     # ⑥ 想记点东西（把最近的事写进记忆）
     if _cool_ok(d, "note") and (b > 40 or s > 40):
         _mark(d, "note")

@@ -141,13 +141,6 @@ def qwen3_lora(history, user_input, role):
         pass
 
     # 游戏模式：她能自己上手玩（回合制/挂机/刷材料）
-    try:
-        from tool import game as _gm4
-        _grules = _gm4.prompt_rules()
-        if _grules:
-            messages.append({"role": "system", "content": _grules})
-    except Exception:
-        pass
 
     # 插件：主人自己装的能力（【插件:标记】参数）
     try:
@@ -200,6 +193,15 @@ def qwen3_lora(history, user_input, role):
         _sn = _stm.prompt_note()
         if _sn:
             messages.append({"role": "system", "content": _sn})
+    except Exception:
+        pass
+
+    # 他的生活习惯（她自己观察攒的：作息 / 活跃时段 / 常用软件）——聊天时能自然提一句
+    try:
+        from tool import habits as _hb2
+        _hn = _hb2.prompt_note()
+        if _hn:
+            messages.append({"role": "system", "content": _hn})
     except Exception:
         pass
 
