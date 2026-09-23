@@ -674,7 +674,7 @@ class SiliconLauncher(QWidget):
         sep.setFixedHeight(1)
         sep.setStyleSheet(f"background: {Color5.name()}; border: none;")
         lay.addWidget(sep)
-        b_set = NavRailButton("⚙", "设置", "模型与功能", icon_key="settings")
+        b_set = NavRailButton("⚙", "设置", "模型 · 语音 · 外观", icon_key="settings")
         b_set.clicked.connect(lambda _=False: self._goto("settings"))
         self.nav_btns["settings"] = b_set
         lay.addWidget(b_set)

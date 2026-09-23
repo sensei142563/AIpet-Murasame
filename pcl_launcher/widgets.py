@@ -62,12 +62,12 @@ class PCLSettingsPanel(QWidget):
         self._layout.setSpacing(int(14 * S))
         self._scroll.setWidget(container)
 
-        title = QLabel("  ⚙ 桌宠配置")
+        title = QLabel("  ⚙ 设置")
         title.setFont(QFont("Microsoft YaHei", int(16 * S), QFont.Bold))
         title.setStyleSheet(f"color: {Color1.name()};")
         self._layout.addWidget(title)
 
-        # ===== 顶部分类标签：全部配置 / 桌宠配置 / QQ配置 / 微信配置 =====
+        # ===== 顶部分类标签：全部 / 桌宠 / 模型与语音 / QQ / 微信 / 其他 =====
         self._cat_entries = []
         self._cat_filter = "all"
         self._cur_layout = self._layout
@@ -82,9 +82,11 @@ class PCLSettingsPanel(QWidget):
         """
         cat_row = QHBoxLayout(); cat_row.setSpacing(int(6 * S))
         self._cat_btns = {}
-        for _key, _label in (("all", "全部配置"), ("pet", "桌宠配置"),
-                             ("qq", "QQ配置"), ("wx", "微信配置"),
-                             ("other", "其他配置")):
+        # 标签文字刻意短：6 个标签在最小窗口（1000px）下要放得进一行，
+        # 太长会被裁掉一半、点不到（"模型与语音"是必须保留的完整叫法）
+        for _key, _label in (("all", "全部"), ("pet", "桌宠"),
+                             ("ai", "模型与语音"), ("qq", "QQ"),
+                             ("wx", "微信"), ("other", "其他")):
             _b = QPushButton(f"  {_label}")
             _b.setCheckable(True)
             _b.setCursor(Qt.PointingHandCursor)
@@ -95,8 +97,11 @@ class PCLSettingsPanel(QWidget):
         cat_row.addStretch()
         self._layout.addLayout(cat_row)
         self._cat_btns["all"].setChecked(True)
-        # 桌宠配置 = 基础/对话/语音/立绘/桌宠显示 等桌宠侧分区
-        self._open_box(("all", "pet"))
+        # 分类归属（一个分区框可属于多个分类；不带 cat 的分区在所有分类都显示）：
+        #   ai  = 基础信息与密钥 / 对话模型与推理 / 长文本输出 / 语音合成与识别（一次性配置）
+        #   pet = Live2D 与立绘 / 桌宠显示与空闲行为 / Live2D 调参（日常常调）
+        # 一个分区框只放一处，标签页只是过滤器，所以两边不会重复出现。
+        self._open_box(("all", "ai"))
 
         # ===== ① 基础信息与密钥 =====
         self._section("基础信息与密钥", "🔑")
@@ -163,7 +168,8 @@ class PCLSettingsPanel(QWidget):
         self._add_slider("screen_type", "屏幕识别", ["false", "true"], "false")
         self._add_slider("voice_trigger", "语音识别", ["false", "true"], "false")
 
-        # ===== ⑤ Live2D 与立绘 =====
+        # ===== ⑤ Live2D 与立绘（以下到「其他」之前都属于桌宠外观/行为，切到 pet 分类）=====
+        self._open_box(("all", "pet"))
         self._section("Live2D 与立绘", "🎭")
         # 人脸识别相关设置已迁移至「插件 → 人脸识别 → 设置」（face_recognition_enabled/
         # camera_enabled/camera_id/camera_interval 由插件设置界面统一管理）
@@ -202,12 +208,12 @@ class PCLSettingsPanel(QWidget):
         pm_lbl.setFont(QFont("Microsoft YaHei", int(12 * S), QFont.Bold))
         pm_lbl.setStyleSheet(f"color: {Color1.name()}; margin-top: {int(14*S)}px;")
         self._cur_layout.addWidget(pm_lbl)
-        self._add_slider("qq_private_enable", "允许回复私信（总开关）", ["true", "false"], "true",
+        self._add_slider("qq_private_enable", "允许回复私信（总开关）", ["false", "true"], "true",
                          hint="关闭后完全不回复任何私信（连主人也不回）。改动即时生效，无需重启 QQ。")
-        self._add_slider("qq_private_reply_stranger", "回复陌生人私信", ["true", "false"], "true",
+        self._add_slider("qq_private_reply_stranger", "回复陌生人私信", ["false", "true"], "true",
                          hint="非好友（临时会话/陌生网友）发来的私信是否回复。"
                               "关闭后只忽略陌生人，好友与主人不受影响。")
-        self._add_slider("qq_private_reply_friend", "回复好友私信", ["true", "false"], "true",
+        self._add_slider("qq_private_reply_friend", "回复好友私信", ["false", "true"], "true",
                          hint="好友（含从群里点开的临时会话）发来的私信是否回复。")
         self._add_slider("qq_private_master_only", "只回复主人私信", ["false", "true"], "false",
                          hint="开启后仅回复主人白名单里的 QQ 私信（覆盖上面两个范围开关）。")
@@ -217,7 +223,7 @@ class PCLSettingsPanel(QWidget):
         self._add_slider("qq_send_voice", "QQ 语音消息 (F5-TTS)", ["false", "true"], "false")
         self._add_slider("qq_vision_enabled", "QQ 图片识别", ["false", "true"], "true")
         self._add_slider("qq_allow_groups", "QQ 群聊 (需@)", ["false", "true"], "true")
-        self._add_slider("qq_offline_enable", "QQ 离线补拉", ["true", "false"], "true",
+        self._add_slider("qq_offline_enable", "QQ 离线补拉", ["false", "true"], "true",
                          hint="启动时补回离线期间的消息。依赖 NapCat 支持 get_friend_msg_history；"
                               "若你的 NapCat 不支持导致启动慢/连接异常，可在此关闭")
         self._add_slider("qq_auto_offline_enable", "QQ 空闲自动离线", ["false", "true"], "false",
@@ -357,6 +363,11 @@ class PCLSettingsPanel(QWidget):
         for _k, _b in getattr(self, "_cat_btns", {}).items():
             _b.setChecked(_k == key)
         self._apply_cat_filter()
+        # 切分类后回到顶部：否则从长页面底部切到短分类会停在空白处，看着像"没内容"
+        try:
+            self._scroll.verticalScrollBar().setValue(0)
+        except Exception:
+            pass
 
     def _apply_cat_filter(self):
         f = getattr(self, "_cat_filter", "all")

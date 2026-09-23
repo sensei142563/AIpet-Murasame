@@ -314,6 +314,27 @@ def dark_palette(accent="#4c8dff"):
     return p
 
 
+def install_no_wheel():
+    """全局：滑块 / 数字框 / 下拉框**不响应滚轮**（防止滚动页面时误改数值）。
+
+    用户实测反馈：Live2D 调参的滑块被滚轮碰一下就跳，太敏感 → 统一改成必须鼠标拖动。
+    做法是把这三类控件的 wheelEvent 覆盖为 ignore()：事件被忽略后会继续向上传给父级，
+    所以**页面照常滚动**，只有数值不动。
+    （设置页原来靠 _block_wheel 逐个控件处理，漏一个就中招；这里一次覆盖所有面板——
+      角色向导 / 主题页 / 触摸编辑器 / 立绘工坊里那些没人记得屏蔽的滑块也一并生效。）
+    """
+    from PyQt5.QtWidgets import QSlider, QAbstractSpinBox, QComboBox
+
+    def _ignore_wheel(self, ev):
+        ev.ignore()          # 不消费事件 → 父级滚动区照常滚动
+
+    for cls in (QSlider, QAbstractSpinBox, QComboBox):
+        try:
+            cls.wheelEvent = _ignore_wheel
+        except Exception:
+            pass
+
+
 def install(app: QApplication = None, accent="#4c8dff"):
     """安装全局 QSS + 深色调色板（幂等）。应在创建主窗口前调用。"""
     global _installed
@@ -325,6 +346,7 @@ def install(app: QApplication = None, accent="#4c8dff"):
         app.setPalette(dark_palette(accent))
         app.setStyleSheet(silicon_qss(accent=accent))
         app.setFont(QFont(M.font, M.font_size))
+        install_no_wheel()                     # 滚轮不许改数值（见该函数说明）
         _installed = True
         print("[SiliconUI] 新界面样式已加载（亚克力 / 圆角 / 深色调色板 / 强调色）")
         return True
