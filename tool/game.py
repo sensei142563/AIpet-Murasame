@@ -526,13 +526,47 @@ def _ask(system: str, user: str, max_tokens: int = 300) -> str:
         return ""
 
 
+_shot = {"hash": 0}      # 最近一次"看画面"的指纹（动作后校验：点了之后有没有反应）
+
+
+def _verify_changed():
+    """动作后校验：这一步之后画面变了多少（<0 = 读不到）。
+
+    参考开源 GUI Agent 的 "act → verify" 做法：点完一动不动就说明这一步没用，
+    该换个位置/换个做法 —— 而不是傻重复（盲点同一个地方正是"没正常游玩"的原因之一）。
+    """
+    try:
+        from tool.screen_capture import (capture_qimage, capture_window_qimage,
+                                         quick_hash, hash_distance)
+        _h = _state.get("hwnd")
+        img = capture_window_qimage(_h) if _h else None
+        if img is None:
+            img = capture_qimage()
+        if img is None:
+            return -1.0
+        _now = quick_hash(img)
+        _old = _shot.get("hash") or 0
+        if not _now or not _old:
+            return -1.0
+        return hash_distance(_now, _old) / 256.0
+    except Exception:
+        return -1.0
+
+
 def _look() -> str:
     """看一眼游戏画面（小图 + 很短的回答，越快越好）"""
     try:
         import tempfile
-        from tool.screen_capture import capture_qimage, is_blank
+        from tool.screen_capture import (capture_qimage, is_blank,
+                                         capture_window_qimage, quick_hash)
         from tool.chat import describe_image
-        img = capture_qimage()
+        # ★ 只抓**游戏窗口**的干净画面：抓整屏会把桌宠自己、任务栏一起喂给视觉模型，
+        #   实测它常把桌宠认成画面内容（"这是 RPG 的标题界面"✗）。参考开源 GUI Agent 的做法：
+        #   喂给模型的画面越干净，判断越准。抓不到窗口再退回整屏。
+        _h = _state.get("hwnd")
+        img = capture_window_qimage(_h) if _h else None
+        if img is None:
+            img = capture_qimage()
         if img is None:
             return "（看不到画面）"
         os.makedirs("tmp", exist_ok=True)
@@ -540,13 +574,18 @@ def _look() -> str:
         img.save(p, "PNG")
         if is_blank(img):
             return "（屏幕是黑的，可能游戏是独占全屏，看不到内容）"
+        try:
+            _shot["hash"] = quick_hash(img)      # 记下这一眼，动作后拿来比
+        except Exception:
+            _shot["hash"] = 0
         desc = describe_image(
             p, max_side=640, max_new=100,
-            prompt=("这是主人正在玩的游戏画面。★ 如果画面里有那个 AI 桌宠窗口（一个动漫角色、"
-                    "半透明小窗），那是**你自己**，请忽略它，重点描述后面的游戏画面。"
-                    "用两句话说清：① 这是什么游戏、什么类型；"
-                    "② 现在是什么画面（标题界面/对话/选项/战斗/地图），以及**画面里能点的按钮或选项**"
-                    "（说出文字和大概位置，比如「下方中间有个开始按钮」）；"
+            prompt=("这是主人正在玩的游戏画面（只截了这个游戏的窗口）。"
+                    "★ 万一画面里出现了那个 AI 桌宠窗口（动漫角色、半透明小窗），那是**你自己**，"
+                    "请忽略它，只看游戏。"
+                    "用两句话说清：① 这是什么游戏、画面主体是什么；"
+                    "② 现在是什么界面（标题/对话/选项/战斗/地图/结算），以及**画面里能点的东西**"
+                    "（按钮、选项、道具…说出上面的文字和大概位置，比如「下方中间有个继续按钮」）。"
                     "如果是对话/文字类，就说「点哪里能继续」。不要客气话，直接说内容。"))
         return str(desc or "").strip() or "（没看清）"
     except Exception as e:
@@ -730,6 +769,10 @@ def _planner_system(name: str, goal: str, controls: str) -> str:
         "每轮只输出 1~3 行动作，格式：\n"
         "【键鼠】点击 800 250 / 【键鼠】按键 space / 【键鼠】按键 1 / 【键鼠】输入 名字 / 【键鼠】等待 1.5\n"
         "★ 一轮动一下就好，别一口气点一堆；不确定就先写「【键鼠】等待 1.5」再看下一轮。\n"
+        "★★ **点不准就别猜像素**：用方位词更稳 —— 中央／左上／右上／左下／右下／顶部／底部／"
+        "中下部／中间。桌宠会按屏幕比例换算位置；「点击 960 650」这种瞎猜的像素反而容易点空。\n"
+        "★★ **点完看效果**：上一步如果「画面一点没变」说明没生效 —— 下一轮**换个位置**"
+        "（同一个地方再点是白点）。\n"
         "★ **视觉小说 / 文字冒险**：每轮就写一行「【键鼠】点击 960 650」或「【键鼠】按键 space」"
         "（点画面中下部、或按空格就是「继续」）；出现选项就点那个选项的位置。"
         "**不要停下来问主人、也不要等他确认**（他一开口你就会自动停下）。\n"
@@ -827,7 +870,20 @@ def _loop(minutes: float, pet_name: str):
             _last_acts = list(acts)          # 记下来：下一轮可以先快进重复它
             done = _pc.execute(acts, notify=None, no_dup=True)
             last = _pc.describe(done) if done else "（一个都没做成）"
-            time.sleep(0.6)
+            time.sleep(0.5)
+            # ★ 动作后校验（参考开源 GUI Agent 的 act→verify）：这一步到底有没有效果？
+            #   画面一点没变 → 说明点空了 → 下一轮强制完整看一次、且**不再快进重复它**
+            #   （盲点同一个地方正是"没正常游玩"的典型症状）。
+            _chg = _verify_changed()
+            # 阈值 0.02：实测游戏画面本身有微弱待机动画（指纹基线约 0.023），
+            # 低于这个数就认为"这一步没生效，点空了"。
+            if _chg >= 0 and _chg < 0.02:
+                _log(f"⚠ 上一步好像没生效（画面只变了 {_chg:.3f}）→ 下一轮完整看一次，别盲重复")
+                last = f"{last}（但画面一点没变，可能没生效）"
+                _reps_done = FAST_REPEAT
+                _last_acts = []
+            elif _chg >= 0:
+                _log(f"这一步画面变化 {_chg:.3f}（有反应）")
         else:
             reason = "玩了好多轮了，我先停一下。"
     except Exception as e:

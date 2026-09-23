@@ -2648,6 +2648,16 @@ class Murasame(QLabel):
                     if _q is None:
                         _q = []
                         self._pending_msgs = _q
+                    # ★ 去重（2026-09-24 实测：玩游戏时"你做完了一次操作"这类系统消息
+                    #   会把队列堆到 6 条，她一直在"回排队的消息"，看起来就像没在好好玩）。
+                    #   同一类系统提示只留最新的一条；主人的话永远保留。
+                    _t = str(text or "")
+                    _kind = _t[:_14]
+                    if role != "user" and _q:
+                        for _i in range(len(_q) - 1, -1, -1):
+                            if str(_q[_i][0])[:_14] == _kind:
+                                _q.pop(_i)
+                                print("[桌宠] 🧹 队列里同类的系统提示已合并（只留最新一条）")
                     if len(_q) < 8:
                         _q.append((text, role))
                         print(f"[桌宠] ⏳ 她还在说话/思考，这条先排队（队列 {len(_q)}）：{str(text)[:20]}")

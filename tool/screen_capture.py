@@ -121,6 +121,96 @@ def capture_qimage(index: int = None):
         return None
 
 
+def capture_window_qimage(hwnd, index: int = None):
+    """只抓**某个窗口**的画面（游戏用）——返回 QImage；失败退回"屏幕裁剪"。
+
+    为什么要它（2026-09-24 用户反馈"恶魔轮盘没正常游玩"）：
+      以前游戏里看画面是抓**整块屏幕** → 桌宠窗口、任务栏、别的窗口全在里面，
+      本地小视觉模型经常把 **桌宠自己** 或别的东西描述成画面内容（实测把它认成
+      "RPG 的标题界面" ✗）→ 计划就离谱了。
+      这里先试 PrintWindow（能拿到窗口自己的内容，被挡住也行），失败再退回按窗口矩形从
+      整屏里裁一块。
+
+    参考做法：开源 GUI Agent（OmniParser / SeeAct / UI-TARS 那类）都强调
+      **喂给模型的画面要干净**（只含目标窗口），别把无关东西混进去。
+    """
+    try:
+        from PyQt5.QtGui import QImage
+        import ctypes
+        from ctypes import wintypes as wt
+        u = ctypes.windll.user32
+        g = ctypes.windll.gdi32
+        hwnd = int(hwnd or 0)
+        if not hwnd:
+            return None
+        r = wt.RECT()
+        if not u.GetWindowRect(hwnd, ctypes.byref(r)):
+            return None
+        w, h = int(r.right - r.left), int(r.bottom - r.top)
+        if w <= 8 or h <= 8 or w > 20000 or h > 20000:
+            return None
+        # ① PrintWindow（含 PW_RENDERFULLCONTENT，DWM 合成窗口/DirectX 也大多能拿到）
+        try:
+            hdc = u.GetWindowDC(hwnd)
+            mem = g.CreateCompatibleDC(hdc)
+            bmp = g.CreateCompatibleBitmap(hdc, w, h)
+            g.SelectObject(mem, bmp)
+            PW_RENDERFULLCONTENT = 0x00000002
+            ok = u.PrintWindow(hwnd, mem, PW_RENDERFULLCONTENT)
+            if ok:
+                bmi = _BITMAPINFO()
+                bmi.bmiHeader.biSize = ctypes.sizeof(_BITMAPINFOHEADER)
+                bmi.bmiHeader.biWidth = w
+                bmi.bmiHeader.biHeight = -h
+                bmi.bmiHeader.biPlanes = 1
+                bmi.bmiHeader.biBitCount = 32
+                bmi.bmiHeader.biCompression = BI_RGB
+                buf = ctypes.create_string_buffer(w * h * 4)
+                got = g.GetDIBits(mem, bmp, 0, h, buf, ctypes.byref(bmi), DIB_RGB_COLORS)
+                g.DeleteObject(bmp)
+                g.DeleteDC(mem)
+                u.ReleaseDC(hwnd, hdc)
+                if got:
+                    img = QImage(buf.raw, w, h, w * 4, QImage.Format_RGB32).copy()
+                    if not is_blank(img):
+                        return img
+            else:
+                g.DeleteObject(bmp)
+                g.DeleteDC(mem)
+                u.ReleaseDC(hwnd, hdc)
+        except Exception:
+            pass
+        # ② 退回：从整屏里按窗口矩形裁一块（窗口在最前面时效果一样）
+        img = capture_qimage(index)
+        if img is None:
+            return None
+        x0 = max(0, int(r.left))
+        y0 = max(0, int(r.top))
+        x1 = min(img.width(), int(r.right))
+        y1 = min(img.height(), int(r.bottom))
+        if x1 - x0 < 8 or y1 - y0 < 8:
+            return None
+        return img.copy(x0, y0, x1 - x0, y1 - y0)
+    except Exception as e:
+        print(f"[抓屏] ⚠ 抓窗口失败: {type(e).__name__}: {e}")
+        return None
+
+
+def changed_ratio(a, b) -> float:
+    """两张图有多大差别（0~1，粗略：按 16x16 指纹差几位 / 256）
+
+    用来做**动作后校验**：点完之后画面一动不动 → 这一步没用，该换个位置
+    （开源 GUI Agent 里通用的 "act → verify" 思路；也能防住"盲点同一个地方"）。
+    """
+    try:
+        h1, h2 = quick_hash(a), quick_hash(b)
+        if not h1 or not h2:
+            return -1.0
+        return hash_distance(h1, h2) / 256.0
+    except Exception:
+        return -1.0
+
+
 def capture_png(path: str, index: int = None) -> bool:
     """抓屏并存成 PNG（后台线程可调用）"""
     try:

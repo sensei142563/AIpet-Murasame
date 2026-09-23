@@ -174,12 +174,19 @@ def check_wiring(results):
             __import__("tool.music", fromlist=["x"]))),
         ("视觉服务挂了能自愈", "def _ensure_local_vision" in inspect.getsource(C)
          and "_ensure_local_vision()" in inspect.getsource(C.describe_image)),
-        ("看游戏画面时忽略桌宠自己", "那是**你自己**，请忽略它" in inspect.getsource(
+        ("看游戏画面时忽略桌宠自己", "AI 桌宠窗口" in inspect.getsource(
             __import__("tool.game", fromlist=["x"])._look)),
         ("游戏：开始前确认窗口真的开着", "def find_game_window" in inspect.getsource(
             __import__("tool.game", fromlist=["x"]))
          and "find_game_window(name)" in inspect.getsource(
             __import__("tool.game", fromlist=["x"]).start)),
+        ("游戏：只截游戏窗口（画面干净）", "capture_window_qimage" in inspect.getsource(
+            __import__("tool.game", fromlist=["x"])._look)),
+        ("游戏：动作后校验（act→verify）", "def _verify_changed" in inspect.getsource(
+            __import__("tool.game", fromlist=["x"]))
+         and "_verify_changed()" in inspect.getsource(
+            __import__("tool.game", fromlist=["x"])._loop)),
+        ("队列去重（系统提示只留最新）", "队列里同类的系统提示已合并" in src_m),
         ("状态等她说完再显示（不挤台词）", "_pending_status" in inspect.getsource(M.Murasame._on_worker_status)
          and "_flush_pending_status" in src_m
          and "_flush_pending_status" in inspect.getsource(M.Murasame.__init__)),
