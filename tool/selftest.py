@@ -171,6 +171,14 @@ def check_wiring(results):
          and "def ensure_sound" in inspect.getsource(__import__("tool.music", fromlist=["x"]))),
         ("音乐：自动暂停再播放（重拉播放流）", "def _kick_playback" in inspect.getsource(
             __import__("tool.music", fromlist=["x"]))),
+        ("视觉服务挂了能自愈", "def _ensure_local_vision" in inspect.getsource(C)
+         and "_ensure_local_vision()" in inspect.getsource(C.describe_image)),
+        ("看游戏画面时忽略桌宠自己", "那是**你自己**，请忽略它" in inspect.getsource(
+            __import__("tool.game", fromlist=["x"])._look)),
+        ("视觉小说：直接开始、别问主人", "视觉小说 / 文字冒险" in inspect.getsource(
+            __import__("tool.game", fromlist=["x"])._planner_system)
+         and "视觉小说 / 文字冒险" in inspect.getsource(
+            __import__("tool.game", fromlist=["x"]).prompt_rules)),
         ("寒暄提示词带标记（自动 no_act）", "只是寒暄" in inspect.getsource(M.Murasame.start_thread)),
         ("问候语禁止写操作指令", "只是寒暄" in inspect.getsource(
             __import__("tool.care", fromlist=["x"]).startup_line)),

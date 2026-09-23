@@ -607,6 +607,68 @@ def _local_vision_describe(image_path: str, prompt: str = "",
     return str(d.get("text") or "").strip()
 
 
+def _ensure_local_vision() -> bool:
+    """本地视觉服务不在就试着拉起来（返回是否可用）。
+
+    为什么需要（2026-09-24）：这个服务是独立进程，可能已经不在（手动起的随 shell 结束、
+    被清理、崩了），而原来只是"回落云端"。云端要是没配好，她就**彻底看不见**
+    （用户反馈"让她玩游戏她不动""说看不到画面"就是这么来的）。
+    这里照启动器的做法：找一个带显卡加速的运行时 → 起服务 → 等健康检查（最多 ~20 秒）。
+    """
+    import subprocess as _sp
+    import time as _t
+    import urllib.request as _ur
+    try:
+        port = int(get_config("./config.json").get("vision_local_port") or 28460)
+    except Exception:
+        port = 28460
+    url = f"http://127.0.0.1:{port}/"
+
+    def _alive() -> bool:
+        try:
+            with _ur.urlopen(url, timeout=2.5) as r:
+                return r.status == 200
+        except Exception:
+            return False
+
+    if _alive():
+        return True
+    script = os.path.join(os.path.abspath("."), "tool", "vision_service.py")
+    if not os.path.isfile(script):
+        print(f"[{now_time()}] [vision-local] 找不到 {script}，没法自启")
+        return False
+    py = ""
+    try:
+        from tool import vision_setup as _vs
+        cfg = get_config("./config.json")
+        py = _vs.find_gpu_runtime(os.path.abspath("."), cfg) or ""
+        if not py:
+            _cand = _vs.find_runtime(os.path.abspath("."), cfg)
+            if _cand and _vs._has_torch(_cand):
+                py = _cand
+    except Exception as e:
+        print(f"[{now_time()}] [vision-local] 运行时探测失败: {type(e).__name__}: {e}")
+    if not py:
+        print(f"[{now_time()}] [vision-local] 没找到能跑视觉的运行时，没法自启")
+        return False
+    try:
+        os.makedirs("data", exist_ok=True)
+        log = open(os.path.join("data", "vision_service.log"), "a", encoding="utf-8", errors="replace")
+        _sp.Popen([py, script], cwd=os.path.abspath("."), stdout=log, stderr=log,
+                  creationflags=getattr(_sp, "CREATE_NO_WINDOW", 0))
+        print(f"[{now_time()}] [vision-local] 服务不在 → 已把它拉起来（{os.path.basename(py)}），等它就绪…")
+    except Exception as e:
+        print(f"[{now_time()}] [vision-local] 拉起服务失败: {type(e).__name__}: {e}")
+        return False
+    for _i in range(20):                    # 模型要加载，最多等 ~20 秒
+        _t.sleep(1.0)
+        if _alive():
+            print(f"[{now_time()}] [vision-local] 服务已就绪")
+            return True
+    print(f"[{now_time()}] [vision-local] 等了 20 秒还没就绪（模型加载慢？）")
+    return False
+
+
 def describe_image(image_path: str, prompt: str = "",
                    max_side: int = 0, max_new: int = 0) -> str:
     """统一的「看图说话」入口：按设置走本地视觉模型或云端 API。
@@ -622,7 +684,16 @@ def describe_image(image_path: str, prompt: str = "",
                 return txt
             print(f"[{now_time()}] [vision-local] ⚠ 空描述 → 回落云端")
         except Exception as e:
-            print(f"[{now_time()}] [vision-local] ⚠ 本地视觉不可用（{type(e).__name__}: {e}）→ 回落云端")
+            print(f"[{now_time()}] [vision-local] ⚠ 本地视觉不可用（{type(e).__name__}: {e}）→ 先试着把服务拉起来")
+            try:
+                if _ensure_local_vision():
+                    txt2 = _local_vision_describe(image_path, prompt, max_side=max_side, max_new=max_new)
+                    if txt2:
+                        print(f"[{now_time()}] [vision-local] 自启后描述完成（{len(txt2)} 字）")
+                        return txt2
+            except Exception as e2:
+                print(f"[{now_time()}] [vision-local] 自启后重试也失败（{type(e2).__name__}）")
+            print(f"[{now_time()}] [vision-local] → 回落云端")
     from tool.cloud_API_chat import cloud_vl
     return cloud_vl(image_path)
 

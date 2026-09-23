@@ -231,7 +231,11 @@ def _look_once() -> str:
         if _is_blank_img(img):
             return "（屏幕是黑的，看不到内容）"
         # 任务里用更小的图（约 5 秒，比正常快档还快），描述也短一点
-        desc = describe_image(p, max_side=640, max_new=120)
+        desc = describe_image(
+            p, max_side=640, max_new=120,
+            prompt=("这是主人电脑的屏幕截图。★ 如果画面里有那个 AI 桌宠窗口（一个动漫角色、"
+                    "半透明小窗），那是桌宠自己，请忽略它，重点描述**后面真正要操作的窗口/界面**"
+                    "（是什么软件、页面内容、有哪些按钮）。用两三句话直接说内容，不要客气话。"))
         return str(desc or "（看不清）")
     except Exception as e:
         return f"（看屏幕失败：{type(e).__name__}）"
