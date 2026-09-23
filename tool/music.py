@@ -1,28 +1,33 @@
 # -*- coding: utf-8 -*-
-"""点歌：让她真的去网易云搜索并播放。
+"""网易云音乐的完整控制系统（全部走 UI Automation：后台操作、不切窗口、不动鼠标）。
 
-为什么这么做（现场勘查这台机器的结论）：
-    * 网易云在运行（进程 cloudmusic），窗口类名 `OrpheusBrowserHost`，
-      **窗口标题就是当前播放的歌**（例如"烟袋斜街 - 接个吻，开一枪/SaMZIng"）
-      → 这就是最可靠的"成功校验点"。
-    * `orpheus://song/<id>` 协议**没有注册**（Store 版没写注册表），本地 API 端口
-      （27232/27233）也没开 → 没法用官方协议/接口点播。
-    * 搜索接口可用：https://music.163.com/api/search/get 返回真实结果。
-    所以：**HTTP 搜索拿到歌名歌手 → 驱动客户端界面搜索 → 播放 → 用窗口标题验证**
-    （标题里出现歌名/关键词就算点上了；没变就再试，最后如实说没成）。
+她能做的（写一行标记就行）：
+    【音乐】播放 歌名 歌手       搜索并播放（后台：写搜索框 → 按 search → 按第一条的播放）
+    【音乐】暂停 / 继续          播放·暂停切换
+    【音乐】下一首 / 上一首
+    【音乐】单曲循环 / 列表循环 / 随机播放 / 顺序播放
+    【音乐】我喜欢              播放「我喜欢的音乐」
+    【音乐】播放歌单 <名字>      切到某个歌单并播放全部
+    【音乐】收藏 / 歌词 / 静音
+    【音乐】在放什么            现在放的是什么、在不在放
 
-标记（她说，桌宠执行）：
-    【音乐】播放 沦陷 dj        ← 点播（搜索 + 播放）
-    【音乐】暂停 / 继续 / 下一首 / 上一首 / 停止
+实现要点（都是在这台机器上实测出来的结论）：
+  · 网易云是 CEF 界面：MSAA 只能拿到窗口层，**UIA 树是完整的**（UIA 需要 comtypes）。
+  · 播放条按钮的 name 就是功能名：play / next / pre / collect / lyric / Volume1 / playlist；
+    循环方式按钮的 name 会在 shuffle → order → loop → singleloop 之间变，
+    所以"设成单曲循环"就是**按到 name 变成 singleloop 为止**。
+  · 侧边栏「我喜欢的音乐」的 AutomationId 是 left_nav_myFav；歌单页上有「播放全部」按钮。
+  · 全程不需要焦点（SetValue / Invoke 都是后台调用）—— 这就是主人要的"不显示窗口执行"。
+  · 播放真实性校验：窗口标题 = 当前歌曲；播放进度（滑块数值）在变 = 真的在放。
+  · UIA 不可用（没装 comtypes）时退回系统媒体键，并如实说明。
 """
 import ctypes
-import ctypes.wintypes as wt
 import os
 import re
 import time
 
 MUSIC_MARK = "【音乐】"
-_WINDOW_CLASS = "OrpheusBrowserHost"     # 网易云客户端主窗口
+_WINDOW_CLASS = "OrpheusBrowserHost"
 _SEARCH_URL = "https://music.163.com/api/search/get"
 _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/120.0 Safari/537.36")
@@ -34,12 +39,19 @@ _APP_HINTS = (
 
 _LINE = re.compile("[【\\[]\\s*音乐\\s*[】\\]]\\s*([^\"\\]\\n]{1,80})")
 
-# 同一个播放请求同时只能跑一个（她自己会连着催；两个自动化抢鼠标键盘谁都点不成）
+# 同一个音乐操作同时只能跑一个（她连着催时，两个自动化会互相抢）
 _busy = [False]
-# 每首歌的尝试时间戳：短时间内试太多次就不试了，免得"一直重复搜索"
+# 每首歌的尝试时间戳：短时间内试太多次就不再试，免得"一直重复搜索"
 _attempts = {}
-_ATTEMPT_WINDOW = 300      # 5 分钟内
-_ATTEMPT_LIMIT = 2         # 同一首歌最多试 2 次
+_ATTEMPT_WINDOW = 300
+_ATTEMPT_LIMIT = 2
+# 歌单列表缓存（读侧边栏要零点几秒，不必每轮都读）
+_playlists_cache = {"t": 0.0, "v": []}
+_PLAYLIST_TTL = 60.0
+
+# 循环方式：按钮 name ↔ 说法
+_LOOP_MODES = {"singleloop": "单曲循环", "loop": "列表循环",
+               "shuffle": "随机播放", "order": "顺序播放"}
 
 
 def _log(msg: str):
@@ -49,63 +61,75 @@ def _log(msg: str):
         pass
 
 
-# 主人这句话是不是在"点歌/控制音乐"（自然语言判断，parse() 只看标记，不够用）
-_MUSIC_WORDS = ("点歌", "放一首", "放首歌", "放歌", "来一首", "来首歌", "来首", "听歌",
-                "放音乐", "放点音乐", "换首歌", "换一首", "下一首", "上一首",
-                "暂停音乐", "继续放", "别放歌", "关掉音乐")
-
-
-def looks_like_music_request(text: str) -> bool:
-    """主人是不是在让你点歌/控制音乐（用来避免键鼠任务循环跟点歌抢操作）"""
-    try:
-        t = str(text or "")
-        if not t:
-            return False
-        return any(w in t for w in _MUSIC_WORDS)
-    except Exception:
-        return False
-
-
 def prompt_rules() -> str:
-    """交给模型的能力说明"""
+    """交给模型的能力说明（自动带上主人的歌单，方便她自己挑）"""
+    pls = list_playlists()
+    pl_line = ""
+    if pls:
+        pl_line = "主人的歌单（可以自己挑着放）：" + "、".join(pls[:8]) + "。\n"
     return (
-        "【点歌 / 控制音乐（已开启）】你可以真的操作网易云音乐，在回复里单独写一行：\n"
-        "【音乐】播放 歌名 歌手（例如【音乐】播放 沦陷 dj）——桌宠会去搜索并播放它\n"
-        "【音乐】暂停 / 【音乐】继续 / 【音乐】下一首 / 【音乐】上一首\n"
-        "★ 主人说「帮我点歌」「放一首…」「来首…」时就用这个，不要自己去点搜索框猜坐标。\n"
-        "★ 一次只点一首；点完用你自己的话跟他说放的是哪首（桌宠会把真正的歌名告诉你）。\n"
-        "★ 用这个的时候**不要再写【键鼠】指令**：桌宠点歌时会自己操作搜索框和回车，"
-        "你再动手就会两边抢鼠标，结果谁都点不成（实测就是这么失败的）。\n"
-        "★ 如果桌宠告诉你「没放上 / 没能确认播放」，**不要自己重复点歌**（重复请求会被拒绝）："
-        "如实跟主人说没点上、让他手动按一下播放键，或者等他再喊你一次。\n"
+        "【音乐控制（网易云，已开启）】你可以自己操作网易云音乐，在回复里单独写一行：\n"
+        "【音乐】播放 歌名 歌手（例如【音乐】播放 沦陷 dj）\n"
+        "【音乐】暂停 / 继续 / 下一首 / 上一首\n"
+        "【音乐】单曲循环 / 列表循环 / 随机播放 / 顺序播放\n"
+        "【音乐】我喜欢（直接放「我喜欢的音乐」）／【音乐】播放歌单 名字\n"
+        "【音乐】收藏 / 歌词 / 静音 / 在放什么\n"
+        + pl_line +
+        "★ 这些都是**后台执行**：不切走主人的画面、不动鼠标，放心用。\n"
+        "★ 主人说「帮我点歌」「放一首…」「换首歌」「暂停」「单曲循环」时就用它，"
+        "不要自己去点搜索框猜坐标。\n"
+        "★ 一次只做一件事；做完用你自己的话跟主人说一声。\n"
+        "★ 自主模式下（主人没开口）你也可以**想放什么就放什么**：他同一首听很久了、"
+        "或者看不出在忙什么，就给他换一首合适的；但别太频繁，一次会话换一两次就够。\n"
+        "★ 如果桌宠说「没放上 / 没做成」，不要自己重复点歌（重复请求会被拒绝）："
+        "如实跟主人说没做成，或者等他再喊你。\n"
         "★ 标记那一行不会念出来，也不会显示给主人看。"
     )
 
-
-# ─────────────────────── 解析 / 清理 ───────────────────────
 
 def _norm(s: str) -> str:
     return re.sub("\\s+", " ", str(s or "")).strip()
 
 
+# ─────────────────────── 解析 ───────────────────────
+
 def parse(text: str) -> list:
-    """解析出要做的音乐动作：[(动作, 参数)]"""
+    """解析【音乐】标记 → [(动作, 参数)]"""
     out = []
     for m in _LINE.finditer(str(text or "")):
         s = _norm(m.group(1)).strip("：:，,。")
         if not s:
             continue
         low = s.lower()
-        if any(k in s for k in ("暂停", "停一下", "pause")):
+        if any(k in s for k in ("暂停", "停一下", "pause")) or s == "停":
             out.append(("pause", ""))
-        elif any(k in s for k in ("继续", "播放吧", "接着", "resume", "play_pause")):
+        elif any(k in s for k in ("继续", "接着放", "resume")):
             out.append(("resume", ""))
-        elif any(k in s for k in ("下一首", "下首", "下一曲", "next")):
+        elif any(k in s for k in ("下一首", "下首", "下一曲", "切歌", "next")):
             out.append(("next", ""))
         elif any(k in s for k in ("上一首", "上首", "上一曲", "prev")):
             out.append(("prev", ""))
-        elif any(k in s for k in ("停止", "关掉音乐", "stop")):
-            out.append(("stop", ""))
+        elif any(k in s for k in ("单曲循环", "单曲")):
+            out.append(("loop_single", ""))
+        elif any(k in s for k in ("列表循环", "循环播放", "循环")):
+            out.append(("loop_list", ""))
+        elif any(k in s for k in ("随机", "乱序", "shuffle")):
+            out.append(("loop_random", ""))
+        elif any(k in s for k in ("顺序播放", "顺序", "order")):
+            out.append(("loop_order", ""))
+        elif any(k in s for k in ("我喜欢", "喜欢的歌", "收藏的歌")):
+            out.append(("liked", ""))
+        elif s.startswith("播放歌单") or s.startswith("切歌单") or s.startswith("换个歌单"):
+            q = re.sub("^(播放歌单|切歌单|换个歌单|换歌单)", "", s).strip("：:，,。\"'「」")
+            out.append(("playlist", q))
+        elif any(k in s for k in ("收藏", "喜欢这首", "红心")):
+            out.append(("favorite", ""))
+        elif "歌词" in s:
+            out.append(("lyric", ""))
+        elif any(k in s for k in ("静音", "音量")):
+            out.append(("mute", ""))
+        elif any(k in s for k in ("在放什么", "放的是什么", "当前歌曲", "现在放的", "状态")):
+            out.append(("now", ""))
         elif s.startswith("播放") or s.startswith("放") or s.startswith("点歌") or low.startswith("play"):
             q = re.sub("^(播放|放一首|放|点歌|点一首|play|放一下)", "", s).strip("：:，,。\"'「」")
             if q:
@@ -123,21 +147,34 @@ def strip(text: str) -> str:
     try:
         if not _LINE.search(src):
             return src
-        out = _LINE.sub("", src).strip()
-        out = re.sub("\\n{2,}", chr(10), out)
-        return out.strip()
+        return re.sub("\\n{2,}", chr(10), _LINE.sub("", src)).strip()
     except Exception:
         return src
 
 
-# ─────────────────────── 搜索 ───────────────────────
+def looks_like_music_request(text: str) -> bool:
+    """主人是不是在让你点歌/控制音乐（避免键鼠任务循环跟点歌抢操作）"""
+    try:
+        t = str(text or "")
+        if not t:
+            return False
+        kws = ("点歌", "放一首", "放首歌", "放歌", "来一首", "来首歌", "来首", "听歌",
+               "放音乐", "放点音乐", "换首歌", "换一首", "换歌", "下一首", "上一首",
+               "暂停音乐", "继续放", "关掉音乐", "我喜欢的音乐", "静音",
+               "单曲循环", "随机播放", "列表循环", "歌词")
+        return any(w in t for w in kws)
+    except Exception:
+        return False
+
+
+# ─────────────────────── 搜索接口（只取歌名歌手） ───────────────────────
 
 def search(query: str, limit: int = 5) -> list:
     """搜歌 → [(id, 歌名, 歌手, 专辑)]"""
     try:
         import requests
-        from tool.net_env import bypass_proxy_for_local
         try:
+            from tool.net_env import bypass_proxy_for_local
             bypass_proxy_for_local()
         except Exception:
             pass
@@ -151,8 +188,8 @@ def search(query: str, limit: int = 5) -> list:
         for s in songs:
             try:
                 _art = "/".join(a.get("name", "") for a in (s.get("artists") or []) if a.get("name"))
-                _alb = ((s.get("album") or {}).get("name") or "")
-                out.append((int(s.get("id")), str(s.get("name") or ""), _art, _alb))
+                out.append((int(s.get("id")), str(s.get("name") or ""), _art,
+                            str((s.get("album") or {}).get("name") or "")))
             except Exception:
                 continue
         return out
@@ -161,7 +198,7 @@ def search(query: str, limit: int = 5) -> list:
         return []
 
 
-# ─────────────────────── Windows 窗口 / 键盘 / 剪贴板 ───────────────────────
+# ─────────────────────── 窗口 / 退路键鼠 ───────────────────────
 
 def _u32():
     return ctypes.windll.user32
@@ -170,13 +207,13 @@ def _u32():
 def find_window():
     """找网易云主窗口（没开返回 0）"""
     try:
-        h = _u32().FindWindowW(_WINDOW_CLASS, None)
-        return int(h or 0)
+        return int(_u32().FindWindowW(_WINDOW_CLASS, None) or 0)
     except Exception:
         return 0
 
 
 def window_title(hwnd) -> str:
+    """窗口标题 = 当前播放的歌（最可靠的状态来源）"""
     try:
         n = _u32().GetWindowTextLengthW(hwnd)
         buf = ctypes.create_unicode_buffer(n + 2)
@@ -193,69 +230,8 @@ def _foreground():
         return 0
 
 
-def _focus(hwnd) -> bool:
-    """把客户端窗口带到前台（成功返回 True）
-
-    ⚠ 这里**只用最朴素的做法**：ShowWindow + SetForegroundWindow。
-      曾经加过 AttachThreadInput 那种"绕前台锁"的写法，实测不但抢不到焦点，
-      还可能把调用线程和别人的输入队列挂在一起、在驱动/游戏全屏时卡住（
-      桌宠主线程就是这样被拖成"未响应"的），已经删掉。
-    """
-    try:
-        u = _u32()
-        SW_RESTORE = 9
-        u.ShowWindow(hwnd, SW_RESTORE)
-        u.SetForegroundWindow(hwnd)
-        time.sleep(0.25)
-        return _foreground() == int(hwnd)
-    except Exception:
-        return False
-
-
-def _set_clipboard(text: str) -> bool:
-    """把文字放进剪贴板（这样中文也能"打"进搜索框）"""
-    try:
-        u32, k32 = ctypes.windll.user32, ctypes.windll.kernel32
-        # ⚠ 64 位下必须声明返回类型：GlobalAlloc/GlobalLock 返回的是指针大小的句柄，
-        #   默认按 c_int 处理会被截断成 0 → 后面 memmove 到空指针（access violation）。
-        k32.GlobalAlloc.restype = ctypes.c_void_p
-        k32.GlobalAlloc.argtypes = [ctypes.c_uint, ctypes.c_size_t]
-        k32.GlobalLock.restype = ctypes.c_void_p
-        k32.GlobalLock.argtypes = [ctypes.c_void_p]
-        k32.GlobalUnlock.argtypes = [ctypes.c_void_p]
-        u32.SetClipboardData.restype = ctypes.c_void_p
-        u32.SetClipboardData.argtypes = [ctypes.c_uint, ctypes.c_void_p]
-        CF_UNICODETEXT = 13
-        GMEM_MOVEABLE = 0x0002
-        data = str(text)
-        if not u32.OpenClipboard(None):
-            _log("⚠ OpenClipboard 失败（别的程序占着剪贴板？）")
-            return False
-        try:
-            u32.EmptyClipboard()
-            size = (len(data) + 1) * ctypes.sizeof(ctypes.c_wchar)
-            h = k32.GlobalAlloc(GMEM_MOVEABLE, size)
-            if not h:
-                return False
-            p = k32.GlobalLock(h)
-            if not p:
-                _log("⚠ GlobalLock 返回空")
-                return False
-            buf = ctypes.create_unicode_buffer(data)
-            ctypes.memmove(ctypes.c_void_p(p), buf, size)
-            k32.GlobalUnlock(h)
-            if not u32.SetClipboardData(CF_UNICODETEXT, h):
-                return False
-            return True
-        finally:
-            u32.CloseClipboard()
-    except Exception as e:
-        _log(f"⚠ 写剪贴板失败: {e}")
-        return False
-
-
 def _keys(*seq):
-    """按顺序发送组合键/单键：('ctrl','f') 或 ('enter',) 或 ('media_next',)"""
+    """发组合键/单键（退路用）"""
     from pynput.keyboard import Controller as _K, Key
     kb = _K()
     _map = {"ctrl": Key.ctrl, "alt": Key.alt, "shift": Key.shift, "enter": Key.enter,
@@ -277,29 +253,22 @@ def _keys(*seq):
 
 
 def media(action: str) -> str:
-    """播放控制：用系统媒体键（网易云认这些键，稳定不依赖界面）"""
+    """退路：系统媒体键（只在部分网易云版本有效，Store 版实测无效）"""
     try:
-        if action == "pause" or action == "stop":
-            _keys("media_play")            # 播放/暂停 是同一个键
-            return "已经帮你暂停了。"
-        if action == "resume" or action == "play_pause":
-            _keys("media_play")
-            return "给你接着放了。"
+        if action in ("pause", "stop"):
+            _keys("media_play"); return "已经帮你暂停了。"
+        if action in ("resume", "play_pause"):
+            _keys("media_play"); return "给你接着放了。"
         if action == "next":
-            _keys("media_next")
-            return "换下一首了。"
+            _keys("media_next"); return "换下一首了。"
         if action == "prev":
-            _keys("media_prev")
-            return "回到上一首了。"
+            _keys("media_prev"); return "回到上一首了。"
     except Exception as e:
         return f"没控制上（{type(e).__name__}）。"
     return ""
 
 
-# ─────────────────────── 点播 ───────────────────────
-
 def _launch_client() -> bool:
-    """网易云没开就试着拉起来"""
     for p in _APP_HINTS:
         try:
             if p and os.path.exists(p):
@@ -308,7 +277,7 @@ def _launch_client() -> bool:
                 return bool(find_window())
         except Exception:
             continue
-    try:                                   # Store 版：从开始菜单找
+    try:
         os.startfile("shell:AppsFolder")
         time.sleep(1.0)
     except Exception:
@@ -316,149 +285,277 @@ def _launch_client() -> bool:
     return bool(find_window())
 
 
-def _win_rect(hwnd):
-    """窗口的屏幕矩形 (left, top, right, bottom)；拿不到就返回全 0（调用方必须判）
+# ─────────────────────── UIA：后台控制 ───────────────────────
 
-    ⚠ 以前这里写的是 `import ctypes as _c; _c.wintypes.RECT()` —— 而模块只 import 了
-      ctypes，干净环境下 **ctypes.wintypes 根本不存在** → 每次都抛异常被吞掉 →
-      返回 (0,0,0,0) → 搜索框候选位置全变成 (0,22) → 点歌每次都点到屏幕左上角，
-      也就是用户看到的"点击点到别的窗口上"。现在用模块顶部的 ctypes.wintypes，并且
-      调用方对 0 值必须直接放弃（_click_in_window 会拦）。
-    """
+def _uia():
+    from tool import uia as _u
+    return _u
+
+
+def uia_ready() -> bool:
     try:
-        u = _u32()
-        u.GetWindowRect.argtypes = [ctypes.c_void_p, ctypes.POINTER(wt.RECT)]
-        u.GetWindowRect.restype = ctypes.c_int
-        r = wt.RECT()
-        if not u.GetWindowRect(ctypes.c_void_p(int(hwnd)), ctypes.byref(r)):
-            return 0, 0, 0, 0
-        return int(r.left), int(r.top), int(r.right), int(r.bottom)
-    except Exception as e:
-        _log(f"⚠ 读窗口位置失败: {type(e).__name__}: {e}")
-        return 0, 0, 0, 0
-
-
-def _rect_ok(rect) -> bool:
-    """窗口矩形有效吗（0 或负尺寸都算无效）"""
-    try:
-        l, t, r, b = rect
-        return (r - l) > 50 and (b - t) > 50
+        return _uia().available()
     except Exception:
         return False
 
 
-def _click_in_window(hwnd, x: int, y: int) -> bool:
-    """只在**这个窗口的范围之内**点击；窗口位置读不到就直接不点（返回 False）。
-
-    为什么：以前会把候选坐标算在 (0,22) 这种地方，一点就点到别的窗口上去了
-    （用户反馈"有时候点击会点到别的窗口上"）。宁可这一轮说做不了，也不乱点。
-    """
-    rect = _win_rect(hwnd)
-    if not _rect_ok(rect):
-        _log("⚠ 读不到网易云窗口的位置 → 这次不点（绝不乱点屏幕）")
-        return False
-    l, t, r, b = rect
-    if not (l <= x <= r and t <= y <= b):
-        _log(f"⚠ 目标点 ({x},{y}) 不在窗口 {rect} 内 → 放弃这次点击")
-        return False
-    _click(x, y)
-    return True
-
-
-def _click(x: int, y: int):
-    """真实鼠标点击（点击本身就会把焦点给那个窗口，不依赖前台锁）"""
-    try:
-        u = _u32()
-        u.SetCursorPos(int(x), int(y))
-        time.sleep(0.12)
-        u.mouse_event(0x0002, 0, 0, 0, 0)      # LEFT DOWN
-        time.sleep(0.05)
-        u.mouse_event(0x0004, 0, 0, 0, 0)      # LEFT UP
-        time.sleep(0.2)
-    except Exception as e:
-        _log(f"⚠ 点击失败: {e}")
-
-
-def _search_box_candidates(hwnd) -> list:
-    """搜索框可能的几个位置（相对窗口：网易云的搜索框在顶部条偏左/居中）
-
-    实测这台机器上窗口是 377,95~1544,847（1167x752）：搜索框在顶部条上，
-    横向大约在窗口宽度的 33%/45%/55%/25% 处、纵向距顶 22px。挨个试，用
-    "窗口标题是否变成这首歌"来判定成功。点之前都会校验在窗口范围内（见 _click_in_window）。
-    """
-    l, t, r, b = _win_rect(hwnd)
-    if not _rect_ok((l, t, r, b)):
+def _walk_buttons(hwnd):
+    U = _uia()
+    root = U.root_for(hwnd)
+    if root is None:
         return []
     out = []
-    # ① 首选：用 UIA 读到的**真实搜索框**位置（实测 (703,116,915,146) 这种）
-    try:
-        from tool import uia as _uia
-        root = _uia.root_for(hwnd)
-        box = _uia.top_bar_edit(root, hwnd) if root is not None else None
-        r2 = _uia.rect_of(box) if box is not None else None
-        if r2 and (r2[2] - r2[0]) > 40:
-            out.append(((r2[0] + r2[2]) // 2, (r2[1] + r2[3]) // 2))
-            _log(f"UIA 读到的搜索框: {r2} → 点它的中心 {out[-1]}")
-    except Exception as _e:
-        _log(f"（UIA 读搜索框失败，用比例估算）{_e}")
-    # ② 退路：按窗口比例估算（按实测比例 703/377-1544 → 约 0.28w、y≈t+36）
-    w, h = max(1, r - l), max(1, b - t)
-    for fx, fy in ((0.37, 0.048), (0.30, 0.048), (0.45, 0.048)):
-        out.append((int(l + w * fx), int(t + h * fy)))
+    for el, nm, ct, aid in U.walk(root):
+        if ct == U.CT_BUTTON:
+            r = U.rect_of(el)
+            out.append((el, str(nm).strip(), r))
     return out
-def _uia_play(name: str, artist: str) -> str:
-    """用 UI Automation **在后台**点歌（不切窗口、不抢焦点、不动鼠标）。
 
-    返回：'ok' 成功 / 'fail' 没成 / '' 不可用（交给模拟键鼠那条老路）。
 
-    实测（这台机器）：网易云是 CEF 界面，MSAA 只给到窗口层，但 **UIA 树是完整的**：
-      顶部搜索框 bounds=(703,116,915,146)，旁边还有个 name='search' 的按钮，
-      搜索结果里第一条的按钮 name 含「播放」。设值 + 按按钮全程不需要焦点。
-    """
+def _player_button(hwnd, names):
+    """在播放条区域找按钮（按 name 匹配 + 用 y 坐标限定在播放条那一条上）"""
+    want = [n.lower() for n in names]
+    btns = _walk_buttons(hwnd)
+    y_ref = None
+    for _el, nm, r in btns:
+        if nm.lower() == "play" and r:
+            y_ref = r[1]
+            break
+    for el, nm, r in btns:
+        if nm.lower() in want:
+            if y_ref is None or not r or abs(r[1] - y_ref) <= 60:
+                return el, r
+    return None, None
+
+
+def _invoke_player(hwnd, names) -> bool:
+    U = _uia()
+    el, _r = _player_button(hwnd, names)
+    if el is None:
+        return False
+    ok = U.invoke(el)
+    if ok:
+        _log(f"后台按下播放条按钮「{names[0]}」（窗口没动）")
+    return bool(ok)
+
+
+def current_loop_mode(hwnd) -> str:
+    """当前循环方式（singleloop / loop / shuffle / order），读不到返回空"""
+    for _el, nm, _r in _walk_buttons(hwnd):
+        if nm.lower() in _LOOP_MODES:
+            return nm.lower()
+    return ""
+
+
+def set_loop_mode(hwnd, want: str) -> str:
+    """把循环方式按到想要的那个（按钮是循环切换的，最多按 4 次）"""
+    if not uia_ready():
+        return ""
     try:
-        from tool import uia as _uia
-        if not _uia.available():
+        cur = current_loop_mode(hwnd)
+        if cur == want:
+            return _LOOP_MODES[want]
+        for _ in range(4):
+            if not _invoke_player(hwnd, list(_LOOP_MODES.keys())):
+                break
+            time.sleep(0.7)
+            cur = current_loop_mode(hwnd)
+            if cur == want:
+                _log(f"循环方式已设为 {_LOOP_MODES[cur]}")
+                return _LOOP_MODES[want]
+        return _LOOP_MODES.get(cur, "")
+    except Exception as e:
+        _log(f"⚠ 设置循环方式失败: {e}")
+        return ""
+
+
+def progress_value(hwnd) -> float:
+    """播放进度（滑块数值）—— 用它判断到底在不在放"""
+    try:
+        U = _uia()
+        from comtypes.gen import UIAutomationClient as UIA
+        root = U.root_for(hwnd)
+        if root is None:
+            return -1.0
+        for el, nm, ct, _aid in U.walk(root):
+            if ct != U.CT_SLIDER or "播放进度" not in str(nm):
+                continue
+            # 滑块要用 RangeValuePattern 读（Chromium 的 slider 不提供 ValuePattern）
+            try:
+                pat = el.GetCurrentPattern(UIA.UIA_RangeValuePatternId)
+                if pat is not None:
+                    rv = pat.QueryInterface(UIA.IUIAutomationRangeValuePattern)
+                    return float(rv.CurrentValue)
+            except Exception:
+                pass
+            try:
+                pat = el.GetCurrentPattern(UIA.UIA_ValuePatternId)
+                if pat is not None:
+                    vp = pat.QueryInterface(UIA.IUIAutomationValuePattern)
+                    m = re.search("-?\\d+(?:\\.\\d+)?", str(vp.CurrentValue))
+                    if m:
+                        return float(m.group(0))
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return -1.0
+
+
+def is_playing(hwnd) -> bool:
+    """在不在播放 —— 看播放条上那个按钮叫 play（暂停中）还是 pause（在放）。
+
+    实测：这个按钮的 name 会随状态变（暂停时是 play、播放时是 pause），
+    比读进度滑块可靠得多（那个元素经常读不到或已经失效）。
+    """
+    for _el, nm, _r in _walk_buttons(hwnd):
+        n = nm.lower()
+        if n == "pause":
+            return True
+        if n == "play":
+            return False
+    # 读不到按钮就退回进度判断
+    a = progress_value(hwnd)
+    if a < 0:
+        return False
+    time.sleep(1.2)
+    b = progress_value(hwnd)
+    return b > a and b >= 0
+
+
+def _clean_sidebar_name(raw: str) -> str:
+    """侧边栏元素的 name 常带内部标识（例："sidebar_like 我喜欢的音乐 side"）→ 只留人话"""
+    s = str(raw or "").strip()
+    if "我喜欢的音乐" in s:
+        return "我喜欢的音乐"
+    s = re.sub(r"^sidebar_[A-Za-z0-9_]*\s*", "", s)
+    s = re.sub(r"\s*side(down|up)?\s*$", "", s)
+    s = re.sub(r"\s*(slide_up|slide_down)\s*", " ", s)
+    return s.strip()
+
+
+def list_playlists() -> list:
+    """侧边栏里能看到的歌单名（含「我喜欢的音乐」）——给她挑歌用"""
+    try:
+        now = time.time()
+        if _playlists_cache["v"] and now - float(_playlists_cache["t"] or 0) < _PLAYLIST_TTL:
+            return list(_playlists_cache["v"])
+        if not uia_ready():
+            return []
+        hwnd = find_window()
+        if not hwnd:
+            return []
+        U = _uia()
+        root = U.root_for(hwnd)
+        if root is None:
+            return []
+        out = []
+        for el, nm, ct, aid in U.walk(root):
+            r = U.rect_of(el)
+            if not r:
+                continue
+            # 侧边栏：窗口左侧一条，宽度像条目
+            if r[0] < 610 and 30 <= (r[2] - r[0]) <= 200 and (r[3] - r[1]) >= 12:
+                s = _clean_sidebar_name(str(nm))
+                if s and s not in out and len(s) <= 22:
+                    out.append(s)
+        _playlists_cache["t"], _playlists_cache["v"] = now, out
+        return out
+    except Exception:
+        return []
+
+
+def _click_nav_item(hwnd, name: str) -> bool:
+    """打开侧边栏里的条目（我喜欢的音乐 / 某个歌单）——UIA invoke，后台"""
+    try:
+        U = _uia()
+        root = U.root_for(hwnd)
+        if root is None:
+            return False
+        if name and ("我喜欢" in name):
+            for el, nm, ct, aid in U.walk(root):
+                if str(aid) == "left_nav_myFav" or "我喜欢的音乐" in str(nm):
+                    if U.invoke(el):
+                        _log("后台打开「我喜欢的音乐」（窗口没动）")
+                        time.sleep(1.1)
+                        return True
+        for el, nm, ct, aid in U.walk(root):
+            if name and name in str(nm):
+                r = U.rect_of(el)
+                if not r or r[0] > 610:
+                    continue
+                if U.invoke(el):
+                    _log(f"后台打开歌单「{nm}」（窗口没动）")
+                    time.sleep(1.1)
+                    return True
+    except Exception as e:
+        _log(f"⚠ 打开歌单失败: {e}")
+    return False
+
+
+def play_play_all(hwnd) -> bool:
+    """按歌单页上的「播放全部」"""
+    try:
+        U = _uia()
+        root = U.root_for(hwnd)
+        if root is None:
+            return False
+        for el, nm, ct, aid in U.walk(root):
+            if ct == U.CT_BUTTON and "播放全部" in str(nm):
+                if U.invoke(el):
+                    _log("后台按下「播放全部」（窗口没动）")
+                    time.sleep(1.3)
+                    return True
+    except Exception:
+        pass
+    return False
+
+
+# ─────────────────────── 后台点歌 ───────────────────────
+
+def _uia_play(name: str, artist: str) -> str:
+    """后台点歌（UIA）：'ok' 成功 / 'fail' 没成 / '' 不可用"""
+    try:
+        U = _uia()
+        if not U.available():
             return ""
         hwnd = find_window()
         if not hwnd:
             return ""
-        root = _uia.root_for(hwnd)
+        root = U.root_for(hwnd)
         if root is None:
             return ""
-        box = _uia.top_bar_edit(root, hwnd)
+        box = U.top_bar_edit(root, hwnd)
         if box is None:
             _log("UIA：没找到搜索框")
             return "fail"
-        if not _uia.set_value(box, f"{name} {artist}".strip()):
+        if not U.set_value(box, f"{name} {artist}".strip()):
             return "fail"
         _log("UIA：已把歌名写进搜索框（窗口没切到前台）")
-        btn = _uia.find(root, control_type=_uia.CT_BUTTON, contains="search")
+        btn = U.find(root, control_type=U.CT_BUTTON, contains="search")
         if btn is not None:
-            _uia.invoke(btn)                 # 点那个放大镜按钮 = 提交搜索
+            U.invoke(btn)
             _log("UIA：已提交搜索")
         time.sleep(1.4)
-        # 结果页重新取根，找最靠上的「播放」按钮（第一条结果那个）
-        root2 = _uia.root_for(hwnd)
+        root2 = U.root_for(hwnd)
         cands = []
-        for el, nm, ct, aid in _uia.walk(root2):
-            if ct == _uia.CT_BUTTON and "播放" in nm and "全部" not in nm:
-                r = _uia.rect_of(el)
+        for el, nm, ct, aid in U.walk(root2):
+            if ct == U.CT_BUTTON and "播放" in nm and "全部" not in nm:
+                r = U.rect_of(el)
                 if r:
                     cands.append((r[1], el, nm, r))
         if not cands:
             _log("UIA：结果页没找到「播放」按钮")
             return "fail"
         cands.sort(key=lambda x: x[0])
-        _top = cands[0]
-        _log(f"UIA：按第一条结果的按钮「{_top[2][:20]}」{_top[3]}")
-        if not _uia.invoke(_top[1]):
+        _log(f"UIA：按第一条结果的按钮「{cands[0][2][:20]}」{cands[0][3]}")
+        if not U.invoke(cands[0][1]):
             return "fail"
         time.sleep(1.5)
-        if _title_hit(window_title(hwnd), name):
+        if _title_hit(window_title(hwnd), name) or is_playing(hwnd):
             return "ok"
-        # 有些版本按钮是"播放全部"，试第二个候选
         for _r, _el, _nm, _rc in cands[1:4]:
-            _uia.invoke(_el)
+            U.invoke(_el)
             time.sleep(1.3)
             if _title_hit(window_title(hwnd), name):
                 return "ok"
@@ -468,35 +565,26 @@ def _uia_play(name: str, artist: str) -> str:
         return ""
 
 
-def _play_button_pos(hwnd):
-    """搜索结果页上「播放」按钮的位置（用无障碍接口量出来的真实布局）
-
-    实测这台机器（窗口 377,95~1544,847 = 1167x752）：
-      搜索结果的「播放」按钮 bounds=[691,285,64,28] → 相对窗口 (314,190) = (0.269w, 0.253h)
-      第一条结果行             bounds=[703,330,101,20] → 相对窗口 (326,235) = (0.279w, 0.313h)
-    ★ 点这个按钮才是"真的播放"——以前只瞎按回车，运气好才播上（用户反馈"只搜索没播放"）。
-      窗口尺寸变了比例依然成立（CEF 布局按比例锚定），点之前还会校验在窗口内。
-    """
-    l, t, r, b2 = _win_rect(hwnd)
-    if not _rect_ok((l, t, r, b2)):
-        return None
-    w, h = max(1, r - l), max(1, b2 - t)
-    return int(l + w * 0.269), int(t + h * 0.253)
+def _title_hit(title: str, name: str) -> bool:
+    """窗口标题里出现歌名（或歌名前几个字）就算点上了"""
+    t = str(title or "")
+    n = str(name or "").strip()
+    if not t or not n:
+        return False
+    if n in t:
+        return True
+    key = n[:4]
+    return bool(key) and key in t
 
 
-def play_song(query: str, dry_run: bool = False) -> str:
-    """搜索 + 播放一首歌；返回一句给主人听的结果说明。
-
-    dry_run=True 时只做到"搜进搜索框"，不按最后那下回车（不会真的换歌，测试用）。
-    """
+def play_song(query: str) -> str:
+    """搜索 + 播放一首歌（后台 UIA；UIA 不可用时退回媒体键并如实说明）"""
     q = _norm(query)
     if not q:
         return "你没说歌名呀。"
-    # 同一个东西同时在跑 → 别再起一个（两个自动化抢鼠标键盘，谁都点不成）
     if _busy[0]:
-        _log("已经在点歌了 → 这次请求先不重复执行")
+        _log("已经在操作音乐了 → 这次请求先不重复执行")
         return "我正在给你弄呢，等一下下。"
-    # 同一首歌短时间内试太多次就别试了（"一直重复搜索"就是这么来的）
     try:
         _now = time.time()
         _hist = [t for t in (_attempts.get(q) or []) if _now - t < _ATTEMPT_WINDOW]
@@ -510,133 +598,49 @@ def play_song(query: str, dry_run: bool = False) -> str:
         pass
     _busy[0] = True
     try:
-        return _play_song_locked(q)
+        hits = search(q, limit=5)
+        if not hits:
+            return f"搜不到「{q}」这首歌，换个写法试试？"
+        _sid, name, artist, _alb = hits[0]
+        _log(f"搜到：《{name}》{artist}（id={_sid}）")
+        hwnd = find_window()
+        if not hwnd:
+            _log("客户端没开 → 尝试拉起")
+            if not _launch_client():
+                return "网易云没开着，你先打开它我再帮你点。"
+            hwnd = find_window()
+        if not hwnd:
+            return "我没找到网易云的窗口。"
+        _prev_fg = _foreground()
+        _u = _uia_play(name, artist)
+        if _u == "ok":
+            _log(f"✅ 播放成功（后台 UIA）：{window_title(hwnd)}")
+            try:      # 网易云开始播放时会自己跳到前台一次 → 再把焦点还给主人
+                if _prev_fg and _prev_fg != int(hwnd):
+                    _restore_foreground(_prev_fg)
+            except Exception:
+                pass
+            return f"给你放上了：《{name}》{artist}。"
+        if not uia_ready():
+            return media("play_pause") or f"我搜到了《{name}》{artist}，但没法后台播放。"
+        return (f"我搜到了《{name}》{artist}，但没能替你按上播放。"
+                f"别自己重复点歌了：如实跟主人说「没点上、你手动按一下播放」，"
+                f"或者等主人再喊你一次。")
     finally:
         _busy[0] = False
 
 
-def _play_song_locked(q: str, dry_run: bool = False) -> str:
-    hits = search(q, limit=5)
-    if not hits:
-        return f"搜不到「{q}」这首歌，换个写法试试？"
-    sid, name, artist, _alb = hits[0]
-    _log(f"搜到：《{name}》{artist}（id={sid}）")
+# ─────────────────────── 状态与统一入口 ───────────────────────
 
+def status_text() -> str:
+    """现在放的是什么、在不在放、循环方式"""
     hwnd = find_window()
     if not hwnd:
-        _log("客户端没开 → 尝试拉起")
-        if not _launch_client():
-            return "网易云没开着，你先打开它我再帮你点。"
-        hwnd = find_window()
-    if not hwnd:
-        return "我没找到网易云的窗口。"
-
-    # 注意：这里**不再**判断"是否在全屏游戏"就拒绝执行 ——
-    # 主人明确要求"就算在打游戏也要执行"（而且之前的判断还会误报）。
-    # 抢焦点确实会短暂切一下画面，点完会把前台还给主人原来的窗口（见下面 finally）。
-
-    before = window_title(hwnd)
-    # ① 先试"后台"方式（UIA：不切窗口、不动鼠标）——主人要求不显示窗口执行
-    _prev_fg_uia = _foreground()
-    _u = _uia_play(name, artist)
-    if _u == "ok":
-        _log(f"✅ 播放成功（后台 UIA）：{window_title(hwnd)}")
-        # 网易云开始播放时会自己跳到前台 → 再把它压回去，别打断主人
-        try:
-            if _prev_fg_uia and _prev_fg_uia != int(hwnd) and _foreground() == int(hwnd):
-                _u32().SetForegroundWindow(_prev_fg_uia)
-                time.sleep(0.15)
-                _log("已把前台还给主人原来的窗口")
-        except Exception:
-            pass
-        return f"给你放上了：《{name}》{artist}。"
-    if _u == "fail":
-        _log("UIA 后台点歌没成 → 退回模拟键鼠（会短暂切一下窗口）")
-    prev_fg = _foreground()
-    ok = False
-    try:
-        _focus(hwnd)                        # 顺手试一下（失败也没关系，下面靠点击拿焦点）
-        keyword = f"{name} {artist}".strip()
-        for i, (bx, by) in enumerate(_search_box_candidates(hwnd), 1):
-            _log(f"试第 {i} 个搜索框位置 ({bx},{by})")
-            if not _click_in_window(hwnd, bx, by):
-                continue                    # 坐标不可信/越界 → 不点，换下一个候选
-            if not _set_clipboard(keyword):
-                return "剪贴板打不开，没法帮你打歌名。"
-            _keys(("ctrl", "a"))            # 清掉搜索框里已有的字
-            _keys(("ctrl", "v"))            # 粘贴歌名（中文只能靠剪贴板）
-            time.sleep(0.35)
-            _keys("enter")                  # 搜索
-            time.sleep(1.6)
-            if dry_run:
-                _keys("esc")
-                time.sleep(0.3)
-                _log("（演练：只搜不播）")
-                return f"（演练）搜到了《{name}》{artist}，没有真的播放。"
-            # 播放第一条结果：**优先点搜索结果页上那个「播放」按钮**（真实布局量出来的），
-            # 只按回车在多数版本里只会翻页/选中，不会播放（这就是"只搜索没播放"的原因）。
-            _pb = _play_button_pos(hwnd)
-            if _pb:
-                _log(f"点搜索结果里的「播放」按钮 {_pb}")
-                _click_in_window(hwnd, _pb[0], _pb[1])
-                time.sleep(1.4)
-                if _title_hit(window_title(hwnd), name):
-                    ok = True
-                    break
-            _keys("enter")                  # 退路一：回车
-            time.sleep(1.2)
-            if _title_hit(window_title(hwnd), name):
-                ok = True
-                break
-            _keys("down")                   # 退路二：↓ 选中第一条再回车
-            _keys("enter")
-            time.sleep(1.3)
-            if _title_hit(window_title(hwnd), name):
-                ok = True
-                break
-            # 退路三：双击第一条结果行（有些版本双击才播）
-            try:
-                l_, t_, r_, b_ = _win_rect(hwnd)
-                if _rect_ok((l_, t_, r_, b_)):
-                    rx = int(l_ + (r_ - l_) * 0.279)
-                    ry = int(t_ + (b_ - t_) * 0.313)
-                    _log(f"双击第一条结果 {rx},{ry}")
-                    _click_in_window(hwnd, rx, ry)
-                    time.sleep(0.12)
-                    _click_in_window(hwnd, rx, ry)
-                    time.sleep(1.4)
-                    if _title_hit(window_title(hwnd), name):
-                        ok = True
-                        break
-            except Exception as _e3:
-                _log(f"（双击退路失败：{_e3}）")
-    finally:
-        try:                                # 把鼠标/前台还给主人
-            if prev_fg and prev_fg != int(hwnd):
-                _u32().SetForegroundWindow(prev_fg)
-        except Exception:
-            pass
-
-    if ok:
-        _log(f"✅ 播放成功：{window_title(hwnd)}")
-        return f"给你放上了：《{name}》{artist}。"
-    _log(f"⚠ 没能确认播放（标题：{window_title(hwnd) or '空'}，点之前是「{before}」）")
-    return (f"我搜到了《{name}》{artist}，但没能替你按上播放。"
-            f"别自己重复点歌了：直接跟主人说「没点上、你手动按一下播放」，"
-            f"或者等主人再喊你一次。")
-
-
-def _title_hit(title: str, name: str) -> bool:
-    """窗口标题里出现歌名（或歌名的前几个字）就算点上了"""
-    t = str(title or "")
-    n = str(name or "").strip()
-    if not t or not n:
-        return False
-    if n in t:
-        return True
-    # 标题里可能只有一部分（长歌名被截断）→ 用前 4 个字比对
-    key = n[:4]
-    return bool(key) and key in t
+        return "网易云没开着。"
+    t = window_title(hwnd) or "（不知道）"
+    state = "在放" if is_playing(hwnd) else "没在放（或已暂停）"
+    mode = current_loop_mode(hwnd)
+    return f"现在{state}：《{t}》" + (f"，循环方式{_LOOP_MODES.get(mode, mode)}" if mode else "")
 
 
 def run(text: str) -> str:
@@ -645,14 +649,129 @@ def run(text: str) -> str:
     if not acts:
         return ""
     kind, arg = acts[0]
-    if kind == "play":
-        return play_song(arg)
-    if kind == "search":
-        hits = search(arg, limit=3)
-        if not hits:
-            return f"搜不到「{arg}」。"
-        return "搜到这些：" + "；".join(f"《{n}》{a}" for _i, n, a, _al in hits)
-    return media(kind)
+    _fg_before = _foreground()
+    try:
+        _r = _run_locked(kind, arg)
+    except Exception as e:
+        _log(f"⚠ 执行 {kind} 失败: {type(e).__name__}: {e}")
+        _r = f"我这边操作音乐出了点问题（{type(e).__name__}）。"
+    # ★ 网易云有时会自己跳到前台（开始/切换播放时）→ 把前台还给主人原来的窗口
+    try:
+        _h = find_window()
+        if _fg_before and _h and _fg_before != int(_h) and _foreground() == int(_h):
+            _restore_foreground(_fg_before)
+    except Exception:
+        pass
+    return _r
+
+
+def _restore_foreground(prev_fg: int) -> bool:
+    """把前台/焦点还给主人原来的窗口。
+
+    网易云一开始播放就会自己跳到最前面（它客户端的行为），不还回去会打断主人打字。
+    直接 SetForegroundWindow 常被前台锁挡住 → 补一次"模拟按一下 Alt"
+    （系统会认为用户刚操作过，前台锁松一格，这是标准做法；比 AttachThreadInput 安全）。
+    """
+    try:
+        u = _u32()
+        u.SetForegroundWindow(int(prev_fg))
+        time.sleep(0.12)
+        if _foreground() == int(prev_fg):
+            _log("已把前台还给主人原来的窗口")
+            return True
+        try:
+            from pynput.keyboard import Controller as _K, Key
+            kb = _K()
+            kb.press(Key.alt)
+            time.sleep(0.04)
+            kb.release(Key.alt)
+            time.sleep(0.08)
+            u.SetForegroundWindow(int(prev_fg))
+            time.sleep(0.15)
+        except Exception:
+            pass
+        ok = _foreground() == int(prev_fg)
+        _log("已把前台还给主人原来的窗口" if ok else "（网易云抢着当前台，没能还回去）")
+        return ok
+    except Exception:
+        return False
+
+
+def _run_locked(kind: str, arg: str) -> str:
+    """（上面的 run() 负责兜异常 + 还原前台，真正干活的在这里）"""
+    try:
+        if kind == "play":
+            return play_song(arg)
+        if kind == "search":
+            hits = search(arg, limit=3)
+            if not hits:
+                return f"搜不到「{arg}」。"
+            return "搜到这些：" + "；".join(f"《{n}》{a}" for _i, n, a, _al in hits)
+        if kind == "now":
+            return status_text()
+        hwnd = find_window()
+        if not hwnd:
+            return "网易云没开着，你打开它我再帮你。"
+        if not uia_ready():
+            mp = {"pause": "pause", "resume": "resume", "next": "next", "prev": "prev",
+                  "play_pause": "play_pause"}
+            if kind in mp:
+                return media(mp[kind])
+            return "这台机器上后台控制不可用（没装 comtypes），我只能用系统媒体键。"
+        # ── 播放控制（全部后台，不切窗口）──
+        if kind in ("pause", "resume", "play_pause"):
+            cur_playing = is_playing(hwnd)
+            if kind == "pause" and not cur_playing:
+                return "现在就是暂停着的。"
+            if kind == "resume" and cur_playing:
+                return "本来就在放着呢。"
+            _invoke_player(hwnd, ["play"])
+            time.sleep(1.0)
+            now_playing = is_playing(hwnd)
+            return "给你暂停了。" if not now_playing else "给你接着放了。"
+        if kind == "next":
+            _invoke_player(hwnd, ["next"])
+            time.sleep(1.3)
+            return f"换下一首了：《{window_title(hwnd)}》。"
+        if kind == "prev":
+            _invoke_player(hwnd, ["pre"])
+            time.sleep(1.3)
+            return f"回到上一首：《{window_title(hwnd)}》。"
+        if kind in ("loop_single", "loop_list", "loop_random", "loop_order"):
+            want = {"loop_single": "singleloop", "loop_list": "loop",
+                    "loop_random": "shuffle", "loop_order": "order"}[kind]
+            m = set_loop_mode(hwnd, want)
+            return f"设成{m}了。" if m else "循环方式没改成。"
+        if kind == "liked":
+            if _click_nav_item(hwnd, "我喜欢的音乐"):
+                if play_play_all(hwnd):
+                    return "给你放上「我喜欢的音乐」了。"
+                return "打开了「我喜欢的音乐」，但没找到播放按钮。"
+            return "没找到「我喜欢的音乐」入口。"
+        if kind == "playlist":
+            if not arg:
+                pls = list_playlists()
+                return ("你的歌单有：" + "、".join(pls[:8])) if pls else "侧边栏没看到歌单。"
+            for nm in list_playlists():
+                if arg in str(nm) or str(nm) in arg:
+                    if _click_nav_item(hwnd, str(nm)) and play_play_all(hwnd):
+                        return f"切到歌单「{nm}」放上了。"
+            if _click_nav_item(hwnd, arg) and play_play_all(hwnd):
+                return f"切到歌单「{arg}」放上了。"
+            return f"没找到叫「{arg}」的歌单。"
+        if kind == "favorite":
+            _invoke_player(hwnd, ["collect"])
+            return "给你收藏了这首。"
+        if kind == "lyric":
+            _invoke_player(hwnd, ["lyric"])
+            return "把歌词界面打开了。"
+        if kind == "mute":
+            _invoke_player(hwnd, ["Volume1"])
+            return "切换了静音。"
+    except Exception as e:
+        _log(f"⚠ 执行 {kind} 失败: {type(e).__name__}: {e}")
+        return f"我这边操作音乐出了点问题（{type(e).__name__}）。"
+    return ""
 
 
 if __name__ == "__main__":
@@ -662,14 +781,14 @@ if __name__ == "__main__":
     except Exception:
         pass
     print("=== 解析 ===")
-    for t in ("【音乐】播放 沦陷 dj", "【音乐】暂停", "【音乐】下一首",
-              "好，我给你放。【音乐】播放 起风了 周深"):
+    for t in ("【音乐】暂停", "【音乐】下一首", "【音乐】单曲循环", "【音乐】随机播放",
+              "【音乐】我喜欢", "【音乐】播放歌单 火影忍者上分bgm", "【音乐】在放什么",
+              "【音乐】播放 沦陷 dj", "【音乐】收藏", "【音乐】歌词"):
         print("  %-30s → %s" % (t, parse(t)))
     print()
-    print("=== 搜索（真网络）===")
-    for _id, n, a, al in search("沦陷 dj", limit=3):
-        print("  %s | %s | %s" % (_id, n, a))
-    print()
-    print("=== 窗口 ===")
+    print("UIA 可用:", uia_ready())
     h = find_window()
-    print("  hwnd =", h, "| 当前播放:", window_title(h) or "（没开）")
+    print("窗口:", h, "| 标题:", window_title(h))
+    print("在放:", is_playing(h), "| 循环方式:", current_loop_mode(h))
+    print("歌单:", list_playlists()[:10])
+    print("状态:", status_text())

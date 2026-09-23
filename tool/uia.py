@@ -54,6 +54,8 @@ CT_HYPERLINK = 50005
 CT_LISTITEM = 50007
 CT_TEXT = 50033
 CT_PANE = 50031
+CT_SLIDER = 50026
+CT_GROUP = 50020
 
 
 def walk(root, max_depth: int = 16, limit: int = 800):
