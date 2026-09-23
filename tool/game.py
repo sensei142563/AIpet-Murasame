@@ -30,6 +30,16 @@ import threading
 import time
 
 GAME_MARK = "【游戏】"
+
+
+def _type_name(e) -> str:
+    return f"{type(e).__name__}: {e}"
+
+
+try:
+    from tool import pc_control as _pc_mod
+except Exception:
+    _pc_mod = None
 DEFAULT_MINUTES = 10
 MAX_ROUNDS = 60
 # ── 快进（2026-09-24 用户反馈"执行速度太慢了"）──
@@ -78,12 +88,14 @@ def _cfg_path() -> str:
 
 
 def enabled() -> bool:
-    try:
-        from tool.config import get_config
-        v = get_config("./config.json").get("game_enabled", "true")
-        return str(v).strip().lower() in ("true", "1", "yes", "on")
-    except Exception:
-        return True
+    """玩游戏是否可用 —— **恒为 True**。
+
+    2026-09-24 用户要求：「都说了加在自主控制功能里了，为什么菜单还有选项」——
+    菜单里那个独立开关已经去掉。规则：
+      · 主人开口让她玩 → 随时可以（受命，不受自主开关限制）
+      · 她自己想玩 → 由「自主操作」开关决定（见 tool/desire.py 的 play 念头）
+    """
+    return True
 
 
 def set_enabled(on: bool) -> bool:
@@ -720,9 +732,23 @@ def start(name: str, goal: str = "", controls: str = "", minutes: int = None,
           pet_name: str = "我") -> str:
     """开始看着画面玩（**先确认游戏真的开着**）"""
     if not enabled():
-        return "主人没让我玩游戏（菜单里可以打开「允许她玩游戏」）。"
+        return "现在玩不了游戏（这条本来跟着「自主控制」走，不该出现——请告诉开发者）。"
     if not name:
         return "要玩哪个游戏呀？"
+    # ★ 自检：上一次的"在玩"是不是卡住了？（用户反馈"为什么显示手上正在玩别的"）
+    #   判断依据：心跳太旧（>120 秒没动过）或者当初那个窗口已经没了 → 那是残留状态，清掉。
+    try:
+        with _lock:
+            _stale = bool(_state.get("running")) and (
+                (time.time() - float(_state.get("beat") or 0) > 120.0)
+                or (not _window_alive(_state.get("hwnd"))))
+            if _stale:
+                _log("发现残留的'在玩'状态（心跳太旧/窗口没了）→ 清掉，重新开始")
+                _state.update({"running": False, "stop": False, "hwnd": 0, "title": "",
+                               "reason": "（上一次没退干净，已重置）"})
+                _state["beat"] = 0.0
+    except Exception:
+        pass
     hwnd, title, _by_name = find_game_window(name)
     if not hwnd:
         _log(f"没找到「{name}」的窗口，而且前台也不是游戏 → 不开玩")
@@ -736,6 +762,20 @@ def start(name: str, goal: str = "", controls: str = "", minutes: int = None,
                        "hwnd": int(hwnd), "title": str(title)[:60],
                        "by_name": bool(_by_name)})
     mins = float(minutes or DEFAULT_MINUTES)
+    _state["beat"] = time.time()
+    # ★ 让她"在游戏窗口里点击"：方位词按这个窗口换算；窗口化的点击走 PostMessage
+    #   （不动真鼠标、不抢主人的光标 —— 用户要求"模拟点击而不是直接控制鼠标"）
+    try:
+        import ctypes
+        from ctypes import wintypes as _wt
+        _r = _wt.RECT()
+        if ctypes.windll.user32.GetWindowRect(int(hwnd), ctypes.byref(_r)):
+            _pc_mod.set_click_frame((_r.left, _r.top, _r.right, _r.bottom))
+            _pc_mod.set_click_target(int(hwnd))
+            _log(f"点击范围设为游戏窗口 ({_r.left},{_r.top})-({_r.right},{_r.bottom})，"
+                 f"并启用后台点击（不动真鼠标）")
+    except Exception as _e:
+        _log(f"⚠ 设置点击范围失败（按整屏算）: {_type_name(_e)}")
     _start_hotkey()
     threading.Thread(target=_loop, args=(mins, pet_name), daemon=True).start()
     _log(f"开始玩「{name}」→ 窗口《{title[:40]}》(hwnd={hwnd}，按名字认的={_by_name})")
@@ -819,6 +859,7 @@ def _loop(minutes: float, pet_name: str):
                 ok = False
                 break
             _state["round"] = rnd
+            _state["beat"] = time.time()      # 心跳（残留状态自检用）
             _say_status(f"正在玩 {name}……")
             # ★ 快进模式（2026-09-24 用户反馈"执行速度太慢了"）：
             #   完整一轮 = 抓屏 + 视觉认画面（几秒~十几秒）+ 规划（几秒）≈ 15~25 秒。
@@ -878,6 +919,22 @@ def _loop(minutes: float, pet_name: str):
             # 阈值 0.02：实测游戏画面本身有微弱待机动画（指纹基线约 0.023），
             # 低于这个数就认为"这一步没生效，点空了"。
             if _chg >= 0 and _chg < 0.02:
+                # ★ 后台点击（PostMessage）有些游戏不认（尤其独占全屏）→ 这一步没变化时
+                #   自动**改用真鼠标重点一次**（真点完会把光标还原，不会把主人的鼠标拐跑）。
+                try:
+                    if _pc.get_click_target():
+                        _log("后台点击好像没被游戏接受 → 改用真鼠标重点一次（会还原光标）")
+                        _pc.set_click_target(0)
+                        try:
+                            _pc.execute(list(_last_acts or acts), notify=None, no_dup=True)
+                        finally:
+                            _pc.set_click_target(int(_state.get("hwnd") or 0))
+                        time.sleep(0.4)
+                        _chg = _verify_changed()
+                        _log(f"真鼠标重点后画面变化 {_chg:.3f}")
+                except Exception as _e4:
+                    _log(f"⚠ 真鼠标重试失败: {_type_name(_e4)}")
+            if _chg >= 0 and _chg < 0.02:
                 _log(f"⚠ 上一步好像没生效（画面只变了 {_chg:.3f}）→ 下一轮完整看一次，别盲重复")
                 last = f"{last}（但画面一点没变，可能没生效）"
                 _reps_done = FAST_REPEAT
@@ -894,6 +951,11 @@ def _loop(minutes: float, pet_name: str):
             _state["running"] = False
         try:      # 收尾了就别再挂着"正在玩…"（用户反馈：关了还显示在游玩）
             _say_status("")
+        except Exception:
+            pass
+        try:      # 点击框/后台点击目标也要清掉，别影响之后正常操作电脑
+            _pc_mod.set_click_frame(None)
+            _pc_mod.set_click_target(0)
         except Exception:
             pass
         _stop_hotkey()

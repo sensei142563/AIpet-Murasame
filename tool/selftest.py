@@ -180,6 +180,20 @@ def check_wiring(results):
             __import__("tool.game", fromlist=["x"]))
          and "find_game_window(name)" in inspect.getsource(
             __import__("tool.game", fromlist=["x"]).start)),
+        ("游戏：状态卡住会自愈（心跳）", "_state.get(\"beat\")" in inspect.getsource(
+            __import__("tool.game", fromlist=["x"]).start)),
+        ("游戏：点按窗口换算（方位词）", "set_click_frame" in inspect.getsource(
+            __import__("tool.game", fromlist=["x"]).start)
+         and "_frame[\"rect\"]" in inspect.getsource(
+            __import__("tool.pc_control", fromlist=["x"])._anchor_xy)),
+        ("后台点击（PostMessage，不动真鼠标）", "def _post_click" in inspect.getsource(
+            __import__("tool.pc_control", fromlist=["x"]))),
+        ("后台点击无效 → 真鼠标重试", "改用真鼠标重点一次" in inspect.getsource(
+            __import__("tool.game", fromlist=["x"])._loop)),
+        ("菜单不再有「允许她玩游戏」", 'item(_ai, "允许她玩游戏"' not in src_m
+         and "def enabled" in inspect.getsource(__import__("tool.game", fromlist=["x"]))),
+        ("整轮回复算忙（对话不被顶掉）", "_reply_active" in inspect.getsource(M.Murasame.on_reply)
+         and "_reply_active" in inspect.getsource(M.Murasame.is_busy_reply)),
         ("游戏：只截游戏窗口（画面干净）", "capture_window_qimage" in inspect.getsource(
             __import__("tool.game", fromlist=["x"])._look)),
         ("游戏：动作后校验（act→verify）", "def _verify_changed" in inspect.getsource(

@@ -481,9 +481,82 @@ def _cn_count(s: str) -> int:
     return 0
 
 
+# ★ "点击框"：玩某个窗口（游戏）时由调用方设进来，方位词按**这个窗口**换算 ——
+#   用户反馈"点的位置也不对"就是这里：她看到的是游戏窗口的画面，坐标却按整屏算 ✗
+_frame = {"rect": None}
+# 后台点击的目标窗口（玩某个游戏时由调用方设置）：{"hwnd": ...}
+_click_target = {"hwnd": 0}
+
+
+def set_click_target(hwnd=None):
+    """设置/清除"后台点击的目标窗口"（PostMessage 用）"""
+    try:
+        _click_target["hwnd"] = int(hwnd or 0)
+    except Exception:
+        _click_target["hwnd"] = 0
+
+
+def _post_click(hwnd, x, y, kind="click") -> bool:
+    """把点击"投递"给窗口（PostMessage，不动真鼠标）——前台窗口收到才有效。
+
+    实测：窗口化的游戏 / 视觉小说 / 大部分软件界面都认这一套（等于在它窗口内点了那个点），
+    独占全屏的 3D 游戏多一半不认 → 调用方会退回真鼠标。
+    坐标要转成**窗口客户区坐标**（ScreenToClient）。
+    """
+    try:
+        import ctypes
+        from ctypes import wintypes as wt
+        u = ctypes.windll.user32
+        hwnd = int(hwnd)
+        if not u.IsWindow(hwnd):
+            return False
+        pt = wt.POINT(int(x), int(y))
+        if not u.ScreenToClient(hwnd, ctypes.byref(pt)):
+            return False
+        LP = 0x0001  # WM_LBUTTONDOWN 需要的 lParam 低位=1
+        lparam = (int(pt.y) << 16) | (int(pt.x) & 0xFFFF)
+        WM_MOUSEMOVE, WM_LBUTTONDOWN, WM_LBUTTONUP = 0x0200, 0x0201, 0x0202
+        WM_RBUTTONDOWN, WM_RBUTTONUP = 0x0204, 0x0205
+        WM_LBUTTONDBLCLK = 0x0203
+        u.PostMessageW(hwnd, WM_MOUSEMOVE, 0, lparam)
+        if kind == "right":
+            u.PostMessageW(hwnd, WM_RBUTTONDOWN, 0x0002, lparam)
+            u.PostMessageW(hwnd, WM_RBUTTONUP, 0, lparam)
+        elif kind == "double":
+            u.PostMessageW(hwnd, WM_LBUTTONDOWN, LP, lparam)
+            u.PostMessageW(hwnd, WM_LBUTTONUP, 0, lparam)
+            u.PostMessageW(hwnd, WM_LBUTTONDBLCLK, LP, lparam)
+            u.PostMessageW(hwnd, WM_LBUTTONUP, 0, lparam)
+        else:
+            u.PostMessageW(hwnd, WM_LBUTTONDOWN, LP, lparam)
+            u.PostMessageW(hwnd, WM_LBUTTONUP, 0, lparam)
+        return True
+    except Exception as e:
+        _log_line(f"⚠ 后台点击失败（退回真鼠标）: {type(e).__name__}: {e}")
+        return False
+
+
+def set_click_frame(rect=None):
+    """设/清"点击框"（left, top, right, bottom）——玩窗口化游戏时用"""
+    try:
+        if rect and len(rect) == 4 and (rect[2] - rect[0]) > 8 and (rect[3] - rect[1]) > 8:
+            _frame["rect"] = tuple(int(v) for v in rect)
+        else:
+            _frame["rect"] = None
+    except Exception:
+        _frame["rect"] = None
+
+
+def get_click_frame():
+    return _frame["rect"]
+
+
 def _anchor_xy(s: str):
     for w, fx, fy in _ANCHORS:
         if w in s:
+            r = _frame["rect"]
+            if r:                     # 有点击框 → 按窗口换算（游戏用）
+                return int(r[0] + (r[2] - r[0]) * fx), int(r[1] + (r[3] - r[1]) * fy)
             x0, y0, sw, sh = _screen_size()
             return int(x0 + sw * fx), int(y0 + sh * fy)
     return None
@@ -776,6 +849,20 @@ def execute(actions: list, dry_run: bool = False, auto: bool = False, notify=Non
                     _log_line(f"[演练] {t} ({x},{y})")
                     done.append(a)
                     continue
+                # ★ 后台点击（用户要求："模拟点击而不是直接控制鼠标"）：
+                #   玩窗口/游戏时优先用 PostMessage 把点击"投递"给那个窗口 —— **不动真鼠标**，
+                #   不抢主人的光标；不合适（全屏游戏不认 / 没有目标窗口）时才用真鼠标，
+                #   而且用完把光标**还原**到原处（别把主人的鼠标拐跑）。
+                _bg_hwnd = (getattr(_click_target, "hwnd", 0) or 0)
+                if _bg_hwnd and _post_click(int(_bg_hwnd), x, y, t):
+                    _log_line(f"后台{t} ({x},{y})（窗口内，没动真鼠标）")
+                    done.append(a)
+                    continue
+                _old_pos = None
+                try:
+                    _old_pos = _mouse.position
+                except Exception:
+                    _old_pos = None
                 _mouse.position = (x, y)
                 time.sleep(0.05)
                 if t == "click":
@@ -784,7 +871,12 @@ def execute(actions: list, dry_run: bool = False, auto: bool = False, notify=Non
                     _mouse.click(Button.left, 2)
                 elif t == "right":
                     _mouse.click(Button.right, 1)
-                _log_line(f"{t} ({x},{y})")
+                if _old_pos is not None:      # 把光标还给主人
+                    try:
+                        _mouse.position = _old_pos
+                    except Exception:
+                        pass
+                _log_line(f"{t} ({x},{y})" + ("（已还原光标）" if _old_pos else ""))
                 done.append(a)
             elif t == "scroll":
                 n = max(1, min(20, int(a.get("n", 1))))

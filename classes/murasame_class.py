@@ -513,6 +513,7 @@ class Murasame(QLabel):
         # 自主学习 / 电脑近况：每 4 分钟看一眼（内部自己限速：≥20 分钟才动手、
         # 主人刚说完话或她正忙就跳过；都在后台线程，界面不会卡）
         self._last_user_ts = 0.0
+        self._reply_active = False     # 整轮回复进行中（on_reply 开始→结束）
         self._pending_status = ""      # 攒下的状态文字（等她说完再显示）
         self._chatter_turn = False     # 当前这一轮是不是她自己发起的碎碎念
         self._last_pc_narrate = 0.0
@@ -1635,6 +1636,13 @@ class Murasame(QLabel):
         try:
             t = str(text or "").strip()
             if not t:
+                # ★ 空状态 = 循环结束了 → 把对话框还给她上一句话
+                #   （用户反馈："游戏都没了对话框还显示正在玩游戏"）
+                try:
+                    if not self.is_busy_reply():
+                        self.show_text(str(getattr(self, "full_text", "") or ""), typing=False)
+                except Exception:
+                    pass
                 return
             if self.is_busy_reply():
                 self._pending_status = t
@@ -2062,6 +2070,9 @@ class Murasame(QLabel):
             pass
 
     def on_reply(self, reply, portrait_list, history, portrait_history, voices, emotion_list=None):
+        # ★ 整轮回复进行中：这期间算"忙"（句与句之间的停顿也不算闲着），
+        #   否则状态文字会在停顿里挤进来，把她还没说完的对话顶掉（用户反馈）。
+        self._reply_active = True
         self.portrait_history = portrait_history
         self.history = history
         self._save_history()
@@ -2427,6 +2438,8 @@ class Murasame(QLabel):
         except Exception:
             pass
 
+        # 整轮结束了 → 解除"忙"标记（之后状态文字才能显示）
+        self._reply_active = False
         # 这一轮播完了 → 继续处理排队中的消息
         try:
             _q2 = getattr(self, "_pending_msgs", None) or []
@@ -2447,12 +2460,21 @@ class Murasame(QLabel):
 
     # 启动一个新线程（安全版，打断旧线程）
     def is_busy_reply(self) -> bool:
-        """她是不是正在思考 / 正在说话（这期间不接受新的对话）"""
+        """她是不是正在思考 / 正在说话（这期间不接受新的对话）。
+
+        ★ 2026-09-24 用户反馈"有的对话还没结束就被顶掉了"：
+          整轮回复在**句子之间**会有短暂停顿（上一句放完、下一句还没开始），
+          那时 `_talking` 是 False → 状态文字就挤进来了 ✗。
+          所以额外用一个 `_reply_active` 标记**整轮**（on_reply 开始到结束），
+          这期间一律算忙。
+        """
         try:
             if self.worker is not None and self.worker.isRunning():
                 return True
         except Exception:
             pass
+        if getattr(self, "_reply_active", False):
+            return True
         return bool(getattr(self, "_talking", False) or getattr(self, "_stream_playing", False))
 
     def _set_ime(self, on: bool):
@@ -3220,16 +3242,9 @@ class Murasame(QLabel):
                 _act_seen = item(_ai, "她的状态 / 记忆 / 提醒")
                 _act_seen.setToolTip("单独开一个小窗口，显示她记住的事、学到的东西和最近的日记。")
                 _act_seen.triggered.connect(self._show_learned)
-                try:
-                    from tool import game as _gm3
-                    _act_gm = item(_ai, "允许她玩游戏", checked=_gm3.enabled())
-                    _act_gm.setToolTip("开启后你让她玩（「你帮我打一局」）她真的会上手：" + chr(10) +
-                                       "回合制/战棋/卡牌/挂机/刷材料能玩；动作类（火影、FPS）玩不了。" + chr(10) +
-                                       "玩的时候按 F12 或跟她说「停」立刻收手；主人一开口她也会停。" + chr(10) +
-                                       "默认最多 10 分钟，操作方式会记住（下次不用再教）。")
-                    _act_gm.triggered.connect(lambda on=False: _gm3.set_enabled(bool(on)))
-                except Exception:
-                    pass
+                # 「允许她玩游戏」菜单项已去掉（2026-09-24 用户要求）：
+                # 玩游戏属于「自主控制」的一部分 —— 主人开口随时能玩，
+                # 她自己想玩由「自主操作」开关决定，不再单独设开关。
                 try:
                     from tool import plugins as _plg2
                     _act_pl = item(_ai, "启用插件", checked=_plg2.enabled())
