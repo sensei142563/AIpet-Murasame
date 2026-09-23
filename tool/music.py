@@ -22,6 +22,7 @@
   · UIA 不可用（没装 comtypes）时退回系统媒体键，并如实说明。
 """
 import ctypes
+import json
 import os
 import re
 import time
@@ -63,20 +64,25 @@ def _log(msg: str):
 
 
 def prompt_rules() -> str:
-    """交给模型的能力说明（自动带上主人的歌单，方便她自己挑）"""
+    """交给模型的能力说明（自动带上主人的歌单 + 她记住的听歌口味）"""
     pls = list_playlists()
     pl_line = ""
     if pls:
         pl_line = "主人的歌单（可以自己挑着放）：" + "、".join(pls[:8]) + "。\n"
+    fav = favorites_text(6)
+    fav_line = ("主人常听的（她想主动放歌时优先从这些里挑）：" + fav + "。\n") if fav else ""
     return (
         "【音乐控制（网易云，已开启）】你可以自己操作网易云音乐，在回复里单独写一行：\n"
         "【音乐】播放 歌名 歌手（例如【音乐】播放 沦陷 dj）\n"
         "【音乐】暂停 / 继续 / 下一首 / 上一首\n"
         "【音乐】单曲循环 / 列表循环 / 随机播放 / 顺序播放\n"
         "【音乐】我喜欢（直接放「我喜欢的音乐」）／【音乐】播放歌单 名字\n"
-        "【音乐】收藏 / 歌词 / 静音 / 在放什么 / 关弹窗\n"
-        + pl_line +
+        "【音乐】收藏 / 歌词 / 静音 / 在放什么 / 关弹窗 / 爱听什么\n"
+        + pl_line + fav_line +
         "★ 这些都是**后台执行**：不切走主人的画面、不动鼠标，放心用。\n"
+        "★ **记住版本**：同一首歌有很多版本（原唱/翻唱/remix/现场）。桌宠会记住"
+        "主人听过、爱听的那一版，下次点同一首歌**优先放他爱听的那版**；"
+        "他问「我爱听什么」时，用【音乐】爱听什么 查出来念给他听。\n"
         "★ **会员曲的事**：主人没有黑胶 VIP（点会员曲只会放 30 秒试听，还会弹开通页面）。"
         "所以点歌时桌宠会**优先挑不用会员的版本**（免费 / 低音质免费）。"
         "如果一首歌只有会员版，桌宠会告诉你——你就如实跟主人说「这首要会员，只有试听，"
@@ -139,6 +145,8 @@ def parse(text: str) -> list:
             out.append(("now", ""))
         elif any(k in s for k in ("关弹窗", "关掉弹窗", "弹窗", "关广告", "关掉广告", "关掉会员")):
             out.append(("close_popup", ""))
+        elif any(k in s for k in ("爱听什么", "爱听", "常听什么", "常听的", "听歌口味", "喜欢听什么")):
+            out.append(("favorites", ""))
         elif s.startswith("播放") or s.startswith("放") or s.startswith("点歌") or low.startswith("play"):
             q = re.sub("^(播放|放一首|放|点歌|点一首|play|放一下)", "", s).strip("：:，,。\"'「」")
             if q:
@@ -219,6 +227,186 @@ def search(query: str, limit: int = 5) -> list:
 
 def _fee_label(fee: int) -> str:
     return {0: "免费", 8: "低音质免费", 1: "会员", 4: "付费专辑"}.get(int(fee or 0), "未知")
+
+
+# ─────────── 记住主人爱听哪个版本（下次优先放那一版）───────────
+# 用户要求：「桌宠要记住爱听的是哪个版本的音乐，下次播放优先播放爱听的版本」。
+# 存在 pets/<角色>/memory/music_prefs.json，和她的其它记忆放一起。
+_pref_cache = {"path": "", "data": None}
+
+
+def _pref_path() -> str:
+    try:
+        from pets.pet_registry import get_memory_dir
+        d = get_memory_dir()
+    except Exception:
+        d = "memory"
+    try:
+        os.makedirs(d, exist_ok=True)
+    except Exception:
+        pass
+    return os.path.join(d, "music_prefs.json")
+
+
+def _song_key(name: str) -> str:
+    """按歌名归一化做 key —— 同一首歌的各种版本要归到**同一把 key**。
+
+    "红色高跟鞋" / "红色高跟鞋(0.88x)" / "红色高跟鞋 (Live)" / "起风了(林俊杰)"
+    都算同一首歌，这样"主人爱听哪一版"才能跨版本生效（实测踩到：不带歌手点歌时，
+    搜索结果第一条变成了《红色高跟鞋(0.88x)》，key 不一样就找不到记忆了）。
+    括号里的版本标记（Live/remix/DJ版/0.88x…）只用来区分**版本**，不参与歌曲身份。
+    """
+    s = re.split(r"[（(\[【]", str(name or ""))[0]
+    s = re.sub(r"[\s\-_·、,，.。!！?？~～]", "", s).lower()
+    return s[:40]
+
+
+def _ver_key(name: str, artist: str) -> str:
+    """版本的指纹：歌名（保留括号里的标记）+ 歌手，都归一化。"""
+    n = re.sub(r"[\s\-_()（）\[\]【】·、,，.。!！?？~～]", "", str(name or "")).lower()[:48]
+    a = re.sub(r"[\s\-_()（）\[\]【】·、,，.。!！?？]", "", str(artist or "")).lower()[:40]
+    return n + "|" + a
+
+
+def _prefs() -> dict:
+    p = _pref_path()
+    if _pref_cache["path"] == p and _pref_cache["data"] is not None:
+        return _pref_cache["data"]
+    d = {}
+    try:
+        if os.path.exists(p):
+            with open(p, encoding="utf-8") as f:
+                d = json.load(f) or {}
+    except Exception:
+        d = {}
+    if not isinstance(d, dict):
+        d = {}
+    d.setdefault("songs", {})       # key(歌名) → [ {ver, artist, name, id, fee, plays, ts}, … ]
+    d.setdefault("liked", {})       # ver 指纹 → {times, ts, songs:[歌名…]}
+    _pref_cache["path"], _pref_cache["data"] = p, d
+    return d
+
+
+def _save_prefs(d: dict):
+    try:
+        # 只留最近 200 首歌、每首最多 6 个版本，别让文件无限长
+        songs = d.get("songs") or {}
+        if len(songs) > 200:
+            items = sorted(songs.items(), key=lambda kv: max((x.get("ts") or 0) for x in kv[1]) if kv[1] else 0)
+            d["songs"] = dict(items[-200:])
+        for k, lst in list(d.get("songs", {}).items()):
+            if isinstance(lst, list) and len(lst) > 6:
+                d["songs"][k] = sorted(lst, key=lambda x: -(x.get("plays") or 0))[:6]
+        with open(_pref_path(), "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False, indent=1)
+        _pref_cache["data"] = d
+    except Exception as e:
+        _log(f"⚠ 保存听歌偏好失败: {type(e).__name__}: {e}")
+
+
+def remember_play(name: str, artist: str, song_id: int = 0, fee: int = 0) -> str:
+    """记下"这一版主人听了"——同一首歌同一版本听得越多，下次越优先放它。
+
+    只在**真的放上了**之后调用（试听/没放上不算，免得把听不了的版本记成爱听）。
+    """
+    try:
+        nm, ar = str(name or "").strip(), str(artist or "").strip()
+        if not nm:
+            return ""
+        d = _prefs()
+        sk, vk = _song_key(nm), _ver_key(nm, ar)
+        lst = d["songs"].setdefault(sk, [])
+        hit = None
+        for it in lst:
+            if it.get("ver") == vk or (song_id and int(it.get("id") or 0) == int(song_id)):
+                hit = it
+                break
+        if hit is None:
+            hit = {"ver": vk, "name": nm, "artist": ar, "id": int(song_id or 0),
+                   "fee": int(fee or 0), "plays": 0, "ts": 0.0}
+            lst.append(hit)
+        hit["plays"] = int(hit.get("plays") or 0) + 1
+        hit["ts"] = time.time()
+        hit["fee"] = int(fee or 0)
+        if song_id:
+            hit["id"] = int(song_id)
+        liked = d["liked"].setdefault(vk, {"times": 0, "ts": 0.0, "songs": []})
+        liked["times"] = int(liked.get("times") or 0) + 1
+        liked["ts"] = time.time()
+        if nm not in (liked.get("songs") or []):
+            liked.setdefault("songs", []).append(nm)
+            liked["songs"] = liked["songs"][-30:]
+        _save_prefs(d)
+        _log(f"📝 记住这个版本：《{nm}》{ar}（已听 {hit['plays']} 次）")
+        return f"《{nm}》{ar}"
+    except Exception as e:
+        _log(f"⚠ 记听歌偏好出错: {type(e).__name__}: {e}")
+        return ""
+
+
+def preferred_for(name: str) -> dict:
+    """这首歌主人爱听哪一版 → 返回**记忆里的那一条**（没有记录返回 {}）。
+
+    ★ 为什么不去当前搜索结果里找：实测踩到过——主人第二次点同一首歌时，
+      查询词略有不同（"红色高跟鞋" vs "红色高跟鞋 蔡健雅"）→ 搜索结果的 8 条里
+      根本没有他爱听的那一版 → 以前就直接退回"免费优先"，放了另一个版本（用户明确不想要）。
+      现在的做法是：**直接拿记忆里的歌名+歌手去搜**，那就不依赖这次搜索的结果了。
+    """
+    try:
+        lst = (_prefs().get("songs") or {}).get(_song_key(name)) or []
+        if not lst:
+            return {}
+        best = sorted(lst, key=lambda x: (-(int(x.get("plays") or 0)), -(x.get("ts") or 0)))[0]
+        if not str(best.get("name") or "").strip():
+            return {}
+        return {"name": str(best.get("name")), "artist": str(best.get("artist") or ""),
+                "id": int(best.get("id") or 0), "fee": int(best.get("fee") or 0),
+                "plays": int(best.get("plays") or 0)}
+    except Exception as e:
+        _log(f"⚠ 查听歌偏好出错: {type(e).__name__}: {e}")
+    return {}
+
+
+def preferred_version(hits: list, name: str = "") -> dict:
+    """（旧的"在搜索结果里找爱听版本"入口，保留兼容）→ 命中就返回 {'hit': 那一行}"""
+    try:
+        pf = preferred_for(name or (hits[0][1] if hits else ""))
+        if not pf:
+            return {}
+        for h in hits or []:
+            if pf.get("id") and int(h[0]) == int(pf["id"]):
+                return {"hit": h, "plays": pf["plays"], "why": "id"}
+        for h in hits or []:
+            if _ver_key(h[1], h[2]) == _ver_key(pf["name"], pf["artist"]):
+                return {"hit": h, "plays": pf["plays"], "why": "版本"}
+    except Exception:
+        pass
+    return {}
+
+
+def favorites_text(limit: int = 8) -> str:
+    """主人常听的（给她挑歌/点歌时参考，也能直接说给主人听）"""
+    try:
+        d = _prefs()
+        rows = []
+        for sk, lst in (d.get("songs") or {}).items():
+            if not lst:
+                continue
+            best = max(lst, key=lambda x: (int(x.get("plays") or 0), x.get("ts") or 0))
+            rows.append((int(best.get("plays") or 0), best.get("ts") or 0,
+                         str(best.get("name") or ""), str(best.get("artist") or "")))
+        if not rows:
+            return ""
+        rows.sort(key=lambda x: (-x[0], -x[1]))
+        return "、".join(f"《{n}》{a}（{c} 次）" for c, _t, n, a in rows[:limit])
+    except Exception:
+        return ""
+
+
+def summary_text() -> str:
+    """她记得的听歌口味（菜单/窗口里可看）"""
+    fav = favorites_text(10)
+    return ("主人常听的：" + fav) if fav else "（还没记住主人爱听什么）"
 
 
 def _prefer_free() -> bool:
@@ -1021,12 +1209,23 @@ def play_song(query: str) -> str:
             _fee = 0
         _log(f"搜到：《{name}》{artist}（id={_sid}，{_fee_label(_fee)}）"
              + (f"｜候选 {len(hits)} 首，挑了免费的版本" if _pick is not hits[0] else ""))
-        # 依次尝试的顺序（用户要求：优先不要会员的）
-        #   ① 主人点的那个（原唱/主流版本）
-        #   ② 一些"完全免费"的同名版本（封面/翻唱/remix，客户端能整首放）
-        # 客户端只能放"搜索结果第一条"，所以换版本的办法是**换成那个版本的搜索词**再搜一次；
-        # 到底有没有只能试听，靠界面上的"正在试听…"判定（实测只有 fee=0 会消失）。
-        _tries = [(name, artist, "")]
+        # 依次尝试的顺序：
+        #   ① **主人爱听的那一版**（music_prefs.json 里记着，直接按它的歌名+歌手去搜，
+        #      不依赖这次的搜索结果——实测这样才稳）← 用户要求：下次优先放这一版
+        #   ② 主人这次点的那个（原唱/主流版本）
+        #   ③ 一些"完全免费"的同名版本（封面/翻唱/remix，客户端能整首放）
+        # 客户端只能放"搜索结果第一条"，所以换版本的办法是**换成那个版本的搜索词**再搜一次。
+        _pref = preferred_for(name) if _prefer_free() else {}
+        _tries, _seen = [], set()
+        if _pref.get("name"):
+            _tries.append((_pref["name"], _pref["artist"],
+                           f"你爱听的版本·听过 {_pref.get('plays') or 1} 次 "))
+            _seen.add(_ver_key(_pref["name"], _pref["artist"]))
+            _log(f"🎧 主人爱听的是：《{_pref['name']}》{_pref['artist']}"
+                 f"（听过 {_pref.get('plays') or 1} 次）→ 优先放这一版")
+        if _ver_key(name, artist) not in _seen:
+            _tries.append((name, artist, ""))
+            _seen.add(_ver_key(name, artist))
         if _prefer_free():
             try:
                 for h in hits:
@@ -1060,22 +1259,30 @@ def play_song(query: str) -> str:
         _u, _preview, _label = "", False, ""
         for _i, (_n2, _a2, _lab) in enumerate(_tries):
             if _i:
-                _log(f"上一版只能试听/没成 → 换成「{_n2} {_a2}」再搜一次")
+                _log(f"上一版没成 → 换成「{_n2} {_a2}」再搜一次")
             _u = _uia_play(_n2, _a2)
-            # ★ 歌确实换成了「这一版」（ok 或 preview 都算放上了）——先把名字记下来，
-            #   最后按**这一版自己的 fee** 判断要不要提示"可能要会员"。
             if _u == "ok" or str(_u).startswith("preview:"):
+                # ★ 歌确实换成了「这一版」——先把名字和它自己的 fee 记下来
                 name, artist, _label = _n2, _a2, _lab
+                _this_fee = int(_fee or 0)
                 try:
                     for _h in hits:
-                        if str(_h[1]).strip() == str(_n2).strip() and str(_h[2]).strip() == str(_a2).strip():
-                            _fee = int(_h[4] or 0)
+                        if (str(_h[1]).strip() == str(_n2).strip()
+                                and str(_h[2]).strip() == str(_a2).strip()):
+                            _this_fee = int(_h[4] or 0)
                             break
                 except Exception:
                     pass
-            if _u == "ok":
-                break
-            if str(_u).startswith("preview:"):
+                _fee = _this_fee
+                if _u == "ok":
+                    break
+                # ★ 界面上那句"正在试听"实测**不稳定**（同一首免费歌这次有、下次没有）：
+                #   如果这一版是 fee=0（完全免费），就不要因为这句话把它换掉 ——
+                #   否则"主人爱听的那一版"会被误换成别的版本（正是用户不想要的）。
+                if _this_fee == 0:
+                    _preview = False
+                    _log("（界面提示'试听'，但这一版是完全免费的 → 按放上了算，不换版本）")
+                    break
                 _preview = True
                 continue
             _preview = False
@@ -1110,9 +1317,23 @@ def play_song(query: str) -> str:
             except Exception:
                 pass
             if _vip_only:
+                try:
+                    remember_play(name, artist, _sid, _fee)
+                except Exception:
+                    pass
                 return (f"给你放上了：《{name}》{artist}{_tag}。"
                         f"（这首是{_fee_label(_fee)}曲，没会员的话可能只能试听 30 秒——"
                         f"我已经优先找过免费版本，这首没有。）")
+            # ★ 记住"主人听了这一版"——下次点同一首歌就先放它（用户要求）
+            try:
+                _sid2 = 0
+                for _h in hits:
+                    if str(_h[1]).strip() == str(name).strip() and str(_h[2]).strip() == str(artist).strip():
+                        _sid2 = int(_h[0])
+                        break
+                remember_play(name, artist, _sid2 or _sid, _fee)
+            except Exception:
+                pass
             return f"给你放上了：《{name}》{artist}{_tag}。"
         if _preview:
             try:
@@ -1229,6 +1450,9 @@ def _run_locked(kind: str, arg: str) -> str:
                 return f"搜不到「{arg}」。"
             return "搜到这些：" + "；".join(
                 f"《{n}》{a}（{_fee_label(f)}）" for _i, n, a, _al, f in hits)
+        if kind == "favorites":
+            fav = favorites_text(8)
+            return ("主人常听的是：" + fav) if fav else "我还没记住主人爱听什么——你多点几次，我就记住了。"
         if kind == "close_popup":
             hwnd = find_window()
             if not hwnd:

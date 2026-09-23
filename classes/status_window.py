@@ -410,7 +410,7 @@ class StatusWindow(QDialog):
             except Exception:
                 pass
 
-            # ④ 记忆（印象 / 最近发生的事 / 日记）
+            # ④ 记忆（印象 / 最近发生的事 / 日记 / 爱听的歌）
             mem = []
             try:
                 from tool import self_learn as _sl
@@ -433,6 +433,13 @@ class StatusWindow(QDialog):
                         mem.append("【今天的日记】" + d[:400])
                 except Exception:
                     pass
+            except Exception:
+                pass
+            try:      # 她记住的听歌口味（点歌时会优先放主人爱听的那一版）
+                from tool import music as _mu
+                fav = _mu.favorites_text(8)
+                if fav:
+                    mem.append("【爱听的歌】" + fav)
             except Exception:
                 pass
             self._cards.addWidget(_Card("她记下的事", "\n".join(mem) or "（还什么都没记下）",

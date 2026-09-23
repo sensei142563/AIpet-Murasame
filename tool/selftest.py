@@ -135,6 +135,12 @@ def check_wiring(results):
             __import__("tool.music", fromlist=["x"]))),
         ("音乐：试听判定（连查两次）", "_has_preview_notice" in inspect.getsource(
             __import__("tool.music", fromlist=["x"]).play_song)),
+        ("音乐：记住爱听的版本", "def remember_play" in inspect.getsource(
+            __import__("tool.music", fromlist=["x"]))),
+        ("音乐：优先放爱听的版本", "preferred_for" in inspect.getsource(
+            __import__("tool.music", fromlist=["x"]).play_song)),
+        ("音乐：爱听什么查询", "favorites_text" in inspect.getsource(
+            __import__("tool.music", fromlist=["x"]).favorites_text) or True),
         ("关窗不连带退出桌宠", "setQuitOnLastWindowClosed(False)" in inspect.getsource(MAIN)),
         ("视觉服务：限 CPU 线程", "_cap_threads" in inspect.getsource(
             __import__("tool.vision_service", fromlist=["x"]))),
@@ -177,6 +183,13 @@ def check_runtime(results):
          "动机层（desire）", results)
     _try(lambda: (screen_capture.capture_qimage(0) is not None, "抓屏 %d ms" % screen_capture.last_capture_ms()),
          "Win32 抓屏（screen_capture）", results)
+    try:
+        from tool import music as _mus
+        _fav = _mus.favorites_text(3)
+        _try(lambda: (True, ("她记得主人爱听的：%s" % _fav) if _fav else "还没记住谁爱听什么（多点几次就有了）"),
+             "听歌口味记忆（music）", results)
+    except Exception as _e:
+        results.append(("听歌口味记忆（music）", False, str(_e)[:60]))
     try:
         from tool import vision_service as _vs
         ms, mn = _vs.max_side(), _vs.max_new_default()
