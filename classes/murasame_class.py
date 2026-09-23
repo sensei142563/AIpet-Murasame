@@ -1934,6 +1934,7 @@ class Murasame(QLabel):
                     f"你以“{self.pet_name}”的身份，简单打个招呼"
                     "可以说“欢迎回来”、问问主人要不要继续刚才的事情之类，"
                     "回答简短。不要与之前重复。"
+                    "★ 这一轮只是寒暄：不要输出任何操作指令（【键鼠】等）。"
                 )
                 self.start_thread(greeting_prompt, role="system", t=True)
                 # 防止重复问候
@@ -2464,7 +2465,22 @@ class Murasame(QLabel):
         except Exception:
             pass
 
-    def start_thread(self, text, role, t=False):
+    def start_thread(self, text, role, t=False, no_act=False):
+        """发起一轮对话。
+
+        no_act=True：这一轮只是寒暄/系统提示（比如开机问候）→ 不许解析、执行任何
+        操作指令，也不开「连着做完」的任务循环（实测 bug：问候那一轮她多写了一句
+        【键鼠】移动，结果整个问候被当成电脑操控任务跑了一遍）。
+
+        另外：提示词里只要写了「只是寒暄」，就自动按 no_act 处理 —— 各处系统提示
+        （问候/关怀/久没输入/摸头/摄像头…）都带上这句，省得一个个传参数
+        （经 _request_dialog 信号进来的那些传不了第 4 个参数）。
+        """
+        try:
+            if not no_act and "只是寒暄" in str(text or ""):
+                no_act = True
+        except Exception:
+            pass
         try:
             self._last_turn_role = str(role)
         except Exception:
@@ -2633,12 +2649,12 @@ class Murasame(QLabel):
         if model_type == "local":
             self.worker = qwen3_lora_Worker(
                 self.history, self.portrait_history, text, role, t=t,
-                portrait_type=_ptype,
+                portrait_type=_ptype, no_act=bool(no_act),
             )
         else:
             self.worker = cloud_API_Worker(
                 self.history, self.portrait_history, text, role, t=t,
-                portrait_type=_ptype,
+                portrait_type=_ptype, no_act=bool(no_act),
             )
 
         self.worker.finished.connect(self.on_reply)

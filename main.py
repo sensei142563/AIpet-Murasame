@@ -286,7 +286,8 @@ if __name__ == "__main__":
                                 from tool import care as _care
                                 _p = _care.startup_line(getattr(pet, "pet_name", "我"))
                                 if _p:
-                                    pet.start_thread(_p, role="system", t=True)
+                                    # no_act=True：开机问候只是打个招呼，不许动手
+                                    pet.start_thread(_p, role="system", t=True, no_act=True)
                             except Exception as _e:
                                 print(f"[AIpet] ⚠ 启动问候失败: {_e}")
 
@@ -804,7 +805,8 @@ if __name__ == "__main__":
     if live2d_widget:
         live2d_widget.trigger_text.connect(lambda text: pet.show_text(text, typing=True))
         live2d_widget.trigger_touch_head.connect(
-            lambda: pet.start_thread("主人摸了摸你的头", role="system")
+            lambda: pet.start_thread("主人摸了摸你的头（★ 这一轮只是寒暄：不要输出任何操作指令）",
+                                     role="system")
         )
         # 身体各处触摸（头/胸/腹/下体/四肢/自定义部位）—— Live2D 模式下由模型控件转发，
         # 桌宠用与 2D 完全相同的「触摸区域」判定 + 同一套反应（这样 Live2D 也能摸全身）

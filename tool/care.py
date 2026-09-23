@@ -124,7 +124,8 @@ def startup_line(pet_name: str = "我") -> str:
                     "%s %s" % (_rm._fmt_ts(x.get("at")), x.get("what")) for x in its[:3]) + "。"
         except Exception:
             pass
-        txt += ("用你自己的口吻跟主人打个招呼，一句话就行（别提'系统提示'、别报时）。）")
+        txt += ("用你自己的口吻跟主人打个招呼，一句话就行（别提'系统提示'、别报时）。"
+                "★ 这一轮只是寒暄：不要输出任何操作指令（【键鼠】等）。）")
         return txt
     except Exception:
         return ""

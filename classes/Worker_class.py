@@ -232,6 +232,12 @@ def _handle_pc_control(reply: str, owner, is_auto: bool) -> str:
     """
     try:
         from tool import pc_control as _pc
+        # ★ 寒暄/问候/系统提示那一轮：只把指令从台词里去掉，**不解析、不执行**
+        if getattr(owner, "no_act", False):
+            _clean = _pc.strip(reply)
+            if _clean != str(reply or "") and _pc.parse(reply):
+                print("[桌宠] 💤 这一轮只是打招呼/系统提示 → 忽略她写的操作指令")
+            return _clean
         _acts = _pc.parse(reply)
         # 解析不出动作也要把半截指令从文字里去掉：那种"【键鼠】晃动鼠标"念出来更糟
         _clean = _pc.strip(reply)
@@ -276,7 +282,18 @@ def _handle_pc_control(reply: str, owner, is_auto: bool) -> str:
                     _auto_safe = bool(_acts) and all(_au2.allowed(a, True)[0] for a in _acts)
                 except Exception:
                     _auto_safe = False
-            if (not is_auto) or _auto_safe:
+            # ★ 别在"这一轮根本不该动手"的时候开任务循环（2026-09-24 实测 bug）：
+            #   ① 寒暄/问候轮（no_act）；
+            #   ② 自主轮里「自主操作」开关没开 —— 动作已经被拦下，再开"连着做完"自相矛盾，
+            #      而且任务描述会拿问候语/系统提示当任务（她就会把问候当任务汇报说）。
+            _can_task = True
+            if getattr(owner, "no_act", False):
+                _can_task = False
+                print("[桌宠] 💤 这一轮只是打招呼/系统提示 → 不动手、也不开任务循环")
+            if is_auto and not _pc.auto_enabled():
+                _can_task = False
+                print("[桌宠] 💤 自主操作没开 → 本轮不开任务循环")
+            if _can_task and ((not is_auto) or _auto_safe):
                 _skip_task = False
                 try:
                     # ⚠ 主人的要求里如果是"点歌"，不要开键鼠任务循环：
@@ -310,8 +327,13 @@ class qwen3_lora_Worker(QThread):
     status = pyqtSignal(str)      # 临时状态（"正在操作电脑……"）→ 对话框显示
 
     def __init__(self, history, portrait_history, user_input, role="user", t = False,
-                 portrait_type=None):
+                 portrait_type=None, no_act=False):
         super().__init__()
+        # no_act=True：这一轮只是寒暄/开机问候/系统提示，**不许动手**
+        # （实测 bug：开机问候那一轮她多写了一句【键鼠】移动 → 被当成"要操控电脑"，
+        #  动作被自主开关拦下，但任务循环照样开起来、任务描述还是问候语全文 →
+        #  她把问候当"任务汇报"说，收尾消息又把对话队列堵住）
+        self.no_act = bool(no_act)
         # 当前画面上显示的那一套立绘（a/b）——AI 必须按同一套选层，
         # 否则渲染时要跨套换算，表情/装饰会被丢掉（用户反馈"立绘没有表情"）
         self.portrait_type = portrait_type
@@ -451,8 +473,13 @@ class cloud_API_Worker(QThread):
     status = pyqtSignal(str)      # 临时状态（"正在操作电脑……"）→ 对话框显示
 
     def __init__(self, history, portrait_history, user_input, role="user", t = False,
-                 portrait_type=None):
+                 portrait_type=None, no_act=False):
         super().__init__()
+        # no_act=True：这一轮只是寒暄/开机问候/系统提示，**不许动手**
+        # （实测 bug：开机问候那一轮她多写了一句【键鼠】移动 → 被当成"要操控电脑"，
+        #  动作被自主开关拦下，但任务循环照样开起来、任务描述还是问候语全文 →
+        #  她把问候当"任务汇报"说，收尾消息又把对话队列堵住）
+        self.no_act = bool(no_act)
         # 当前画面上显示的那一套立绘（a/b）——AI 必须按同一套选层，
         # 否则渲染时要跨套换算，表情/装饰会被丢掉（用户反馈"立绘没有表情"）
         self.portrait_type = portrait_type

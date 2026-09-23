@@ -153,6 +153,12 @@ def check_wiring(results):
          in inspect.getsource(__import__("tool.music", fromlist=["x"]).play_song)
          or "免费版本 " in inspect.getsource(__import__("tool.music", fromlist=["x"]).play_song)),
         ("关窗不连带退出桌宠", "setQuitOnLastWindowClosed(False)" in inspect.getsource(MAIN)),
+        ("寒暄轮不动手（no_act）", "no_act" in inspect.getsource(W._handle_pc_control)
+         and "self.no_act" in src_w),
+        ("寒暄提示词带标记（自动 no_act）", "只是寒暄" in inspect.getsource(M.Murasame.start_thread)),
+        ("问候语禁止写操作指令", "只是寒暄" in inspect.getsource(
+            __import__("tool.care", fromlist=["x"]).startup_line)),
+        ("自主没开就不开任务循环", "自主操作没开 → 本轮不开任务循环" in inspect.getsource(W._handle_pc_control)),
         ("视觉服务：限 CPU 线程", "_cap_threads" in inspect.getsource(
             __import__("tool.vision_service", fromlist=["x"]))),
         ("视觉服务：降优先级", "_lower_priority" in inspect.getsource(
