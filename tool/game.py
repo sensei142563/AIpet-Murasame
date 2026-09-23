@@ -32,8 +32,28 @@ import time
 GAME_MARK = "【游戏】"
 DEFAULT_MINUTES = 10
 MAX_ROUNDS = 60
+# ── 快进（2026-09-24 用户反馈"执行速度太慢了"）──
+# 完整一轮 = 抓屏 + 视觉认画面（几秒~十几秒）+ 规划（几秒）≈ 15~25 秒；
+# 像视觉小说那种"点一下就继续"的，直接重复上一步就行，连着快进几轮再完整看一次。
+FAST_REPEAT = 4       # 连着重复上一步几次，就完整看一次画面（1 次完整 + 4 次快进）
+FAST_GAP = 0.6        # 快进时每步之间的间隔（秒）
+_FAST_TYPES = ("click", "double", "right", "key", "wait")   # 可以安全重复的动作类型
 # 一轮里的上限：不许它在一轮里狂点
 _LINE = None          # 延迟编译（避免顶层 re 依赖）
+
+
+def _fast_ok(acts) -> bool:
+    """这一步能不能"直接重复"（视觉小说那种点一下继续的场景）。
+
+    只有点击/双击/右键/按键/等待这类**不会打字、不会切窗口**的动作才敢连着重复；
+    带打字（输入文字）或组合键（热键）的必须每轮重新看一眼再决定。
+    """
+    try:
+        return bool(acts) and all(str(a.get("type")) in _FAST_TYPES for a in acts)
+    except Exception:
+        return False
+
+
 
 _state = {
     "running": False, "stop": False, "name": "", "goal": "", "controls": "",
@@ -614,8 +634,10 @@ def _foreground_window():
         return 0, ""
 
 
-def find_game_window(name: str = ""):
+def find_game_window(name: str = "", allow_foreground: bool = True):
     """找"要玩的游戏"的窗口 → (hwnd, 标题)；找不到返回 (0, '')。
+
+    allow_foreground=False 时**只看名字**（每轮复查用，避免把别的窗口当成游戏还在）。
 
     为什么要有这一步（2026-09-24 用户反馈）：她说"开始玩了"，可**游戏根本没打开** ——
     对着桌面一轮轮乱点、还一直说在游玩。现在开始前先确认窗口：
@@ -629,11 +651,13 @@ def find_game_window(name: str = ""):
         for hwnd, t in wins:
             nt = _norm_txt(t)
             if nt and (key in nt or nt in key):
-                return hwnd, t
+                return hwnd, t, True          # (窗口, 标题, 是不是按名字认出来的)
+    if not allow_foreground:
+        return 0, "", False
     fg_h, fg_t = _foreground_window()
     if fg_h:
-        return fg_h, fg_t
-    return 0, ""
+        return fg_h, fg_t, False
+    return 0, "", False
 
 
 def _window_alive(hwnd) -> bool:
@@ -655,7 +679,7 @@ def start(name: str, goal: str = "", controls: str = "", minutes: int = None,
         return "主人没让我玩游戏（菜单里可以打开「允许她玩游戏」）。"
     if not name:
         return "要玩哪个游戏呀？"
-    hwnd, title = find_game_window(name)
+    hwnd, title, _by_name = find_game_window(name)
     if not hwnd:
         _log(f"没找到「{name}」的窗口，而且前台也不是游戏 → 不开玩")
         return f"我没找到「{name}」的窗口——你先把它打开、让它在最前面，我再上手。"
@@ -665,7 +689,8 @@ def start(name: str, goal: str = "", controls: str = "", minutes: int = None,
         _state.update({"running": True, "stop": False, "name": str(name)[:24],
                        "goal": str(goal or "")[:120], "controls": str(controls or "")[:200],
                        "round": 0, "started": time.time(), "log": [], "reason": "",
-                       "hwnd": int(hwnd), "title": str(title)[:60]})
+                       "hwnd": int(hwnd), "title": str(title)[:60],
+                       "by_name": bool(_by_name)})
     mins = float(minutes or DEFAULT_MINUTES)
     _start_hotkey()
     threading.Thread(target=_loop, args=(mins, pet_name), daemon=True).start()
@@ -715,6 +740,8 @@ def _loop(minutes: float, pet_name: str):
     last = "（还没动手）"
     reason = ""
     ok = False
+    _reps_done = 0            # 已经快进了几轮（到 FAST_REPEAT 就完整看一眼）
+    _last_acts = []           # 上一次真的执行的动作（快进时重复它）
     try:
         for rnd in range(1, MAX_ROUNDS + 1):
             if _stopped():
@@ -725,7 +752,15 @@ def _loop(minutes: float, pet_name: str):
                 break
             # ★ 游戏被关掉了？（用户要求："如果游戏关掉了应该做出对应的回复"）
             #   以前不管游戏在不在都一轮轮"玩"下去，还一直说在游玩 —— 现在当场停手如实说。
-            if not _window_alive(_state.get("hwnd")):
+            _dead = not _window_alive(_state.get("hwnd"))
+            if not _dead and _state.get("by_name"):
+                # 当初是按名字认出来的 → 每轮再按名字找一遍（用户反馈："关掉了还在游玩"）
+                _h2, _t2, _2 = find_game_window(str(_state.get("name") or ""),
+                                                 allow_foreground=False)
+                if not _h2:
+                    _dead = True
+                    _log(f"按名字再找《{_state.get('name')}》已经找不到了 → 认为游戏关掉了")
+            if _dead:
                 _log("游戏窗口不见了 → 停止并如实说")
                 reason = (f"《{str(_state.get('title') or _state.get('name'))[:24]}》"
                           f"好像关掉了，我就不玩了。想再玩就把它打开喊我。")
@@ -733,12 +768,27 @@ def _loop(minutes: float, pet_name: str):
                 break
             _state["round"] = rnd
             _say_status(f"正在玩 {name}……")
+            # ★ 快进模式（2026-09-24 用户反馈"执行速度太慢了"）：
+            #   完整一轮 = 抓屏 + 视觉认画面（几秒~十几秒）+ 规划（几秒）≈ 15~25 秒。
+            #   像视觉小说这种"点一下就继续"的，根本不值得每轮都重新看一眼 ——
+            #   只要上一步是**可以重复**的动作（点击/双击/按键/等待），就直接重复它，
+            #   连着快进 FAST_REPEAT 轮再完整看一次（等于替主人连点「继续」）。
+            if _reps_done < FAST_REPEAT and _fast_ok(_last_acts):
+                print(f"[游戏] 第 {rnd} 轮（快进：重复上一步 {str(last)[:34]}）")
+                try:
+                    _pc.execute(_last_acts, notify=None, no_dup=True)
+                except Exception as _e3:
+                    print(f"[游戏] ⚠ 快进执行出错: {type(_e3).__name__}")
+                _reps_done += 1
+                time.sleep(FAST_GAP)
+                continue
+            _reps_done = 0
             desc = _look()
             print(f"[游戏] 第 {rnd} 轮画面：{str(desc)[:90]}")
             user = (f"当前画面：{desc}\n"
                     f"上一轮我做了什么：{last}\n"
                     f"（第 {rnd} 轮）现在输出下一步动作（1~3 行）；结束就写「完成：…」，玩不动写「失败：…」")
-            reply = _ask(system, user, max_tokens=300)
+            reply = _ask(system, user, max_tokens=200)
             if not reply:
                 reason = "唔……我这边联系不上模型了。"
                 break
@@ -765,6 +815,7 @@ def _loop(minutes: float, pet_name: str):
                 reason = "好，停了。"
                 break
             print(f"[游戏] 第 {rnd} 轮执行：{_pc.describe(acts)}")
+            _last_acts = list(acts)          # 记下来：下一轮可以先快进重复它
             done = _pc.execute(acts, notify=None, no_dup=True)
             last = _pc.describe(done) if done else "（一个都没做成）"
             time.sleep(0.6)
@@ -776,6 +827,10 @@ def _loop(minutes: float, pet_name: str):
         stopped = _stopped()
         with _lock:
             _state["running"] = False
+        try:      # 收尾了就别再挂着"正在玩…"（用户反馈：关了还显示在游玩）
+            _say_status("")
+        except Exception:
+            pass
         _stop_hotkey()
         try:
             _pc.clear_abort()

@@ -179,6 +179,13 @@ def check_wiring(results):
             __import__("tool.game", fromlist=["x"]))
          and "find_game_window(name)" in inspect.getsource(
             __import__("tool.game", fromlist=["x"]).start)),
+        ("游戏：快进模式（重复上一步提速）", "FAST_REPEAT" in inspect.getsource(
+            __import__("tool.game", fromlist=["x"]))
+         and "_fast_ok" in inspect.getsource(__import__("tool.game", fromlist=["x"]))),
+        ("游戏：每轮按名字复查窗口（关掉就停）", "allow_foreground=False" in inspect.getsource(
+            __import__("tool.game", fromlist=["x"])._loop)),
+        ("点歌文案是中性的「正在点歌」", "正在点歌……" in inspect.getsource(M.Murasame)
+         and "正在帮你点歌" not in inspect.getsource(M.Murasame)),
         ("内部提示不算主人开口（不再掐停游戏）", "_is_internal" in inspect.getsource(
             M.Murasame.start_thread)),
         ("状态文案不带轮数/步数", "正在玩 {name}……\")" in inspect.getsource(

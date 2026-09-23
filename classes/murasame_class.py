@@ -2242,7 +2242,9 @@ class Murasame(QLabel):
                     _mu_pending[:] = []          # 一次只处理一个
                     print("[桌宠] 🎵 她要点歌 → 去网易云搜索并播放")
                     self._talking = False
-                    self.show_text("正在帮你点歌……", typing=True)
+                    # 文案用中性的"正在点歌"：
+                    #   用户反馈让她放**她自己**喜欢的歌时，对话框写「正在**帮你**点歌」很矛盾 ✗
+                    self.show_text("正在点歌……", typing=True)
                     import threading as _thm
                     _thm.Thread(target=self._music_and_reply, args=(_mreq,), daemon=True).start()
                     return
