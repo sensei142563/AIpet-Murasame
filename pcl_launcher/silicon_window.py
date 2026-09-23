@@ -1758,7 +1758,11 @@ def _hook_repaint_transparency(page):
                             from PyQt5.QtCore import QTimer   # Qt 可能晚一步重建 → 再补两次
                             def _redo(o=owner):
                                 if _widget_alive(o):          # 页面已被重建/销毁就别碰了
-                                    _make_transparent(o)
+                                    # ⚠ 必须和"建页时"用同一个 alpha：建页走的是
+                                    #   _page_block_alpha()（有壁纸 0.92 / 没壁纸 0.35），
+                                    #   这里用默认 0.35 的话，一点「刷新」整页块面就突然变淡
+                                    #   （用户报的"点刷新前后不一样"）。
+                                    _make_transparent(o, alpha=_page_block_alpha())
                             _redo()                            # 立即
                             QTimer.singleShot(150, _redo)
                             QTimer.singleShot(450, _redo)
@@ -1983,6 +1987,10 @@ def _make_transparent(root_widget, alpha: float = 0.35, recurse: bool = True):
     widgets = [root_widget] + (root_widget.findChildren(QWidget) if recurse else [])
     for child in widgets:
         try:
+            if child.property("keep_true_color"):
+                # 配色预览色块之类"必须显示真彩"的控件：跳过，别压透明度
+                # （压到 35% 后几块颜色几乎一样，预览就失去意义了）
+                continue
             child.setAutoFillBackground(False)
             css = child.styleSheet()
             if css and "background" in css:

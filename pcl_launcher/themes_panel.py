@@ -525,6 +525,10 @@ class PCLThemesPanel(QScrollArea):
                     if key in cols:
                         c = QLabel()
                         c.setFixedSize(int(26*S), int(14*S))
+                        # 配色预览必须显示**真实颜色**：标记一下，让外壳的"整页透明化"
+                        # 跳过它。否则会被压到 35% 不透明度 → 几个色块看着都是浅蓝，
+                        # 预览等于没用（用户报的"点刷新前后色块不一样"就是这个）。
+                        c.setProperty("keep_true_color", True)
                         c.setStyleSheet(f"background: {cols[key]}; border-radius: {int(3*S)}px;")
                         sw.addWidget(c)
         except Exception:
