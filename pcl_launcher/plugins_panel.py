@@ -17,7 +17,7 @@ import subprocess
 from PyQt5.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve
 from PyQt5.QtWidgets import (
     QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QScrollArea,
-    QCheckBox, QFrame, QMessageBox, QFileDialog, QSizePolicy, QDialog,
+    QCheckBox, QFrame, QMessageBox, QFileDialog, QDialog,
     QSpinBox, QDoubleSpinBox, QComboBox, QLineEdit, QButtonGroup,
     QGraphicsOpacityEffect
 )

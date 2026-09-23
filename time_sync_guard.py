@@ -10,7 +10,6 @@
 日志：data/time_sync_guard.log
 """
 import os
-import sys
 import time
 import socket
 import subprocess
