@@ -601,15 +601,16 @@ class PCLPluginsPanel(QScrollArea):
         right = QVBoxLayout()
         right.setSpacing(int(6*S))
         chk = QCheckBox("启用")
+        chk.setChecked(is_enabled(meta, cfg))
+        # ⚠ 原来这里先 setStyleSheet(enabled_check_qss(...)) 紧接着又 setStyleSheet(...) 把
+        #   它整个覆盖了 —— 等于那个专门写的"启用"样式从来没生效过（勾选态渲染成实心方块，
+        #   看不出是勾选框）。现在只设一次：用现成的开关样式，失败才退回最简样式。
         try:
             from .silicon_ui import enabled_check_qss
             chk.setStyleSheet(enabled_check_qss(Color1.name()))
         except Exception:
-            pass
-        chk.setChecked(is_enabled(meta, cfg))
-        chk.setStyleSheet(f"QCheckBox {{ color: {Color1.name()}; font-size: {int(13*S)}px; "
-                          f"font-family: 'Microsoft YaHei'; background: transparent; }}"
-                          f"QCheckBox::indicator {{ width: {int(16*S)}px; height: {int(16*S)}px; }}")
+            chk.setStyleSheet(f"QCheckBox {{ color: {Color1.name()}; font-size: {int(13*S)}px; "
+                              f"font-family: 'Microsoft YaHei'; }}")
         chk.stateChanged.connect(lambda st, m=meta: self._on_toggle(m, st))
         right.addWidget(chk)
 
