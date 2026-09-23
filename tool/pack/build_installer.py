@@ -95,15 +95,23 @@ def _audit_payload(items: list) -> None:
 
     为什么不用"看 SKIP_DIRS 对不对"来保证：那种保证只在有人记得改它时成立。
     这里直接只看结果——收集到的 payload 路径里有没有可疑东西，有就中止构建。
+
+    ⚠ 规则必须**精确**，宁可少报也不能乱中止构建：
+      第一版写成 `.*credential.*` 通配，结果第三方库的正常源码
+      `runtime/venv/Lib/site-packages/huggingface_hub/utils/_git_credential.py`
+      就被判成"凭据"、整个打包被中止（实测踩到）。这种检查器比没有更糟——
+      会被人直接注释掉。
+      所以：只在**应用根这一层**按文件名判（config.json / *.pid / qr*.png），
+      目录规则也只认顶层的 data/ face_shibie/ logs/；site-packages、
+      python/Lib、NapCat 里的同名文件一律不管。
     """
     danger_dir = re.compile(r"^(app/)?(data|face_shibie|logs)/", re.I)
-    danger_name = re.compile(
-        r"(^|/)(config\.json|wechat_credentials\.json|.*credential.*|.*\.qrcode|"
-        r"qq_memory/|.*\.pid|qr.*\.png)$", re.I)
+    danger_top = re.compile(
+        r"^(app/)?(config\.json|wechat_credentials\.json|[^/]*\.pid|qr[^/]*\.png)$", re.I)
     bad = []
     for _src, rel in items:
         r = rel.replace("\\", "/")
-        if danger_dir.match(r) or danger_name.search(r):
+        if danger_dir.match(r) or danger_top.match(r):
             bad.append(r)
     if bad:
         _log("")
@@ -164,6 +172,23 @@ def collect_payload() -> list:
         n3 = len(items)
         items += list(_iter_files(scene, "app/场景素材"))
         _log(f"  [app/场景素材] {len(items) - n3} 个文件")
+
+    # ── 5) 去重
+    # ⚠ 实测踩到：绿色版目录里**已经**带了 场景素材/（build_launcher 会复制进去），
+    #   第 4 步又按 BASE/场景素材 加了一遍 → zip 里出现重复条目
+    #   （UserWarning: Duplicate name: 'app/场景素材/巷口.JPG'）。重复条目会让
+    #   zip 变大、解压时后写覆盖先写（内容一致时无害，不一致时静默丢文件）。
+    seen, uniq, dups = set(), [], 0
+    for src, rel in items:
+        key = rel.replace("\\", "/")
+        if key in seen:
+            dups += 1
+            continue
+        seen.add(key)
+        uniq.append((src, rel))
+    if dups:
+        _log(f"  [去重] 丢掉 {dups} 个重复条目（同一路径被收集了两次）")
+    items = uniq
     _audit_payload(items)          # 隐私自检（有问题直接中止，别生成安装包）
     return items
 
