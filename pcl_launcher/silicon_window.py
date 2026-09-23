@@ -344,9 +344,8 @@ class HomePage(QWidget):
         row.addStretch()
         cl.addLayout(row)
 
-        tip = QLabel("启动桌宠后可用下方按钮实时控制；QQ 首次使用需扫码登录（需要手机 QQ）。")
-        tip.setStyleSheet(f"color: {Gray2.name()}; font-size: 12px;")
-        cl.addWidget(tip)
+        # 这里原来还有一句"启动桌宠后可用下方按钮实时控制；QQ 首次使用需扫码登录"——
+        # 前半句控制面板自己已经写明，后半句与「开始使用」引导③重复，故删掉（首页减法）。
         outer.addWidget(card)
 
         # ── 控制面板卡片 ──
@@ -446,6 +445,43 @@ class HomePage(QWidget):
         tr.addStretch()
         tl.addLayout(tr)
         outer.addWidget(tools)
+
+        # ── 「开始使用」引导卡 ──
+        # 目的：把首页下方那片空白变成"还差哪一步"，且每步都能**直接点**。
+        # 三步全做完 → 整张卡隐藏（不占地方、不啰嗦），符合"首页减法"。
+        self.guide = Card()
+        gl = QVBoxLayout(self.guide)
+        gl.setContentsMargins(18, 14, 18, 16)
+        gl.setSpacing(8)
+        gl.addWidget(silicon_ui.section_title("开始使用", accent))
+        hint = QLabel("下面只列出还差的事，做完就消失；每一条都能直接点。")
+        hint.setStyleSheet(f"color: {Gray3.name()}; font-size: 11px;")
+        gl.addWidget(hint)
+        self._guide_rows = []          # [(行控件, 序号/勾, 按钮, 说明)]
+        for _i, _title in enumerate(("启动 AIpet 桌宠", "填写对话模型 API Key", "启动 QQ AIpet")):
+            row = QWidget()
+            rl = QHBoxLayout(row)
+            rl.setContentsMargins(0, 0, 0, 0)
+            rl.setSpacing(10)
+            mark = QLabel("①")
+            mark.setFixedWidth(20)
+            mark.setStyleSheet(f"color: {Color3.name()}; font-size: 13px; font-weight: bold;")
+            btn = QPushButton(_title)
+            btn.setStyleSheet(_ghost_btn_qss())
+            btn.setMinimumHeight(34)
+            lab = QLabel("")
+            lab.setStyleSheet(f"color: {Gray2.name()}; font-size: 12px;")
+            rl.addWidget(mark)
+            rl.addWidget(btn)
+            rl.addWidget(lab, 1)
+            gl.addWidget(row)
+            self._guide_rows.append((row, mark, btn, lab))
+        # 三步各自的动作（按钮文字在 _apply_status 里按状态微调）
+        self._guide_rows[0][2].clicked.connect(self.toggle_pet)
+        self._guide_rows[1][2].clicked.connect(self._open_settings_page)
+        self._guide_rows[2][2].clicked.connect(self.start_qq)
+        self.guide.hide()               # 默认隐藏，状态刷新后决定要不要显示
+        outer.addWidget(self.guide)
         outer.addStretch()
 
         self._probe_signal.connect(self._apply_status)
@@ -479,7 +515,7 @@ class HomePage(QWidget):
                         ctrl = (json.loads(r.read().decode("utf-8", "replace")) or {}).get("status") or {}
                 except Exception:
                     ctrl = {}
-            self._probe_result = (alive, tts_ok, ctrl)
+            self._probe_result = (alive, tts_ok, ctrl, self._read_cfg_quick())
             try:
                 self._probe_signal.emit()
             except Exception:
@@ -488,10 +524,45 @@ class HomePage(QWidget):
         import threading
         threading.Thread(target=_work, daemon=True).start()
 
+    @staticmethod
+    def _read_cfg_quick() -> dict:
+        """读一次 config.json（给"开始使用"引导判"API Key 填了没"）。
+
+        放在探测线程里读，不占 UI 线程；失败就返回空 dict（当作"还没填"）。
+        """
+        try:
+            with open(os.path.join(_app_base_dir(), "config.json"), "r", encoding="utf-8") as f:
+                return json.load(f) or {}
+        except Exception:
+            return {}
+
+    def _open_settings_page(self):
+        """跳到设置页的「模型与语音」那一栏（填 API Key 的地方）"""
+        try:
+            self.shell._goto("settings")
+            cfgp = self.shell.pages.get("settings")
+            if cfgp is not None and hasattr(cfgp, "_switch_cat"):
+                cfgp._switch_cat("ai")
+        except Exception as e:
+            print(f"[NewUI] ⚠ 打开设置页失败: {e}")
+
+    def _api_key_ok(self, cfg: dict) -> tuple:
+        """对话模型有没有可用的 API Key。返回 (是否就绪, 缺哪个/说明)"""
+        mt = str((cfg or {}).get("model_type") or "qwen").strip().lower()
+        if mt == "local":
+            # 本地模型（Ollama）不需要 Key；这里不拦人，交给桌宠侧自己报错
+            return True, ""
+        keyname = "deepseek_api_key" if mt == "deepseek" else "qwen_api_key"
+        label = "DeepSeek" if mt == "deepseek" else "Qwen"
+        if str((cfg or {}).get(keyname) or "").strip():
+            return True, ""
+        return False, label
+
     def _apply_status(self):
         """探测结果回到 UI 线程再更新（信号触发）"""
         try:
-            alive, tts_ok, ctrl = getattr(self, "_probe_result", (False, False, {}))
+            alive, tts_ok, ctrl, cfg = getattr(self, "_probe_result",
+                                               (False, False, {}, {}))
             self._probe_busy = False
             self.chip_pet.set_text("桌宠：运行中" if alive else "桌宠：未运行", alive)
             # 「正在关闭/启动中」期间不要被状态刷新覆盖文案
@@ -541,6 +612,36 @@ class HomePage(QWidget):
                                             "下面的开关和按钮才有反应。")
             except Exception:
                 pass
+            # ── 开始使用引导（只列还差的步骤；都齐了整张卡隐藏）──
+            try:
+                api_ok, api_label = self._api_key_ok(cfg)
+                qq_on = self.shell._qq_proc is not None and self.shell._qq_proc.poll() is None
+                # (已完成?, 按钮文字, 说明)
+                steps = [
+                    (alive, "启动 AIpet 桌宠",
+                     "点一下就跑起来；右下角托盘可退出" if not alive else ""),
+                    (api_ok, "填写对话模型 API Key",
+                     ("还差 %s 的 Key（设置 → 模型与语音）" % api_label) if not api_ok else ""),
+                    (qq_on, "启动 QQ AIpet",
+                     "首次需要手机 QQ 扫码登录" if not qq_on else ""),
+                ]
+                marks = ("①", "②", "③")
+                pending = 0
+                for i, (row, mark, btn, lab) in enumerate(self._guide_rows):
+                    done, title, note = steps[i]
+                    if done:
+                        row.hide()
+                        continue
+                    pending += 1
+                    row.show()
+                    mark.setText(marks[pending - 1])       # 序号按"还差的第几条"重排
+                    mark.setStyleSheet(f"color: {Color3.name()}; font-size: 13px; font-weight: bold;")
+                    btn.setText(title)
+                    btn.setEnabled(True)
+                    lab.setText(note)
+                self.guide.setVisible(pending > 0)
+            except Exception as _e:
+                print(f"[NewUI] ⚠ 引导卡更新失败: {_e}")
         except Exception as e:
             print(f"[NewUI] ⚠ 状态更新失败: {e}")
 
