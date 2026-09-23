@@ -2205,25 +2205,43 @@ class Murasame(QLabel):
         return fam
 
     def _update_text_scaling(self):
-        """字号 / 左右留白：**按文字区实际宽度**算，任何立绘比例都不会"字太大显示不全"。
+        """字号 / 左右留白。
 
-        丛雨原值参考：可用宽 430px 左右 → 字号 12px、左右各约 39px。"""
+        两套算法，按"有没有配对话框区域"分：
+          · 配了框（协作者的向导里拖过框的角色）→ 字号按**框宽**算，换角色不跑偏；
+          · 没配框（丛雨等老角色）→ 回到 v1.16.1 的算法：字号 = 40 × 显示缩放。
+        """
         scale = max(self._current_scale, 0.1)
-        # ① 先定左右留白（按窗口宽度比例，且不超过旧算法给的宽度）
+        # ① 先定左右留白：v1.16.1 是 140 × scale；但窗口太窄时不能把框挤没，
+        #    所以额外限一次「不超过窗口宽的 20%」（旧代码限的是 8%，等于把框放宽了，
+        #    Live2D 下文本框因此比 1.16.1 宽一截）
         old_margin = max(10, int(round(self._base_text_x_offset * scale)))
-        self.text_x_offset = max(8, min(old_margin, max(10, int(round(self.width() * 0.08)))))
-        # ② 用新留白算文字区宽度 → 字号（保证任何窗口尺寸都能显示完整）
+        self.text_x_offset = max(8, min(old_margin, max(10, int(round(self.width() * 0.20)))))
+        # ② 文字区宽度（配了框的角色要用它算字号）
         try:
             area_w = max(60, int(self._text_rect().width()))
         except Exception:
             area_w = max(60, int(self.width() * 0.7))
         fscale = self._live_font_scale()   # 实时值优先（拖动即时生效、聊天时不回退）
-        if getattr(self, "_live2d_mode", False) and not getattr(self, "_text_box", None):
-            # Live2D 且没配置对话框区域：沿用原算法（窗口高度 × font_scale），保持老角色现状
-            scaled_font_size = max(8, int(round(self._base_font_size * scale * fscale)))
-        else:
-            # 按文字区宽度定字号：430px → 12px（丛雨原值），窄立绘自动变小 → 显示完整
+        if getattr(self, "_text_box", None):
+            # 配了对话框区域：按框宽定字号（框大 → 字大）
             scaled_font_size = max(9, int(round(area_w * self._font_ratio * fscale)))
+        else:
+            # 没配框：v1.16.1 的算法 = 40 × scale。
+            # ⚠ scale（_current_scale）里**已经含过一次**角色的 live2d_font_scale，
+            #   所以这里绝对不能再乘一次 fscale：丛雨 0.35 会被乘成 0.1225，
+            #   再被 max(8,…) 卡住 → Live2D 下字号常年钉在 11px（用户报的"文字显示太小"）。
+            #   用户没拖过字号时用「角色原值」（Live2D 已经乘进 scale，故取 1.0；
+            #   2D 用配置里的 text_font_scale_2d）；拖过才按"相对角色默认值的倍数"缩放。
+            _live = getattr(self, "_font_scale_live", None)
+            if getattr(self, "_live2d_mode", False):
+                _role_fs = float(getattr(self, "_live2d_font_scale", 1.0) or 1.0) or 1.0
+                _eff = float(_live) if _live is not None else _role_fs
+                fscale_rel = _eff / _role_fs
+            else:
+                fscale_rel = (float(_live) if _live is not None
+                              else float(getattr(self, "_text_font_scale_cfg", 1.0) or 1.0))
+            scaled_font_size = max(8, int(round(self._base_font_size * scale * fscale_rel)))
         # 用「像素字号 + 全提示 + 抗锯齿」：小字号下笔画更实，不会有糊边
         _pt = max(6, int(round(scaled_font_size * 1.333)))     # pt → px（保持原有大小观感）
         self.text_font = QFont(self._resolve_pet_font())

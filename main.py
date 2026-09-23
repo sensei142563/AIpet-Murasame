@@ -198,17 +198,12 @@ if __name__ == "__main__":
 
     # 后台启动本地 API 服务（FastAPI + Uvicorn）
     def _run_api_server():
-        # Windows Proactor 下客户端断开会产生无害的 "WinError 10054" 噪音 traceback
-        # （HTTP 短连接常见）。切 Selector 事件循环消除（标准解法，功能无影响）。
-        try:
-            import asyncio
-            if sys.platform == "win32":
-                asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-        except Exception:
-            pass
-        config = uvicorn.Config(api_app, host="127.0.0.1", port=28565, log_level="info")
-        server = uvicorn.Server(config)
-        server.run()
+        # 细节都收在 tool/api_server.py 里：
+        #   · access_log=False —— 启动器每 300ms 探一次 /control，否则日志刷屏
+        #   · 自建事件循环 + 忽略 ConnectionResetError —— uvicorn 0.37 在 Windows 上
+        #     强制用 Proactor，光靠 set_event_loop_policy 已经压不住 10054 的 traceback
+        from tool.api_server import run_blocking
+        run_blocking(api_app, "127.0.0.1", 28565)
 
     api_thread = threading.Thread(
         target=_run_api_server,
