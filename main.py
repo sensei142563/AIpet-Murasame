@@ -202,6 +202,27 @@ if __name__ == "__main__":
     api_thread.start()
 
     app = QApplication(sys.argv)  # 创建应用对象
+
+    # ★ 写进程锁（data/pet.pid）：启动器和 run.py 靠它判断"桌宠已经在跑了"。
+    #   以前只靠探测 HTTP 端口，而桌宠启动要三十秒 —— 这期间会被判成"未运行"，
+    #   按钮变回「启动桌宠」、再点就拉起第二只（用户反馈"会启动多个桌宠"）。
+    _pid_file = os.path.join("data", "pet.pid")
+    try:
+        os.makedirs("data", exist_ok=True)
+        with open(_pid_file, "w", encoding="utf-8") as _pf:
+            _pf.write(str(os.getpid()))
+    except Exception as _e:
+        print(f"[AIpet] ⚠ 写进程锁失败: {_e}")
+
+    def _remove_pid_file():
+        try:
+            if os.path.exists(_pid_file):
+                with open(_pid_file, encoding="utf-8") as _f:
+                    if _f.read().strip() == str(os.getpid()):
+                        os.remove(_pid_file)
+        except Exception:
+            pass
+
     pet = Murasame()  # 创建桌宠实例
     app.aboutToQuit.connect(lambda: save_screen_type(pet))
     # 退出时记录桌宠位置（下次启动回到原位置；配合启动器「重置桌宠位置」按钮）
@@ -229,6 +250,10 @@ if __name__ == "__main__":
 
     try:
         app.aboutToQuit.connect(_start_exit_watchdog)
+    except Exception:
+        pass
+    try:
+        app.aboutToQuit.connect(_remove_pid_file)   # 正常退出时清掉进程锁
     except Exception:
         pass
     # 显示窗口：等第一帧立绘（服装）合成好再显示，避免先露出"没穿好衣服"的样子；

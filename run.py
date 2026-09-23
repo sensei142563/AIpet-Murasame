@@ -238,6 +238,28 @@ def install_requirements():
     # Step 1️⃣ 快速检查 requirements 内的关键依赖是否已存在（避免每次启动都跑 pip）
     # 注意：torch 与 f5_tts 不在此检查——torch 由 setup_runtime_and_pytorch 管理，
     #       f5_tts 是可选语音库，由 start_f5tts_api 单独引导。
+    # ★ 缓存：requirements.txt 没变过、上次检查也通过 → 直接跳过
+    #   （每次启动 import cv2/numpy/PyQt5/pygame/soundfile 大约要 3 秒，纯白等；
+    #    桌宠自己那个进程还会再 import 一次，run.py 这份纯属浪费）
+    try:
+        import json as _json
+        _st = os.path.join("data", ".deps_ok.json")
+        _sig = None
+        try:
+            _stt = os.stat(req_path)
+            _sig = "%d:%d" % (int(_stt.st_mtime), int(_stt.st_size))
+        except Exception:
+            pass
+        if _sig:
+            try:
+                with open(_st, encoding="utf-8") as _f:
+                    if _json.load(_f).get("sig") == _sig:
+                        log("核心依赖已就绪（上次检查通过，跳过）。", "SUCCESS")
+                        return
+            except Exception:
+                pass
+    except Exception:
+        _sig = None
     try:
         import cv2
         import numpy
@@ -245,6 +267,14 @@ def install_requirements():
         import pygame
         import soundfile
         log("核心依赖已就绪，跳过自动安装。", "SUCCESS")
+        try:
+            if _sig:
+                import json as _json2
+                os.makedirs("data", exist_ok=True)
+                with open(os.path.join("data", ".deps_ok.json"), "w", encoding="utf-8") as _f:
+                    _json2.dump({"sig": _sig}, _f)
+        except Exception:
+            pass
         return
     except ImportError:
         pass
@@ -335,12 +365,12 @@ def setup_runtime_and_pytorch(config_path="config.json", cfg=None, hardware_type
         return "deepseek"
 
     if model_type == "deepseek":
+        # ⚠ 云端模式根本不需要 torch，以前还去 ensure_cpu_torch()：每次启动白等约 4 秒
+        #   （尝试 import torch → DLL 初始化失败 → 打印警告继续）。直接跳过。
         log("检测到 DeepSeek 云端模式，跳过 PyTorch 安装。")
-        ensure_cpu_torch()
         return "deepseek"
     elif model_type == "qwen":
         log("检测到 Qwen 云端模式，跳过 PyTorch 安装。")
-        ensure_cpu_torch()
         return "qwen"
 
     log("检测到本地运行模式。")
@@ -460,6 +490,20 @@ def run_download():
         if not os.path.exists(script_path):
             log(f"未找到文件: {script_path}", "ERROR")
             return
+
+        # ★ 模型已经在本地 → 直接跳过（这脚本每次都会去 ModelScope 联网检查，
+        #   实测要 17 秒，是启动最慢的一段）。要强制重新下载就删掉这两个目录。
+        try:
+            _gs = os.path.abspath(r".\GPT-SoVITS")
+            _gpt_ok = any(f.endswith((".ckpt", ".pth"))
+                          for f in os.listdir(os.path.join(_gs, "GPT_weights")))
+            _sov_ok = any(f.endswith((".pth", ".ckpt"))
+                          for f in os.listdir(os.path.join(_gs, "SoVITS_weights")))
+            if _gpt_ok and _sov_ok:
+                log("语音模型已就绪，跳过下载检查（省下十几秒）。", "SUCCESS")
+                return
+        except Exception:
+            pass
 
         log(f"正在运行模型下载脚本：{script_path}", "INFO")
         try:
@@ -744,7 +788,7 @@ def start_tts_api():
                 env=_pop_env,
                 creationflags=_console_flags()
             )
-            time.sleep(5)
+            time.sleep(1.5)
             log("TTS 服务已启动%s。" % ("" if quiet_mode() else "（新控制台）"))
 
             def _warm():
@@ -788,7 +832,7 @@ def start_tts_api():
                   ["ssh", "aipet", "-t", "bash -lc 'bash run.sh; bash'"],
                   creationflags=_console_flags()
             )
-            time.sleep(5)
+            time.sleep(1.5)
             log("TTS 服务已启动%s。" % ("" if quiet_mode() else "（新控制台）"))
             return proc
         except Exception as e:
@@ -943,6 +987,41 @@ def _cleanup_services():
         pass
 
 
+def _pet_pid_alive() -> bool:
+    """data/pet.pid 里记的桌宠进程还活着吗（比探测 HTTP 端口可靠：启动期间端口还没起）
+
+    为什么要它：桌宠启动要三十秒，这期间端口探测必然失败 → 会被当成"没在跑"，
+    于是又拉一只起来（用户反馈"会启动多个桌宠"）。
+    """
+    try:
+        import ctypes
+        pf = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "pet.pid")
+        if not os.path.exists(pf):
+            return False
+        with open(pf, encoding="utf-8") as f:
+            pid = int((f.read() or "0").strip() or 0)
+        if pid <= 0:
+            return False
+        k32 = ctypes.windll.kernel32
+        k32.OpenProcess.restype = ctypes.c_void_p
+        k32.OpenProcess.argtypes = [ctypes.c_uint, ctypes.c_int, ctypes.c_uint]
+        k32.GetExitCodeProcess.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
+        h = k32.OpenProcess(0x1000, False, pid)          # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return False
+        try:
+            code = ctypes.c_ulong(0)
+            ok = k32.GetExitCodeProcess(ctypes.c_void_p(h), ctypes.byref(code))
+            return bool(ok) and code.value == 259        # STILL_ACTIVE
+        finally:
+            try:
+                k32.CloseHandle(ctypes.c_void_p(h))
+            except Exception:
+                pass
+    except Exception:
+        return False
+
+
 def _already_running() -> bool:
     """单实例保护：桌宠 API 端口已被占用 → 说明已经有一个桌宠在跑。
 
@@ -960,8 +1039,8 @@ def _already_running() -> bool:
 
 
 if __name__ == "__main__":
-    if _already_running():
-        log("检测到桌宠已在运行（API 端口 28565 已被占用）。", "WARN")
+    if _already_running() or _pet_pid_alive():
+        log("检测到桌宠已在运行（端口被占用或进程锁还在）→ 本次启动自动退出。", "WARN")
         log("为避免出现两只桌宠 / 端口冲突报错，本次启动已自动退出。", "INFO")
         log("・想切换角色：在启动器里「关闭桌宠」后再启动即可", "INFO")
         log("・确实要开第二个（不推荐）：先关闭当前桌宠窗口", "INFO")

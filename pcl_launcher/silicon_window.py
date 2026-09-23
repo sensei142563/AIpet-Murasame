@@ -273,6 +273,42 @@ def _local_open(req, timeout=3):
     return _local_opener().open(req, timeout=timeout)
 
 
+def _pet_pid_alive() -> bool:
+    """桌宠进程还活着吗（读 data/pet.pid）——**启动期间**端口还没起，只能靠它判断。
+
+    用户反馈："启动时按钮有时候会变回启动桌宠，点了就开第二只" ——
+    根因就是这里以前只探测 HTTP 端口，而桌宠启动要三十秒，
+    期间端口探测失败 → 按钮变回「启动桌宠」→ 再点就拉起第二个。
+    """
+    try:
+        import ctypes
+        pf = os.path.join(_app_base_dir(), "data", "pet.pid")
+        if not os.path.exists(pf):
+            return False
+        with open(pf, encoding="utf-8") as f:
+            pid = int((f.read() or "0").strip() or 0)
+        if pid <= 0:
+            return False
+        k32 = ctypes.windll.kernel32
+        k32.OpenProcess.restype = ctypes.c_void_p
+        k32.OpenProcess.argtypes = [ctypes.c_uint, ctypes.c_int, ctypes.c_uint]
+        k32.GetExitCodeProcess.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
+        h = k32.OpenProcess(0x1000, False, pid)
+        if not h:
+            return False
+        try:
+            code = ctypes.c_ulong(0)
+            ok = k32.GetExitCodeProcess(ctypes.c_void_p(h), ctypes.byref(code))
+            return bool(ok) and code.value == 259
+        finally:
+            try:
+                k32.CloseHandle(ctypes.c_void_p(h))
+            except Exception:
+                pass
+    except Exception:
+        return False
+
+
 def _pet_api_alive() -> bool:
     try:
         req = urllib.request.Request(_CONTROL_BASE, method="GET")
@@ -679,7 +715,13 @@ class HomePage(QWidget):
         self._probe_busy = True
 
         def _work():
+            # 端口或进程锁任一活着 → 算"运行中"（启动期间只有进程锁在）
             alive = _pet_api_alive()
+            if not alive:
+                try:
+                    alive = _pet_pid_alive()
+                except Exception:
+                    pass
             tts_ok = False
             try:
                 import socket
@@ -795,7 +837,20 @@ class HomePage(QWidget):
             self._open_story()
 
     def toggle_pet(self):
-        if _pet_api_alive():
+        _running = _pet_api_alive()
+        if not _running:
+            try:
+                _running = _pet_pid_alive()
+            except Exception:
+                pass
+        if _running and not _pet_api_alive():
+            # 进程在、端口还没起 = 正在启动：别当作"未运行"去再拉一只
+            self._busy_btn(self.btn_pet, " 正在启动中…", 30000)
+            self.status_lbl.setText(" 桌宠正在启动，请稍候…")
+            QTimer.singleShot(6000, self.refresh_status)
+            print("[NewUI] 桌宠正在启动中（进程已在）→ 不再启动第二只")
+            return
+        if _running:
             # 关闭桌宠：显示「正在关闭中…」并禁用按钮，避免重复点击
             self._busy_btn(self.btn_pet, " 正在关闭中…", 8000)
             self.status_lbl.setText(" 正在关闭桌宠…")
@@ -810,7 +865,7 @@ class HomePage(QWidget):
             # 轮询等它真的退出（最多 12 秒），再刷新状态
             self._wait_pet_gone(12)
             return
-        self._busy_btn(self.btn_pet, " 正在启动中…", 15000)
+        self._busy_btn(self.btn_pet, " 正在启动中…", 40000)
         base = _app_base_dir()
         py = _find_python(base)
         if not py:
