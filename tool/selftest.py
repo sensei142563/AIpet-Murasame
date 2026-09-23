@@ -161,8 +161,11 @@ def check_wiring(results):
          and "_scrub_history()" in inspect.getsource(M.Murasame._load_history)),
         ("音乐：确保真的在放（自己按播放键）", "def _ensure_playing" in inspect.getsource(
             __import__("tool.music", fromlist=["x"]))),
-        ("音乐：播放条按钮只认最下面那条", "0.70" in inspect.getsource(
-            __import__("tool.music", fromlist=["x"])._toggle_candidates)),
+        ("音乐：只看播放条那一个键", "def _play_bar_toggle" in inspect.getsource(
+            __import__("tool.music", fromlist=["x"]))
+         and "0.72" in inspect.getsource(__import__("tool.music", fromlist=["x"])._play_bar_toggle)),
+        ("音乐：换歌立刻停手（不冒充放上）", "按了播放键之后歌变了" in inspect.getsource(
+            __import__("tool.music", fromlist=["x"])._ensure_playing)),
         ("寒暄提示词带标记（自动 no_act）", "只是寒暄" in inspect.getsource(M.Murasame.start_thread)),
         ("问候语禁止写操作指令", "只是寒暄" in inspect.getsource(
             __import__("tool.care", fromlist=["x"]).startup_line)),

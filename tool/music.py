@@ -871,60 +871,46 @@ def _player_button(hwnd, names):
     return None, None
 
 
-def _toggle_candidates(hwnd):
-    """所有"播放/暂停切换键"候选：**底部可见的优先，再试隐藏的**。
+def _ensure_playing(hwnd, tries: int = 2) -> bool:
+    """确保**真的在放** —— 而且**只按播放条上那一个键**，按完核对没换歌。
 
-    实测（2026-09-24）：这台机器上同一个播放器里存在 5 个叫 play/pause 的按钮，
-    其中**可见的那个按了没反应**（CEF 自绘元素 Invoke 无效），
-    **rect=(0,0,0,0) 的隐藏那个一按真的能切换** —— 而换个窗口大小时又反过来。
-    所以不猜哪个对，全拿来依次试，直到"在放吗"真的变成 True。
-    """
-    want = ("play", "pause")
-    try:
-        import ctypes
-        from ctypes import wintypes as _wt
-        _r0 = _wt.RECT()
-        ctypes.windll.user32.GetWindowRect(int(hwnd), ctypes.byref(_r0))
-        _band = int(_r0.top) + int(max(1, int(_r0.bottom) - int(_r0.top)) * 0.70)
-    except Exception:
-        _band = 1 << 30
-    vis, hid = [], []
-    for el, nm, r in _walk_buttons(hwnd):
-        if nm.lower() not in want:
-            continue
-        if r and r[2] > r[0] and r[1] >= _band:
-            vis.append((el, nm, r))
-        elif r and r[2] > r[0]:
-            vis.append((el, nm, r))          # 可见但不在底部：也先于隐藏的试
-        else:
-            hid.append((el, nm, r))
-    return vis + hid
-
-
-def _ensure_playing(hwnd, tries: int = 3) -> bool:
-    """确保**真的在放**（用户反馈：有时候点上了却没声音，得手动暂停再播放）。
-
-    做法就是照主人手动那一套：挨个候选切换键试，直到"在放吗"变成 True。
+    ★ 2026-09-24 用户反馈"让播放的是红色高跟鞋，播放的确实是另一个音乐"，
+      实测根因就在这个函数的老版本：它把页面上**所有**叫 play/pause 的元素
+      排成一列挨个按（包括页面中部那个），结果
+        · 第一个把正在放的歌**暂停**了；
+        · 第二个**把别的歌放了起来**（标题真的从《些许遗憾…》变成《红色高跟鞋（DJ版）》）。
+      现在：
+        ① 只认播放条（窗口最下面那一条）上的那一个键；
+        ② 按之前记下标题，按完**核对标题没变**——变了立刻停手、不冒充放上了；
+        ③ 读不到播放条键就**什么都不按**（宁可不动，也不能把主人的歌换掉）。
     """
     try:
         if is_playing(hwnd) is True:
             return True
+        el, nm = _play_bar_toggle(hwnd)
+        if el is None:
+            _log("播放条上找不到播放/暂停键 → 不敢乱按（怕按到别的歌），这次先不动")
+            return False
+        _t0 = window_title(hwnd)
         for _i in range(max(1, int(tries))):
-            for el, nm, rr in _toggle_candidates(hwnd):
-                try:
-                    U_inv = _uia().invoke(el)
-                except Exception:
-                    U_inv = False
-                if not U_inv:
-                    continue
-                time.sleep(0.8)
-                if is_playing(hwnd) is True:
-                    _log(f"✅ 自己按了播放键（{nm} @{rr}）→ 真的响起来了")
-                    return True
-            time.sleep(0.5)
+            if is_playing(hwnd) is True:
+                return True
+            try:
+                if not _uia().invoke(el):
+                    break
+            except Exception:
+                break
+            time.sleep(1.0)
+            if window_title(hwnd) != _t0:
+                _log("⚠ 按了播放键之后歌变了 → 立刻停手（不冒充放上了）")
+                return False
+            if is_playing(hwnd) is True:
+                _log(f"✅ 按了播放条上的键（{nm}）→ 真的响起来了")
+                return True
+        return is_playing(hwnd) is True
     except Exception as e:
         _log(f"⚠ 恢复播放出错: {type(e).__name__}: {e}")
-    return False
+        return False
 
 
 def _invoke_player(hwnd, names) -> bool:
@@ -1001,24 +987,51 @@ def progress_value(hwnd) -> float:
     return -1.0
 
 
+def _play_bar_toggle(hwnd):
+    """播放条（窗口**最下面那一条**）上的播放/暂停键 → (元素, 名字)；找不到 (None, '')。
+
+    ★ 2026-09-24 实测（这次的关键）：同一个页面里存在**好几个**叫 play/pause 的元素：
+        播放条上那个（y≈754，窗口底部）    ← 正确的，只会切播放/暂停
+        页面中部另一个（y≈508/551）        ← 按一下**会把别的歌放起来**！
+        rect=(0,0,0,0) 的隐藏几个          ← 有的能切、有的会换歌，不可靠
+      以前 is_playing() 读的是"第一个叫 play/pause 的" → 很可能读到**中部那个**
+      → 状态判断飘忽、自动恢复播放按到错误按钮（把用户点的歌换成别的歌、
+      或者把正在放的音乐暂停）。所以判断和按键都**只认播放条这一个**。
+    """
+    try:
+        import ctypes
+        from ctypes import wintypes as _wt
+        _r0 = _wt.RECT()
+        ctypes.windll.user32.GetWindowRect(int(hwnd), ctypes.byref(_r0))
+        _band = int(_r0.top) + int(max(1, int(_r0.bottom) - int(_r0.top)) * 0.72)
+    except Exception:
+        _band = None
+    best = None
+    for el, nm, r in _walk_buttons(hwnd):
+        if nm.lower() not in ("play", "pause"):
+            continue
+        if not r or r[2] <= r[0] or r[3] <= r[1]:
+            continue                      # 隐藏元素（rect 全 0）不要
+        if _band is not None and r[1] < _band:
+            continue                      # 不在底部那一条 → 不是播放条上的
+        if best is None or r[1] > best[2][1]:   # 取最靠下的那个（播放条在最底下）
+            best = (el, nm, r)
+    return (best[0], best[1]) if best else (None, "")
+
+
 def is_playing(hwnd):
     """在不在播放：True（在放）/ False（暂停着）/ **None（读不到，不知道）**。
 
-    实测：播放条上那个按钮的 name 会随状态变（暂停时是 play、播放时是 pause），
-    比读进度滑块可靠得多（那个元素经常读不到或已经失效）。
-    ★ 关键：网易云**最小化**时整个 UIA 树是空的 → 这时绝不能断言"没在放"
-    （否则她会以为没歌、又去点一首）。读不到就返回 None，让调用方别乱猜。
+    只读**播放条上那一个**切换键的名字（实测：暂停时叫 play、在放时叫 pause）——
+    页面中部还有一个同名元素，读它会得到完全相反的答案（见 _play_bar_toggle）。
+    读不到 → None：让调用方别乱猜（宁可不说，也不要按错按钮把歌换掉）。
     """
+    el, nm = _play_bar_toggle(hwnd)
+    if el is not None:
+        return nm.lower() == "pause"
     btns = _walk_buttons(hwnd)
-    for _el, nm, _r in btns:
-        n = nm.lower()
-        if n == "pause":
-            return True
-        if n == "play":
-            return False
     if not btns:
         return None                      # 一个控件都读不到 → 最小化/没开/还在加载
-    # 有控件但没找到播放按钮 → 退回进度判断
     a = progress_value(hwnd)
     if a < 0:
         return None
