@@ -166,6 +166,11 @@ def check_wiring(results):
          and "0.72" in inspect.getsource(__import__("tool.music", fromlist=["x"])._play_bar_toggle)),
         ("音乐：换歌立刻停手（不冒充放上）", "按了播放键之后歌变了" in inspect.getsource(
             __import__("tool.music", fromlist=["x"])._ensure_playing)),
+        ("音乐：静音检测与解除（音量0%的坑）", "def muted" in inspect.getsource(
+            __import__("tool.music", fromlist=["x"]))
+         and "def ensure_sound" in inspect.getsource(__import__("tool.music", fromlist=["x"]))),
+        ("音乐：自动暂停再播放（重拉播放流）", "def _kick_playback" in inspect.getsource(
+            __import__("tool.music", fromlist=["x"]))),
         ("寒暄提示词带标记（自动 no_act）", "只是寒暄" in inspect.getsource(M.Murasame.start_thread)),
         ("问候语禁止写操作指令", "只是寒暄" in inspect.getsource(
             __import__("tool.care", fromlist=["x"]).startup_line)),

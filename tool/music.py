@@ -42,6 +42,25 @@ _LINE = re.compile("[【\\[]\\s*音乐\\s*[】\\]]\\s*([^\"\\]\\n]{1,80})")
 
 # 同一个音乐操作同时只能跑一个（她连着催时，两个自动化会互相抢）
 _busy = [False]
+_notes = []          # 本次操作的"要告诉主人的话"（静音已解除/踹通了播放…）
+
+
+def _note(text: str):
+    if text:
+        try:
+            _notes.append(str(text))
+        except Exception:
+            pass
+
+
+def take_notes() -> str:
+    """取出并清空这次操作攒下的提示（play_song 汇报时带上）"""
+    try:
+        out = "".join(_notes)
+        _notes.clear()
+        return out
+    except Exception:
+        return ""
 # 每首歌的尝试时间戳：短时间内试太多次就不再试，免得"一直重复搜索"
 _attempts = {}
 _ATTEMPT_WINDOW = 600       # 10 分钟内最多试几次
@@ -871,6 +890,138 @@ def _player_button(hwnd, names):
     return None, None
 
 
+def muted(hwnd) -> bool:
+    """网易云是不是**静音**了？
+
+    实测（2026-09-24）：那个音量键的名字会随状态变 —— 正常叫 `Volume1`、静音叫 `mute`，
+    静音时界面上还有一行「音量调节 0%」。用户"放了歌却没声音"就有这一条：
+    之前某个【音乐】静音 操作把它静音了，之后放的每一首都**一点声音都没有**。
+    """
+    try:
+        for el, nm, r in _walk_buttons(hwnd):
+            n = nm.strip().lower()
+            if n in ("mute", "volume0"):
+                return True
+            if n.startswith("volume"):
+                return False
+        U = _uia()
+        root = U.root_for(hwnd)
+        if root is not None:
+            for el in U.find_all_fast(root, None, limit=1200):
+                if "音量调节" in str(U.name_of(el)):
+                    return True
+    except Exception:
+        pass
+    return False
+
+
+def ensure_sound(hwnd) -> str:
+    """静音了就点一下打开声音（返回一句说明；没静音返回空串）。
+
+    那个音量键是**切换键**：静音时按一下恢复；正常时按一下会静音 → 所以必须先判断。
+    """
+    try:
+        if not muted(hwnd):
+            return ""
+        _log("⚠ 网易云是静音状态（音量 0%）→ 点一下音量键恢复声音")
+        for el, nm, r in _walk_buttons(hwnd):
+            if nm.strip().lower() in ("mute", "volume0"):
+                if _uia().invoke(el):
+                    time.sleep(0.9)
+                    if muted(hwnd):
+                        return "（它现在是静音的，我点了一下但好像没开成，你手动点一下小喇叭）"
+                    _log("✅ 已解除静音（音量键回到正常）")
+                    return "（它刚才被静音了，我已经把声音打开了）"
+                break
+    except Exception as e:
+        _log(f"⚠ 解除静音出错: {type(e).__name__}: {e}")
+    return ""
+
+
+def progress_moving(hwnd, seconds: float = 3.0):
+    """播放进度有没有在动？True/False/None（读不到就不下结论）。
+
+    UIA **读不到**进度（实测：播放条那个滑块既不暴露 Range/Value，子元素也不移动），
+    所以用像素：抓播放条上方那一条细带两次，比指纹 —— 变了就是在走，一点没变就是卡着。
+    用户反馈"播放进度条也卡着不动"就是这种卡死状态（歌载入、按钮显示在放、进度不动、
+    也没声音 → 要手动暂停再播放才恢复）。
+    """
+    try:
+        from tool import screen_capture as _sc
+        import ctypes
+        from ctypes import wintypes as _wt
+        _r0 = _wt.RECT()
+        ctypes.windll.user32.GetWindowRect(int(hwnd), ctypes.byref(_r0))
+        top, left = int(_r0.top), int(_r0.left)
+        bottom, right = int(_r0.bottom), int(_r0.right)
+        h = max(1, bottom - top)
+        # 进度条在播放条上方那一条：取底部 22%~26% 之间的一细带，横向掐中间一段
+        y0 = top + int(h * 0.86)
+        y1 = top + int(h * 0.93)
+        x0 = left + int((right - left) * 0.20)
+        x1 = left + int((right - left) * 0.80)
+        if y1 - y0 < 2 or x1 - x0 < 10:
+            return None
+        a = _sc.capture_qimage(0)
+        if a is None:
+            return None
+        crop = a.copy(x0, y0, x1 - x0, y1 - y0)
+        h1 = _sc.quick_hash(crop)
+        time.sleep(max(0.5, float(seconds)))
+        b = _sc.capture_qimage(0)
+        if b is None:
+            return None
+        crop2 = b.copy(x0, y0, x1 - x0, y1 - y0)
+        h2 = _sc.quick_hash(crop2)
+        if not h1 or not h2:
+            return None
+        return _sc.hash_distance(h1, h2) > 0
+    except Exception as e:
+        _log(f"⚠ 进度检测出错: {type(e).__name__}")
+        return None
+
+
+def _kick_playback(hwnd, force: bool = True) -> str:
+    """把播放**踹通**：暂停 → 等一下 → 再播放（主人手动就是这么修的）。
+
+    为什么默认就踹（force=True）：用户反馈"放进去了但没声音、进度条也卡着不动，
+      要手动暂停再播放才有声音"。实测这台机器上网易云有这种**卡住**状态：
+      歌载入了、按钮显示在放、但流没起来（静音/设备/缓冲都可能触发），
+      而"暂停再播放"能重新拉一次流 —— 那就自动替他做一遍（代价不到 1 秒）。
+    做完会**确保最后是"在放"**（按了没反应就再按一次，最多 3 次），
+    并把结果如实说出来（弄通了 / 没弄通让他手动）。
+    """
+    try:
+        el, nm = _play_bar_toggle(hwnd)
+        if el is None:
+            return ""
+        _t0 = window_title(hwnd)
+        was = is_playing(hwnd)
+        if not force and was is not True:
+            return ""
+        # ① 先暂停一下（如果本来在放）
+        if was is True:
+            _uia().invoke(el)
+            time.sleep(0.7)
+            if window_title(hwnd) != _t0:
+                return "（按暂停的时候歌变了，我先停手了）"
+        # ② 再播放，最多按 3 次直到真的在放
+        for _i in range(3):
+            _uia().invoke(el)
+            time.sleep(1.0)
+            if window_title(hwnd) != _t0:
+                return "（按播放键的时候歌变了，我先停手了）"
+            if is_playing(hwnd) is True:
+                if was is True:
+                    _log("✅ 已暂停再播放（用户说的那种卡住，靠这个重拉播放流）→ 现在状态是在放")
+                    return "（刚才它有点卡，我暂停再播放重新拉了一次）"
+                return ""
+        return "（它好像卡住了，我暂停再播放也没弄通——你手动点一下播放键试试）"
+    except Exception as e:
+        _log(f"⚠ 踹播放出错: {type(e).__name__}: {e}")
+        return ""
+
+
 def _ensure_playing(hwnd, tries: int = 2) -> bool:
     """确保**真的在放** —— 而且**只按播放条上那一个键**，按完核对没换歌。
 
@@ -1249,10 +1400,16 @@ def _uia_play(name: str, artist: str, _skip_preview_check: bool = False) -> str:
             #   放上了，实际**一点声音都没有**，要手动暂停再播放才响（用户的原话）。
             #   这里再确认一次"真的在放"，没在放就自己按一下那个播放/暂停切换键。
             try:
+                # ★ 先查静音：实测（2026-09-24）网易云自己会被静音（音量 0%、键名叫 mute），
+                #   这时候"放进去了、按钮显示在放"，但**一点声音都没有**（用户反馈）。
+                _note(ensure_sound(hwnd))
                 if is_playing(hwnd) is False:
                     _log("标题对上了但播放器是暂停状态 → 自己想办法让它响")
                     if not _ensure_playing(hwnd):
                         _log("（试了播放条上的切换键，还是没放起来——读不到状态就不硬说）")
+                # ★ 再踹一下卡死的情况：按钮说在放、进度却一动不动、也没声音
+                #   （用户反馈"播放进度条也卡着不动"）→ 暂停再播放，就是主人手动那一套
+                _note(_kick_playback(hwnd))
             except Exception as _e2:
                 _log(f"⚠ 确认播放状态出错: {type(_e2).__name__}")
             # 顺手看一眼界面上的"正在试听…"——但**不作为唯一判据**：实测它可能一闪而过
@@ -1511,7 +1668,7 @@ def play_song(query: str) -> str:
                     pass
                 return (f"给你放上了：《{name}》{artist}{_tag}。"
                         f"（这首是{_fee_label(_fee)}曲，没会员的话可能只能试听 30 秒——"
-                        f"我已经优先找过免费版本，这首没有。）")
+                        f"我已经优先找过免费版本，这首没有。）{take_notes()}")
             # ★ 记住"主人听了这一版"——下次点同一首歌就先放它（用户要求）
             try:
                 _sid2 = 0
@@ -1522,7 +1679,7 @@ def play_song(query: str) -> str:
                 remember_play(name, artist, _sid2 or _sid, _fee)
             except Exception:
                 pass
-            return f"给你放上了：《{name}》{artist}{_tag}。"
+            return f"给你放上了：《{name}》{artist}{_tag}。{take_notes()}"
         if _preview:
             try:
                 if _prev_fg and _prev_fg != int(hwnd):
