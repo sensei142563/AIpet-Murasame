@@ -161,10 +161,28 @@ def score(screen_change_bits=None, user_idle_sec=None, busy=False,
 
 
 def should_speak(threshold=None, **kw) -> tuple:
-    """要不要开口 → (True/False, 分数, 说明)"""
-    th = float(threshold if threshold is not None else _cfg("attention_threshold", DEFAULT_THRESHOLD))
+    """要不要开口 → (True/False, 分数, 说明)
+
+    活跃度（config 的 autonomy_level）也在这里生效：
+      quiet  安静 → 一律不主动开口（只回应主人）
+      normal 适中 → 用阈值
+      active 活跃 → 门槛低 0.8，更愿意搭话
+    """
+    lv = "normal"
+    try:
+        from tool import desire as _dz
+        lv = _dz.level()
+    except Exception:
+        pass
+    if lv == "quiet":
+        return False, -99.0, "活跃度=安静（不主动开口）"
+    base = float(_cfg("attention_threshold", DEFAULT_THRESHOLD))
+    if threshold is not None:
+        base = float(threshold)
+    if lv == "active":
+        base = max(0.5, base - 0.8)
     s, why = score(**kw)
-    return (s >= th), s, why
+    return (s >= base), s, why
 
 
 if __name__ == "__main__":

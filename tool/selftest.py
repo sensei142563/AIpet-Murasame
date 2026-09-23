@@ -31,7 +31,7 @@ def check_modules(results):
             "tool.screen_capture", "tool.pc_control", "tool.pc_task", "tool.file_access",
             "tool.pc_info", "tool.self_learn", "tool.music", "tool.uia", "tool.perf_guard",
             "tool.state", "tool.attention", "tool.experience", "tool.autonomy",
-            "tool.reminder", "tool.care", "classes.Worker_class", "classes.murasame_class",
+            "tool.reminder", "tool.care", "tool.desire", "classes.Worker_class", "classes.murasame_class",
             "classes.learn_window", "main")
     bad = []
     for m in mods:
@@ -74,6 +74,9 @@ def check_wiring(results):
         ("到点提醒", "到点提醒" in src_m),
         ("主动关怀", "主动关怀" in src_m),
         ("会议静音", "会议/演示中，保持安静" in src_m),
+        ("动机层（她自己想做什么）", "她自己想" in src_m),
+        ("自主活跃度菜单", "自主活跃度" in src_m),
+        ("活跃度→开口评分", "desire as _dz" in inspect.getsource(__import__("tool.attention", fromlist=["x"]).should_speak)),
         ("启动问候", "startup_line" in inspect.getsource(MAIN)),
         ("任务经验（规划）", "_exp_note" in inspect.getsource(PT._planner_system)),
         ("自主分档（执行）", "autonomy" in inspect.getsource(PC.execute)),
@@ -96,6 +99,10 @@ def check_runtime(results):
     _try(lambda: (autonomy.tier_of_action({"type": "click"}) == "safe", autonomy.summary_text().splitlines()[0][:40]), "行动分档（autonomy）", results)
     _try(lambda: (bool(reminder.parse("【提醒】30分钟后 喝水")), reminder.list_text().splitlines()[0]), "提醒（reminder）", results)
     _try(lambda: (care.companion_days() >= 1, care.summary_text()[:50]), "陪伴/关怀（care）", results)
+    from tool import desire
+    _try(lambda: (desire.level() in ("quiet", "normal", "active"),
+                  "活跃度 %s｜%s" % (desire.level_label(), desire.summary_text()[:60])),
+         "动机层（desire）", results)
     _try(lambda: (screen_capture.capture_qimage(0) is not None, "抓屏 %d ms" % screen_capture.last_capture_ms()),
          "Win32 抓屏（screen_capture）", results)
 

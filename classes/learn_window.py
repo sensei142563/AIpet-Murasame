@@ -76,6 +76,11 @@ class LearnWindow(QDialog):
                 txt += chr(10) + chr(10) + "【陪伴】" + _care.summary_text()
             except Exception:
                 pass
+            try:
+                from tool import desire as _dz
+                txt += chr(10) + chr(10) + "【她现在的念头】" + chr(10) + _dz.summary_text()
+            except Exception:
+                pass
             self.view.setPlainText(txt)
         except Exception as e:
             self.view.setPlainText("读取失败：%s" % e)

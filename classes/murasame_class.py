@@ -1507,6 +1507,17 @@ class Murasame(QLabel):
             except Exception:
                 pass
 
+    def _cycle_autonomy(self):
+        """菜单：切自主活跃度（安静 → 适中 → 活跃）"""
+        try:
+            from tool import desire as _dz3
+            nxt = _dz3.next_level()
+            if _dz3.set_level(nxt):
+                self.show_text("唔……那我自己看着办的程度调成「%s」了。" % _dz3.level_label(),
+                               typing=False)
+        except Exception as e:
+            print(f"[桌宠] ⚠ 切换活跃度失败: {e}")
+
     def _show_learned(self):
         """菜单：看看她学到了什么（单独一个窗口，不占对话框）"""
         try:
@@ -1697,6 +1708,33 @@ class Murasame(QLabel):
     def _learn_tick(self):
         """定时器：自主学习 + 电脑近况 + 主动关怀（都在后台线程，界面不卡）"""
         try:
+            # ── 动机层：她自己"想做什么"（无聊/想说话/精力）──
+            try:
+                from tool import desire as _dz, state as _st8, care as _c8
+                _talked = _st8.last_talk_ago() < 300
+                _sh_changed = True
+                try:
+                    _ph, _pd, _pt, _pk = getattr(self, "_last_shot_info", (0, "", 0.0, 0.0))
+                    _sh_changed = (time.time() - float(_pt or 0)) < 900
+                except Exception:
+                    pass
+                _dz.tick(talked=_talked, screen_changed=_sh_changed)
+                if not _c8.quiet_now() and not self.is_busy_reply():
+                    _mp = None
+                    try:
+                        from tool import music as _mu8
+                        if _mu8.uia_ready():
+                            _mp = _mu8.is_playing(_mu8.find_window() or 0) if _mu8.find_window() else None
+                    except Exception:
+                        _mp = None
+                    _w = _dz.wants(music_playing=_mp)
+                    if _w:
+                        print(f"[桌宠] 💭 她自己想：{_w.get('text')}")
+                        self._request_dialog.emit(_w.get("prompt") or "", "system", True)
+                        return
+            except Exception as _ed:
+                print(f"[桌宠] ⚠ 动机检查失败: {_ed}")
+
             # 主动关怀：深夜/久坐（带冷却，不会唠叨）
             try:
                 from tool import care as _care
@@ -2880,6 +2918,17 @@ class Murasame(QLabel):
                 _act_seen = item(_ai, "她的状态 / 记忆 / 提醒")
                 _act_seen.setToolTip("单独开一个小窗口，显示她记住的事、学到的东西和最近的日记。")
                 _act_seen.triggered.connect(self._show_learned)
+                try:
+                    from tool import desire as _dz2
+                    _act_lv = item(_ai, "自主活跃度：%s（点击切换）" % _dz2.level_label())
+                    _act_lv.setToolTip(
+                        "安静：不主动开口、不主动动手（只回应你，提醒照常）。" + chr(10) +
+                        "适中：现在的节奏。" + chr(10) +
+                        "活跃：更愿意开口、间隔更短、更常自己找事做（想放歌、想看看你在忙什么）。" + chr(10) +
+                        "写进 config.json 的 autonomy_level。")
+                    _act_lv.triggered.connect(self._cycle_autonomy)
+                except Exception:
+                    pass
                 _act_study = item(_ai, "让她现在学点什么")
                 _act_study.setToolTip("立刻让她自习一次，结果显示在小窗口里（要先打开上面的「自主学习」）。")
                 _act_study.triggered.connect(self._study_now)

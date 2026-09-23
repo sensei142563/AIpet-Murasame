@@ -238,7 +238,16 @@ def _handle_pc_control(reply: str, owner, is_auto: bool) -> str:
                          daemon=True).start()
             # 受命动手 → 开「连着做完」的任务循环：每步只花一次小调用，
 # 不再一步等一整轮对话（实测一步 25~45 秒、一次任务要五分钟，用户反馈"效率太低"）。
-            if not is_auto:
+            # 自主回合也允许"连着做" —— 但必须**全都是安全动作**
+            #（打字/按键这类分档会拦掉，剩下的点击/移动可以自己做完）
+            _auto_safe = False
+            if is_auto:
+                try:
+                    from tool import autonomy as _au2
+                    _auto_safe = bool(_acts) and all(_au2.allowed(a, True)[0] for a in _acts)
+                except Exception:
+                    _auto_safe = False
+            if (not is_auto) or _auto_safe:
                 _skip_task = False
                 try:
                     # ⚠ 主人的要求里如果是"点歌"，不要开键鼠任务循环：

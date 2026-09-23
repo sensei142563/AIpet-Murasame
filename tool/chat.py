@@ -158,6 +158,15 @@ def qwen3_lora(history, user_input, role):
     except Exception:
         pass
 
+    # 她的动机（无聊/想说话/精力）：影响她自己想不想找点事做
+    try:
+        from tool import desire as _dsm
+        _dn = _dsm.note()
+        if _dn:
+            messages.append({"role": "system", "content": _dn})
+    except Exception:
+        pass
+
     # 她此刻的心情与和主人的关系（情绪状态机：影响语气，别一直一个调子）
     try:
         from tool import state as _stm
