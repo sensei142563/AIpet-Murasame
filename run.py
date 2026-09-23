@@ -782,11 +782,16 @@ def start_tts_api():
             _pop_env.update(_rocm_env)
             if _rocm:                      # 只有 A 卡环境需要（中文路径下的字典问题）
                 _pop_env.update(prepare_tts_env(python_path))
+            # ★ 让 TTS 跑在「低于普通」优先级：这套 torch+ROCm（A 卡）即使空闲也会
+            #   因线程自旋吃掉 1 个多核（实测 2026-09-24），不压低就会跟主人抢 CPU、
+            #   整机发卡。低了之后它只在空闲周期里跑，合成速度的影响可以忽略。
+            #   （视觉服务那边同样处理：tool/vision_service.py 里自己压优先级 + 限线程）
+            _flags = _console_flags() | getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", 0x4000)
             proc = subprocess.Popen(
                 [python_path, script_path] + _extra,
                 cwd=work_dir,
                 env=_pop_env,
-                creationflags=_console_flags()
+                creationflags=_flags
             )
             time.sleep(1.5)
             log("TTS 服务已启动%s。" % ("" if quiet_mode() else "（新控制台）"))

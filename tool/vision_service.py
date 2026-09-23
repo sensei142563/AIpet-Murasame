@@ -27,10 +27,74 @@ import threading
 import time
 
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+# OpenMP/MKL 的"自旋等待"会白烧 CPU（这台机器上实测：默认线程池空闲时吃掉约 2 个核）
+os.environ.setdefault("OMP_WAIT_POLICY", "PASSIVE")
+os.environ.setdefault("KMP_BLOCKTIME", "0")
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 APP = os.path.dirname(HERE)
 CFG_PATH = os.path.join(APP, "config.json")
+
+
+def _lower_priority():
+    """把自己降到「低于普通」优先级：就算忙，也别跟主人正在用的程序抢 CPU。
+
+    实测（2026-09-24）：GPT-SoVITS 那套 torch+ROCm（AMD RX 6600）**什么都不做**
+    也会因线程自旋/显卡运行时轮询吃掉 1~2 个核。视觉服务和 TTS 都跑在它上面，
+    几份加起来就把机器拖卡了。这里配合 torch.set_num_threads() 一起治：
+    线程数压住 → 空闲自旋基本消失；优先级压低 → 万一还忙也不影响前台。
+
+    ⚠ 64 位下 GetCurrentProcess 返回的是句柄（指针大小），不声明 restype 会被
+      ctypes 截断成 int → SetPriorityClass 拿到无效句柄静默失败
+      （第一版就这么失败了：psutil 一看还是 NORMAL）。
+    """
+    try:
+        if os.name != "nt":
+            return False
+        k32 = ctypes.windll.kernel32
+        k32.GetCurrentProcess.restype = ctypes.c_void_p
+        k32.SetPriorityClass.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+        k32.SetPriorityClass.restype = ctypes.c_int
+        BELOW_NORMAL_PRIORITY_CLASS = 0x00004000
+        h = k32.GetCurrentProcess()
+        ok = bool(k32.SetPriorityClass(h, BELOW_NORMAL_PRIORITY_CLASS))
+        print(f"[vision] 进程优先级已降到「低于普通」: {ok}", flush=True)
+        return ok
+    except Exception as e:
+        print(f"[vision] ⚠ 降优先级失败: {type(e).__name__}: {e}", flush=True)
+        return False
+
+
+def _cap_threads():
+    """限制 torch 的 CPU 线程数（配置 vision_threads，默认 min(4, 核数//2)）。
+
+    为什么必须做：默认线程池 = 逻辑核数（本机 16），这套 ROCm 版 torch 的空闲自旋
+    会烧掉约 2 个核；压到 4 之后实测**空闲 0%**。视觉推理本身跑在显卡上，
+    速度基本不受影响（CPU 线程只做图像预处理与分词）。
+    """
+    try:
+        import torch
+        try:
+            n = int(_cfg().get("vision_threads") or 0)
+        except Exception:
+            n = 0
+        if n <= 0:
+            n = min(4, max(1, (os.cpu_count() or 4) // 2))
+        torch.set_num_threads(int(n))
+        print(f"[vision] CPU 线程数限制为 {n}（系统 {os.cpu_count()} 核，防自旋吃满 CPU）", flush=True)
+    except Exception as e:
+        print(f"[vision] ⚠ 限制 CPU 线程数失败: {type(e).__name__}: {e}", flush=True)
+
+
+def _already_running(p: int) -> bool:
+    """端口上是否已经有一个视觉服务（不管它有没有加载完模型）"""
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{int(p)}/", timeout=2.5) as r:
+            body = r.read(400).decode("utf-8", "replace")
+        return "vision" in body or "\"model\"" in body or r.status == 200
+    except Exception:
+        return False
 
 DEFAULT_MODEL_DIR = r"D:\下载\AI桌宠\vision\Qwen2-VL-2B-Instruct"
 DEFAULT_PORT = 28460
@@ -49,6 +113,18 @@ def _cfg() -> dict:
         return {}
 
 
+def max_new_default() -> int:
+    """描述最多生成多少 token（config 的 vision_max_new，默认 160）。
+
+    她说"两到四句话"用不了 256 个 token，但一旦模型开始啰嗦，多出来的每一句
+    都是实打实的显卡时间（用户要的是一句话，不是小作文）。
+    """
+    try:
+        return max(40, int(_cfg().get("vision_max_new") or 160))
+    except Exception:
+        return 160
+
+
 def model_dir() -> str:
     v = os.environ.get("VISION_MODEL_DIR") or str(_cfg().get("vision_local_model_dir") or "").strip()
     return v or DEFAULT_MODEL_DIR
@@ -58,13 +134,17 @@ def max_side() -> int:
     """截图长边压到多少像素再喂给模型。
 
     越大认字越准（窗口标题、网页文字），越小越快 —— 视觉编码耗时随像素数
-    近似平方增长（本机 1280 约 17s、896 约 6s）。想快就把 config.json 里的
-    vision_max_side 调小。
+    近似平方增长。本机（AMD RX 6600 LE）实测 2026-09-24，同一张 1920x1080 灰图：
+        1280 → 37.6 秒     1024 → 19.4 秒
+         896 → 13.5 秒      768 →  9.0 秒     640 → 7.6 秒
+    默认从 1280 改成 **896**：后台每 150 秒会自己看一次屏幕，按 1280 那一档
+    等于每隔两分半就占着显卡 37 秒，整机就会"时不时卡一下"（用户反馈）。
+    想更快就把 config.json 的 vision_max_side 调到 768；想认字更准就调回 1280。
     """
     try:
-        return max(280, int(os.environ.get("VISION_MAX_SIDE") or _cfg().get("vision_max_side") or 1280))
+        return max(280, int(os.environ.get("VISION_MAX_SIDE") or _cfg().get("vision_max_side") or 896))
     except Exception:
-        return 1280
+        return 896
 
 
 def port() -> int:
@@ -404,7 +484,7 @@ def main():
                 return self._json({"ok": False, "error": _model["error"]}, 503)
             try:
                 txt = describe(img, str(req.get("prompt") or ""),
-                               int(req.get("max_new") or 256),
+                               int(req.get("max_new") or max_new_default()),
                                int(req.get("max_side") or 0))
                 return self._json({"ok": True, "text": txt})
             except Exception as e:
@@ -412,7 +492,17 @@ def main():
                 return self._json({"ok": False, "error": f"{type(e).__name__}: {e}"}, 500)
 
     p = port()
+    # ── 单实例守卫 ──
+    # 为什么：启动器"探活"是在模型还在加载时做的，那会儿服务还没法正常应答，
+    # 于是又拉起一个 → 两个实例都占着端口（Windows 上 SO_REUSEADDR 允许）、
+    # 各加载一份模型（实测吃了 7.8GB + 1.4GB 内存），也各烧一份 CPU。
+    if _already_running(p):
+        print(f"[vision] 端口 {p} 上已经有一个视觉服务在跑 → 本实例退出（不重复占内存/CPU）", flush=True)
+        return
+    _cap_threads()
+    _lower_priority()
     srv = ThreadingHTTPServer(("127.0.0.1", p), Handler)
+    srv.allow_reuse_address = False      # 让"抢同一个端口"直接失败，而不是静默双开
     srv.daemon_threads = True
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     threading.Thread(target=idle_guard, daemon=True).start()   # 闲置时把显存让给语音

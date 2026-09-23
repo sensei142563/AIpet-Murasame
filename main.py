@@ -224,6 +224,12 @@ if __name__ == "__main__":
             pass
 
     pet = Murasame()  # 创建桌宠实例
+    # ★ 关掉「最后一个窗口关闭就退出应用」——桌宠窗口是 Qt.Tool 类型，
+    #   Qt 不把 Tool 窗口算作"窗口"，于是关掉任何一个普通窗口（比如
+    #   「她的状态 / 记忆 / 提醒」那扇窗）时，Qt 会认为最后一个窗口没了 →
+    #   整个桌宠跟着退出（实测：日志里紧跟着就是「正在退出…」）。
+    #   桌宠的退出只应该由托盘菜单 / 启动器的关闭请求来触发。
+    app.setQuitOnLastWindowClosed(False)
     app.aboutToQuit.connect(lambda: save_screen_type(pet))
     # 退出时记录桌宠位置（下次启动回到原位置；配合启动器「重置桌宠位置」按钮）
     app.aboutToQuit.connect(lambda: save_window_pos(pet))

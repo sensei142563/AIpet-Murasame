@@ -56,6 +56,11 @@ def check_wiring(results):
     src_w = inspect.getsource(W)
     src_c = inspect.getsource(C)
     src_ca = inspect.getsource(CA)
+    try:
+        import run as _RUN
+        RUN_PY = inspect.getsource(_RUN)
+    except Exception:
+        RUN_PY = ""
     checks = [
         ("键鼠钩子（Worker）", "_handle_pc_control" in src_w),
         ("文件钩子（Worker）", "FILE_MARK" in inspect.getsource(W._tidy_sentences)),
@@ -111,6 +116,14 @@ def check_wiring(results):
             __import__("tool.music", fromlist=["x"])._uia_play)),
         ("音乐：暂停认两个按钮名", '["play", "pause"]' in inspect.getsource(
             __import__("tool.music", fromlist=["x"])._run_locked)),
+        ("关窗不连带退出桌宠", "setQuitOnLastWindowClosed(False)" in inspect.getsource(MAIN)),
+        ("视觉服务：限 CPU 线程", "_cap_threads" in inspect.getsource(
+            __import__("tool.vision_service", fromlist=["x"]))),
+        ("视觉服务：降优先级", "_lower_priority" in inspect.getsource(
+            __import__("tool.vision_service", fromlist=["x"]))),
+        ("视觉服务：单实例守卫", "_already_running" in inspect.getsource(
+            __import__("tool.vision_service", fromlist=["x"]))),
+        ("TTS 跑低优先级", "BELOW_NORMAL_PRIORITY_CLASS" in RUN_PY),
     ]
     missing = [n for n, ok in checks if not ok]
     results.append(("关键接线（%d 处）" % len(checks), not missing,
@@ -145,6 +158,13 @@ def check_runtime(results):
          "动机层（desire）", results)
     _try(lambda: (screen_capture.capture_qimage(0) is not None, "抓屏 %d ms" % screen_capture.last_capture_ms()),
          "Win32 抓屏（screen_capture）", results)
+    try:
+        from tool import vision_service as _vs
+        ms, mn = _vs.max_side(), _vs.max_new_default()
+        _try(lambda: (ms <= 896, "默认看图长边 %d px、描述上限 %d token（越小越快；实测同机 1280 要 37 秒、896 约 13 秒）" % (ms, mn)),
+             "视觉档位（vision_service）", results)
+    except Exception as _e:
+        results.append(("视觉档位（vision_service）", False, str(_e)[:60]))
 
 
 def check_optional(results):
