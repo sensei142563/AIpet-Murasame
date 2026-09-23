@@ -51,6 +51,7 @@ def root_for(hwnd):
 CT_BUTTON = 50000
 CT_EDIT = 50004
 CT_HYPERLINK = 50005
+CT_IMAGE = 50006          # 网易云的关闭"×"就是 Image（实测 name='close'）
 CT_LISTITEM = 50007
 CT_TEXT = 50033
 CT_PANE = 50031

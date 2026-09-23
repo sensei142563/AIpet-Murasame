@@ -78,5 +78,6 @@
   "vision_idle_unload": 300,
   "vision_fast_max_side": 896,
   "vision_threads": 4,
-  "vision_max_new": 160
+  "vision_max_new": 160,
+  "music_prefer_free": "true"
 }

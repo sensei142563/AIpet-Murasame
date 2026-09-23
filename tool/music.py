@@ -74,9 +74,15 @@ def prompt_rules() -> str:
         "【音乐】暂停 / 继续 / 下一首 / 上一首\n"
         "【音乐】单曲循环 / 列表循环 / 随机播放 / 顺序播放\n"
         "【音乐】我喜欢（直接放「我喜欢的音乐」）／【音乐】播放歌单 名字\n"
-        "【音乐】收藏 / 歌词 / 静音 / 在放什么\n"
+        "【音乐】收藏 / 歌词 / 静音 / 在放什么 / 关弹窗\n"
         + pl_line +
         "★ 这些都是**后台执行**：不切走主人的画面、不动鼠标，放心用。\n"
+        "★ **会员曲的事**：主人没有黑胶 VIP（点会员曲只会放 30 秒试听，还会弹开通页面）。"
+        "所以点歌时桌宠会**优先挑不用会员的版本**（免费 / 低音质免费）。"
+        "如果一首歌只有会员版，桌宠会告诉你——你就如实跟主人说「这首要会员，只有试听，"
+        "要不要换一首免费的同名版本」，别硬说放好了。\n"
+        "★ 会员/广告弹窗（开通黑胶VIP、收银台、活动页）桌宠会**自动点掉**；"
+        "主人明确说「关弹窗」时可以用【音乐】关弹窗。\n"
         "★ 主人说「帮我点歌」「放一首…」「换首歌」「暂停」「单曲循环」时就用它，"
         "不要自己去点搜索框猜坐标。\n"
         "★ 一次只做一件事；做完用你自己的话跟主人说一声。\n"
@@ -131,6 +137,8 @@ def parse(text: str) -> list:
             out.append(("mute", ""))
         elif any(k in s for k in ("在放什么", "放的是什么", "当前歌曲", "现在放的", "状态")):
             out.append(("now", ""))
+        elif any(k in s for k in ("关弹窗", "关掉弹窗", "弹窗", "关广告", "关掉广告", "关掉会员")):
+            out.append(("close_popup", ""))
         elif s.startswith("播放") or s.startswith("放") or s.startswith("点歌") or low.startswith("play"):
             q = re.sub("^(播放|放一首|放|点歌|点一首|play|放一下)", "", s).strip("：:，,。\"'「」")
             if q:
@@ -171,7 +179,13 @@ def looks_like_music_request(text: str) -> bool:
 # ─────────────────────── 搜索接口（只取歌名歌手） ───────────────────────
 
 def search(query: str, limit: int = 5) -> list:
-    """搜歌 → [(id, 歌名, 歌手, 专辑)]"""
+    """搜歌 → [(id, 歌名, 歌手, 专辑, fee)]
+
+    fee 是网易云的收费标记（实测本机）：
+        0 = 免费      8 = 低音质免费（不用会员也能放）
+        1 = 会员专享（没会员只能试听 30 秒）   4 = 需购买专辑
+    主人没会员时，优先挑 0 / 8 的结果（见 pick_best）。
+    """
     try:
         import requests
         try:
@@ -189,14 +203,145 @@ def search(query: str, limit: int = 5) -> list:
         for s in songs:
             try:
                 _art = "/".join(a.get("name", "") for a in (s.get("artists") or []) if a.get("name"))
+                try:
+                    _fee = int(s.get("fee") if s.get("fee") is not None else 0)
+                except Exception:
+                    _fee = 0
                 out.append((int(s.get("id")), str(s.get("name") or ""), _art,
-                            str((s.get("album") or {}).get("name") or "")))
+                            str((s.get("album") or {}).get("name") or ""), _fee))
             except Exception:
                 continue
         return out
     except Exception as e:
         _log(f"⚠ 搜索失败: {type(e).__name__}: {e}")
         return []
+
+
+def _fee_label(fee: int) -> str:
+    return {0: "免费", 8: "低音质免费", 1: "会员", 4: "付费专辑"}.get(int(fee or 0), "未知")
+
+
+def _prefer_free() -> bool:
+    """点歌时是否优先挑"不用会员"的版本（config 的 music_prefer_free，默认开）。
+
+    用户要求：主人没会员时优先放不要会员的歌（不然只能听 30 秒试听）。
+    """
+    try:
+        from tool.config import get_config
+        v = str(get_config("./config.json").get("music_prefer_free", "true")).lower()
+        return v not in ("false", "0", "off", "no")
+    except Exception:
+        return True
+
+
+def _has_preview_notice(hwnd) -> bool:
+    """界面上是不是出现了"正在试听…开通VIP听整首"（= 没会员，只放了 30 秒）。
+
+    实测这句提示挂在 Group(50020) 上（'正在试听，开通黑胶VIP听整首'），
+    所以按元素名扫；扫不到就返回 False（不误报）。
+    """
+    try:
+        U = _uia()
+        root = U.root_for(hwnd)
+        if root is None:
+            return False
+        for el in U.find_all_fast(root, None, limit=1200):
+            nm = U.name_of(el)
+            if "试听" in nm and ("VIP" in nm or "会员" in nm or "整首" in nm):
+                return True
+    except Exception:
+        pass
+    return False
+
+
+# ── 后台自动收拾弹窗（会员收银台 / 广告）──
+_popup_watch = {"on": False, "last": 0.0}
+
+
+def watch_popups(interval: float = 25.0):
+    """起一个轻量后台线程：网易云开着时，定期自动关掉会员/广告弹窗。
+
+    为什么放这儿（而不是让桌宠调）：桌宠的定时器都挺长（几分钟），
+    会员弹窗一挡就是挡住整个播放器，得尽快关掉；这里自己盯，代价也小
+    （窗口最小化时直接返回，不读控件）。
+    """
+    if _popup_watch["on"]:
+        return
+    _popup_watch["on"] = True
+
+    def _loop():
+        try:
+            ctypes.windll.ole32.CoInitialize(None)     # 后台线程里用 COM 先初始化
+        except Exception:
+            pass
+        while True:
+            try:
+                time.sleep(max(5.0, float(interval)))
+                hwnd = find_window()
+                if hwnd and not window_minimized(hwnd):
+                    r = close_popups(hwnd)
+                    if r:
+                        print(f"[音乐] {r}")
+            except Exception:
+                pass
+
+    import threading as _th
+    _th.Thread(target=_loop, daemon=True, name="music-popup-watch").start()
+    _log("已启动弹窗巡视（每 25 秒看一眼有没有会员/广告弹窗，有就点掉）")
+
+
+def _same_song(nm: str, top: str) -> bool:
+    """是不是同一首歌的版本（允许"起风了 / 周深 - 起风了 (5OC Boot"这类）"""
+    a = re.sub(r"[\s\-_()（）\[\]【】·、,，.。!！?？]", "", str(nm or "")).lower()
+    b = re.sub(r"[\s\-_()（）\[\]【】·、,，.。!！?？]", "", str(top or "")).lower()
+    if not a or not b:
+        return False
+    return b in a or a in b
+
+
+def pick_best(hits: list, query: str = "") -> tuple:
+    """从搜索结果里挑一首最该放的 —— **优先完全免费(fee=0)的**（用户要求）。
+
+    实测（2026-09-24，本机无黑胶 VIP）：
+        fee=0 完全免费 → 能整首放
+        fee=8 低音质免费 / fee=1 会员 / fee=4 付费 → **都只能试听 30 秒**
+      （判据是界面上的"正在试听，开通黑胶VIP听整首"，换 fee=0 的歌它就消失）
+    所以这里只把 fee=0 当"能完整放"。打分：
+        +60 完全免费   +40 歌手名在搜索词里（都是免费时挑原唱）   -index 保持一点排序权重
+    没有免费的（同名）就返回第一条（调用方会如实告诉主人"只有会员版"）。
+    """
+    if not hits:
+        return None
+    try:
+        top_name = str(hits[0][1] or "").strip()
+        q = str(query or "")
+        scored = []
+        for i, h in enumerate(hits):
+            try:
+                _id, _nm, _art, _alb, _fee = (list(h) + [0])[:5]
+                _fee = int(_fee or 0)
+            except Exception:
+                continue
+            if not _same_song(_nm, top_name):
+                continue                      # 只要同一首歌的版本
+            score = 0
+            if _fee == 0:
+                score += 60
+            for part in re.split(r"[\s,/、]+", str(_art or "")):
+                if part and part in q:
+                    score += 40
+                    break
+            score -= i
+            scored.append((score, i, h))
+        if not scored:
+            return hits[0]
+        scored.sort(key=lambda x: (-x[0], x[1]))
+        _best = scored[0][2]
+        if int((list(_best) + [0])[4] or 0) != 0:
+            return hits[0]                    # 一个免费的都没有 → 还是放主人点的那个
+        return _best
+    except Exception:
+        return hits[0]
 
 
 # ─────────────────────── 窗口 / 退路键鼠 ───────────────────────
@@ -304,6 +449,78 @@ def unensure_uia(hwnd):
             _log("已把网易云放回最小化（保持你原来的样子）")
     except Exception:
         pass
+
+
+# ─────────── 会员/广告弹窗：自动点关闭 ───────────
+# 现场抓到的真实元素（2026-09-24，本机网易云点了会员歌之后）：
+#   ct=50006(Image)  name='close'  rect=(1484,190,1504,210)      ← 收银台右上角的 ×
+#   ct=50020(Group)  name='正在试听，开通黑胶VIP听整首'          ← 没会员时的试听提示
+#   ct=50026(Slider) name='推荐 连续包月 5.5 首月 ¥18 …'         ← 收银台里的套餐
+#   ct=50020(Group)  name='/st/vipcashier-v4/mini/?messageSrc=im' ← 就是会员收银台页
+_POPUP_HINTS = ("会员", "VIP", "vip", "试听", "开通", "扫码", "二维码", "协议", "优惠",
+                "活动", "领取", "续费", "广告", "推荐歌曲", "推广")
+_CLOSE_TOKENS = ("close", "关闭", "以后再说", "稍后再说", "稍后", "跳过", "我知道了",
+                 "不再提示", "暂不", "再想想", "取消", "放弃", "关掉")
+# 这些词说明是"要你花钱/登录"的按钮，绝不能当关闭键点
+_CLOSE_NEVER = ("开通", "立即", "领取", "续费", "购买", "支付", "试听", "登录", "同意",
+                "确认", "下载", "安装", "了解更多")
+
+
+def close_popups(hwnd=None, force: bool = False) -> str:
+    """自动点掉网易云的会员/广告弹窗，返回干了什么（没弹窗返回空串）。
+
+    安全设计（别乱点主人的界面）：
+      ① 只有先扫到"弹窗味儿"的元素（会员/VIP/试听/开通/协议/广告…）才动手；
+         force=True 时（主人明确说"关弹窗"）不看这个。
+      ② 只点名字像关闭的元素（close/关闭/以后再说/稍后/跳过/我知道了/取消…），
+         且**名字里带"开通/领取/续费/购买"的一律跳过**（那是让你花钱的）。
+      ③ 只点有真实屏幕位置的（网易云树里有一堆 rect=(0,0,0,0) 的隐藏元素）。
+    """
+    try:
+        if not uia_ready():
+            return ""
+        hwnd = int(hwnd or find_window() or 0)
+        if not hwnd or window_minimized(hwnd):
+            return ""                     # 最小化时读不到控件，别硬来
+        U = _uia()
+        root = U.root_for(hwnd)
+        if root is None or U.children_count(root, max_depth=3, limit=30) <= 1:
+            return ""
+        popup_hint = ""
+        cands = []
+        # 只扫 Image / Button（实测那个 × 是 Image）——比全树快得多（0.2 秒）
+        for ct in (U.CT_IMAGE, U.CT_BUTTON):
+            for el in U.find_all_fast(root, ct, limit=150):
+                nm = U.name_of(el).strip()
+                if not nm:
+                    continue
+                if any(h in nm for h in _POPUP_HINTS):
+                    popup_hint = popup_hint or nm[:40]
+                    continue
+                low = nm.lower()
+                if any(t in low for t in _CLOSE_TOKENS) and not any(b in nm for b in _CLOSE_NEVER):
+                    r = U.rect_of(el)
+                    if r and r[2] > r[0] and r[3] > r[1] and r[2] > 0 and r[3] > 0:
+                        cands.append((r[1], el, nm, r))
+        if not cands:
+            return ""
+        if not popup_hint and not force:
+            return ""                     # 没看到弹窗迹象 → 不乱按（怕关掉主人的面板）
+        cands.sort(key=lambda x: x[0])
+        done = []
+        for _t, el, nm, r in cands[:2]:
+            try:
+                if U.invoke(el):
+                    done.append(f"{nm}@{r}")
+            except Exception:
+                pass
+        if done:
+            _log(f"🧹 自动关掉了弹窗（{popup_hint or '手动'}）：{'、'.join(done)}")
+            return (f"我把弹窗关了（{popup_hint or '按你说的'}）。" if force
+                    else f"顺手关掉了一个弹窗：{popup_hint or done[0]}")
+    except Exception as e:
+        _log(f"⚠ 关弹窗出错: {type(e).__name__}: {e}")
+    return ""
 
 
 def _keys(*seq):
@@ -605,8 +822,16 @@ def play_play_all(hwnd) -> bool:
 
 # ─────────────────────── 后台点歌 ───────────────────────
 
-def _uia_play(name: str, artist: str) -> str:
-    """后台点歌（UIA）：'ok' 成功 / 'other:<歌名>' 点上了但不是这首 / 'fail' 没成 / '' 不可用"""
+def _uia_play(name: str, artist: str, _skip_preview_check: bool = False) -> str:
+    """后台点歌（UIA）。
+
+    返回：
+        'ok'                点上了、而且能完整放（不是会员试听）
+        'preview:<歌名>'    点上了，但界面上出现"正在试听，开通黑胶VIP听整首"
+                            （= 这首要会员，只放了 30 秒）
+        'other:<歌名>'      点上了但不是这首
+        'fail' / ''         没成 / UIA 不可用
+    """
     try:
         U = _uia()
         if not U.available():
@@ -692,16 +917,33 @@ def _uia_play(name: str, artist: str) -> str:
         if not U.invoke(cands[0][1]):
             return "fail"
         # 等它真的开始放（轮询标题，最多 3 秒；以前死等 1.5 秒）
+        _hit = False
         for _ in range(10):
             time.sleep(0.3)
             if _title_hit(window_title(hwnd), name):
-                return "ok"
-        for _r, _el, _nm, _rc in cands[1:4]:
-            U.invoke(_el)
-            for _ in range(6):
-                time.sleep(0.3)
-                if _title_hit(window_title(hwnd), name):
-                    return "ok"
+                _hit = True
+                break
+        if not _hit:
+            for _r, _el, _nm, _rc in cands[1:4]:
+                U.invoke(_el)
+                for _ in range(6):
+                    time.sleep(0.3)
+                    if _title_hit(window_title(hwnd), name):
+                        _hit = True
+                        break
+                if _hit:
+                    break
+        if _hit and not _skip_preview_check:
+            # 顺手看一眼界面上的"正在试听…"——但**不作为唯一判据**：实测它可能一闪而过
+            # （网易云切歌瞬间会短暂出现），所以调用方会再确认一次才当数。
+            try:
+                if _has_preview_notice(hwnd):
+                    return "preview:" + str(window_title(hwnd) or name)
+            except Exception:
+                pass
+            return "ok"
+        if _hit:
+            return "ok"
         # ② 歌换了但不是要的那首 → 如实说，不冒充成功
         _now = window_title(hwnd)
         if _now and _now != _before:
@@ -767,11 +1009,40 @@ def play_song(query: str) -> str:
     _busy[0] = True
     _hwnd0 = 0
     try:
-        hits = search(q, limit=5)
+        watch_popups()          # 顺手把"弹窗巡视"挂上：会员/广告弹窗一出现就被点掉
+        hits = search(q, limit=8)
         if not hits:
             return f"搜不到「{q}」这首歌，换个写法试试？"
-        _sid, name, artist, _alb = hits[0]
-        _log(f"搜到：《{name}》{artist}（id={_sid}）")
+        _pick = pick_best(hits, q) if _prefer_free() else hits[0]
+        _sid, name, artist, _alb, _fee = (list(_pick) + [0])[:5]
+        try:
+            _fee = int(_fee or 0)
+        except Exception:
+            _fee = 0
+        _log(f"搜到：《{name}》{artist}（id={_sid}，{_fee_label(_fee)}）"
+             + (f"｜候选 {len(hits)} 首，挑了免费的版本" if _pick is not hits[0] else ""))
+        # 依次尝试的顺序（用户要求：优先不要会员的）
+        #   ① 主人点的那个（原唱/主流版本）
+        #   ② 一些"完全免费"的同名版本（封面/翻唱/remix，客户端能整首放）
+        # 客户端只能放"搜索结果第一条"，所以换版本的办法是**换成那个版本的搜索词**再搜一次；
+        # 到底有没有只能试听，靠界面上的"正在试听…"判定（实测只有 fee=0 会消失）。
+        _tries = [(name, artist, "")]
+        if _prefer_free():
+            try:
+                for h in hits:
+                    if int(h[4] or 0) != 0:                       # 只有完全免费的才值得换
+                        continue
+                    if not _same_song(h[1], name):
+                        continue
+                    if str(h[1]).strip() == str(name).strip() and str(h[2]).strip() == str(artist).strip():
+                        continue
+                    _tries.append((str(h[1]), str(h[2]), "免费版本 "))
+            except Exception:
+                pass
+        try:
+            _tries = _tries[:3]
+        except Exception:
+            pass
         hwnd = find_window()
         if not hwnd:
             _log("客户端没开 → 尝试拉起")
@@ -786,15 +1057,73 @@ def play_song(query: str) -> str:
         if not ensure_uia(hwnd):
             return (f"我搜到了《{name}》{artist}，但网易云这会儿读不到界面"
                     f"（大概刚最小化/正在加载）——你把它点开一下，我再给你放。")
-        _u = _uia_play(name, artist)
-        if _u == "ok":
-            _log(f"✅ 播放成功（后台 UIA）：{window_title(hwnd)}")
+        _u, _preview, _label = "", False, ""
+        for _i, (_n2, _a2, _lab) in enumerate(_tries):
+            if _i:
+                _log(f"上一版只能试听/没成 → 换成「{_n2} {_a2}」再搜一次")
+            _u = _uia_play(_n2, _a2)
+            # ★ 歌确实换成了「这一版」（ok 或 preview 都算放上了）——先把名字记下来，
+            #   最后按**这一版自己的 fee** 判断要不要提示"可能要会员"。
+            if _u == "ok" or str(_u).startswith("preview:"):
+                name, artist, _label = _n2, _a2, _lab
+                try:
+                    for _h in hits:
+                        if str(_h[1]).strip() == str(_n2).strip() and str(_h[2]).strip() == str(_a2).strip():
+                            _fee = int(_h[4] or 0)
+                            break
+                except Exception:
+                    pass
+            if _u == "ok":
+                break
+            if str(_u).startswith("preview:"):
+                _preview = True
+                continue
+            _preview = False
+            break                              # 其他结果（other/fail）不用再换版本了
+        _played = _u == "ok" or str(_u).startswith("preview:")
+        _vip_only = int(_fee or 0) != 0        # 最终放的那一版不是完全免费 → 可能要会员
+        # 点完顺手收拾弹窗：没会员时点会员歌 → 网易云会弹"开通黑胶VIP"的收银台
+        _cleaned = ""
+        try:
+            _cleaned = close_popups(hwnd)
+        except Exception:
+            pass
+        # 到底是不是"只能试听"？界面提示不稳定，所以**连查两次**都出现才采信一次；
+        # 而且它只用来给 fee≠0 的歌加提示——fee=0（完全免费）的歌一律按"放上了"报。
+        if _played and not _label:
+            try:
+                if _has_preview_notice(hwnd):
+                    time.sleep(1.8)
+                    if _has_preview_notice(hwnd):
+                        _preview = True
+            except Exception:
+                pass
+        _tag = f"（{_label}）" if _label else ""
+        _vip_only = int(_fee or 0) != 0        # 最终放的那一版不是完全免费 → 可能要会员
+        # ★ 界面上的"正在试听"提示**不稳定**（同一首歌这次有、下次没有，实测），
+        #   所以不让它推翻确定的判断：fee=0 的歌一律按"放上了"报，
+        #   只有 fee≠0 的会员/付费曲才提示"可能要会员、只能试听"。
+        if _played and (not _preview or not _vip_only):
             try:      # 网易云开始播放时会自己跳到前台一次 → 再把焦点还给主人
                 if _prev_fg and _prev_fg != int(hwnd):
                     _restore_foreground(_prev_fg)
             except Exception:
                 pass
-            return f"给你放上了：《{name}》{artist}。"
+            if _vip_only:
+                return (f"给你放上了：《{name}》{artist}{_tag}。"
+                        f"（这首是{_fee_label(_fee)}曲，没会员的话可能只能试听 30 秒——"
+                        f"我已经优先找过免费版本，这首没有。）")
+            return f"给你放上了：《{name}》{artist}{_tag}。"
+        if _preview:
+            try:
+                if _prev_fg and _prev_fg != int(hwnd):
+                    _restore_foreground(_prev_fg)
+            except Exception:
+                pass
+            _extra = ("我把能整首放的免费版本都试过了，都没成。"
+                      if len(_tries) > 1 else "这首在网易云上没有能整首放的免费版本。")
+            return (f"《{name}》{artist}**只能放 30 秒试听**（这首要黑胶会员）。"
+                    f"{_extra}如实告诉主人：要么开会员，要么换一首别的歌。")
         if str(_u).startswith("other:"):
             _wrong = str(_u).split(":", 1)[1]
             try:
@@ -807,8 +1136,9 @@ def play_song(query: str) -> str:
         if not uia_ready():
             return media("play_pause") or f"我搜到了《{name}》{artist}，但没法后台播放。"
         return (f"我搜到了《{name}》{artist}，但没能替你按上播放。"
-                f"别自己重复点歌了：如实跟主人说「没点上、你手动按一下播放」，"
-                f"或者等主人再喊你一次。")
+                + (f"（{_cleaned}）" if _cleaned else "")
+                + "别自己重复点歌了：如实跟主人说「没点上、你手动按一下播放」，"
+                  "或者等主人再喊你一次。")
     finally:
         _busy[0] = False
         unensure_uia(_hwnd0 or find_window())
@@ -894,10 +1224,19 @@ def _run_locked(kind: str, arg: str) -> str:
         if kind == "play":
             return play_song(arg)
         if kind == "search":
-            hits = search(arg, limit=3)
+            hits = search(arg, limit=5)
             if not hits:
                 return f"搜不到「{arg}」。"
-            return "搜到这些：" + "；".join(f"《{n}》{a}" for _i, n, a, _al in hits)
+            return "搜到这些：" + "；".join(
+                f"《{n}》{a}（{_fee_label(f)}）" for _i, n, a, _al, f in hits)
+        if kind == "close_popup":
+            hwnd = find_window()
+            if not hwnd:
+                return "网易云没开着。"
+            if window_minimized(hwnd) and not ensure_uia(hwnd):
+                return "网易云最小化着，我读不到它的界面。"
+            r = close_popups(hwnd, force=True)
+            return r or "我看了看，没有弹窗。"
         if kind == "now":
             return status_text()
         hwnd = find_window()

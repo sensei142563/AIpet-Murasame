@@ -126,6 +126,15 @@ def check_wiring(results):
             __import__("tool.music", fromlist=["x"]).play_song)),
         ("UIA：FindAll 快速查找在", "def find_all_fast" in inspect.getsource(
             __import__("tool.uia", fromlist=["x"]))),
+        ("音乐：优先挑免费的（fee=0）", "def pick_best" in inspect.getsource(
+            __import__("tool.music", fromlist=["x"])) and "fee" in inspect.getsource(
+            __import__("tool.music", fromlist=["x"]).search)),
+        ("音乐：自动关会员/广告弹窗", "def close_popups" in inspect.getsource(
+            __import__("tool.music", fromlist=["x"]))),
+        ("音乐：弹窗巡视线程", "def watch_popups" in inspect.getsource(
+            __import__("tool.music", fromlist=["x"]))),
+        ("音乐：试听判定（连查两次）", "_has_preview_notice" in inspect.getsource(
+            __import__("tool.music", fromlist=["x"]).play_song)),
         ("关窗不连带退出桌宠", "setQuitOnLastWindowClosed(False)" in inspect.getsource(MAIN)),
         ("视觉服务：限 CPU 线程", "_cap_threads" in inspect.getsource(
             __import__("tool.vision_service", fromlist=["x"]))),
