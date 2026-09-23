@@ -116,6 +116,16 @@ def check_wiring(results):
             __import__("tool.music", fromlist=["x"])._uia_play)),
         ("音乐：暂停认两个按钮名", '["play", "pause"]' in inspect.getsource(
             __import__("tool.music", fromlist=["x"])._run_locked)),
+        ("音乐：UIA 用 FindAll 提速", "find_all_fast" in inspect.getsource(
+            __import__("tool.music", fromlist=["x"])._walk_buttons)),
+        ("音乐：搜索按钮轮询+按位置兜底", "button_next_to" in inspect.getsource(
+            __import__("tool.music", fromlist=["x"])._uia_play)),
+        ("音乐：结果页查全部元素类型（歌名在 Group 上）", "_name_hit(U.name_of(el), name)" in inspect.getsource(
+            __import__("tool.music", fromlist=["x"])._uia_play)),
+        ("音乐：重试是短冷却不是长时间封禁", "_ATTEMPT_GAP" in inspect.getsource(
+            __import__("tool.music", fromlist=["x"]).play_song)),
+        ("UIA：FindAll 快速查找在", "def find_all_fast" in inspect.getsource(
+            __import__("tool.uia", fromlist=["x"]))),
         ("关窗不连带退出桌宠", "setQuitOnLastWindowClosed(False)" in inspect.getsource(MAIN)),
         ("视觉服务：限 CPU 线程", "_cap_threads" in inspect.getsource(
             __import__("tool.vision_service", fromlist=["x"]))),

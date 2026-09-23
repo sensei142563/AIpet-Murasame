@@ -166,6 +166,59 @@ def invoke(el) -> bool:
         return False
 
 
+def find_all_fast(root, control_type=None, limit: int = 400):
+    """用 UIA 自己的 FindAll 在**目标进程里**筛控件 —— 比 walk() 快 5~10 倍。
+
+    为什么重要（2026-09-24 实测，网易云 741 个元素）：
+        walk(limit=800)   0.68s   且只走到第 452 个 → 位置靠后的控件会漏（搜按钮在第 656 个！）
+        walk(limit=2000)  1.07s
+        FindAll(Edit)     0.22s   只回 1 个（就是搜索框）
+        FindAll(Button)   0.24s   45 个按钮，search 按钮稳稳在里面
+    点歌一次要来回找好几轮控件，用 walk 光遍历就三五秒，还时不时"找不到按钮"
+    —— 这就是用户说的「点歌这么简单的事为什么这么慢/卡住」。
+    """
+    if root is None or not available():
+        return []
+    try:
+        uia = _cache["uia"]
+        UIA = _mods()
+        if control_type is None:
+            found = root.FindAll(4, uia.CreateTrueCondition())      # 4 = TreeScope_Descendants
+        else:
+            cond = uia.CreatePropertyCondition(UIA.UIA_ControlTypePropertyId, int(control_type))
+            found = root.FindAll(4, cond)
+        out = []
+        try:
+            n = int(found.Length)
+        except Exception:
+            return []
+        for i in range(min(n, int(limit))):
+            try:
+                out.append(found.GetElement(i))
+            except Exception:
+                pass
+        return out
+    except Exception as e:
+        print(f"[UIA] ⚠ FindAll 失败（{type(e).__name__}: {e}）→ 调用方应退回 walk")
+        return []
+
+
+def name_of(el) -> str:
+    """控件名字（失败给空串）"""
+    try:
+        return str(el.CurrentName or "")
+    except Exception:
+        return ""
+
+
+def aid_of(el) -> str:
+    """控件 AutomationId（失败给空串）"""
+    try:
+        return str(el.CurrentAutomationId or "")
+    except Exception:
+        return ""
+
+
 def children_count(root, max_depth: int = 3, limit: int = 30) -> int:
     """数一下树里有多少元素（用来判断"这棵树是不是空的"）。
 
@@ -186,17 +239,24 @@ def top_bar_edit(root, hwnd=None):
         name='搜索'                rect=(1463,378,1503,408) ← 别处的框（名字反倒像"搜索"）
       按名字挑会挑错 → 搜错 → 放了别的歌。所以**认位置**：最靠上的那个就是顶栏。
 
-    有 Edit 但一个位置都读不到时，才退回"名字/标识带 search/搜索"的那个。
+    用 FindAll(Edit) 取（实测 0.22s，walk 要 0.7~1.1s 还可能漏）；
+    拿不到位置时才退回"名字/标识带 search/搜索"的那个。
     注意：窗口最小化时一个 Edit 都读不到（UIA 树是空的）——那不是这里的锅，
     调用方应先把窗口还原（见 tool/music.py 的 ensure_uia）。
     """
+    els = find_all_fast(root, CT_EDIT, limit=40)
+    if not els:
+        # 退回旧的全树遍历（万一 FindAll 在这个控件上不工作）
+        for _el, nm, ct, _aid in walk(root, limit=2000):
+            if ct == CT_EDIT:
+                els.append(_el)
+    if not els:
+        return None
     cands = []
     hint = None
-    for idx, (el, nm, ct, aid) in enumerate(walk(root, limit=2000)):
-        if ct != CT_EDIT:
-            continue
-        blob = f"{nm} {aid}".lower()
-        if hint is None and ("search" in blob or "搜索" in blob):
+    for idx, el in enumerate(els):
+        nm, aid = name_of(el), aid_of(el)
+        if hint is None and ("search" in f"{nm} {aid}".lower() or "搜索" in nm):
             hint = el
         r = rect_of(el)
         cands.append((r[1] if r else None, idx, el))
@@ -206,7 +266,43 @@ def top_bar_edit(root, hwnd=None):
         return heightable[0][2]          # 顶栏 = 最靠上的输入框
     if hint is not None:
         return hint
-    return cands[0][2] if cands else None
+    return cands[0][2]
+
+
+def buttons_named(root, contains="", limit: int = 400):
+    """所有名字含 contains 的按钮 [(el, name, rect)]（用 FindAll，快）"""
+    out = []
+    for el in find_all_fast(root, CT_BUTTON, limit=limit):
+        nm = name_of(el)
+        if contains and contains not in nm:
+            continue
+        out.append((el, nm, rect_of(el)))
+    return out
+
+
+def button_next_to(root, box_rect, limit: int = 400):
+    """紧挨着某个输入框左边的那个按钮（= 放大镜/搜索键，按位置认）。
+
+    为什么要这个兜底：网易云的 search 按钮在整棵树里排得很靠后（实测第 656 个），
+    窗口刚从最小化还原时树还没长全 → 按名字可能找不到；但"贴着搜索框左边"
+    这个位置关系很稳（实测按钮 rect=(657,117,703,145)、搜索框 rect=(703,116,915,146)）。
+    """
+    if not box_rect:
+        return None, None
+    bl, bt, br, bb = box_rect
+    best = None
+    for el in find_all_fast(root, CT_BUTTON, limit=limit):
+        r = rect_of(el)
+        if not r:
+            continue
+        l, t, rr, b = r
+        if rr <= bl + 6 and (bl - rr) <= 60 and t < bb and b > bt:   # 右缘贴着框左边 + 纵向重叠
+            score = abs(bl - rr) + abs(((t + b) // 2) - ((bt + bb) // 2))
+            if best is None or score < best[0]:
+                best = (score, el, name_of(el), r)
+    if best:
+        return best[1], best[3]
+    return None, None
 
 
 if __name__ == "__main__":

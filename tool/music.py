@@ -43,8 +43,9 @@ _LINE = re.compile("[【\\[]\\s*音乐\\s*[】\\]]\\s*([^\"\\]\\n]{1,80})")
 _busy = [False]
 # 每首歌的尝试时间戳：短时间内试太多次就不再试，免得"一直重复搜索"
 _attempts = {}
-_ATTEMPT_WINDOW = 300
-_ATTEMPT_LIMIT = 2
+_ATTEMPT_WINDOW = 600       # 10 分钟内最多试几次
+_ATTEMPT_LIMIT = 4
+_ATTEMPT_GAP = 8.0          # 两次尝试之间至少隔几秒（防疯狂连点，但不用主人干等）
 # 歌单列表缓存（读侧边栏要零点几秒，不必每轮都读）
 _playlists_cache = {"t": 0.0, "v": []}
 _PLAYLIST_TTL = 60.0
@@ -375,15 +376,26 @@ def uia_ready() -> bool:
 
 
 def _walk_buttons(hwnd):
+    """所有按钮 [(元素, 名字, 位置)]。
+
+    ★ 用 FindAll 而不是全树 walk（实测 741 个元素的网易云：walk 0.68~1.07s，
+      FindAll 0.24s）。这个函数在暂停/切歌/循环/收藏、以及桌宠每次判断
+      "在不在放"时都会跑（她每隔几秒就问一次），差的就是整机的流畅度。
+    """
     U = _uia()
     root = U.root_for(hwnd)
     if root is None:
         return []
     out = []
-    for el, nm, ct, aid in U.walk(root):
+    els = U.find_all_fast(root, U.CT_BUTTON, limit=400)
+    if els:
+        for el in els:
+            out.append((el, U.name_of(el).strip(), U.rect_of(el)))
+        return out
+    # 兜底：FindAll 不好使时退回全树遍历
+    for el, nm, ct, _aid in U.walk(root):
         if ct == U.CT_BUTTON:
-            r = U.rect_of(el)
-            out.append((el, str(nm).strip(), r))
+            out.append((el, str(nm).strip(), U.rect_of(el)))
     return out
 
 
@@ -614,13 +626,29 @@ def _uia_play(name: str, artist: str) -> str:
             _log("UIA：写不进搜索框")
             return "fail"
         _log("UIA：已把歌名写进搜索框（窗口没切到前台）")
-        btn = U.find(root, control_type=U.CT_BUTTON, contains="search")
-        if btn is not None:
-            U.invoke(btn)
-            _log("UIA：已提交搜索")
-        else:
-            _log("UIA：没找到 search 按钮（不按了，免得放出旧结果）")
+        # ── 找搜索按钮：轮询 + 按位置兜底 ──
+        # 为什么不能只找一次：窗口刚从最小化还原时 UIA 树是**逐步长出来**的，
+        # 而这个 search 按钮在整棵树里排得很靠后（实测第 656/741 个）→
+        # 树没长全就找不着 → 以前直接报"没找到 search 按钮"放弃（用户看到的就是点了没反应）。
+        box_rect = U.rect_of(box)
+        btn = None
+        for _try in range(6):                        # 最多等 1.5 秒
+            hit = U.buttons_named(root, contains="search", limit=400)
+            if hit:
+                btn = hit[0][0]
+                break
+            alt, _ar = U.button_next_to(root, box_rect)
+            if alt is not None:
+                btn = alt
+                _log("UIA：按位置认出搜索按钮（名字没匹配上）")
+                break
+            time.sleep(0.25)
+            root = U.root_for(hwnd) or root
+        if btn is None:
+            _log("UIA：没找到 search 按钮（等了 1.5 秒）")
             return "fail"
+        U.invoke(btn)
+        _log("UIA：已提交搜索")
         # ── ① 先确认"结果页真的出了这首歌" ──
         #    为什么：搜索没生效时页面还停着上一次的结果，直接点第一个「播放」
         #    就会放出一首你没点的歌（2026-09-23 实测踩到：想放《夜空中最亮的星》，
@@ -628,19 +656,30 @@ def _uia_play(name: str, artist: str) -> str:
         got = False
         cands = []
         for _try in range(14):
-            time.sleep(0.5)
-            cands = []
-            for el, nm, ct, aid in U.walk(U.root_for(hwnd)):
-                s = str(nm)
-                if ct == U.CT_BUTTON and "播放" in s and "全部" not in s:
-                    r = U.rect_of(el)
-                    if r:
-                        cands.append((r[1], el, s, r))
-                elif _name_hit(s, name):
-                    got = True
+            time.sleep(0.4)
+            r2 = U.root_for(hwnd)
+            # 用 FindAll 取按钮（实测 0.24s，walk 要 0.7~1.1s）——这一轮最多要跑 14 次，
+            # 差的就是好几秒（用户感觉到的"慢"）
+            for el, s, r in U.buttons_named(r2, contains="播放", limit=400):
+                if "全部" in s:
+                    continue
+                if r:
+                    cands.append((r[1], el, s, r))
+            if not got:
+                # 结果页里有没有这首歌。★ 必须查**所有**元素类型：网易云把歌名挂在
+                # Group(50020) 上（不是 Text）——只查 Text 会误判"没搜到"，
+                # 于是明明搜出来了也不敢点（2026-09-24 实测踩到）。
+                # FindAll(全部) 实测 0.10s，比 walk 快得多，随便查。
+                els = U.find_all_fast(r2, None, limit=1200)
+                if not els:
+                    els = [e for e, _n, _c, _a in U.walk(r2, limit=800)]
+                for el in els:
+                    if _name_hit(U.name_of(el), name):
+                        got = True
+                        break
             if got and cands:
                 if _try:
-                    _log(f"UIA：等了 {(_try + 1) * 0.5:.1f} 秒，结果页出来了")
+                    _log(f"UIA：等了 {(_try + 1) * 0.4:.1f} 秒，结果页出来了")
                 break
         if not cands:
             _log("UIA：结果页没找到「播放」按钮")
@@ -652,14 +691,17 @@ def _uia_play(name: str, artist: str) -> str:
         _log(f"UIA：按第一条结果的按钮「{cands[0][2][:20]}」{cands[0][3]}")
         if not U.invoke(cands[0][1]):
             return "fail"
-        time.sleep(1.5)
-        if _title_hit(window_title(hwnd), name):
-            return "ok"
-        for _r, _el, _nm, _rc in cands[1:4]:
-            U.invoke(_el)
-            time.sleep(1.3)
+        # 等它真的开始放（轮询标题，最多 3 秒；以前死等 1.5 秒）
+        for _ in range(10):
+            time.sleep(0.3)
             if _title_hit(window_title(hwnd), name):
                 return "ok"
+        for _r, _el, _nm, _rc in cands[1:4]:
+            U.invoke(_el)
+            for _ in range(6):
+                time.sleep(0.3)
+                if _title_hit(window_title(hwnd), name):
+                    return "ok"
         # ② 歌换了但不是要的那首 → 如实说，不冒充成功
         _now = window_title(hwnd)
         if _now and _now != _before:
@@ -706,10 +748,18 @@ def play_song(query: str) -> str:
     try:
         _now = time.time()
         _hist = [t for t in (_attempts.get(q) or []) if _now - t < _ATTEMPT_WINDOW]
+        _last = max(_hist) if _hist else 0
+        # ★ 冷却策略（2026-09-24 改）：以前是"5 分钟内只许试 2 次"，一旦失败两次，
+        #   主人再喊也只会被挡回去，而她还在反复承诺"这回真给你放" —— 用户看到的就是
+        #   "点歌卡住了"。现在改成：两次尝试之间至少隔 _ATTEMPT_GAP 秒，
+        #   10 分钟内最多 _ATTEMPT_LIMIT 次。既能防住疯狂连点，又不用主人干等 5 分钟。
+        if _last and (_now - _last) < _ATTEMPT_GAP:
+            _log(f"「{q}」{_ATTEMPT_GAP:.0f} 秒内刚试过 → 先等一下再试")
+            return "唔……这个我刚刚按过，你等一两秒我再试一次。"
         if len(_hist) >= _ATTEMPT_LIMIT:
-            _log(f"「{q}」{_ATTEMPT_WINDOW // 60} 分钟内已试过 {len(_hist)} 次 → 不再重复")
-            return (f"《{q}》我刚试过两次都没放上，先不重复了——"
-                    f"你再喊我一次我再试，或者你自己点一下播放键。")
+            _log(f"「{q}」{_ATTEMPT_WINDOW // 60} 分钟内已试过 {len(_hist)} 次 → 先不重复")
+            return (f"《{q}》我试了好几次都没放上，先不硬试了——"
+                    f"你自己点一下播放键更快，或者过一会儿再喊我。")
         _hist.append(_now)
         _attempts[q] = _hist
     except Exception:
