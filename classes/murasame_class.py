@@ -1507,6 +1507,49 @@ class Murasame(QLabel):
             except Exception:
                 pass
 
+    def _plugin_and_reply(self, marker, arg):
+        """跑一个插件（后台线程），把结果交给她用自己的话讲"""
+        try:
+            from tool import plugins as _plg
+            res = _plg.run_one(str(marker), str(arg))
+            if not res:
+                res = f"（插件「{marker}」没给我结果，可能没装或出错了）"
+            print(f"[桌宠] 🧩 插件结果：{str(res)[:70]}")
+            self._request_dialog.emit(
+                "（系统提示：你刚才用插件「" + str(marker) + "」做了件事，结果是——"
+                + str(res)[:1200] +
+                "。用你自己的口吻讲给主人听，一两句话，别说'插件'两个字，也别提系统提示。）",
+                "user", False)
+        except Exception as e:
+            print(f"[桌宠] ⚠ 插件执行失败（{type(e).__name__}: {e}）")
+            try:
+                self._request_dialog.emit("唔……我那个小工具好像坏了。", "user", False)
+            except Exception:
+                pass
+
+    def _search_and_reply(self, query, user_text):
+        """真的去搜（后台线程），再把结果交给她用自己的话讲"""
+        try:
+            from tool import web_search as _wsm
+            ctx = _wsm.context_text(str(query), limit=5)
+            if not ctx:
+                print("[桌宠] 🔍 没搜到结果 → 如实告诉她")
+                self._request_dialog.emit(
+                    "（系统提示：你刚想上网查「" + str(query)[:40] + "」，但没搜到结果。"
+                    "如实跟主人说没查到，别编。）", "user", False)
+                return
+            print(f"[桌宠] 🔍 搜到 {ctx.count(chr(10) + '1. ') or 1} 组结果 → 带着它回答主人")
+            self._request_dialog.emit(
+                ctx + chr(10) + f"主人刚才说：「{user_text}」。"
+                "请用你自己的口吻把查到的讲给他听：挑重点、说人话，"
+                "别说'根据搜索结果'，别提系统提示；不确定的地方就说没查到。", "user", False)
+        except Exception as e:
+            print(f"[桌宠] ⚠ 搜索失败（{type(e).__name__}: {e}）")
+            try:
+                self._request_dialog.emit(str(user_text), "user", False)
+            except Exception:
+                pass
+
     def _cycle_autonomy(self):
         """菜单：切自主活跃度（安静 → 适中 → 活跃）"""
         try:
@@ -1966,6 +2009,51 @@ class Murasame(QLabel):
                     pass
         except Exception as _e2:
             print(f"[桌宠] ⚠ 自主要求看屏幕判断失败: {_e2}")
+
+        # ── 插件（主人自己装的能力，标记长这样：【插件:天气】北京）──
+        try:
+            from classes.Worker_class import _pl_pending
+            from tool import plugins as _plg
+            _joined = "".join(str(x) for x in (reply or []))
+            if "【插件】" in _joined or "【插件:" in _joined:
+                _preq = _pl_pending.pop(0) if _pl_pending else ""
+                _pl_pending[:] = []
+                _lst = _plg.parse(str(_preq or ""))
+                if _lst:
+                    _mk, _arg = _lst[0]
+                    print(f"[桌宠] 🧩 她要用插件「{_mk}」（参数：{_arg[:20]}）")
+                    self._talking = False
+                    self.show_text("唔……我看看。", typing=True)
+                    import threading as _thp
+                    _thp.Thread(target=self._plugin_and_reply, args=(_mk, _arg),
+                                daemon=True).start()
+                    return
+                if not _lst:
+                    print("[桌宠] 🧩 插件标记没解析出标记名 → 当普通回复处理")
+                    reply = [_plg.clean_for_speech(_joined)] if _joined else reply
+        except Exception as _ep:
+            print(f"[桌宠] ⚠ 插件处理失败: {_ep}")
+
+        # ── 她要上网查东西（提示词里教她：【搜索】关键词）──
+        try:
+            from tool.web_search import SEARCH_MARK
+            from tool import web_search as _wsm
+            from classes.Worker_class import _ws_pending
+            if SEARCH_MARK in "".join(str(x) for x in (reply or [])):
+                _wq = _ws_pending.pop(0) if _ws_pending else ""
+                _ws_pending[:] = []
+                _qs = _wsm.parse(str(_wq or ""))
+                if _qs:
+                    print(f"[桌宠] 🔍 她要搜：{_qs[0][:30]}")
+                    self._talking = False
+                    self.show_text("唔……我上网查查。", typing=True)
+                    import threading as _thw
+                    _thw.Thread(target=self._search_and_reply,
+                                args=(_qs[0], getattr(self, "_last_user_text", "") or _qs[0]),
+                                daemon=True).start()
+                    return
+        except Exception as _ew:
+            print(f"[桌宠] ⚠ 搜索意图判断失败: {_ew}")
 
         # ── 她帮主人记提醒（提示词里教她：【提醒】30分钟后 喝水）──
         try:
@@ -2918,6 +3006,24 @@ class Murasame(QLabel):
                 _act_seen = item(_ai, "她的状态 / 记忆 / 提醒")
                 _act_seen.setToolTip("单独开一个小窗口，显示她记住的事、学到的东西和最近的日记。")
                 _act_seen.triggered.connect(self._show_learned)
+                try:
+                    from tool import plugins as _plg2
+                    _act_pl = item(_ai, "启用插件", checked=_plg2.enabled())
+                    _act_pl.setToolTip("插件放在项目根目录的 plugins\ 里：每个文件夹一个 plugin.json + main.py，"
+                                       "她就能多一项本事（比如内置的「系统信息」）。")
+                    _act_pl.triggered.connect(lambda on=False: _plg2.set_enabled(bool(on)))
+                    _act_pldir = item(_ai, "打开插件目录")
+                    _act_pldir.triggered.connect(lambda: __import__("os").startfile(_plg2._root()))
+                except Exception:
+                    pass
+                try:
+                    from tool import web_search as _ws3
+                    _act_ws = item(_ai, "允许联网搜索", checked=_ws3.enabled())
+                    _act_ws.setToolTip("开启后她能上网查东西：你问「今天天气」「最新公告」这类，"
+                                       "她会去搜（cn.bing.com 优先，百度备用，只读取标题与摘要）。")
+                    _act_ws.triggered.connect(lambda on=False: _ws3.set_enabled(bool(on)))
+                except Exception:
+                    pass
                 try:
                     from tool import desire as _dz2
                     _act_lv = item(_ai, "自主活跃度：%s（点击切换）" % _dz2.level_label())

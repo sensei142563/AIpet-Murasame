@@ -54,6 +54,10 @@ def split_sentences(text):
 _mu_pending = []
 # 提醒请求暂存（【提醒】标记同理）
 _rm_pending = []
+# 联网搜索请求暂存（【搜索】标记）
+_ws_pending = []
+# 插件请求暂存（【插件:标记】）
+_pl_pending = []
 
 
 def _tidy_sentences(items):
@@ -81,6 +85,21 @@ def _tidy_sentences(items):
             if _fa.FILE_MARK in s:
                 _fa.set_pending(s)          # 请求暂存，"列出 桌面"这种内容不进台词
                 out.append(_fa.FILE_MARK)
+                continue
+        except Exception:
+            pass
+        try:
+            if "【插件:" in s or "［插件:" in s or "[插件:" in s:
+                _pl_pending.append(s)
+                out.append("【插件】")
+                continue
+        except Exception:
+            pass
+        try:
+            from tool import web_search as _wsm
+            if _wsm.SEARCH_MARK in s:
+                _ws_pending.append(s)
+                out.append(_wsm.SEARCH_MARK)
                 continue
         except Exception:
             pass

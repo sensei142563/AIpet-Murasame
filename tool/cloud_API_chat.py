@@ -164,6 +164,24 @@ def cloud_talk(history: list, user_input: str, role: str):
     except Exception:
         pass
 
+    # 插件：主人自己装的能力（【插件:标记】参数）
+    try:
+        from tool import plugins as _plg3
+        _pgl = _plg3.rules_text()
+        if _pgl:
+            messages.append({"role": "system", "content": _pgl})
+    except Exception:
+        pass
+
+    # 联网搜索：不确定的事让她去查（只读标题摘要）
+    try:
+        from tool import web_search as _wsm2
+        _wrules = _wsm2.prompt_rules()
+        if _wrules:
+            messages.append({"role": "system", "content": _wrules})
+    except Exception:
+        pass
+
     # 提醒/待办：她能帮主人记事（到点由桌宠叫她开口）
     try:
         from tool import reminder as _rm2

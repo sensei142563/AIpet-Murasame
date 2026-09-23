@@ -1,0 +1,8 @@
+{
+  "name": "模板例子",
+  "description": "教你怎么写插件（默认关闭，复制这个文件夹改一改就能用）",
+  "marker": "例子",
+  "version": "1.0",
+  "author": "你",
+  "enabled": false
+}

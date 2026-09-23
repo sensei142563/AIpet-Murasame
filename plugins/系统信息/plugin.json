@@ -1,0 +1,8 @@
+{
+  "name": "系统信息",
+  "description": "看看电脑的 CPU/内存/磁盘/开机多久",
+  "marker": "系统信息",
+  "version": "1.0",
+  "author": "AIpet 内置示例",
+  "enabled": true
+}
