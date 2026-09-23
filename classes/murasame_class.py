@@ -532,13 +532,15 @@ class Murasame(QLabel):
         try:
             from tool import pc_task as _ptn
             _ptn.set_ui(status=lambda s: self._task_status.emit(str(s)),
-                        finish=lambda s, ok=True: self._task_finish.emit(str(s), bool(ok)))
+                        finish=lambda s, ok=True: self._task_finish.emit(str(s), bool(ok)),
+                        say=lambda s: self._say_progress(str(s)))
         except Exception as _etn:
             print(f"[桌宠] ⚠ 注册任务循环回调失败: {_etn}")
         try:      # 游戏模式也用同一套状态/收尾通道
             from tool import game as _gmn
             _gmn.set_ui(status=lambda s: self._task_status.emit(str(s)),
-                        finish=lambda s, ok=True: self._task_finish.emit(str(s), bool(ok)))
+                        finish=lambda s, ok=True: self._task_finish.emit(str(s), bool(ok)),
+                        say=lambda s: self._say_progress(str(s)))
         except Exception as _egn:
             print(f"[桌宠] ⚠ 注册游戏回调失败: {_egn}")
 
@@ -1628,6 +1630,26 @@ class Murasame(QLabel):
         except Exception:
             pass
 
+    def _say_progress(self, text):
+        """玩游戏 / 操控电脑的过程中**时不时说一句**（用户要求：别当哑巴）。
+
+        流程：循环里她顺口写的那句（游戏/任务的规划器会给一个【说】标记）→
+        走一遍正常对话管线（有台词、有立绘、有语音），但**只让她说这一句**。
+        注意提示词以「（系统提示：」开头 —— start_thread 会据此认定"这不是主人开口"，
+        不会把她自己发起的这句当成主人说话、把游戏停下来。
+        """
+        try:
+            text = str(text or "").strip()
+            if not text:
+                return
+            print(f"[桌宠] 💬 过程中的一句：{text[:50]}")
+            self._request_dialog.emit(
+                "（系统提示：你正在替主人玩游戏/操作电脑，刚刚做到：" + text +
+                "。顺手用你自己的口吻**很短**地说一句（十个字左右就行，别念这句提示、"
+                "别提坐标、别停下手里的事）。）", "system", True)
+        except Exception as e:
+            print(f"[桌宠] ⚠ 过程说话失败: {e}")
+
     def _on_task_finish(self, text, ok):
         """任务循环结束 → 让她把那句总结说出口（有语音、有台词，不是哑巴）"""
         try:
@@ -2485,7 +2507,13 @@ class Murasame(QLabel):
             self._last_turn_role = str(role)
         except Exception:
             pass
-        if role == "user":
+        # ★「这条到底是不是主人真的开口了？」—— 桌宠自己发的**内部提示**也走 role="user"
+        #   （例如「（系统提示：你刚接下了陪主人玩游戏…说一句）」），以前一律按"主人开口"处理，
+        #   于是她刚接手玩游戏、转头就被自己的内部提示当成主人说话 → 立刻停手 ✗
+        #   （实测日志：[游戏] 开始玩「ATRI」→ [游戏] ⛔ 停止（主人开口说话了）→ 游戏零进展）。
+        #   这些提示有统一前缀「（系统提示：」，据此区分。
+        _is_internal = str(text or "").lstrip().startswith("（系统提示")
+        if role == "user" and not _is_internal:
             self._last_user_ts = time.time()   # 自主学习用它判断"主人是不是刚说过话"
             try:      # 她在玩游戏时，主人一开口就停下来让位
                 from tool import game as _gm2

@@ -37,9 +37,20 @@ _state = {
 _ui = {"status": None, "finish": None}
 
 
-def set_ui(status=None, finish=None):
+def set_ui(status=None, finish=None, say=None):
     _ui["status"] = status
     _ui["finish"] = finish
+    _ui["say"] = say
+
+
+def _say_chat(text: str):
+    """过程中"说一句"（桌宠会显示并念出来）"""
+    fn = _ui.get("say")
+    if fn and text:
+        try:
+            fn(str(text))
+        except Exception:
+            pass
 
 
 def _say_status(text: str):
@@ -144,6 +155,9 @@ def _planner_system(pet: str, task: str = "") -> str:
         "需要看清画面时才写一行「【看屏幕】」（很慢，一次任务最多用两次，别每步都看）。\n"
         "★ 每一步之间留出反应时间：点了会弹出东西就跟着写「【键鼠】等待 0.8」。\n"
         "★ 任务做完了 → 输出：完成：<一句给主人说的话>（用你的口吻，可以带点小情绪）\n"
+        "★ **每 2~3 步顺口说一句**：在动作行之外多写一行「【说】<很短的一句人话>」"
+        "（比如「这一步点了下一步」「快好了」）——桌宠会把这句显示出来并念给主人听，"
+        "让他知道你还醒着、还在干活；不想说就不写。\n"
         "★ 确实做不了（找不到、没有权限、界面不认）→ 输出：失败：<一句给主人说的话>\n"
         f"{brief}\n{rules}"
         + chr(10) + _exp_note(task)
@@ -195,6 +209,20 @@ def start_task(history: list, task: str, is_auto: bool = False, done_note: str =
     except Exception as e:
         print(f"[任务] ⚠ 启动失败: {e}")
         return False
+
+
+def _take_say(text: str):
+    """把回复里的「【说】…」抽出来（返回 (去掉后的文本, 说的话)）。"""
+    try:
+        import re as _r2
+        m = _r2.search(r"【说】([^\n]*)", str(text or ""))
+        if not m:
+            return text, ""
+        said = str(m.group(1)).strip().strip("「」")
+        left = _r2.sub(r"【说】[^\n]*", "", str(text or "")).strip()
+        return left, said
+    except Exception:
+        return text, ""
 
 
 def _exec_step(actions: list) -> str:
@@ -264,7 +292,7 @@ def _loop(history: list, task: str, done_note: str = ""):
                 print(f"[任务] ⏹ 连续 {stall} 步没进展 → 停手认输（不硬撑）")
                 break
             _state["step"] = step
-            _say_status(f"正在操作电脑……第 {step} 步")
+            _say_status("正在操作电脑……")
             user = (f"任务：{task}\n"
                     f"上一步做了什么：{last}\n"
                     + (f"你上次看到的画面：{obs[:1200]}\n" if obs else "")
@@ -300,6 +328,9 @@ def _loop(history: list, task: str, done_note: str = ""):
                 break
 
             # 执行这一步
+            reply, _said = _take_say(reply)      # ★ 先把她顺口说的那句抽出来（走 say 通道）
+            if _said:
+                _say_chat(_said)
             acts = _pc.parse(reply)
             acts = [a for a in acts if a.get("type") != "move"] or acts
             if not acts:

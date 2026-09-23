@@ -150,9 +150,20 @@ def status() -> dict:
     return dict(_state)
 
 
-def set_ui(status=None, finish=None):
+def set_ui(status=None, finish=None, say=None):
     _ui["status"] = status
     _ui["finish"] = finish
+    _ui["say"] = say
+
+
+def _say_chat(t: str):
+    """过程中"说一句"（桌宠会把这句话显示出来并念出来）"""
+    fn = _ui.get("say")
+    if fn and t:
+        try:
+            fn(str(t))
+        except Exception:
+            pass
 
 
 def _say_status(t: str):
@@ -663,6 +674,20 @@ def start(name: str, goal: str = "", controls: str = "", minutes: int = None,
             f"打不过或者你觉得烦就按 F12，或者直接跟我说「停」。")
 
 
+def _take_say(text: str):
+    """把回复里的「【说】…」抽出来（返回 (去掉后的文本, 说的话)）。"""
+    try:
+        import re as _r2
+        m = _r2.search(r"【说】([^\n]*)", str(text or ""))
+        if not m:
+            return text, ""
+        said = str(m.group(1)).strip().strip("「」")
+        left = _r2.sub(r"【说】[^\n]*", "", str(text or "")).strip()
+        return left, said
+    except Exception:
+        return text, ""
+
+
 def _planner_system(name: str, goal: str, controls: str) -> str:
     return (
         f"你正在替主人玩「{name}」。你能看到画面描述，然后决定下一步怎么做。\n"
@@ -674,6 +699,9 @@ def _planner_system(name: str, goal: str, controls: str) -> str:
         "★ **视觉小说 / 文字冒险**：每轮就写一行「【键鼠】点击 960 650」或「【键鼠】按键 space」"
         "（点画面中下部、或按空格就是「继续」）；出现选项就点那个选项的位置。"
         "**不要停下来问主人、也不要等他确认**（他一开口你就会自动停下）。\n"
+        "★ **每 2~3 轮顺口说一句**：在动作行之外多写一行「【说】<很短的一句人话>」"
+        "（比如「点了一下继续，剧情在走」「我看到选项了」）——桌宠会把这句显示出来并念给主人听，"
+        "让他知道你还醒着、还在动；不想说就不写。\n"
         "★ 这局结束了（赢了/输了/回到主菜单）→ 输出：完成：<一句话>\n"
         "★ 明显玩不动、或者需要主人决定 → 输出：失败：<一句话>"
     )
@@ -704,7 +732,7 @@ def _loop(minutes: float, pet_name: str):
                 ok = False
                 break
             _state["round"] = rnd
-            _say_status(f"正在玩 {name}……第 {rnd} 轮")
+            _say_status(f"正在玩 {name}……")
             desc = _look()
             print(f"[游戏] 第 {rnd} 轮画面：{str(desc)[:90]}")
             user = (f"当前画面：{desc}\n"
@@ -725,6 +753,9 @@ def _loop(minutes: float, pet_name: str):
             if fin:
                 reason = fin
                 break
+            reply, _said = _take_say(reply)
+            if _said:
+                _say_chat(_said)
             acts = _pc.parse(reply)
             if not acts:
                 last = "（我上一步没写出能执行的动作）"

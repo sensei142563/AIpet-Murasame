@@ -179,6 +179,14 @@ def check_wiring(results):
             __import__("tool.game", fromlist=["x"]))
          and "find_game_window(name)" in inspect.getsource(
             __import__("tool.game", fromlist=["x"]).start)),
+        ("内部提示不算主人开口（不再掐停游戏）", "_is_internal" in inspect.getsource(
+            M.Murasame.start_thread)),
+        ("状态文案不带轮数/步数", "正在玩 {name}……\")" in inspect.getsource(
+            __import__("tool.game", fromlist=["x"])._loop)
+         and "正在操作电脑……\")" in inspect.getsource(
+            __import__("tool.pc_task", fromlist=["x"])._loop)),
+        ("过程说话（say 通道）", "def _say_progress" in inspect.getsource(M.Murasame)
+         and "say=lambda s: self._say_progress" in inspect.getsource(M.Murasame)),
         ("游戏：关掉了就停手并如实说", "_window_alive(_state.get" in inspect.getsource(
             __import__("tool.game", fromlist=["x"])._loop)),
         ("视觉小说：直接开始、别问主人", "视觉小说 / 文字冒险" in inspect.getsource(
