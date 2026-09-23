@@ -389,11 +389,85 @@ def _search_box_candidates(hwnd) -> list:
     l, t, r, b = _win_rect(hwnd)
     if not _rect_ok((l, t, r, b)):
         return []
-    w = max(1, r - l)
     out = []
-    for fx in (0.33, 0.45, 0.55, 0.25):
-        out.append((int(l + w * fx), int(t + 22)))
+    # ① 首选：用 UIA 读到的**真实搜索框**位置（实测 (703,116,915,146) 这种）
+    try:
+        from tool import uia as _uia
+        root = _uia.root_for(hwnd)
+        box = _uia.top_bar_edit(root, hwnd) if root is not None else None
+        r2 = _uia.rect_of(box) if box is not None else None
+        if r2 and (r2[2] - r2[0]) > 40:
+            out.append(((r2[0] + r2[2]) // 2, (r2[1] + r2[3]) // 2))
+            _log(f"UIA 读到的搜索框: {r2} → 点它的中心 {out[-1]}")
+    except Exception as _e:
+        _log(f"（UIA 读搜索框失败，用比例估算）{_e}")
+    # ② 退路：按窗口比例估算（按实测比例 703/377-1544 → 约 0.28w、y≈t+36）
+    w, h = max(1, r - l), max(1, b - t)
+    for fx, fy in ((0.37, 0.048), (0.30, 0.048), (0.45, 0.048)):
+        out.append((int(l + w * fx), int(t + h * fy)))
     return out
+def _uia_play(name: str, artist: str) -> str:
+    """用 UI Automation **在后台**点歌（不切窗口、不抢焦点、不动鼠标）。
+
+    返回：'ok' 成功 / 'fail' 没成 / '' 不可用（交给模拟键鼠那条老路）。
+
+    实测（这台机器）：网易云是 CEF 界面，MSAA 只给到窗口层，但 **UIA 树是完整的**：
+      顶部搜索框 bounds=(703,116,915,146)，旁边还有个 name='search' 的按钮，
+      搜索结果里第一条的按钮 name 含「播放」。设值 + 按按钮全程不需要焦点。
+    """
+    try:
+        from tool import uia as _uia
+        if not _uia.available():
+            return ""
+        hwnd = find_window()
+        if not hwnd:
+            return ""
+        root = _uia.root_for(hwnd)
+        if root is None:
+            return ""
+        box = _uia.top_bar_edit(root, hwnd)
+        if box is None:
+            _log("UIA：没找到搜索框")
+            return "fail"
+        if not _uia.set_value(box, f"{name} {artist}".strip()):
+            return "fail"
+        _log("UIA：已把歌名写进搜索框（窗口没切到前台）")
+        btn = _uia.find(root, control_type=_uia.CT_BUTTON, contains="search")
+        if btn is not None:
+            _uia.invoke(btn)                 # 点那个放大镜按钮 = 提交搜索
+            _log("UIA：已提交搜索")
+        time.sleep(1.4)
+        # 结果页重新取根，找最靠上的「播放」按钮（第一条结果那个）
+        root2 = _uia.root_for(hwnd)
+        cands = []
+        for el, nm, ct, aid in _uia.walk(root2):
+            if ct == _uia.CT_BUTTON and "播放" in nm and "全部" not in nm:
+                r = _uia.rect_of(el)
+                if r:
+                    cands.append((r[1], el, nm, r))
+        if not cands:
+            _log("UIA：结果页没找到「播放」按钮")
+            return "fail"
+        cands.sort(key=lambda x: x[0])
+        _top = cands[0]
+        _log(f"UIA：按第一条结果的按钮「{_top[2][:20]}」{_top[3]}")
+        if not _uia.invoke(_top[1]):
+            return "fail"
+        time.sleep(1.5)
+        if _title_hit(window_title(hwnd), name):
+            return "ok"
+        # 有些版本按钮是"播放全部"，试第二个候选
+        for _r, _el, _nm, _rc in cands[1:4]:
+            _uia.invoke(_el)
+            time.sleep(1.3)
+            if _title_hit(window_title(hwnd), name):
+                return "ok"
+        return "fail"
+    except Exception as e:
+        _log(f"UIA 点歌出错: {type(e).__name__}: {e}")
+        return ""
+
+
 def _play_button_pos(hwnd):
     """搜索结果页上「播放」按钮的位置（用无障碍接口量出来的真实布局）
 
@@ -457,19 +531,27 @@ def _play_song_locked(q: str, dry_run: bool = False) -> str:
     if not hwnd:
         return "我没找到网易云的窗口。"
 
-    # ⚠ 主人正在打全屏游戏时**不要去抢焦点**：
-    #   点歌要先把网易云切到最前面再敲键盘，这会把游戏切出去（画面一黑/掉帧），
-    #   而且实测这种情况下最容易把桌宠主线程卡住（"未响应"）。宁可不做。
-    try:
-        from tool.perf_guard import game_mode
-        if game_mode():
-            _log("检测到全屏游戏 → 不抢焦点，等主人打完")
-            return (f"你在打游戏，我不抢你的画面啦。等这局完了跟我说一声，"
-                    f"我马上给你放《{name}》。")
-    except Exception:
-        pass
+    # 注意：这里**不再**判断"是否在全屏游戏"就拒绝执行 ——
+    # 主人明确要求"就算在打游戏也要执行"（而且之前的判断还会误报）。
+    # 抢焦点确实会短暂切一下画面，点完会把前台还给主人原来的窗口（见下面 finally）。
 
     before = window_title(hwnd)
+    # ① 先试"后台"方式（UIA：不切窗口、不动鼠标）——主人要求不显示窗口执行
+    _prev_fg_uia = _foreground()
+    _u = _uia_play(name, artist)
+    if _u == "ok":
+        _log(f"✅ 播放成功（后台 UIA）：{window_title(hwnd)}")
+        # 网易云开始播放时会自己跳到前台 → 再把它压回去，别打断主人
+        try:
+            if _prev_fg_uia and _prev_fg_uia != int(hwnd) and _foreground() == int(hwnd):
+                _u32().SetForegroundWindow(_prev_fg_uia)
+                time.sleep(0.15)
+                _log("已把前台还给主人原来的窗口")
+        except Exception:
+            pass
+        return f"给你放上了：《{name}》{artist}。"
+    if _u == "fail":
+        _log("UIA 后台点歌没成 → 退回模拟键鼠（会短暂切一下窗口）")
     prev_fg = _foreground()
     ok = False
     try:

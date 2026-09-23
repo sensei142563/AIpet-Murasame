@@ -27,3 +27,4 @@ qrcode
 pillow
 pycryptodome
 pilk
+comtypes

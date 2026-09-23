@@ -86,10 +86,16 @@ def notification_state() -> int:
 
 
 def _detect() -> bool:
+    """是不是真的在全屏独占游戏/演示（**只认这两个**）
+
+    ⚠ 以前还认 QUNS_BUSY(2) 和"前台窗口占满屏"：
+      · QUNS_BUSY 在很多正常场景也会返回 2（用户没玩游戏也命中）；
+      · "占满屏"在任务栏自动隐藏时，任何最大化窗口都会被当成全屏。
+      实测用户根本没玩游戏，桌宠却说"你在打游戏"（用户反馈），就是这两条误报。
+      现在只认 QUNS_RUNNING_D3D_FULL_SCREEN(3) 和 QUNS_PRESENTATION_MODE(4)。
+    """
     st = notification_state()
-    if st in (_QUNS_BUSY, _QUNS_RUNNING_D3D_FULL_SCREEN, _QUNS_PRESENTATION_MODE):
-        return True
-    return fullscreen_foreground()
+    return st in (_QUNS_RUNNING_D3D_FULL_SCREEN, _QUNS_PRESENTATION_MODE)
 
 
 def game_mode(fresh: bool = False) -> bool:
