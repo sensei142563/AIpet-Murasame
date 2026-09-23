@@ -171,6 +171,18 @@ def _derive_from_base(pal: dict) -> dict:
         p2["Gray1"] = "#ffffff" if dark else "#000000"
         p2["Gray2"] = "#b9c2d6" if dark else "#5a5f6b"
         p2["Gray3"] = "#98a2b8" if dark else "#6d7280"
+        # 8 级灰阶是「文字 → 背景」的单调亮度阶梯（旧版主题就是这个梯度：
+        # Gray1 #404040 一路到 Gray8 #f5f5f5）。自定义底色时必须**整条重算**——
+        # 只算前三级会留下"主题自带的浅灰面 + 派生出来的浅色文字"这种自相矛盾的
+        # 组合，表现就是浅字压浅面 = 看不清。千恋万花·樱华主题正是这样中枪的：
+        # 它的 Gray6/7/8 是 #e2d5c7 / #f1e8dd / #f7f0e7 浅米色，而派生文字是
+        # #eef1f7，于是"字看不清"。
+        # 比例取旧版主题各级与底色的实际距离（Gray4 .37 / Gray5 .25 / Gray6 .12 /
+        # Gray7 .06 / Gray8 .04）→ 浅底就是经典的 #a1a1a1/#bfbfbf/#e0e0e0/#f0f0f0/#f5f5f5，
+        # 深底按同样幅度往白里混（对比度对称）。
+        for _k, _name in ((0.37, "Gray4"), (0.25, "Gray5"), (0.12, "Gray6"),
+                          (0.06, "Gray7"), (0.04, "Gray8")):
+            p2[_name] = _mix(b, _k if dark else -_k).name()
         p2["preview_bg"] = (b.darker(120) if dark else b.lighter(104)).name()
         print(f"[Colors] 已按启动器底色派生界面配色: 底={base_hex}"
               f" 文字={'浅' if dark else '深'} 面={face.name()}")
@@ -215,6 +227,28 @@ GreenDark = _q(_PAL["GreenDark"])
 
 # ===== 预览区背景（Live2D 清屏 / 立绘底）=====
 PREVIEW_BG = _q(_PAL.get("preview_bg", "#eaf2fe"))
+
+
+def base_bg_color() -> QColor:
+    """窗口/二级窗口的**底板**颜色（alpha 固定 255，底板要保证内容清晰）。
+
+    · 用户自选了「启动器底色」(config.ui_bg_color) → 用它（此时整套配色也跟着派生）
+    · 没选（空串 = 跟随主题，默认）→ 用当前主题自己的底色 Color8
+      ⚠ 以前这里硬编码回退 "#000000"：经典/樱华是浅色主题、文字是深色，
+        底板一黑文字就"消失"，所以必须回退到主题底色而不是黑。
+    """
+    try:
+        _hexv = str(_config().get("ui_bg_color") or "").strip()
+        c = QColor(_hexv) if _hexv else QColor(Color8)
+        if not c.isValid():
+            c = QColor(Color8)
+        c.setAlpha(255)
+        return c
+    except Exception:
+        c = QColor(Color8)
+        c.setAlpha(255)
+        return c
+
 
 # ===== 6 套强调色（accent）=====
 THEME_COLORS = {

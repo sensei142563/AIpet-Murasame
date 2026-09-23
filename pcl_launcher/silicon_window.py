@@ -16,9 +16,10 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import urllib.request
 
-from PyQt5.QtCore import Qt, QTimer, QSize, QUrl, pyqtSignal
+from PyQt5.QtCore import Qt, QTimer, QSize, QUrl, QThread, pyqtSignal
 from PyQt5.QtGui import (QColor, QFont, QIcon, QImage, QPainter, QPainterPath,
                          QPixmap)
 from PyQt5.QtWidgets import (QScrollArea, QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
@@ -49,11 +50,43 @@ def _is_light_theme() -> bool:
         return False
 
 
+_WALLPAPER_CACHE = {"v": None}
+
+
+def _has_wallpaper() -> bool:
+    """当前主题是否声明了背景（图片/视频）。带缓存：SF() 会被调用几百次，
+    每次都去读 theme.json + config.json 太亏（启动变慢）。换主题时清缓存。"""
+    if _WALLPAPER_CACHE["v"] is None:
+        try:
+            _bt, _src, _op = background_info()
+            _WALLPAPER_CACHE["v"] = bool(_src)
+        except Exception:
+            _WALLPAPER_CACHE["v"] = False
+    return bool(_WALLPAPER_CACHE["v"])
+
+
+def _reset_style_caches():
+    """换主题后调用（主题/壁纸变了，SF() 的结果跟着变）"""
+    _WALLPAPER_CACHE["v"] = None
+
+
 def SF(alpha: float) -> str:
-    """半透明面颜色：深色主题=白透明，浅色主题=黑透明（两边都能看出卡片层次）"""
+    """面颜色（卡片/输入框/按钮底色）。
+
+    · 没壁纸：深色主题=白透明 / 浅色主题=黑透明，0.02~0.30 → 露出底色渐变，层次感好
+    · **有壁纸**：改用主题自己的面板色（Color6）+ 高不透明度（0.82~0.96）。
+      卡片的职责是给文字一个稳定的底；壁纸一花，30% 的卡片约等于没有，文字直接糊在
+      画面里 —— 这就是用户报的「千恋万花·樱华主题看不清字」（背景是角色拼贴画）。
+      ⚠ 别用"黑/白 + 高 alpha"：浅色主题上黑 0.9 = 黑板（试过，整个界面会变黑）。
+    """
+    if _has_wallpaper():
+        c = Color6
+        a = min(0.96, 0.82 + 0.14 * min(1.0, max(0.0, alpha) / 0.30))
+        return f"rgba({c.red()},{c.green()},{c.blue()},{a:.3f})"
+    a = max(0.02, min(0.30, alpha))
     if _is_light_theme():
-        return f"rgba(0,0,0,{max(0.02, min(0.30, alpha)):.3f})"
-    return f"rgba(255,255,255,{max(0.02, min(0.30, alpha)):.3f})"
+        return f"rgba(0,0,0,{a:.3f})"
+    return f"rgba(255,255,255,{a:.3f})"
 
 
 def _app_base_dir() -> str:
@@ -556,6 +589,10 @@ class SiliconLauncher(QWidget):
         self._wx_proc = None
         self._bg_widget = None
         self._media = None
+        self._bg_reader = None        # 主题视频背景：OpenCV 解码线程（见 _VideoBgReader）
+        self._bg_video_frame = None   # 最新一帧（Live2D 预览区同步取用）
+        self._bg_video_serial = 0
+        self._bg_frame_busy = False
 
         self.setWindowTitle("AIpet 丛雨桌宠 · 启动器")
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
@@ -734,7 +771,7 @@ class SiliconLauncher(QWidget):
             # 让整页（含所有子控件）不再遮挡主题背景：
             # 1) 取消自动填充；2) 把内联样式里的实心背景改成半透明（保留一点层次，文字仍清晰）
             try:
-                _make_transparent(w)
+                _make_transparent(w, alpha=_page_block_alpha())
             except Exception as _e:
                 print(f"[NewUI] ⚠ 页面透明化失败({key}): {_e}")
             # ⚠ 页面会自我刷新（点「设置」→ 桌宠列表 _refresh() / 插件页 _reload()），
@@ -932,6 +969,7 @@ class SiliconLauncher(QWidget):
                     print(f"[NewUI] ⚠ 主题写入 config 失败: {e}")
             from . import colors as _C
             _C.apply_theme_live(theme_id)
+            _reset_style_caches()          # 壁纸有无变了 → SF() 的不透明度跟着变
             self._accent = _C.accent_hex()
             # 全局 QSS + 调色板（主题底色不同 → 文字深浅跟着变）
             try:
@@ -1036,7 +1074,8 @@ class SiliconLauncher(QWidget):
         except Exception:
             self.stack.setCurrentWidget(w)
         try:
-            _make_transparent(w)     # 切到该页时再兜一次（页面可能刚被刷新/重建过）
+            # 切到该页时再兜一次（页面可能刚被刷新/重建过）
+            _make_transparent(w, alpha=_page_block_alpha())
         except Exception:
             pass
         _ulog(f"切页 → {key}（快照过渡，470ms 内必删）")
@@ -1167,15 +1206,17 @@ class SiliconLauncher(QWidget):
     def _load_background(self):
         """主题背景（图片/视频）：铺满整窗，内容叠在上面"""
         try:
-            # 背景底色：壁纸半透明时透出来的那层（config.ui_bg_color，默认黑）
+            # 背景底色：壁纸半透明时透出来的那层
+            # （用户自选了「启动器底色」就用它；没选 = 跟随主题 → 保留主题自己的
+            #   底板色，经典/樱华是浅色主题，硬套黑色会让深色文字看不见）
             try:
-                _bc = str(self._bg_value("ui_bg_color", "#000000") or "#000000").strip()
+                _bc = str(self._bg_value("ui_bg_color", "") or "").strip()
                 if _bc:
                     self._set_base_color(QColor(_bc))
             except Exception:
                 pass
             btype, src, opacity = background_info()
-            # 用户在主题页可调：背景透明度 / 模糊度
+            # 用户在主题页可调：背景透明度 / 模糊度 / 遮罩强度
             try:
                 _o = self._bg_value("ui_bg_opacity", 100)
                 if _o not in (None, ""):
@@ -1183,6 +1224,13 @@ class SiliconLauncher(QWidget):
                 self._bg_blur = int(self._bg_value("ui_bg_blur", 0) or 0)
             except Exception:
                 self._bg_blur = 0
+            # 背景遮罩：把画面朝主题底色混一层，保证上层文字可读
+            # （樱华主题是角色拼贴背景，不遮的话文字完全糊住 = 用户报的"看不清字"）
+            try:
+                _sc = self._bg_value("ui_bg_scrim", None)
+                self._bg_scrim = 0.55 if _sc in (None, "") else max(0.0, min(0.95, float(_sc) / 100.0))
+            except Exception:
+                self._bg_scrim = 0.55
             if not src:
                 return
             if btype == "image":
@@ -1212,6 +1260,7 @@ class SiliconLauncher(QWidget):
                     p.drawPixmap(0, 0, pm)
                     p.end()
                     pm = faded
+                pm = self._apply_scrim(pm)
                 try:
                     self.back.set_bg(pm)
                     self.back.lower()          # 底板在最底层（内容叠在上面）
@@ -1219,25 +1268,110 @@ class SiliconLauncher(QWidget):
                 except Exception as _e:
                     print(f"[NewUI] ⚠ 设置圆角壁纸失败: {_e}")
             elif btype == "video":
-                from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
-                from PyQt5.QtMultimediaWidgets import QVideoWidget
-                self._bg_widget = QVideoWidget(self.back)
-                self._media = QMediaPlayer(self)
-                self._media.setMedia(QMediaContent(QUrl.fromLocalFile(src)))
-                self._media.setVideoOutput(self._bg_widget)
-                self._media.setVolume(0)
-                self._media.play()
-                self._bg_widget.setAttribute(Qt.WA_TransparentForMouseEvents)
-                self._bg_widget.lower()
-                self._bg_widget.show()
-                self._apply_bg_mask()
-                self.resizeEvent(None)
-                print(f"[NewUI] 主题背景视频: {os.path.basename(src)}")
+                self._start_video_background(src, opacity)
         except Exception as e:
             print(f"[NewUI] ⚠ 主题背景加载失败: {e}")
 
+    def _apply_scrim(self, pm):
+        """在背景画面（图片或视频帧）上叠一层主题底色的半透明遮罩。
+
+        为什么需要：主题背景是整窗铺满的，而面板本身是半透明的
+        （Color8 带 alpha 215）→ 背景一花，上层文字就糊在画面里看不出来。
+        樱华主题的 assets/bg.jpg 是角色拼贴画，用户报的「看不清字」正是这个。
+        遮罩把画面朝主题底色混一层：浅色主题偏奶白、深色主题偏深，文字立刻可读。
+        默认 55%（主题页可调，0% = 原始画面）。
+        """
+        try:
+            k = float(getattr(self, "_bg_scrim", 0.55) or 0.0)
+            if k <= 0.001 or pm is None or pm.isNull():
+                return pm
+            out = QPixmap(pm.size())
+            out.fill(Qt.transparent)
+            p = QPainter(out)
+            p.drawPixmap(0, 0, pm)
+            c = QColor(Color8)                  # 主题底色（浅主题奶白 / 深主题深灰）
+            c.setAlphaF(min(0.95, k))
+            p.fillRect(out.rect(), c)
+            p.end()
+            return out
+        except Exception as e:
+            print(f"[NewUI] ⚠ 背景遮罩失败: {e}")
+            return pm
+
+    def _start_video_background(self, src, opacity):
+        """主题视频背景：OpenCV 解码线程 → 逐帧刷到**已有的圆角底板**（不用 QtMultimedia）。
+
+        为什么不用 QMediaPlayer/QVideoWidget（原来就是这么写的，用户报"视频根本不播"）：
+          1) 本机实测 Qt5.15 的 WMF/DirectShow 打不开 H.264 mp4 ——
+             `DirectShowPlayerService::doRender: Unknown error 0x80040266`
+             → mediaStatus=InvalidMedia、duration=0；而 cv2(ffmpeg) 正常解出
+             1900 帧/30fps（证据：_audit_fish9269/probe_video_decode.py，实测）。
+          2) 原来那段还调了 `self._apply_bg_mask()`——**全仓库没有这个函数**，
+             抛 AttributeError 被 except 吞掉 → 后面的 setGeometry 永不执行 →
+             QVideoWidget 停在默认 100×30，所以"看不出哪里该播"。
+          3) QVideoWidget 是原生子窗口：圆角/亚克力/透明度都套不上，还会盖住内容页。
+        现在复用图片壁纸那条路（self.back.set_bg）：圆角、透明度、层级全部一致。
+        """
+        try:
+            self._stop_video_background()
+            self._bg_video_opacity = float(opacity or 1.0)
+            self._bg_reader = _VideoBgReader(src, self)
+            # 解码线程按窗口大小先缩好再送（cover 裁切），GUI 线程只负责贴图
+            self._bg_reader.set_target(self.back.width(), self.back.height())
+            self._bg_reader.frame_ready.connect(self._on_bg_video_frame)
+            self._bg_reader.start()
+            print(f"[NewUI] 主题背景视频（OpenCV 解码）: {os.path.basename(src)}")
+        except Exception as e:
+            print(f"[NewUI] ⚠ 视频背景不可用（已跳过）: {e}")
+            self._bg_reader = None
+
+    def _stop_video_background(self):
+        r = self._bg_reader
+        self._bg_reader = None
+        if r is not None:
+            try:
+                r.stop()
+            except Exception:
+                pass
+
+    def _on_bg_video_frame(self, img):
+        """解码线程送来一帧 → 按透明度处理 → 贴到圆角底板。
+
+        · 用 _bg_frame_busy 做背压：上一帧还没贴完就丢掉新帧，避免 GUI 线程堆积
+        · 模糊（ui_bg_blur）对视频**不生效**：每帧都做盒式模糊在 1200×780 上
+          30fps 撑不住（图片是一次性的，视频是每帧），宁可不糊也不要卡
+        """
+        try:
+            if img is None or img.isNull():
+                return
+            self._bg_video_frame = img           # 供 Live2D 预览区同步为 GL 纹理
+            self._bg_video_serial += 1
+            if self._bg_frame_busy:
+                return
+            self._bg_frame_busy = True
+            try:
+                pm = QPixmap.fromImage(img)
+                op = float(getattr(self, "_bg_video_opacity", 1.0) or 1.0)
+                if op < 0.99:
+                    faded = QPixmap(pm.size())
+                    faded.fill(Qt.transparent)
+                    p = QPainter(faded)
+                    p.setOpacity(max(0.05, min(1.0, op)))
+                    p.drawPixmap(0, 0, pm)
+                    p.end()
+                    pm = faded
+                pm = self._apply_scrim(pm)
+                self.back.set_bg(pm)
+                self.back.lower()
+                self.back.update()
+            finally:
+                self._bg_frame_busy = False
+        except Exception as e:
+            self._bg_frame_busy = False
+            print(f"[NewUI] ⚠ 视频帧绘制失败: {e}")
+
     def reload_background(self):
-        """背景透明度/模糊度实时生效：销毁旧背景图/视频 → 按当前 config 重建"""
+        """背景透明度/模糊度实时生效：停掉旧解码线程/旧控件 → 按当前 config 重建"""
         try:
             if self._media is not None:
                 try:
@@ -1245,6 +1379,7 @@ class SiliconLauncher(QWidget):
                 except Exception:
                     pass
                 self._media = None
+            self._stop_video_background()
             if self._bg_widget is not None:
                 self._bg_widget.hide()
                 self._bg_widget.deleteLater()
@@ -1258,6 +1393,9 @@ class SiliconLauncher(QWidget):
         try:
             if self._bg_widget is not None:
                 self._bg_widget.setGeometry(0, 0, self.back.width(), self.back.height())
+            # 视频：把新尺寸告诉解码线程（它在自己的线程里做 cover 缩放）
+            if self._bg_reader is not None:
+                self._bg_reader.set_target(self.back.width(), self.back.height())
         except Exception:
             pass
         if event is not None:
@@ -1312,6 +1450,7 @@ class SiliconLauncher(QWidget):
         except Exception:
             pass
         self.hide()
+        self._stop_video_background()      # 视频背景解码线程必须停，否则进程退不掉
         if self._media is not None:
             try:
                 self._media.stop()
@@ -1371,6 +1510,83 @@ def _hook_repaint_transparency(page):
                 print(f"[NewUI] ⚠ 挂钩 {name} 失败: {e}")
 
 
+class _VideoBgReader(QThread):
+    """主题视频背景解码线程（OpenCV/ffmpeg）。
+
+    为什么不用 QtMultimedia：本机实测 Qt5.15 的 WMF/DirectShow 引擎打不开 H.264 mp4
+    （`DirectShowPlayerService::doRender: Unknown error 0x80040266` → InvalidMedia、
+    duration=0），而 cv2 能稳定解出 30fps/1900 帧。老版本就是这么做的（当时写在这段
+    代码的注释里），后来换成 QMediaPlayer 才坏的。
+
+    线程内就做 cover 缩放（缩到窗口尺寸再发），GUI 线程只贴图 —— 否则
+    1920×1080 的帧每帧在主线程缩放会明显掉帧。
+    """
+
+    frame_ready = pyqtSignal(object)
+
+    def __init__(self, path, parent=None):
+        super().__init__(parent)
+        self._path = path
+        self._running = True
+        self._lock = threading.Lock()
+        self._tw, self._th = 0, 0          # 目标尺寸（窗口大小，0=不缩）
+
+    def set_target(self, w, h):
+        """窗口尺寸变化时告知目标大小（下一次解码生效）"""
+        with self._lock:
+            self._tw, self._th = int(max(0, w)), int(max(0, h))
+
+    def stop(self):
+        self._running = False
+        try:
+            self.wait(2000)
+        except Exception:
+            pass
+
+    def run(self):
+        cap = None
+        try:
+            import cv2
+            cap = cv2.VideoCapture(self._path)
+            if not cap.isOpened():
+                print(f"[NewUI] ⚠ 视频无法打开: {os.path.basename(self._path)}")
+                return
+            fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+            # 上限 30fps：启动器背景不需要更高，省 CPU
+            fps = max(1.0, min(30.0, float(fps)))
+            period = 1.0 / fps
+            print(f"[NewUI] 视频背景已开播 fps={fps:.1f}")
+            while self._running:
+                ok, frame = cap.read()
+                if not ok:
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)      # 循环重播
+                    continue
+                with self._lock:
+                    tw, th = self._tw, self._th
+                if tw > 1 and th > 1:
+                    # cover：先按最大比例缩放，再居中裁切到目标尺寸
+                    fh, fw = frame.shape[:2]
+                    sc = max(tw / float(fw), th / float(fh))
+                    nw, nh = int(fw * sc + 0.5), int(fh * sc + 0.5)
+                    frame = cv2.resize(frame, (nw, nh), interpolation=cv2.INTER_LINEAR)
+                    x0, y0 = (nw - tw) // 2, (nh - th) // 2
+                    frame = frame[y0:y0 + th, x0:x0 + tw]
+                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                h, w = rgb.shape[:2]
+                img = QImage(rgb.data, w, h, 3 * w, QImage.Format_RGB888).copy()
+                if self._running:
+                    self.frame_ready.emit(img)
+                self.msleep(int(period * 1000))
+        except Exception as e:
+            print(f"[NewUI] ⚠ 视频解码线程异常: {type(e).__name__}: {e}")
+        finally:
+            if cap is not None:
+                try:
+                    cap.release()
+                except Exception:
+                    pass
+
+
 def _soft_blur(pm: QPixmap, strength: int) -> QPixmap:
     """三趟盒式模糊（分离式，numpy 加速）→ 近似高斯的「散开」效果。
 
@@ -1414,6 +1630,21 @@ def _soft_blur(pm: QPixmap, strength: int) -> QPixmap:
             return small.scaled(pm.size(), Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
         except Exception:
             return pm
+
+
+def _page_block_alpha() -> float:
+    """页面里"实心块"改成多透明：有壁纸时几乎不透明，没壁纸时 0.35。
+
+    为什么分情况：透明化的目的是让主题壁纸透出来，但壁纸一花，面板上的文字就糊在
+    画面里（用户报「千恋万花·樱华主题看不清字」就是这个——那个主题的背景是角色
+    拼贴画，而面板被压到 35% 不透明，字全部淹掉）。
+    所以有壁纸 → 0.92（几乎不透明，仍能透出一点点氛围）；没壁纸 → 0.35（透出底色渐变）。
+    """
+    try:
+        _btype, _src, _op = background_info()
+        return 0.92 if _src else 0.35
+    except Exception:
+        return 0.35
 
 
 def _make_transparent(root_widget, alpha: float = 0.35, recurse: bool = True):

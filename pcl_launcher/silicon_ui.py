@@ -272,9 +272,19 @@ def card_qss(surface="rgba(255,255,255,0.045)", border="#39405a", radius=None) -
 
 
 def section_title(text: str, accent="#4c8dff") -> QLabel:
-    """区块标题：左侧强调色竖条 + 标题文字"""
+    """区块标题：左侧强调色竖条 + 标题文字。
+
+    ⚠ 文字色取**主题**的主文字色，不能写死 #e6eaf2（那是 Silicon 深色主题的色）：
+      浅色主题（经典/千恋万花）上会变成白字 → 空白一片（用户在樱华主题上就看不到
+      「桌宠控制面板」「快捷工具」这两个标题）。
+    """
+    try:
+        from .colors import Color1 as _T
+        _txt = _T.name()
+    except Exception:
+        _txt = "#e6eaf2"
     lbl = QLabel(f"<span style='color:{accent};'>▍</span> {text}")
-    lbl.setStyleSheet(f"color: #e6eaf2; font-family: '{M.font}';"
+    lbl.setStyleSheet(f"color: {_txt}; font-family: '{M.font}';"
                       f" font-size: 15px; font-weight: bold; padding: 2px 0;")
     return lbl
 
@@ -336,7 +346,13 @@ def install_no_wheel():
 
 
 def install(app: QApplication = None, accent="#4c8dff"):
-    """安装全局 QSS + 深色调色板（幂等）。应在创建主窗口前调用。"""
+    """安装全局 QSS + 深色调色板（幂等）。应在创建主窗口前调用。
+
+    ⚠ QSS 必须吃**当前主题**的颜色，不能用 silicon_qss 的深色默认值：
+      那些默认值（文字 #e6eaf2 / 面 #20263a / 底 #161a24）只对 Silicon 深色主题成立。
+      经典与千恋万花是浅色主题，全局 `QWidget { color: #e6eaf2 }` 会让所有没有内联
+      样式的文字变成白字 → 压在白色/奶白色底上直接看不见。
+    """
     global _installed
     try:
         app = app or QApplication.instance()
@@ -344,7 +360,16 @@ def install(app: QApplication = None, accent="#4c8dff"):
             return False
         app.setStyle("Fusion")                 # Fusion 才能完整套用调色板
         app.setPalette(dark_palette(accent))
-        app.setStyleSheet(silicon_qss(accent=accent))
+        try:
+            from . import colors as _C
+            app.setStyleSheet(silicon_qss(
+                accent=accent,
+                text=_C.Color1.name(), text_dim=_C.Gray2.name(),
+                surface=_C.Color6.name(), surface2=_C.Color7.name(),
+                bg=_C.Color8.name(), border=_C.Color5.name()))
+        except Exception as _e:
+            print(f"[SiliconUI] ⚠ 主题 QSS 失败，回退深色默认值: {_e}")
+            app.setStyleSheet(silicon_qss(accent=accent))
         app.setFont(QFont(M.font, M.font_size))
         install_no_wheel()                     # 滚轮不许改数值（见该函数说明）
         _installed = True

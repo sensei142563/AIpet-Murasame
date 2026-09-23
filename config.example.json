@@ -77,5 +77,5 @@
   "portrait_auto_switch": "true",
   "ui_shell": "silicon",
   "ui_acrylic": "false",
-  "ui_bg_color": "#000000"
+  "ui_bg_color": ""
 }

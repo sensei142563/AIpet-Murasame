@@ -333,6 +333,10 @@ class PCLThemesPanel(QScrollArea):
             return sd
 
         self._bg_opacity_slider = _mk("背景透明度", "ui_bg_opacity", 100)
+        # 背景遮罩：把壁纸/视频朝主题底色混一层 → 保证上层文字看得清。
+        # 樱华主题的背景是角色拼贴画，满不透明度时文字完全糊在画面上（用户报的
+        # 「看不清字」就是这个），所以默认给 55%。
+        self._bg_scrim_slider = _mk("背景遮罩", "ui_bg_scrim", 55)
 
         # ── 背景底色：壁纸半透明时透出来的那层颜色（默认黑，可自由选色）──
         try:
@@ -345,7 +349,14 @@ class PCLThemesPanel(QScrollArea):
             row_c.addWidget(lab_c)
 
             _cfg_now = _load_config() or {}
-            self._bg_color = _QC(str(_cfg_now.get("ui_bg_color") or "#000000"))
+            # 空值 = 跟随主题：色块显示主题自己的底色（以前这里会显示成黑色，
+            # 让人以为"已经是黑底"，其实根本没设过）
+            _explicit = str(_cfg_now.get("ui_bg_color") or "").strip()
+            try:
+                from .colors import base_bg_color as _theme_base
+                self._bg_color = _QC(_explicit) if _explicit else _theme_base()
+            except Exception:
+                self._bg_color = _QC(_explicit or "#000000")
 
             btn_col = QPushButton()
             btn_col.setFixedSize(int(58*S), int(24*S))
@@ -357,29 +368,46 @@ class PCLThemesPanel(QScrollArea):
                     f"QPushButton {{ background: {c.name()}; border: 1px solid rgba(255,255,255,0.35);"
                     f" border-radius: 6px; }}")
 
-            def _save_color(c):
-                self._bg_color = c
+            def _save_color(c, follow=False):
+                """follow=True → 清空 ui_bg_color（跟随主题自带配色）"""
+                from .colors import base_bg_color as _theme_base2
+                self._bg_color = _theme_base2() if follow else c
                 _paint_btn()
                 cc = _load_config() or {}
-                cc["ui_bg_color"] = c.name()
+                if follow:
+                    cc["ui_bg_color"] = ""
+                else:
+                    cc["ui_bg_color"] = c.name()
                 _save_config(cc)
                 # 立即应用（无需重启）
                 try:
                     win = self.window()
                     fn = getattr(win, "apply_bg_settings", None)
                     if callable(fn):
-                        fn({"ui_bg_color": c.name()})
+                        fn({"ui_bg_color": "" if follow else c.name()})
                 except Exception as _e:
                     print(f"[Themes] ⚠ 底色实时应用失败: {_e}")
-                print(f"[Themes] 背景底色 → {c.name()}（已实时生效）")
+                print(f"[Themes] 背景底色 → {'跟随主题' if follow else c.name()}（已实时生效）")
 
             def _pick_color():
                 c = QColorDialog.getColor(self._bg_color, self, "选择背景底色")
                 if c.isValid():
                     _save_color(c)
 
+            # 「跟随主题」放第一位：这是默认状态，也是复现主题原貌的唯一入口
+            _b_follow = QPushButton("跟随主题")
+            _b_follow.setCursor(Qt.PointingHandCursor)
+            _b_follow.setFixedHeight(int(24*S))
+            _b_follow.setToolTip("使用主题自带的整套配色（推荐；自定义底色会覆盖主题配色）")
+            _b_follow.setStyleSheet(
+                f"QPushButton {{ background: rgba(255,255,255,0.10); color: {Color1.name()};"
+                f" border: 1px solid {Color3.name()}; border-radius: 6px; padding: 0 10px;"
+                f" font-size: {int(11*S)}px; }}"
+                f"QPushButton:hover {{ background: {Color3.name()}; color: white; }}")
+            _b_follow.clicked.connect(lambda _=False: _save_color(self._bg_color, follow=True))
             btn_col.clicked.connect(_pick_color)
             _paint_btn()
+            row_c.addWidget(_b_follow)
             row_c.addWidget(btn_col)
             for _name, _hex in (("黑", "#000000"), ("深灰", "#1b1f2b"), ("白", "#ffffff"),
                                 ("米色", "#fdf6ee"), ("暗红", "#2a1418")):
@@ -399,7 +427,7 @@ class PCLThemesPanel(QScrollArea):
             print(f"[Themes] ⚠ 背景底色控件构建失败: {_e}")
         self._bg_blur_slider = _mk("背景模糊度", "ui_bg_blur", 0)
 
-        btn_reset = QPushButton("恢复默认（100% / 0%）")
+        btn_reset = QPushButton("恢复默认（100% / 55% / 0%）")
         btn_reset.setCursor(Qt.PointingHandCursor)
         acc = THEME_COLORS.get(str(ACCENT_ID), {}).get("title_start", "#2f6fd0")
         btn_reset.setStyleSheet(f"""
@@ -408,7 +436,8 @@ class PCLThemesPanel(QScrollArea):
             QPushButton:hover {{ background: {QColor(acc).lighter(120).name()}; }}""")
 
         def _reset():
-            for sd, v in ((self._bg_opacity_slider, 100), (self._bg_blur_slider, 0)):
+            for sd, v in ((self._bg_opacity_slider, 100), (self._bg_scrim_slider, 55),
+                          (self._bg_blur_slider, 0)):
                 try:
                     sd.setValue(v)
                 except Exception:

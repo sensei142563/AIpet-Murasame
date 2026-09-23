@@ -30,13 +30,16 @@ def _app_base_dir() -> str:
 
 
 def _read_base_color() -> str:
-    """启动器底色（config.ui_bg_color，默认黑）"""
+    """启动器底板色：用户自选了 config.ui_bg_color 就用它，否则用当前主题的底色。
+
+    ⚠ 以前这里硬编码回退 "#000000"，把二级窗口的底板刷成纯黑，而经典/樱华主题
+      的文字是深色 → 窗口里"字看不见"。回退必须落到主题底色。
+    """
     try:
-        import json as _json
-        cfg = _json.load(open(os.path.join(_app_base_dir(), "config.json"), encoding="utf-8"))
-        return str(cfg.get("ui_bg_color") or "#000000")
+        from .colors import base_bg_color
+        return base_bg_color().name()
     except Exception:
-        return "#000000"
+        return "#20263a"
 
 
 def refresh_all_dialog_colors(color=None):
@@ -63,25 +66,17 @@ class SiliconDialog(QDialog):
     def __init__(self, title: str, parent=None, width=760, height=560):
         super().__init__(parent)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
-        # 统一的窗口底色 = 启动器底色（config.ui_bg_color，默认黑）→ 文字一律用高对比浅色
-        # ⚠ 冻结(frozen)后 __file__ 在 _internal 里 → 必须用 exe 目录取 config，
-        #   否则永远读不到用户设置的底色（这就是"其它窗口不是启动器底色"的原因）
+        # 底板色 = 启动器底板色（用户自选则用它，否则跟随当前主题）
         self._base = QColor(_read_base_color())
         # 注册到全局：外壳改底色时所有已打开窗口一起实时更新
         try:
             _OPEN_DIALOGS.append(self)
         except Exception:
             pass
-        # 统一的窗口底色 = 启动器底色（config.ui_bg_color，默认黑）→ 文字一律用高对比浅色
-        self._base = QColor("#000000")
-        try:
-            import json as _json
-            _cfg = _json.load(open(os.path.join(
-                os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.json"),
-                encoding="utf-8"))
-            self._base = QColor(str(_cfg.get("ui_bg_color") or "#000000"))
-        except Exception:
-            pass
+        # ⚠ 这里原来还有一段"再读一次 config.json"的重复代码，用的是
+        #   __file__ 推导路径（frozen 后 __file__ 在 _internal 里 → 永远读不到用户
+        #   配置，正是上面注释警告的那件事）。合并成上面的 _read_base_color() 一处，
+        #   顺带修掉"绿色版二级窗口不跟随底色"。
         # 不用透明窗口：二级窗口要保证内容清晰（透明窗口在部分环境下会整体发虚/看着透明）
         # 透明窗口 + 圆角底板：四角外保持透明（亚克力可选，圆角始终保留）
         self.setAttribute(Qt.WA_TranslucentBackground, True)
@@ -159,9 +154,10 @@ class SiliconDialog(QDialog):
         """按启动器底色刷新窗口底色 + 文字对比（可被外壳实时调用）"""
         try:
             from PyQt5.QtGui import QPalette, QFont
-            if color is not None:
+            if color is not None and str(color).strip():
                 self._base = QColor(color)
             else:
+                # 空值 = 跟随主题 → 回落到主题底板色（不是黑）
                 self._base = QColor(_read_base_color())
             self._apply_palette()
             try:
