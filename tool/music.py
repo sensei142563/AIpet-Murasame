@@ -836,19 +836,95 @@ def _walk_buttons(hwnd):
 
 
 def _player_button(hwnd, names):
-    """在播放条区域找按钮（按 name 匹配 + 用 y 坐标限定在播放条那一条上）"""
+    """在**播放条**上找按钮（play/pause/next/pre/循环/收藏/歌词/音量…）。
+
+    ★ 必须限定在"窗口最下面那一条"：实测（2026-09-24）搜索结果页也有个名字叫
+      「play 播放」的按钮（在页面中部）→ 老逻辑拿"第一个叫 play 的按钮"当基准 y，
+      结果把页面中部那个播放键当成了播放条上的切换键 → 一按就换成了搜索结果里的第一首
+      （用户反馈"音乐没声音，暂停再播放才有声音"那次，自动恢复播放时又按错、换了歌）。
+      现在按窗口高度取底部 30% 区域（播放条在 y≈856/1080 ≈ 79%）来认。
+    """
     want = [n.lower() for n in names]
     btns = _walk_buttons(hwnd)
-    y_ref = None
-    for _el, nm, r in btns:
-        if nm.lower() == "play" and r:
-            y_ref = r[1]
-            break
+    try:
+        import ctypes
+        from ctypes import wintypes as _wt
+        r0 = _wt.RECT()
+        ctypes.windll.user32.GetWindowRect(int(hwnd), ctypes.byref(r0))
+        top, h = int(r0.top), max(1, int(r0.bottom) - int(r0.top))
+    except Exception:
+        top, h = 0, 1
+    _band = top + int(h * 0.70)          # 底部 30% 以内才算播放条
+    _in_bar = []
+    for el, nm, r in btns:
+        if nm.lower() not in want or not r:
+            continue
+        if r[1] >= _band:
+            _in_bar.append((el, nm, r))
+    if _in_bar:
+        _in_bar.sort(key=lambda x: x[2][1], reverse=True)   # 最靠下的那条优先
+        return _in_bar[0][0], _in_bar[0][2]
+    # 读不到窗口高度/位置时退回老逻辑（有按钮就先用着）
     for el, nm, r in btns:
         if nm.lower() in want:
-            if y_ref is None or not r or abs(r[1] - y_ref) <= 60:
-                return el, r
+            return el, r
     return None, None
+
+
+def _toggle_candidates(hwnd):
+    """所有"播放/暂停切换键"候选：**底部可见的优先，再试隐藏的**。
+
+    实测（2026-09-24）：这台机器上同一个播放器里存在 5 个叫 play/pause 的按钮，
+    其中**可见的那个按了没反应**（CEF 自绘元素 Invoke 无效），
+    **rect=(0,0,0,0) 的隐藏那个一按真的能切换** —— 而换个窗口大小时又反过来。
+    所以不猜哪个对，全拿来依次试，直到"在放吗"真的变成 True。
+    """
+    want = ("play", "pause")
+    try:
+        import ctypes
+        from ctypes import wintypes as _wt
+        _r0 = _wt.RECT()
+        ctypes.windll.user32.GetWindowRect(int(hwnd), ctypes.byref(_r0))
+        _band = int(_r0.top) + int(max(1, int(_r0.bottom) - int(_r0.top)) * 0.70)
+    except Exception:
+        _band = 1 << 30
+    vis, hid = [], []
+    for el, nm, r in _walk_buttons(hwnd):
+        if nm.lower() not in want:
+            continue
+        if r and r[2] > r[0] and r[1] >= _band:
+            vis.append((el, nm, r))
+        elif r and r[2] > r[0]:
+            vis.append((el, nm, r))          # 可见但不在底部：也先于隐藏的试
+        else:
+            hid.append((el, nm, r))
+    return vis + hid
+
+
+def _ensure_playing(hwnd, tries: int = 3) -> bool:
+    """确保**真的在放**（用户反馈：有时候点上了却没声音，得手动暂停再播放）。
+
+    做法就是照主人手动那一套：挨个候选切换键试，直到"在放吗"变成 True。
+    """
+    try:
+        if is_playing(hwnd) is True:
+            return True
+        for _i in range(max(1, int(tries))):
+            for el, nm, rr in _toggle_candidates(hwnd):
+                try:
+                    U_inv = _uia().invoke(el)
+                except Exception:
+                    U_inv = False
+                if not U_inv:
+                    continue
+                time.sleep(0.8)
+                if is_playing(hwnd) is True:
+                    _log(f"✅ 自己按了播放键（{nm} @{rr}）→ 真的响起来了")
+                    return True
+            time.sleep(0.5)
+    except Exception as e:
+        _log(f"⚠ 恢复播放出错: {type(e).__name__}: {e}")
+    return False
 
 
 def _invoke_player(hwnd, names) -> bool:
@@ -1155,6 +1231,17 @@ def _uia_play(name: str, artist: str, _skip_preview_check: bool = False) -> str:
                 if _hit:
                     break
         if _hit and not _skip_preview_check:
+            # ★ 光"标题对上了"还不够：实测（2026-09-24 用户反馈）点搜索结果里的播放键
+            #   有时只是把歌**载入**播放器，播放器自己还是暂停状态 → 标题变了、我们以为
+            #   放上了，实际**一点声音都没有**，要手动暂停再播放才响（用户的原话）。
+            #   这里再确认一次"真的在放"，没在放就自己按一下那个播放/暂停切换键。
+            try:
+                if is_playing(hwnd) is False:
+                    _log("标题对上了但播放器是暂停状态 → 自己想办法让它响")
+                    if not _ensure_playing(hwnd):
+                        _log("（试了播放条上的切换键，还是没放起来——读不到状态就不硬说）")
+            except Exception as _e2:
+                _log(f"⚠ 确认播放状态出错: {type(_e2).__name__}")
             # 顺手看一眼界面上的"正在试听…"——但**不作为唯一判据**：实测它可能一闪而过
             # （网易云切歌瞬间会短暂出现），所以调用方会再确认一次才当数。
             try:
@@ -1685,10 +1772,10 @@ def _run_locked(kind: str, arg: str) -> str:
             # ★ 那个按钮是**切换键**：在放的时候它叫 pause、暂停时叫 play。
             #   以前只找 "play" → 正在播放时找不到按钮，暂停就静默失败了
             #   （还会谎报"给你接着放了"）。这里两个名字都认。
-            if not _invoke_player(hwnd, ["play", "pause"]):
-                _log("⚠ 没找到播放/暂停按钮")
-                return "我没找到播放条上那个按钮——你手动按一下吧。"
-            time.sleep(1.0)
+            if not _ensure_playing(hwnd):
+                _log("⚠ 没能让它放起来（播放条上的切换键都试过了）")
+                return "我按了播放条，但它好像没反应——你手动按一下吧。"
+            time.sleep(0.6)
             now_playing = is_playing(hwnd)
             if now_playing is None:
                 return "我按了一下播放条，但读不到状态——你听一下有没有响。"

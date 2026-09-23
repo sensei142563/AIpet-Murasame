@@ -5402,6 +5402,61 @@ class Murasame(QLabel):
             self.history = history
         if isinstance(portrait_history, list):
             self.portrait_history = portrait_history
+        # ★ 顺手把历史里"装着 JSON 的台词"洗干净（一次性自愈）。
+        #   模型偶尔会把整段台词写成 ["[\"…", "\", \"…"] 这种带转义的 JSON 文本，
+        #   早先的版本没还原就存进了历史 → 她照着自己的历史学，越说越像 JSON
+        #   （用户反馈"对话的文字还是有问题"）。这里在载入时统一还原并写回：
+        #   不用主人清记忆，也不会因为桌宠在跑而被内存里的旧数据覆盖回去。
+        try:
+            self._scrub_history()
+        except Exception as _e:
+            print(f"[AIpet] ⚠ 历史清洗跳过: {_e}")
+
+    def _scrub_history(self) -> int:
+        """把历史里带转义/嵌套 JSON 的台词还原成干净句子（返回修了几条）"""
+        try:
+            from classes.Worker_class import _unwrap_jsonish
+        except Exception:
+            return 0
+        n = 0
+        for msg in list(getattr(self, "history", []) or []):
+            if not isinstance(msg, dict):
+                continue
+            c = str(msg.get("content") or "")
+            if not c or ("\\\"" not in c and not c.strip().startswith('["[')):
+                continue
+            try:
+                arr = json.loads(c)
+            except Exception:
+                arr = [c]
+            if not isinstance(arr, list):
+                arr = [arr]
+            out = []
+            try:
+                from classes.Worker_class import _clean_json_fragment as _cjf
+            except Exception:
+                _cjf = None
+            for item in arr:
+                u = _unwrap_jsonish(str(item))
+                if isinstance(u, list):
+                    _items = [str(x) for x in u]
+                else:
+                    _items = [str(u)]
+                for _x in _items:
+                    if _cjf:
+                        _x = _cjf(_x)
+                    if str(_x).strip():
+                        out.append(str(_x))
+            if out:
+                msg["content"] = json.dumps(out, ensure_ascii=False)
+                n += 1
+        if n:
+            print(f"[AIpet] 🧹 历史里有 {n} 条台词是带转义的 JSON 文本 → 已还原成干净台词")
+            try:
+                self._save_history()
+            except Exception:
+                pass
+        return n
 
     def _save_history(self):
         try:

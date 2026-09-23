@@ -114,7 +114,7 @@ def check_wiring(results):
             __import__("tool.uia", fromlist=["x"]).top_bar_edit)),
         ("音乐：先确认结果页再点播放", "_name_hit" in inspect.getsource(
             __import__("tool.music", fromlist=["x"])._uia_play)),
-        ("音乐：暂停认两个按钮名", '["play", "pause"]' in inspect.getsource(
+        ("音乐：播放/暂停走「确保真的在放」", "_ensure_playing(hwnd)" in inspect.getsource(
             __import__("tool.music", fromlist=["x"])._run_locked)),
         ("音乐：UIA 用 FindAll 提速", "find_all_fast" in inspect.getsource(
             __import__("tool.music", fromlist=["x"])._walk_buttons)),
@@ -155,6 +155,14 @@ def check_wiring(results):
         ("关窗不连带退出桌宠", "setQuitOnLastWindowClosed(False)" in inspect.getsource(MAIN)),
         ("寒暄轮不动手（no_act）", "no_act" in inspect.getsource(W._handle_pc_control)
          and "self.no_act" in src_w),
+        ("台词 JSON 还原（带转义也不乱说）", "def _unwrap_jsonish" in src_w
+         and "_clean_json_fragment" in src_w),
+        ("历史自愈（启动时洗脏台词）", "def _scrub_history" in src_m
+         and "_scrub_history()" in inspect.getsource(M.Murasame._load_history)),
+        ("音乐：确保真的在放（自己按播放键）", "def _ensure_playing" in inspect.getsource(
+            __import__("tool.music", fromlist=["x"]))),
+        ("音乐：播放条按钮只认最下面那条", "0.70" in inspect.getsource(
+            __import__("tool.music", fromlist=["x"])._toggle_candidates)),
         ("寒暄提示词带标记（自动 no_act）", "只是寒暄" in inspect.getsource(M.Murasame.start_thread)),
         ("问候语禁止写操作指令", "只是寒暄" in inspect.getsource(
             __import__("tool.care", fromlist=["x"]).startup_line)),

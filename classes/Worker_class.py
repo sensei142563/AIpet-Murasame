@@ -37,6 +37,67 @@ def clean_sentence(text):
     return text.strip()
 
 
+def _clean_json_fragment(s):
+    """把一句话里残留的 JSON 符号去掉：["、"]、\\" 、多余逗号。
+
+    实测：她那种"装着 JSON 的台词"被 json.loads 拆开后，每一片还带着结构符号
+    （'["第一句。' / '","第二句。'）→ 只做整体还原是不够的，得逐片再清一次。
+    """
+    s = str(s or "").strip()
+    if not s:
+        return ""
+    s = s.replace('\\"', '"').replace("\\n", " ").replace("\\\\", "\\")
+    for _ in range(3):
+        s = s.strip()
+        s = s.strip("[").strip("]").strip()
+        s = s.strip('"').strip("'").strip()
+        s = s.strip(",").strip()
+    return s.strip()
+
+
+def _unwrap_jsonish(text):
+    """模型有时把台词写成**带转义的 JSON 文本**，把包装符号原样说出来。
+
+    实测（2026-09-24 日志）：
+        Reply:["[\"你爱听的那版《红色高跟鞋》给你放上了，听过 3 次的就是它。", "\", \"都两点多了，听完这首就去睡。"]
+    整条回复是一个"装着 JSON 的字符串"→ json.loads 失败 → 走兜底切句 → 台词里带着
+    ["、\" 这些符号显示/朗读出来（用户反馈"对话的文字还是有问题"）。
+    这里把它还原成干净的句子列表（返回 list；不像 JSON 就原样返回 str）。
+    """
+    import json as _j
+    import re as _r
+    s = str(text or "")
+    t = s.strip()
+    if not t:
+        return s
+    looks = ("\\\"" in t) or t.startswith("[") or t.startswith('["')         or ('",' in t) or (t.startswith('"') and t.endswith('"') and len(t) > 1)
+    if not looks:
+        return s
+    # 直接当 JSON 解析（合法的列表 / 字符串）
+    for _cand in (t, ("[" + t + "]") if not t.startswith("[") else t):
+        try:
+            v = _j.loads(_cand)
+        except Exception:
+            continue
+        if isinstance(v, list):
+            _out = [str(x) for x in v if str(x).strip()]
+            if _out:
+                return _out
+        if isinstance(v, str) and v.strip():
+            return v
+    # 解析不了 → 字符级清理：还原转义、脱掉最外层括号，再按 JSON 的逗号分隔切开
+    u = t.replace("\\\"", '"').replace("\\n", " ").replace("\\\\", "\\").strip()
+    if u.startswith("[") and u.endswith("]"):
+        u = u[1:-1]
+    parts = _r.split(r'"?\s*,\s*"?', u)
+    out = []
+    for p in parts:
+        p = _clean_json_fragment(p)
+        if p:
+            out.append(p)
+    return out or [t]
+
+
 def split_sentences(text):
     """兜底切句：AI 未按 JSON 列表返回时，客户端按句末标点切分（保留标点）"""
     import re
@@ -387,10 +448,13 @@ class qwen3_lora_Worker(QThread):
                 pass
     def _run_impl(self):
         def to_list(text):
+            _u = _unwrap_jsonish(text)
+            if isinstance(_u, list):
+                return _u
             try:
-                text = json.loads(text)  # 把字符串解析成 Python 列表
+                text = json.loads(_u)  # 把字符串解析成 Python 列表
             except Exception as e:
-                text = [text]  # 如果解析失败，就退化成单句
+                text = [_u]  # 如果解析失败，就退化成单句
             return text
         if self.force_stop:
             print("[qwen3-lora] 已中断生成。")
@@ -556,11 +620,16 @@ class cloud_API_Worker(QThread):
             reply, self,
             bool(getattr(self, "t", False)) or str(getattr(self, "role", "")) == "system")
         # 兜底切句：AI 未按 JSON 列表返回时，客户端按句末标点切分（修复整段话不切句）
-        try:
-            parsed = json.loads(reply)
-            reply_list_raw = parsed if isinstance(parsed, list) else split_sentences(str(parsed))
-        except Exception:
-            reply_list_raw = split_sentences(reply)
+        # ★ 先还原"装着 JSON 的字符串"（她偶尔会把 ["…", \"…"] 这种带转义的东西整段说出来）
+        _un = _unwrap_jsonish(reply)
+        if isinstance(_un, list):
+            reply_list_raw = _un
+        else:
+            try:
+                parsed = json.loads(_un)
+                reply_list_raw = parsed if isinstance(parsed, list) else split_sentences(str(parsed))
+            except Exception:
+                reply_list_raw = split_sentences(_un)
         # 清理 + 去空句 + 保留【看屏幕】标记（下游翻译/情绪/立绘都按这份列表走）
         reply_list_raw = _tidy_sentences(reply_list_raw)
         if any("【文件】" in str(x) for x in reply_list_raw):
