@@ -199,11 +199,20 @@ python run_launcher.py
 ### 启动 QQ 聊天
 
 - **方式一（推荐）**：双击 **`启动QQ.bat`**（绿色版/源码版都行）。
-- **方式二（PCL）**：`config.json` 中 `qq_enabled="true"` → 双击 `AIpet-Murasame.exe` 启动器 → 点「💬 启动 QQ AIpet」按钮。
+- **方式二（PCL，最省事）**：双击 `AIpet-Murasame.exe` 启动器 → 点「💬 启动 QQ AIpet」。
+  这个按钮会**自动帮你把 NapCat 一起拉起来**（用 `NapCat.Shell.Windows.OneKey/NapCat/launcher-user.bat`，
+  它会按注册表里装的 QQ 启动）并等待就绪：首次使用请在弹出来的 NapCat 窗口里用手机 QQ 扫码，
+  扫完不用再点第二次 —— QQ 桥接本身会自动重连，NapCat 一就绪就会连上。
+  就绪过程中状态栏会依次显示「已拉起 NapCat…」→「正在等待扫码登录…」→「NapCat 已就绪」。
+  同一条工具栏上的「🔑 NapCat WebUI」也会先确保 NapCat 在跑，再打开带 token 的管理面板。
+  > ⚠️ 为什么用 `launcher-user.bat`（注册表 QQ）而不是 `start_napcat.bat`：后者用的是随包的
+  > 绿色 QQ（9.9.33-51802），**超出**本项目锁定的 NapCat 4.18.14 的支持表上限（9.9.32-50969），
+  > 可能报「不支持当前QQ版本架构」。详见根目录 `NAPCAT_VERSION.txt`。
 - **方式三（命令行，源码调试用）**：
   ```bash
   python run_qq.py
   ```
+  （这种方式**不会**自动拉起 NapCat；它只会等 NapCat 就绪后自动连上。）
 
 ### 使用说明
 

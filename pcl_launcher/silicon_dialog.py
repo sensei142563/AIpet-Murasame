@@ -288,6 +288,65 @@ class SiliconDialog(QDialog):
         super().keyPressEvent(event)
 
 
+class MessageDialog(SiliconDialog):
+    """主题一致的消息框（用来替掉 QMessageBox）。
+
+    为什么不用 QMessageBox（用户反馈"弹窗看不清字"）：
+      · 它按平台风格自绘，正文颜色/字号不受启动器主题控制 → 深色主题下发灰
+      · 里面的 emoji 在部分字体环境下渲染成方块（用户截图里那句提示的 📱 就是方块）
+    这里用启动器自己的圆角对话框：正文用主题主文字色（SiliconDialog 的调色板已保证
+    高对比），细节（路径、原因）单独一段小字并可选中复制，底部只有一个「知道了」。
+    正文里**不要用 emoji**，需要强调就用【】或直接写清楚。
+    """
+
+    def __init__(self, parent, title, text, detail="", ok_text="知道了", width=470):
+        super().__init__(title, parent, width=width, height=210)
+        self.setModal(True)
+        lay = self.content
+        m = int(M.font_size)
+        t = QLabel(text)
+        t.setWordWrap(True)
+        t.setStyleSheet(f"color: {Color1.name()}; font-size: {m + 1}px;")
+        lay.addWidget(t)
+        if detail:
+            d = QLabel(detail)
+            d.setWordWrap(True)
+            d.setTextInteractionFlags(Qt.TextSelectableByMouse)   # 路径可以选中复制
+            d.setStyleSheet(f"color: {Gray2.name()}; font-size: {m}px;")
+            lay.addWidget(d)
+        lay.addStretch()
+        row = QHBoxLayout()
+        row.addStretch()
+        b = QPushButton(ok_text)
+        b.setCursor(Qt.PointingHandCursor)
+        b.setMinimumHeight(32)
+        b.setStyleSheet(
+            f"QPushButton {{ background: {accent_hex()}; color: white; border: none;"
+            f" border-radius: 8px; padding: 6px 18px; font-size: {m}px; }}"
+            f"QPushButton:hover {{ background: {QColor(accent_hex()).lighter(115).name()}; }}")
+        b.clicked.connect(self.accept)
+        row.addWidget(b)
+        lay.addLayout(row)
+        try:                       # 按内容量调整高度（细节多的时候别被截断）
+            self.adjustSize()
+            h = max(200, min(420, self.height() + 10))
+            self.resize(max(int(width), self.width()), h)
+        except Exception:
+            pass
+
+
+def message(parent, title, text, detail="", ok_text="知道了"):
+    """显示一个主题一致的消息框（模态）。失败时回退 QMessageBox（内容照旧，不加 emoji）。"""
+    try:
+        d = MessageDialog(parent, title, text, detail, ok_text)
+        return d.exec_()
+    except Exception as e:
+        print(f"[SiliconUI] ⚠ 消息框失败，回退系统弹窗: {e}")
+        from PyQt5.QtWidgets import QMessageBox
+        QMessageBox.information(parent, title, text + (("\n\n" + detail) if detail else ""))
+        return 0
+
+
 class _DlgBack(QWidget):
     """对话框圆角底"""
 

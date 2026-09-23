@@ -311,11 +311,41 @@ QPushButton:disabled {{ color: {Gray3.name()}; border-color: {Color5.name()}; }}
 """
 
 
+# 拉起 NapCat 后最多等这么久（秒）。做成模块常量：测试要把它改小，不然每个用例
+# 都得真等 75 秒（第一版把超时当参数注入，结果测试里没生效、工作线程串到下一个用例，
+# 排查了半天——常量比"隐式参数"更好验证）。
+NAPCAT_WAIT_S = 75
+
+
+def _napcat_ws_port() -> int:
+    """OneBot 正向 WS 端口（从 config 的 qq_napcat_ws 解析，默认 3001）"""
+    try:
+        from urllib.parse import urlparse
+        with open(os.path.join(_app_base_dir(), "config.json"), "r", encoding="utf-8") as f:
+            cfg = json.load(f) or {}
+        u = urlparse(str(cfg.get("qq_napcat_ws") or "ws://127.0.0.1:3001"))
+        return int(u.port or 3001)
+    except Exception:
+        return 3001
+
+
+def _napcat_launcher_bat() -> str:
+    """NapCat 的启动脚本（走注册表找到的 QQ，实测 9.9.22-40990 在 4.18.14 支持表内）。
+
+    ⚠ 不用 start_napcat.bat：它用随包的绿色 QQ 9.9.33-51802，超出 NapCat 4.18.14 的
+      支持表上限 9.9.32-50969，可能报"不支持当前QQ版本架构"。
+    """
+    return os.path.join(_app_base_dir(), "NapCat.Shell.Windows.OneKey", "NapCat",
+                        "launcher-user.bat")
+
+
 # ══════════════════════ 总览页 ══════════════════════
 class HomePage(QWidget):
     """总览：启动/关闭桌宠、QQ、微信 + 控制面板 + 运行状态"""
 
     _probe_signal = pyqtSignal()
+    _napcat_progress = pyqtSignal(str)             # 启动 NapCat 过程中的状态行文案
+    _napcat_done = pyqtSignal(bool, str, str)      # (就绪?, 说明, 后续动作)
 
     def __init__(self, shell, parent=None):
         super().__init__(parent)
@@ -466,6 +496,8 @@ class HomePage(QWidget):
             b.setStyleSheet(_ghost_btn_qss())
             b.clicked.connect(slot)
             tr.addWidget(b)
+            if "WebUI" in text:
+                self.btn_webui = b          # 供"拉起 NapCat 时"改按钮文案/置灰
         tr.addStretch()
         tl.addLayout(tr)
         outer.addWidget(tools)
@@ -509,6 +541,8 @@ class HomePage(QWidget):
         outer.addStretch()
 
         self._probe_signal.connect(self._apply_status)
+        self._napcat_progress.connect(self.status_lbl.setText)
+        self._napcat_done.connect(self._on_napcat_done)
         self._timer = QTimer(self)
         self._timer.timeout.connect(self.refresh_status)
         self._timer.start(6000)
@@ -784,6 +818,18 @@ class HomePage(QWidget):
         print("[NewUI] 已发送「重置桌宠位置」")
 
     def start_qq(self):
+        """启动 QQ AIpet：**先确保 NapCat 在跑**，再起 QQ 桥接。
+
+        用户要求的行为（原来缺的就是这一步）：以前这个按钮只跑 run_qq.py，NapCat 得自己
+        先启动（`启动QQ.bat` 里那句话就是"请确保 NapCat 已启动"）。而 run_qq.py 本身会等
+        （3001 未监听就自动重试），所以卡人的从来不是顺序，是**没人替你拉 NapCat**。
+        """
+        if self.shell._qq_proc is not None and self.shell._qq_proc.poll() is None:
+            self.shell._qq_proc = None      # 已经退出/异常 → 允许重启
+        self._busy_btn(self.btn_qq, "⏳ 正在检查 NapCat…", 120000)
+        self._ensure_napcat("start_qq")
+
+    def _do_start_qq(self):
         base = _app_base_dir()
         py = _find_python(base)
         if not py:
@@ -792,9 +838,115 @@ class HomePage(QWidget):
         try:
             self.shell._qq_proc = subprocess.Popen([py, os.path.join(base, "run_qq.py")], cwd=base,
                                                    creationflags=subprocess.CREATE_NEW_CONSOLE)
-            self.refresh_status()
+            self.status_lbl.setText("QQ AIpet 已启动；未登录时会在 NapCat 窗口里显示二维码。")
+            QTimer.singleShot(12000, self.refresh_status)
         except Exception as e:
-            QMessageBox.warning(self, "启动失败", str(e))
+            self._msg("启动失败", "QQ AIpet 没能启动。", str(e))
+            self.refresh_status()
+
+    # ── 确保 NapCat 在跑（拉起 + 等待就绪）──
+    def _ensure_napcat(self, action: str, timeout_s: int = None):
+        """没跑就把 NapCat 拉起来（可见控制台：二维码在那个窗口里），并等待它**这次要用的**端口就绪。
+
+        就绪判据按用途分（这点很关键）：
+          · 启动 QQ  → 看 WS 端口（默认 3001，QQ 桥接要连它）
+          · 打开 WebUI → 看 WebUI 端口（默认 6099，面板要它）
+        拉起后**只等这一件事**，不要拿另一个端口当门槛（否则"面板明明能开却报没就绪"）。
+        NapCat 在扫码期间 WS 可能还没监听 → 我们照实说明"已在等待扫码"，不装作已就绪。
+        """
+        if getattr(self, "_napcat_busy", False):
+            return
+        self._napcat_busy = True
+        wait_s = int(NAPCAT_WAIT_S if timeout_s is None else timeout_s)
+        ws_port = _napcat_ws_port()
+        webui_port = 6099
+        try:
+            from qq.qq_config import discover_webui_url
+            webui_port = int(discover_webui_url().get("port") or 6099)
+        except Exception:
+            pass
+        need_port = webui_port if action == "open_webui" else ws_port
+        bat = _napcat_launcher_bat()
+        self._napcat_progress.emit("正在检查 NapCat…")
+
+        def _work():
+            try:
+                if _local_port_open(need_port):
+                    self._napcat_done.emit(True, "NapCat 已在运行。", action)
+                    return
+                if not os.path.isfile(bat):
+                    self._napcat_done.emit(
+                        False, "没找到 NapCat 的启动脚本，" + os.path.basename(bat) + " 不在包里。",
+                        action)
+                    return
+                try:
+                    subprocess.Popen([bat], cwd=os.path.dirname(bat),
+                                     creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
+                except Exception as e:
+                    self._napcat_done.emit(False, "拉起 NapCat 失败：" + str(e), action)
+                    return
+                self._napcat_progress.emit(
+                    "已拉起 NapCat，等待它启动……（首次使用请在弹出的窗口里用手机 QQ 扫码）")
+                deadline = time.time() + max(2, wait_s)
+                said_scan, said_login = False, False
+                while time.time() < deadline:
+                    time.sleep(1.5)
+                    if _local_port_open(need_port):
+                        self._napcat_done.emit(True, "NapCat 已就绪。", action)
+                        return
+                    if not said_scan and _local_port_open(webui_port):
+                        said_scan = True
+                        self._napcat_progress.emit(
+                            "NapCat 已启动，正在等待扫码登录……（二维码在 NapCat 窗口里，"
+                            "也保存在 NapCat.Shell.Windows.OneKey\\NapCat\\cache\\qrcode.png）")
+                    elif not said_login and _local_port_open(ws_port):
+                        said_login = True
+                        self._napcat_progress.emit("NapCat 已登录，正在等它把面板端口就绪…")
+                # 超时：可能还在扫码，也可能 QQ 路径不对（launcher-user.bat 会打印 invalid 后暂停）
+                self._napcat_done.emit(
+                    False,
+                    "NapCat 启动了但还没就绪（多半是在等扫码）。" if said_scan
+                    else "NapCat 启动了但端口一直没监听。", action)
+            except Exception as e:
+                self._napcat_done.emit(False, "处理 NapCat 时出错：" + str(e), action)
+
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _on_napcat_done(self, ready: bool, msg: str, action: str):
+        self._napcat_busy = False
+        self.status_lbl.setText(msg)
+        if action == "open_webui":
+            if ready:
+                self._do_open_webui()
+            else:
+                self._napcat_failed_dialog(msg)
+            return
+        if action == "start_qq":
+            # NapCat 没就绪也照样起 QQ 桥接：它会自己等 3001（设计如此），
+            # 而且用户在扫码期间就能看到 QQ 窗口，不必再点第二次。
+            self._do_start_qq()
+            if not ready:
+                self.status_lbl.setText(msg + " QQ AIpet 已同时启动，它会自动等 NapCat 就绪。")
+            QTimer.singleShot(15000, self.refresh_status)
+
+    def _napcat_failed_dialog(self, why: str):
+        """NapCat 拉不起来时的提示：主题一致的消息框、正文高对比、路径可选中复制。"""
+        from .silicon_dialog import message as _msg
+        _msg(self.window(), "NapCat 没能就绪", why,
+             "可以手动启动它：\n"
+             + _napcat_launcher_bat() + "\n"
+             "启动后窗口里会有二维码，用手机 QQ 扫码登录；"
+             "登录成功后 WS 端口（默认 3001）才会监听，WebUI 也才能打开。\n"
+             "如果这个脚本报 \"provided QQ path is invalid\"，说明注册表里没有 QQ，"
+             "改用随包的 NapCat.Shell.Windows.OneKey\\start_napcat.bat。")
+
+    def _msg(self, title: str, text: str, detail: str = ""):
+        """统一用主题一致的消息框（见 silicon_dialog.MessageDialog 的说明）"""
+        try:
+            from .silicon_dialog import message as _m
+            _m(self.window(), title, text, detail)
+        except Exception as e:
+            print(f"[NewUI] ⚠ 消息框失败: {e}")
 
     def start_wechat(self):
         base = _app_base_dir()
@@ -830,14 +982,20 @@ class HomePage(QWidget):
             QMessageBox.warning(self, "桌宠设置", f"打开失败：{e}")
 
     def open_napcat_webui(self):
-        """打开 NapCat WebUI（端口/token 从 NapCat 自己的 webui.json 读，不硬编码）。
+        """打开 NapCat WebUI。**没在跑就先把它拉起来**，而不是弹一个打不开的对话框。
 
-        为什么改：原来写死 `http://127.0.0.1:6099` 且不带 token，还提示
-        「Token 见 config.json」——config.json 里没有 WebUI token（它在
-        NapCat/config/webui.json），端口也是 NapCat 那边可改的。
-        现在：① 自动读端口与 token 拼 `/webui?token=...`；② 打开前先探端口，
-        NapCat 没启动就给一句人话（而不是弹一个打不开的死链接）。
+        用户要求：点这个按钮应该拉起 NapCat。所以现在是
+        「探端口 → 没跑就 launcher-user.bat 拉起来并等待 → 就绪后直接打开带 token 的面板」；
+        只有真的拉不起来（缺脚本/超时）才提示，而且提示是主题一致的消息框（正文高对比、
+        路径可复制、不用 emoji —— QMessageBox 里的 emoji 在部分机器上会渲染成方块）。
+
+        端口/token 仍从 NapCat 自己的 webui.json 读（config.json 里没有 WebUI token）。
         """
+        self._busy_btn(getattr(self, "btn_webui", self.btn_reset_pos),
+                       "⏳ 正在启动 NapCat…", 120000)
+        self._ensure_napcat("open_webui")
+
+    def _do_open_webui(self):
         try:
             from qq.qq_config import discover_webui_url
             info = discover_webui_url()
@@ -845,14 +1003,14 @@ class HomePage(QWidget):
             info = {"url": "http://127.0.0.1:6099/webui", "port": 6099, "token": "", "source": str(e)}
         port = int(info.get("port") or 6099)
         if not _local_port_open(port):
-            QMessageBox.information(
-                self, "NapCat 没在运行",
-                "本机 %d 端口没有程序在监听，所以 WebUI 打不开。\n\n"
-                "NapCat 是随包自带的（NapCat.Shell.Windows.OneKey\\ 目录里），"
-                "但需要先启动它：\n"
-                "  · 点这一行的「📱 重新扫码登录」会拉起 NapCat 并显示二维码，或\n"
-                "  · 手动运行 NapCat.Shell.Windows.OneKey\\start_napcat.bat\n\n"
-                "启动后再点一次这个按钮即可。" % port)
+            # 起来了但面板端口还没监听（多半还在等扫码）→ 说清现状与下一步
+            self._msg("NapCat WebUI 还没就绪",
+                      "NapCat 已经在运行，但 WebUI 端口 %d 还没开始监听（通常是因为还没扫码登录）。"
+                      % port,
+                      "请在弹出的 NapCat 窗口里用手机 QQ 扫码登录，登录成功后再点一次这个按钮。\n"
+                      "二维码文件：" + os.path.join(
+                          _app_base_dir(), "NapCat.Shell.Windows.OneKey", "NapCat",
+                          "cache", "qrcode.png"))
             print(f"[NewUI] NapCat WebUI 未打开：{port} 端口无监听")
             return
         import webbrowser
@@ -861,19 +1019,21 @@ class HomePage(QWidget):
               % (port, "已带" if info.get("token") else "无", info.get("source")))
 
     def napcat_relogin(self):
-        base = _app_base_dir()
-        bat = os.path.join(base, "NapCat.Shell.Windows.OneKey", "NapCat", "launcher-user.bat")
+        """强制拉起 NapCat 重新扫码（跟「启动 QQ」用的是同一条脚本）。"""
+        bat = _napcat_launcher_bat()
         if os.path.exists(bat):
             try:
                 subprocess.Popen([bat], cwd=os.path.dirname(bat),
                                  creationflags=subprocess.CREATE_NEW_CONSOLE)
-                QMessageBox.information(self, "重新扫码登录",
-                                        "已打开 NapCat 登录窗口，请用手机 QQ 扫描二维码。\n"
-                                        "二维码也已保存到：NapCat.Shell.Windows.OneKey\\NapCat\\cache\\qrcode.png")
+                self._msg("重新扫码登录",
+                          "已打开 NapCat 登录窗口，请用手机 QQ 扫描窗口里的二维码。",
+                          "二维码也保存在：" + os.path.join(
+                              _app_base_dir(), "NapCat.Shell.Windows.OneKey", "NapCat",
+                              "cache", "qrcode.png"))
             except Exception as e:
-                QMessageBox.warning(self, "重新登录", str(e))
+                self._msg("重新登录", "拉起 NapCat 失败。", str(e))
         else:
-            QMessageBox.information(self, "重新登录", "未找到 NapCat 启动脚本")
+            self._msg("重新登录", "没找到 NapCat 的启动脚本。", bat)
 
     def open_app_dir(self):
         try:
@@ -1907,8 +2067,10 @@ class _VideoBgReader:
                 if self._running:
                     try:
                         self._emit(img)
-                    except RuntimeError:
-                        # 宿主窗口已经被销毁（PyQt 会抛 wrapped C/C++ object deleted）
+                    except (RuntimeError, AttributeError):
+                        # 宿主窗口已被销毁：PyQt 抛 RuntimeError（wrapped C/C++ object
+                        # deleted）或 AttributeError（不再有这个信号）→ 线程安静退出，
+                        # 不要在日志里刷异常（实测：测试里把 launcher 的引用丢了就会出现）。
                         return
                 time.sleep(period)           # 普通线程没有 msleep，用 time.sleep
         except Exception as e:
