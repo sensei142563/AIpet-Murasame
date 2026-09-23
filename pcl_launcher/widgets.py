@@ -1067,6 +1067,9 @@ class PCLMemoryManager(QScrollArea):
         self._preview = QTextEdit()
         self._preview.setReadOnly(True)
         self._preview.setFixedHeight(int(160 * S))
+        # 没内容时也要说明这个框是干什么的（原来就是一个大白框，看着像坏了）
+        self._preview.setPlaceholderText(
+            "点上面任一行的「查看」，这里会显示那份记忆文件最近的 20 条。")
         self._preview.setStyleSheet(
             f"QTextEdit {{ background: {Color8.name()}; color: {Color1.name()}; "
             f"border: 1px solid {Color5.name()}; border-radius: {btn_radius()}px; "
@@ -1329,6 +1332,13 @@ class PCLMemoryManager(QScrollArea):
                 row.addWidget(btn_del)
 
                 self._mem_layout.addLayout(row)
+        # 首次进来别把一个大空框留给用户：自动预览第一份记忆。
+        # 只在预览还空着时自动填 —— 用户手动看过某份文件后，刷新（切页/清空后）不覆盖他的查看结果。
+        try:
+            if files and not self._preview.toPlainText().strip():
+                self._preview_file(files[0][1], files[0][0])
+        except Exception as _pe:
+            print(f"[Memory] ⚠ 自动预览失败: {_pe}")
         self._refresh_offline()
 
     def _preview_file(self, path, rel):
