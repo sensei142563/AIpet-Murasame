@@ -86,8 +86,19 @@ def check_wiring(results):
         ("活跃度→开口评分", "desire as _dz" in inspect.getsource(__import__("tool.attention", fromlist=["x"]).should_speak)),
         ("启动问候", "startup_line" in inspect.getsource(MAIN)),
         ("任务经验（规划）", "_exp_note" in inspect.getsource(PT._planner_system)),
+        ("失败重规划（卡住换法子）", "stall_hint" in inspect.getsource(PT._loop)),
         ("自主分档（执行）", "autonomy" in inspect.getsource(PC.execute)),
         ("夜间整理（学习循环）", "consolidate" in inspect.getsource(__import__("tool.self_learn", fromlist=["x"]).maybe_cycle)),
+        ("自主玩游戏（动机层）", '"play"' in inspect.getsource(__import__("tool.desire", fromlist=["x"]).wants)),
+        ("自主玩游戏（桌宠执行）", "_gm9.start" in src_m or "自主玩游戏失败" in src_m),
+        ("玩游戏算自主行为（提示词）", "自主行为" in inspect.getsource(__import__("tool.game", fromlist=["x"]).prompt_rules)),
+        ("盯屏触发（解析）", "trigger" in inspect.getsource(__import__("tool.game", fromlist=["x"]).parse)),
+        ("盯屏触发（执行）", "trigger" in inspect.getsource(M.Murasame.on_reply)),
+        ("系统通知", "def _notify" in src_m and "showMessage" in src_m),
+        ("通知接线（提醒）", 'self._notify("提醒"' in src_m),
+        ("通知接线（关怀）", 'self._notify("她说"' in src_m),
+        ("托盘交给桌宠", "pet._tray" in inspect.getsource(MAIN)),
+        ("摄像头疲劳关怀", "是不是没睡好" in inspect.getsource(MAIN)),
     ]
     missing = [n for n, ok in checks if not ok]
     results.append(("关键接线（%d 处）" % len(checks), not missing,
@@ -109,6 +120,9 @@ def check_runtime(results):
     from tool import web_search, plugins, game as _game
     _try(lambda: (True, "开关 %s｜解析 %s" % (_game.enabled(), _game.parse("【游戏】连按 J 3 次"))) ,
          "游戏模式（game）", results)
+    _try(lambda: (bool(_game.parse("【游戏】盯着 800 400 100 50 变化就 按键 space")),
+                  "盯屏：%s" % _game.parse("【游戏】盯着 800 400 100 50 变化就 按键 space")),
+         "盯屏触发（game.trigger）", results)
     _try(lambda: (True, "开关 %s｜Bing/百度可用（实测）" % web_search.enabled()), "联网搜索（web_search）", results)
     _try(lambda: (True, "开关 %s｜已装 %d 个：%s" % (
         plugins.enabled(), len(plugins.list_plugins()),

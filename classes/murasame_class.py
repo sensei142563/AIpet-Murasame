@@ -1533,6 +1533,26 @@ class Murasame(QLabel):
             except Exception:
                 pass
 
+    def _notify(self, title, text):
+        """弹一条 Windows 系统通知（托盘气泡）。
+
+        为什么要有：她说话只在对话框里，主人切到别的窗口（或全屏）就看不见了。
+        提醒、久坐关怀这类"该被看见"的事，顺手弹一条系统通知。
+        config 的 system_notify 可以关（设成 false）。
+        """
+        try:
+            from tool.config import get_config
+            v = str(get_config("./config.json").get("system_notify", "true")).lower()
+            if v in ("false", "0", "off", "no"):
+                return
+            t = getattr(self, "_tray", None)
+            if t is None or not t.isVisible():
+                return
+            from PyQt5.QtWidgets import QSystemTrayIcon
+            t.showMessage(str(title)[:40], str(text)[:180], QSystemTrayIcon.Information, 6000)
+        except Exception as e:
+            print(f"[桌宠] ⚠ 系统通知失败: {e}")
+
     def _search_and_reply(self, query, user_text):
         """真的去搜（后台线程），再把结果交给她用自己的话讲"""
         try:
@@ -1621,6 +1641,12 @@ class Murasame(QLabel):
             if not text:
                 return
             print(f"[桌宠] 🏁 任务结束（{'完成' if ok else '没做完'}）：{text[:70]}")
+            # 主人可能不在电脑前（超过 2 分钟没说话）→ 顺手弹个系统通知，他回来能看见
+            try:
+                if time.time() - float(getattr(self, "_last_user_ts", 0.0) or 0.0) > 120.0:
+                    self._notify("她说", text)
+            except Exception:
+                pass
             self._request_dialog.emit(
                 "（系统提示：你刚刚亲手把这件事做到这里——" + text +
                 "。现在用你自己的口吻把结果说给主人听：只输出你要说的那一句（一两句就好），"
@@ -1776,9 +1802,30 @@ class Murasame(QLabel):
                             _mp = _mu8.is_playing(_mu8.find_window() or 0) if _mu8.find_window() else None
                     except Exception:
                         _mp = None
-                    _w = _dz.wants(music_playing=_mp)
+                    try:
+                        _idle = get_idle_seconds()
+                    except Exception:
+                        _idle = None
+                    _w = _dz.wants(music_playing=_mp, user_idle_sec=_idle)
                     if _w:
                         print(f"[桌宠] 💭 她自己想：{_w.get('text')}")
+                        if _w.get("kind") == "play":
+                            # 自主玩游戏：真的开一局短局（挑最近玩过的那个游戏）
+                            try:
+                                from tool import game as _gm9
+                                games = _gm9.known_games()
+                                if games:
+                                    _gname = max(games, key=lambda k: float((games[k] or {}).get("ts") or 0))
+                                    _h = games.get(_gname) or {}
+                                    _msg = _gm9.start(_gname, str(_h.get("goal") or ""),
+                                                      str(_h.get("controls") or ""),
+                                                      minutes=5, pet_name=self.pet_name)
+                                    print(f"[桌宠] 🎮 她自己开始玩「{_gname}」：{_msg[:40]}")
+                                    if str(_msg).startswith("好，我来玩"):    # 真开起来了才说
+                                        self.show_text("唔……你不在，我自己玩会儿。", typing=False)
+                                        return
+                            except Exception as _eg9:
+                                print(f"[桌宠] ⚠ 自主玩游戏失败: {_eg9}")
                         self._request_dialog.emit(_w.get("prompt") or "", "system", True)
                         return
             except Exception as _ed:
@@ -1795,6 +1842,7 @@ class Murasame(QLabel):
                 _why = _care.check(now_ts=_now, active_sec=_active)
                 if _why:
                     print(f"[桌宠] 💗 主动关怀：{_why}")
+                    self._notify("她说", _why)
                     self._request_dialog.emit(_care.nudge_prompt(_why, self.pet_name), "system", True)
             except Exception as _ec:
                 print(f"[桌宠] ⚠ 关怀检查失败: {_ec}")
@@ -1827,6 +1875,7 @@ class Murasame(QLabel):
                 if _due:
                     _w = "；".join(str(x.get("what")) for x in _due[:3])
                     print(f"[桌宠] ⏰ 到点提醒：{_w}")
+                    self._notify("提醒", _w)
                     self._request_dialog.emit(
                         "（系统提示：到点了，你该提醒主人这些事——" + _w +
                         "。用你自己的口吻说出来（一句话），可以顺便关心一句，别念标记。）",
@@ -2037,6 +2086,9 @@ class Murasame(QLabel):
                     elif _kind == "macro":
                         print(f"[桌宠] 🎮 固定循环：{_arg[:40]}")
                         _msg = _gm.macro(_arg)
+                    elif _kind == "trigger":
+                        print(f"[桌宠] 🎮 盯屏触发：{_arg[:50]}")
+                        _msg = _gm.trigger(_arg)
                     else:
                         _p = _gm._parse_start(_arg)
                         _hist = _gm.recall(_p["name"])

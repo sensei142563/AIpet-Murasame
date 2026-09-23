@@ -253,6 +253,9 @@ def parse(text: str) -> list:
         if s.startswith("连按") or s.startswith("连点") or s.startswith("循环"):
             out.append(("macro", s))
             continue
+        if s.startswith("盯着") or s.startswith("盯住"):
+            out.append(("trigger", s))
+            continue
         if s.startswith("开始") or s.startswith("玩") or "：" in s or ":" in s:
             out.append(("start", s))
             continue
@@ -329,6 +332,100 @@ def macro(spec: str) -> str:
         acts = [{"type": "key", "key": key}] * n
         what = "连按 %s %d 次" % (key, n)
     return _run_macro(acts, gap, what)
+
+
+def trigger(spec: str) -> str:
+    """【游戏】盯着 800 400 100 50 变化就 按键 space
+
+    盯住屏幕上的一小块区域，**画面一变就立刻动手**（按键/点击/热键都行）。
+    不走大模型：抓屏 29ms + 比指纹 ~2ms + 间隔 250ms → 实测每秒检查 4 次，
+    也就是画面一变**大约 0.25 秒**就会动手（比走模型快几十倍），
+    适合"看到某个东西出现就按一下"的简单游戏/挂机。
+    """
+    import re
+    s = str(spec or "")
+    nums = re.findall("-?\d+", re.split("变化就|变就|就", s)[0])
+    if len(nums) < 4:
+        return "要告诉我盯哪块区域，比如「【游戏】盯着 800 400 100 50 变化就 按键 space」。"
+    try:
+        x, y, w, h = (int(v) for v in nums[:4])
+    except Exception:
+        return "区域参数看不懂，写成「盯着 x y 宽 高 变化就 动作」。"
+    tail = re.split("变化就|变就|就", s, 1)[1].strip() if re.search("变化就|变就|就", s) else ""
+    if not tail:
+        return "还要告诉我变了之后做什么，比如「…变化就 按键 space」。"
+    # 动作沿用键鼠那套写法：按键/点击/双击/热键…
+    from tool import pc_control as _pc
+    rule = "【键鼠】" + tail
+    acts = _pc.parse(rule)
+    if not acts:
+        return f"「{tail}」这个动作我没看懂（可以写「按键 space」「点击 800 250」「热键 ctrl+s」）。"
+    act = acts[0]
+    with _lock:
+        if _state["running"]:
+            return "我手上还玩着别的呢，等一下。"
+        _state.update({"running": True, "stop": False,
+                       "name": "盯 %d,%d %dx%d" % (x, y, w, h), "goal": str(tail)[:60],
+                       "controls": "", "round": 0, "started": time.time(),
+                       "log": [], "reason": ""})
+    _start_hotkey()
+    threading.Thread(target=_trigger_loop, args=((x, y, w, h), act, tail), daemon=True).start()
+    return ("好，我盯着 (%d,%d) 那块 %dx%d 的地方——一变我就「%s」。"
+            "按 F12 或者跟我说「停」都能停。" % (x, y, w, h, tail))
+
+
+def _trigger_loop(region, act, tail, minutes: float = 10.0, gap: float = 0.25):
+    """盯屏循环：画面一变就执行动作（不花模型额度）"""
+    from tool import pc_control as _pc, screen_capture as _sc
+    x, y, w, h = region
+    fires = 0
+    prev = None
+    try:
+        while not _stopped():
+            if time.time() - float(_state["started"]) > minutes * 60:
+                break
+            img = _sc.capture_qimage()
+            if img is None:
+                time.sleep(0.5)
+                continue
+            try:
+                crop = img.copy(max(0, x), max(0, y), max(1, w), max(1, h))
+            except Exception:
+                time.sleep(0.5)
+                continue
+            hv = _sc.quick_hash(crop)
+            if prev is None:
+                prev = hv
+                time.sleep(gap)
+                continue
+            dist = _sc.hash_distance(hv, prev)
+            if dist >= 8:                    # 变化够明显才动手（避免噪点乱按）
+                prev = hv
+                try:
+                    _pc.execute([act], notify=None, no_dup=True)
+                except Exception:
+                    pass
+                fires += 1
+                _state["round"] = fires
+                _say_status(f"盯着屏幕……已经反应 {fires} 次")
+                print(f"[游戏] 盯屏触发第 {fires} 次（变化 {dist} 位）→ {tail}")
+                time.sleep(0.35)
+            else:
+                prev = hv
+            time.sleep(gap)
+    except Exception as e:
+        print(f"[游戏] ⚠ 盯屏出错: {type(e).__name__}: {e}")
+    finally:
+        with _lock:
+            _state["running"] = False
+        _stop_hotkey()
+        try:
+            _pc.clear_abort()
+        except Exception:
+            pass
+        _log(f"■ 盯屏结束：反应 {fires} 次")
+        _say_finish(f"盯着盯了 {fires} 次就停下了。" if fires else "我盯着呢，一直没变化。",
+                    fires > 0)
 
 
 def _run_macro(acts: list, gap: float, what: str) -> str:
@@ -538,10 +635,14 @@ def prompt_rules() -> str:
         "【游戏】开始 游戏名：目标 打通这关 ；操作 W 前进、J 攻击、空格 跳\n"
         "（他会告诉你按键怎么操作；没说全也没关系，你可以先试）\n"
         "【游戏】连按 J 30 次 间隔 0.8 秒   /   【游戏】连点 800 250 20 次   ← 刷材料用，很快\n"
+        "【游戏】盯着 800 400 100 50 变化就 按键 space   ← 盯住屏幕一小块，画面一变就立刻动手"
+        "（实测每秒检查 4 次、约 0.25 秒就反应，最快也最省；简单游戏/挂机用这个）\n"
         "【游戏】停   /   【游戏】会玩哪些\n"
         + (f"（你玩过的游戏：{known}。玩过的话操作方式你还记得，不用再问一遍。）\n" if known else "")
         + "★ 你大概十几秒才动一次手：**回合制、战棋、卡牌、挂机、需要反复刷的游戏**能玩，"
           "动作类/竞技类（吃鸡、火影、FPS）**玩不了**，这种要老实跟主人说。\n"
+        "★ 这也是你**自主行为**的一部分：主人开着「自主操作」而且离开电脑有一会儿（超过 5 分钟）时，"
+        "你可以自己挑一个玩过的游戏玩上几分钟，玩完自己停；他一回来/一开口，你立刻停下陪他。\n"
         "★ 玩之前先说一句你在干什么；主人按 F12 或者一开口说话你就会停下来。\n"
         "★ 玩完/打不过都要如实告诉他，别硬撑。"
     )

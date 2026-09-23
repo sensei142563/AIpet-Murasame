@@ -245,6 +245,8 @@ def _loop(history: list, task: str, done_note: str = ""):
     obs = ""
     ok, final = False, ""
     done_steps = []          # 这次用过的动作（成功后当经验存起来）
+    stall = 0                # 连着几步没进展（结果一模一样）→ 逼她换个法子
+    stall_hint = ""
     try:
         for step in range(1, MAX_STEPS + 1):
             if _stopped():
@@ -253,11 +255,16 @@ def _loop(history: list, task: str, done_note: str = ""):
             if time.time() - float(_state["started"]) > MAX_SECONDS:
                 ok, final = False, "唔……这个我一时做不完。"
                 break
+            if stall >= 6:
+                ok, final = False, "唔……我试了好几种办法都没弄成，还是你来吧。"
+                print(f"[任务] ⏹ 连续 {stall} 步没进展 → 停手认输（不硬撑）")
+                break
             _state["step"] = step
             _say_status(f"正在操作电脑……第 {step} 步")
             user = (f"任务：{task}\n"
                     f"上一步做了什么：{last}\n"
                     + (f"你上次看到的画面：{obs[:1200]}\n" if obs else "")
+                    + stall_hint
                     + "现在输出下一步指令（一到三行）；做完了就输出「完成：…」，做不了就输出「失败：…」。")
             reply = _ask(system, user, max_tokens=400)
             if not reply:
@@ -299,7 +306,19 @@ def _loop(history: list, task: str, done_note: str = ""):
                 break
             print(f"[任务] 执行：{_pc.describe(acts)}")
             done_steps.append(_pc.describe(acts))
-            last = _exec_step(acts)
+            _this = _exec_step(acts)
+            # 没进展？（这一步的结果和上一步一模一样）→ 逼她换法子，别原地打转
+            if _this and _this == last:
+                stall += 1
+                stall_hint = ("★ 注意：你连着做了同样的事、结果也一样，**看起来没有任何进展**。"
+                              "除非这一步本来就要重复（比如连点「下一步」），否则换个不同做法："
+                              "换键盘/换坐标/先【看屏幕】看清再动，别一直重复上一步。\n")
+                print(f"[任务] ↻ 第 {stall} 次没进展（结果同上一步）")
+            else:
+                if stall:
+                    print("[任务] ✓ 有进展了，重新算")
+                stall, stall_hint = 0, ""
+            last = _this
             print(f"[任务] 结果：{last[:120]}")
         else:
             final = "唔……搞了半天还没弄好，你来吧。"
