@@ -6,7 +6,7 @@ import subprocess
 import time
 import urllib.request
 
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QColor, QFont, QPixmap
 from PyQt5.QtWidgets import (
     QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QSpinBox, QScrollArea,
@@ -195,9 +195,7 @@ class PCLSettingsPanel(QWidget):
                        "单条回复最多发几条消息（0=不限）", 0, 30, 0,
                        hint="一次回复最多拆成几条消息发出（防刷屏）；"
                             "超出条数时多余句子会合并进最后一条，内容不丢。")
-        # 对话调节改动即写盘（运行中的 QQ 桥接实时读取生效，无需重启 QQ）
-        self._wire_autosave("spin", "qq_max_reply_chars")
-        self._wire_autosave("spin", "qq_max_replies_per_conversation")
+        # 对话调节改动即写盘（运行中的 QQ 桥接实时读取生效，无需重启 QQ）——由统一接线负责
 
         # ===== 私信回复范围 =====
         pm_lbl = QLabel("  📨 私信回复范围")
@@ -213,9 +211,6 @@ class PCLSettingsPanel(QWidget):
                          hint="好友（含从群里点开的临时会话）发来的私信是否回复。")
         self._add_slider("qq_private_master_only", "只回复主人私信", ["false", "true"], "false",
                          hint="开启后仅回复主人白名单里的 QQ 私信（覆盖上面两个范围开关）。")
-        for _pk in ("qq_private_enable", "qq_private_reply_stranger",
-                    "qq_private_reply_friend", "qq_private_master_only"):
-            self._wire_autosave("slider", _pk)
 
         self._add_slider("qq_enabled", "QQ 功能总开关", ["false", "true"], "false")
         self._add_slider("qq_send_sticker", "QQ 表情包", ["false", "true"], "true")
@@ -293,34 +288,46 @@ class PCLSettingsPanel(QWidget):
 
         self._layout.addStretch()
 
-        # ===== 固定底部条：保存按钮固定在面板右下角 =====
-        # 位于滚动区之外 → 不随设置内容滚动；全局所有分类（全部/桌宠/QQ/微信/其他）下始终可见。
-        # 圆形按钮样式：正圆（半径=边长一半），只放图标，hover/悬停有 tooltip 说明
-        _save_d = int(60 * S)          # 圆形按钮直径
-        _save_r = int(_save_d / 2)     # 圆角 = 直径一半 → 正圆
-        btn_save = QPushButton("💾")
-        btn_save.setFixedSize(_save_d, _save_d)
-        btn_save.setCursor(Qt.PointingHandCursor)
-        btn_save.setToolTip("保存全部配置（不随滚动移动，始终固定在此）")
-        btn_save.setStyleSheet(f"""
-            QPushButton {{ background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
-                stop:0 {Color4.name()}, stop:1 {Color3.name()});
-                color: white; border: 2px solid rgba(255,255,255,0.65);
-                font-size: {int(26*S)}px; border-radius: {_save_r}px; }}
-            QPushButton:hover {{ border-color: white;
-                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
-                stop:0 {Color3.name()}, stop:1 {Color4.name()}); }}
-            QPushButton:pressed {{ background: {Color2.name()}; }}
+        # ===== 固定底部条：状态反馈 + 「重启桌宠」=====
+        # 设置已改为**改动即存**（见 _auto_persist / _flush_pending）→ 不再需要「保存」按钮。
+        # 底部条改成反馈区：左边显示「已自动保存 ✓ 时间」，右边给一个重启桌宠的明确入口
+        # （有些配置要桌宠重启后才生效，与其让用户自己去找「关闭桌宠」，不如放在这儿）。
+        self._status_lbl = QLabel("改动会自动保存")
+        self._status_lbl.setStyleSheet(f"color: {Gray3.name()}; font-size: {int(11*S)}px;")
+        btn_restart = QPushButton("🔄 重启桌宠以生效")
+        btn_restart.setCursor(Qt.PointingHandCursor)
+        btn_restart.setToolTip("关闭当前运行中的桌宠；下次启动时使用最新配置")
+        btn_restart.setStyleSheet(f"""
+            QPushButton {{ background: {Color6.name()}; color: {Color1.name()};
+                border: 1px solid {Color5.name()}; padding: {int(6*S)}px {int(14*S)}px;
+                font-size: {int(12*S)}px; border-radius: {btn_radius()}px;
+                font-family: 'Microsoft YaHei'; }}
+            QPushButton:hover {{ background: {Color4.name()}; color: white; }}
         """)
-        btn_save.clicked.connect(self._save_config)
+        btn_restart.clicked.connect(self._restart_pet)
         bottom_row = QHBoxLayout()
-        bottom_row.setContentsMargins(int(30 * S), int(6 * S), int(30 * S), int(14 * S))
+        bottom_row.setContentsMargins(int(30 * S), int(6 * S), int(30 * S), int(12 * S))
+        bottom_row.addWidget(self._status_lbl)
         bottom_row.addStretch(1)
-        bottom_row.addWidget(btn_save)
+        bottom_row.addWidget(btn_restart)
         outer.addLayout(bottom_row)
 
-        # 加载当前配置
-        self._load_current_config()
+        # ===== 自动保存接线：所有控件统一走这里，省得新加控件时漏接 =====
+        self._loading = False       # 载入配置期间抑制自动保存（否则启动时会把每个键原样回写一遍）
+        self._pending = {}          # 待写盘的改动（防抖合并）
+        self._flush_timer = QTimer(self)
+        self._flush_timer.setSingleShot(True)
+        self._flush_timer.setInterval(400)
+        self._flush_timer.timeout.connect(self._flush_pending)
+        for _k in list(self._widgets):
+            self._wire_autosave(_k)
+
+        # 加载当前配置（期间 _loading=True，不触发写盘）
+        self._loading = True
+        try:
+            self._load_current_config()
+        finally:
+            self._loading = False
 
     # ---- helpers ----
     def _config_path_resolve(self):
@@ -356,39 +363,94 @@ class PCLSettingsPanel(QWidget):
         for box, cats in getattr(self, "_cat_entries", []):
             box.setVisible(f in cats)
 
+    # ── 自动保存（改动即写盘，不再有「保存」按钮）──────────────────────
+    #  · 防抖：连续拖动滑块只在停下 400ms 后写一次，避免一次拖动写几十遍盘
+    #  · 载入配置期间静默（_loading），否则启动时会把每个键原样回写一遍
+    #  · 隐藏/销毁前 flush —— 换主题会重建本页，定时器随控件一起消失，不 flush 会丢改动
+    #  · **不重启桌宠**：改一项就杀桌宠显然不行；需要重启的项由底部「重启桌宠以生效」显式触发
+    _APIKEY_KEYS = {"deepseek_api_key": "deepseek", "qwen_api_key": "qwen"}
+
+    def _apply_key(self, cfg, key, value):
+        """把「控件键」落到配置文件里的正确位置（个别键不是同名顶层键）"""
+        if key in self._APIKEY_KEYS:
+            cfg.setdefault("APIKEY", {})
+            cfg["APIKEY"][self._APIKEY_KEYS[key]] = value
+        elif key == "qq_master_ids_text":
+            # 逗号/空格分隔的额外主人白名单 → 解析成列表（最多 4 个，连主主人共 5）
+            import re as _re
+            masters = []
+            for part in _re.split(r"[,，;；\s]+", str(value or "")):
+                p = part.strip()
+                if p.isdigit() and p not in masters:
+                    masters.append(p)
+            cfg["qq_master_ids"] = masters[:4]
+        else:
+            cfg[key] = value
+
     def _auto_persist(self, key, value):
-        """单项即时写盘（对话调节/自动登录等不需要点保存）"""
+        """控件改动 → 记入待写集合，防抖后统一落盘"""
+        if self._loading:
+            return
+        self._pending[key] = value
+        self._flush_timer.start()
+
+    def _flush_pending(self):
+        """把待写改动合并写入 config.json（原子写）。返回是否成功。"""
+        if not self._pending:
+            return True
         try:
             p = self._config_path_resolve()
             cfg = {}
             if os.path.isfile(p):
                 with open(p, "r", encoding="utf-8") as f:
                     cfg = json.load(f)
-            cfg[key] = value
+            for k, v in self._pending.items():
+                self._apply_key(cfg, k, v)
             tmp = p + ".tmp"
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(cfg, f, ensure_ascii=False, indent=2)
             os.replace(tmp, p)
+            self._pending.clear()
+            import time as _t
+            self._status_lbl.setText("已自动保存 ✓ " + _t.strftime("%H:%M:%S"))
+            return True
         except Exception as e:
-            print(f"[PCL] 自动保存失败 {key}: {e}")
+            print(f"[PCL] 自动保存失败: {e}")
+            try:
+                self._status_lbl.setText(f"⚠ 保存失败：{str(e)[:40]}")
+            except Exception:
+                pass
+            return False
 
-    def _wire_autosave(self, kind, key):
-        """把控件改动即时绑定到写盘（spin/slider/text）"""
+    def _wire_autosave(self, key):
+        """按控件类型接线（统一在一处，省得每加一个控件就漏接一次）"""
         try:
             w = self._widgets.get(key)
-            if w is None:
-                return
-            if kind == "spin":
-                w.valueChanged.connect(lambda v, k=key: self._auto_persist(k, int(v)))
-            elif kind == "slider":
+            if isinstance(w, tuple):                      # 滑块：(slider, options, label)
                 slider, options, _lbl = w
                 slider.valueChanged.connect(
-                    lambda v, o=options, k=key: self._auto_persist(k, o[v]))
-            else:
+                    lambda v, k=key, o=options: self._auto_persist(k, o[v]))
+            elif isinstance(w, QDoubleSpinBox):
+                w.valueChanged.connect(lambda v, k=key: self._auto_persist(k, float(v)))
+            elif isinstance(w, QSpinBox):
+                w.valueChanged.connect(lambda v, k=key: self._auto_persist(k, int(v)))
+            elif isinstance(w, QComboBox):
+                w.currentTextChanged.connect(
+                    lambda t, k=key: self._auto_persist(k, str(t).strip()))
+            elif isinstance(w, QLineEdit):
+                # 文本类（密钥/名字/QQ 号）：编辑完成（回车或失焦）时保存，不逐字写盘
                 w.editingFinished.connect(
-                    lambda k=key: self._auto_persist(k, w.text().strip()))
+                    lambda k=key: self._auto_persist(k, self._widgets[k].text().strip()))
         except Exception as e:
             print(f"[PCL] 自动保存绑定失败 {key}: {e}")
+
+    def hideEvent(self, event):
+        """本页被隐藏/即将销毁（换主题会重建）→ 先把待写改动落盘，别丢"""
+        try:
+            self._flush_pending()
+        except Exception:
+            pass
+        super().hideEvent(event)
 
     def _section(self, text, icon="🎯"):
         """设置页分区标题（左侧主题色条 + 半透明底，视觉上把功能归类）"""
@@ -573,77 +635,6 @@ class PCLSettingsPanel(QWidget):
             idx = options.index(val) if val in options else 0
             slider.setValue(idx)
             lbl.setText(lbl.text().split("：")[0] + f"：{options[idx]}")
-
-    def _save_config(self):
-        try:
-            path = self._config_path_resolve()
-            with open(path, "r", encoding="utf-8") as f:
-                cfg = json.load(f)
-
-            cfg["user_name"] = self._get_text("user_name")
-            cfg.setdefault("APIKEY", {})
-            cfg["APIKEY"]["deepseek"] = self._get_text("deepseek_api_key")
-            cfg["APIKEY"]["qwen"] = self._get_text("qwen_api_key")
-
-            cfg["model_type"] = self._get_slider("model_type")
-            cfg["gpu_accel"] = self._get_slider("gpu_accel")
-            cfg["short_model_name"] = self._get_combo("short_model_name")
-            cfg["tts_type"] = self._get_slider("tts_type")
-            cfg["portrait"] = self._get_slider("portrait")
-            cfg["screen_type"] = self._get_slider("screen_type")
-            cfg["voice_trigger"] = self._get_slider("voice_trigger")
-            cfg["voice_synthesis_enable"] = self._get_slider("voice_synthesis_enable")
-            cfg["short_tts_gpu"] = self._get_slider("short_tts_gpu")
-            cfg["longtts_gpu"] = self._get_slider("longtts_gpu")
-            cfg["portrait_auto_switch"] = self._get_slider("portrait_auto_switch")
-            cfg["live2d_enabled"] = self._get_slider("live2d_enabled")
-            cfg["longtext_enabled"] = self._get_slider("longtext_enabled")
-            cfg["longtext_model"] = self._get_slider("longtext_model")
-            cfg["longtext_model_name"] = self._get_combo("longtext_model_name")
-            cfg["vision_model_name"] = self._get_combo("vision_model_name")
-            cfg["reasoning_level"] = self._get_slider("reasoning_level")
-            cfg["qq_owner_id"] = self._get_text("qq_owner_id")
-            # 额外主人白名单：解析逗号/空格分隔数字，去重，最多 4 个（含主主人总计 ≤5）
-            _masters = []
-            import re as _re
-            for _part in _re.split(r"[,，;；\s]+", self._get_text("qq_master_ids_text")):
-                _p = _part.strip()
-                if _p.isdigit() and _p not in _masters:
-                    _masters.append(_p)
-            cfg["qq_master_ids"] = _masters[:4]
-            cfg["qq_enabled"] = self._get_slider("qq_enabled")
-            cfg["qq_send_sticker"] = self._get_slider("qq_send_sticker")
-            cfg["qq_send_voice"] = self._get_slider("qq_send_voice")
-            cfg["qq_vision_enabled"] = self._get_slider("qq_vision_enabled")
-            cfg["qq_allow_groups"] = self._get_slider("qq_allow_groups")
-            cfg["qq_offline_enable"] = self._get_slider("qq_offline_enable")
-            cfg["qq_private_enable"] = self._get_slider("qq_private_enable")
-            cfg["qq_private_reply_stranger"] = self._get_slider("qq_private_reply_stranger")
-            cfg["qq_private_reply_friend"] = self._get_slider("qq_private_reply_friend")
-            cfg["qq_private_master_only"] = self._get_slider("qq_private_master_only")
-            cfg["qq_auto_offline_enable"] = self._get_slider("qq_auto_offline_enable")
-            cfg["qq_lively_enable"] = self._get_slider("qq_lively_enable")
-            cfg["wechat_enabled"] = self._get_slider("wechat_enabled")
-            cfg["wechat_send_voice"] = self._get_slider("wechat_send_voice")
-            cfg["wechat_owner_id"] = self._get_text("wechat_owner_id")
-
-            for k in ["screen_interval", "screen_index", "idle_thinking_minutes", "idle_away_minutes",
-                      "qq_auto_offline_minutes", "qq_lively_interval",
-                      "qq_max_reply_chars", "qq_max_replies_per_conversation"]:
-                w = self._widgets.get(k)
-                if isinstance(w, QSpinBox): cfg[k] = w.value()
-            w = self._widgets.get("DEFAULT_PORTRAIT_SCREEN_RATIO")
-            if isinstance(w, QDoubleSpinBox): cfg["DEFAULT_PORTRAIT_SCREEN_RATIO"] = w.value()
-
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(cfg, f, ensure_ascii=False, indent=2)
-
-            # 重启桌宠
-            self._restart_pet()
-            show_save_toast(True)
-        except Exception as e:
-            print(f"[PCL] 保存配置失败: {e}")
-            show_save_toast(False)
 
     def _get_text(self, key):
         w = self._widgets.get(key)
