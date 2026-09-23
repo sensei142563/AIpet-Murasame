@@ -164,6 +164,15 @@ def cloud_talk(history: list, user_input: str, role: str):
     except Exception:
         pass
 
+    # 游戏模式：她能自己上手玩（回合制/挂机/刷材料）
+    try:
+        from tool import game as _gm4
+        _grules = _gm4.prompt_rules()
+        if _grules:
+            messages.append({"role": "system", "content": _grules})
+    except Exception:
+        pass
+
     # 插件：主人自己装的能力（【插件:标记】参数）
     try:
         from tool import plugins as _plg3

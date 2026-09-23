@@ -535,6 +535,12 @@ class Murasame(QLabel):
                         finish=lambda s, ok=True: self._task_finish.emit(str(s), bool(ok)))
         except Exception as _etn:
             print(f"[桌宠] ⚠ 注册任务循环回调失败: {_etn}")
+        try:      # 游戏模式也用同一套状态/收尾通道
+            from tool import game as _gmn
+            _gmn.set_ui(status=lambda s: self._task_status.emit(str(s)),
+                        finish=lambda s, ok=True: self._task_finish.emit(str(s), bool(ok)))
+        except Exception as _egn:
+            print(f"[桌宠] ⚠ 注册游戏回调失败: {_egn}")
 
         # 勿扰模式：开启后关闭截图与空闲检测，并禁止主动搭话
         self._dnd_enabled = False
@@ -2010,6 +2016,43 @@ class Murasame(QLabel):
         except Exception as _e2:
             print(f"[桌宠] ⚠ 自主要求看屏幕判断失败: {_e2}")
 
+        # ── 游戏模式（她自己上手玩：回合制/挂机/刷材料）──
+        try:
+            from tool.game import GAME_MARK
+            from tool import game as _gm
+            from classes.Worker_class import _gm_pending
+            if GAME_MARK in "".join(str(x) for x in (reply or [])):
+                _greq = _gm_pending.pop(0) if _gm_pending else ""
+                _gm_pending[:] = []
+                _acts = _gm.parse(str(_greq or ""))
+                if _acts:
+                    _kind, _arg = _acts[0]
+                    if _kind == "stop":
+                        _was = _gm.running()
+                        _gm.stop("主人叫停")
+                        _msg = "好，停了。" if _was else "我没在玩呀。"
+                    elif _kind == "list":
+                        from tool.game import summary_text as _gsum
+                        _msg = "我会玩的：" + chr(10) + _gsum()
+                    elif _kind == "macro":
+                        print(f"[桌宠] 🎮 固定循环：{_arg[:40]}")
+                        _msg = _gm.macro(_arg)
+                    else:
+                        _p = _gm._parse_start(_arg)
+                        _hist = _gm.recall(_p["name"])
+                        _p["goal"] = _p["goal"] or str(_hist.get("goal") or "")
+                        _p["controls"] = _p["controls"] or str(_hist.get("controls") or "")
+                        _msg = _gm.start(_p["name"], _p["goal"], _p["controls"],
+                                         minutes=_p.get("minutes"), pet_name=self.pet_name)
+                    print("[桌宠] 🎮 游戏：" + str(_msg)[:60])
+                    self._request_dialog.emit(
+                        "（系统提示：你刚接下了「陪主人玩游戏」这件事，结果：" + str(_msg) +
+                        "。用你自己的口吻跟他说一句（一两句），别念标记、别提系统提示。）",
+                        "user", False)
+                    return
+        except Exception as _eg:
+            print(f"[桌宠] ⚠ 游戏处理失败: {_eg}")
+
         # ── 插件（主人自己装的能力，标记长这样：【插件:天气】北京）──
         try:
             from classes.Worker_class import _pl_pending
@@ -2382,6 +2425,13 @@ class Murasame(QLabel):
             pass
         if role == "user":
             self._last_user_ts = time.time()   # 自主学习用它判断"主人是不是刚说过话"
+            try:      # 她在玩游戏时，主人一开口就停下来让位
+                from tool import game as _gm2
+                if _gm2.running():
+                    _gm2.stop("主人开口说话了")
+                    print("[桌宠] 🎮 主人说话 → 先停手让位")
+            except Exception:
+                pass
             # 心情/好感：被夸会高兴、被凶会难过（人设里她在意的词）
             try:
                 from tool import state as _st3
@@ -3006,6 +3056,16 @@ class Murasame(QLabel):
                 _act_seen = item(_ai, "她的状态 / 记忆 / 提醒")
                 _act_seen.setToolTip("单独开一个小窗口，显示她记住的事、学到的东西和最近的日记。")
                 _act_seen.triggered.connect(self._show_learned)
+                try:
+                    from tool import game as _gm3
+                    _act_gm = item(_ai, "允许她玩游戏", checked=_gm3.enabled())
+                    _act_gm.setToolTip("开启后你让她玩（「你帮我打一局」）她真的会上手：" + chr(10) +
+                                       "回合制/战棋/卡牌/挂机/刷材料能玩；动作类（火影、FPS）玩不了。" + chr(10) +
+                                       "玩的时候按 F12 或跟她说「停」立刻收手；主人一开口她也会停。" + chr(10) +
+                                       "默认最多 10 分钟，操作方式会记住（下次不用再教）。")
+                    _act_gm.triggered.connect(lambda on=False: _gm3.set_enabled(bool(on)))
+                except Exception:
+                    pass
                 try:
                     from tool import plugins as _plg2
                     _act_pl = item(_ai, "启用插件", checked=_plg2.enabled())

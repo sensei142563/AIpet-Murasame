@@ -672,7 +672,8 @@ def _resolve_key(name: str):
     return getattr(Key, n, None)
 
 
-def execute(actions: list, dry_run: bool = False, auto: bool = False, notify=None) -> list:
+def execute(actions: list, dry_run: bool = False, auto: bool = False, notify=None,
+            no_dup: bool = False) -> list:
     """执行动作。dry_run=True 只做校验和日志，不动真实键鼠（自测用）。
 
     auto=True 表示这是**她自己主动**要动手（主人没开口）：
@@ -752,7 +753,7 @@ def execute(actions: list, dry_run: bool = False, auto: bool = False, notify=Non
             _drop(f"主人叫停了（{_abort[0]}），剩下的动作我没做")
             break
         # ── 重复抑制：同一个地方连着点太多次才算"卡住"（允许两次） ──
-        if not dry_run and _is_dup(a):
+        if not dry_run and not no_dup and _is_dup(a):
             _dup_hits[0] += 1
             _log_line(f"⏭ 这个地方已经点过两次了（{_act_key(a)}）→ 跳过，别再重复")
             _drop("你在反复点同一个地方（%s）。它已经点过了，再点也不会有变化——"

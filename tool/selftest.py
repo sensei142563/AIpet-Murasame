@@ -32,7 +32,7 @@ def check_modules(results):
             "tool.pc_info", "tool.self_learn", "tool.music", "tool.uia", "tool.perf_guard",
             "tool.state", "tool.attention", "tool.experience", "tool.autonomy",
             "tool.reminder", "tool.care", "tool.desire",
-            "tool.web_search", "tool.plugins", "classes.Worker_class", "classes.murasame_class",
+            "tool.web_search", "tool.plugins", "tool.game", "classes.Worker_class", "classes.murasame_class",
             "classes.learn_window", "main")
     bad = []
     for m in mods:
@@ -77,6 +77,9 @@ def check_wiring(results):
         ("会议静音", "会议/演示中，保持安静" in src_m),
         ("动机层（她自己想做什么）", "她自己想" in src_m),
         ("联网搜索标记", "SEARCH_MARK" in src_w),
+        ("游戏标记", "GAME_MARK" in src_w),
+        ("游戏模式处理", "GAME_MARK" in inspect.getsource(M.Murasame.on_reply)),
+        ("主人说话停游戏", "先停手让位" in inspect.getsource(M.Murasame.start_thread)),
         ("插件标记", "【插件:" in src_w),
         ("插件执行", "_plugin_and_reply" in src_m or hasattr(M.Murasame, "_plugin_and_reply")),
         ("自主活跃度菜单", "自主活跃度" in src_m),
@@ -103,7 +106,9 @@ def check_runtime(results):
     _try(lambda: (autonomy.tier_of_action({"type": "click"}) == "safe", autonomy.summary_text().splitlines()[0][:40]), "行动分档（autonomy）", results)
     _try(lambda: (bool(reminder.parse("【提醒】30分钟后 喝水")), reminder.list_text().splitlines()[0]), "提醒（reminder）", results)
     _try(lambda: (care.companion_days() >= 1, care.summary_text()[:50]), "陪伴/关怀（care）", results)
-    from tool import web_search, plugins
+    from tool import web_search, plugins, game as _game
+    _try(lambda: (True, "开关 %s｜解析 %s" % (_game.enabled(), _game.parse("【游戏】连按 J 3 次"))) ,
+         "游戏模式（game）", results)
     _try(lambda: (True, "开关 %s｜Bing/百度可用（实测）" % web_search.enabled()), "联网搜索（web_search）", results)
     _try(lambda: (True, "开关 %s｜已装 %d 个：%s" % (
         plugins.enabled(), len(plugins.list_plugins()),
