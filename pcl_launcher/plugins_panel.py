@@ -148,18 +148,44 @@ def set_enabled(meta, enabled: bool) -> bool:
     return True
 
 
+def _time_guard_pidfile() -> str:
+    return os.path.join(_app_base_dir(), "data", "time_sync_guard.pid")
+
+
+def _time_guard_pid():
+    """心跳文件里记录的守护 PID（没有/格式不对返回 None）"""
+    try:
+        with open(_time_guard_pidfile(), "r", encoding="utf-8") as f:
+            return int(f.read().split()[0])
+    except Exception:
+        return None
+
+
+def _time_guard_running() -> bool:
+    """时间同步守护是否在跑 —— 读它的**心跳文件**（守护每个检测周期刷新一次）。
+
+    ⚠ 这里有两条走过的弯路，别再退回：
+      1. 起 PowerShell 扫进程（Get-CimInstance）：实测一次 **500ms+**，而它在**插件页
+         构建时每张卡片都会调到**（_make_card → is_enabled → _tool_running）→ 页面被拖到 2 秒；
+      2. 连它的单实例端口锁（29123）：这台机器上 connect_ex 返回 WSAEWOULDBLOCK
+         （不是立刻拒绝）→ 每次都要等满超时；而守护 listen(1) 从不 accept，
+         探测连接会把 backlog 占满 → **即使守护在跑也会探测失败**（误判）。
+    心跳文件只要一次 os.stat：微秒级，且不会误判（守护每 180s 刷一次，10 分钟没刷算没在跑）。
+    """
+    import time as _t
+    try:
+        p = _time_guard_pidfile()
+        if not os.path.isfile(p):
+            return False
+        return (_t.time() - os.path.getmtime(p)) < 600
+    except Exception:
+        return False
+
+
 def _tool_running(meta) -> bool:
     if meta.get("id") != "time_guard":
         return True
-    try:
-        out = subprocess.run(
-            ["powershell", "-NoProfile", "-Command",
-             "(Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'python(w)?.exe' -and "
-             "$_.CommandLine -like '*time_sync_guard.py*' } | Measure-Object).Count"],
-            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10)
-        return out.stdout.strip().startswith(("1", "2", "3"))
-    except Exception:
-        return False
+    return _time_guard_running()
 
 
 def _time_guard_set(enabled: bool) -> bool:
@@ -181,14 +207,20 @@ def _time_guard_set(enabled: bool) -> bool:
             subprocess.Popen([pyw, os.path.join(base, "time_sync_guard.py")],
                              cwd=base, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             return True
-        # 停用：结束守护进程
-        subprocess.run(
-            ["powershell", "-NoProfile", "-Command",
-             "Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'python(w)?.exe' -and "
-             "$_.CommandLine -like '*time_sync_guard.py*' } | "
-             "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"],
-            capture_output=True, timeout=15,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        # 停用：优先按心跳文件里的 PID 直接结束（毫秒级）；没有心跳文件才退回扫进程
+        pid = _time_guard_pid()
+        if pid:
+            subprocess.run(["taskkill", "/F", "/PID", str(pid)],
+                           capture_output=True, timeout=10,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        else:
+            subprocess.run(
+                ["powershell", "-NoProfile", "-Command",
+                 "Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'python(w)?.exe' -and "
+                 "$_.CommandLine -like '*time_sync_guard.py*' } | "
+                 "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"],
+                capture_output=True, timeout=15,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         return True
     except Exception:
         return False
