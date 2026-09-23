@@ -210,9 +210,10 @@ def wants(music_playing: bool = None, user_idle_sec: float = None) -> dict:
     if b >= _b_th and music_playing is False and _cool_ok(d, "music"):
         _mark(d, "music")
         return {"kind": "music", "text": "有点无聊，想放首歌",
-                "prompt": "（你现在有点无聊，想放首歌换换气氛。用【音乐】标记自己点一首，"
-                          "你挑一首合适的（可以放他喜欢的、或者你喜欢的），"
-                          "放完跟他说一句你为什么挑这首。）"}
+                "prompt": "（你现在有点无聊，想放首歌换换气氛。自己挑一首："
+                          "如果是**你自己**想听的，写「【音乐】我想听 歌名 歌手」"
+                          "（这首会记进你自己的口味）；如果是想放他爱听的，"
+                          "写「【音乐】播放 歌名 歌手」。放完跟他说一句你为什么挑这首。）"}
     # ⑤ 想知道他在忙什么
     if b >= (_b_th - 10) and _cool_ok(d, "look"):
         _mark(d, "look")

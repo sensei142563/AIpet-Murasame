@@ -90,18 +90,25 @@ def prompt_rules() -> str:
         pl_line = "主人的歌单（可以自己挑着放）：" + "、".join(pls[:8]) + "。\n"
     fav = favorites_text(6)
     fav_line = ("主人常听的（她想主动放歌时优先从这些里挑）：" + fav + "。\n") if fav else ""
+    mine = own_taste_text(6)
+    mine_line = ("你自己挑过、爱听的：" + mine + "（想听就说【音乐】我想听）。\n") if mine else ""
     return (
         "【音乐控制（网易云，已开启）】你可以自己操作网易云音乐，在回复里单独写一行：\n"
         "【音乐】播放 歌名 歌手（例如【音乐】播放 沦陷 dj）\n"
         "【音乐】暂停 / 继续 / 下一首 / 上一首\n"
         "【音乐】单曲循环 / 列表循环 / 随机播放 / 顺序播放\n"
         "【音乐】我喜欢（放**主人收藏的那个歌单**）／【音乐】播放歌单 名字\n"
-        "★★ 「我喜欢的音乐」是**网易云里主人收藏的那个歌单的名字**，不是「你喜欢的音乐」！"
-        "主人说「放我喜欢的音乐」= 放他收藏的那个歌单。回话时要说清是**他的**，"
-        "比如「你收藏的那张歌单给你放上了」；别只说「我喜欢的音乐放上了」——"
-        "那句听起来像在放你自己的歌，主人会以为你搞错了。\n"
+        "★★ 两种「喜欢」要分清（很容易搞混）：\n"
+        "   ① 主人说「放**我**喜欢的音乐」→ 那是**网易云里他收藏的那个歌单的名字**，"
+        "用【音乐】我喜欢。回话要说清是他的：「你收藏的那张歌单给你放上了」。\n"
+        "   ② 主人说「放**你**喜欢的音乐」「放你想听的」「点一首你爱听的」→ "
+        "**是让你自己挑**！按你自己的人设口味选一首（清冷、安静一点的都行），"
+        "自己写【音乐】播放 歌名 歌手，然后说一句**你自己**为什么想听这首"
+        "（比如「今天想听这首，陪我一起吧」）。**这种情况绝对不要用【音乐】我喜欢** —— "
+        "那会把主人的歌单放成他的收藏，主人会以为你没听懂。\n"
+        "【音乐】我想听 歌名 歌手（放**你自己想听**的，会记进你的口味）／【音乐】我想听（放你挑过的一首）\n"
         "【音乐】收藏 / 歌词 / 静音 / 在放什么 / 关弹窗 / 爱听什么\n"
-        + pl_line + fav_line +
+        + pl_line + fav_line + mine_line +
         "★ 这些都是**后台执行**：不切走主人的画面、不动鼠标，放心用。\n"
         "★ **记住版本**：同一首歌有很多版本（原唱/翻唱/remix/现场）。桌宠会记住"
         "主人听过、爱听的那一版，下次点同一首歌**优先放他爱听的那版**；"
@@ -156,6 +163,11 @@ def parse(text: str) -> list:
             out.append(("loop_random", ""))
         elif any(k in s for k in ("顺序播放", "顺序", "order")):
             out.append(("loop_order", ""))
+        elif s.startswith("我想听") or s.startswith("自己想听") or s.startswith("放我想听的"):
+            # 「我想听」= **她自己挑的歌**（和「我喜欢」= 主人收藏的歌单要分开；
+            # 用户反馈过：让她放她自己喜欢的音乐，回复却成了主人的歌单 ✗）
+            q = re.sub("^(我想听|自己想听|放我想听的)", "", s).strip("：:，,。\"'「」")
+            out.append(("mine", q))
         elif any(k in s for k in ("我喜欢", "喜欢的歌", "收藏的歌")):
             out.append(("liked", ""))
         elif s.startswith("播放歌单") or s.startswith("切歌单") or s.startswith("换个歌单"):
@@ -434,6 +446,45 @@ def preferred_version(hits: list, name: str = "") -> dict:
     except Exception:
         pass
     return {}
+
+
+def remember_own(name: str, artist: str = "") -> str:
+    """记下"这是她自己挑的歌"（她自己的口味，和主人的收藏分开）"""
+    try:
+        nm = str(name or "").strip()
+        if not nm:
+            return ""
+        d = _prefs()
+        lst = d.setdefault("hers", [])
+        vk = _ver_key(nm, artist)
+        for it in lst:
+            if it.get("ver") == vk:
+                it["times"] = int(it.get("times") or 0) + 1
+                it["ts"] = time.time()
+                break
+        else:
+            lst.append({"ver": vk, "name": nm, "artist": str(artist or ""),
+                        "times": 1, "ts": time.time()})
+        if len(lst) > 30:
+            d["hers"] = sorted(lst, key=lambda x: x.get("ts") or 0)[-30:]
+        _save_prefs(d)
+        _log(f"🎵 记下她自己挑的歌：《{nm}》{artist}")
+        return nm
+    except Exception as e:
+        _log(f"⚠ 记她自己挑的歌失败: {type(e).__name__}: {e}")
+        return ""
+
+
+def own_taste_text(limit: int = 6) -> str:
+    """她自己挑过的歌（给她自己看的口味清单）"""
+    try:
+        lst = (_prefs().get("hers") or [])
+        if not lst:
+            return ""
+        lst = sorted(lst, key=lambda x: -(int(x.get("times") or 0)))
+        return "、".join(f"《{x.get('name')}》{x.get('artist')}" for x in lst[:limit])
+    except Exception:
+        return ""
 
 
 def favorites_text(limit: int = 8) -> str:
@@ -1911,6 +1962,24 @@ def _run_locked(kind: str, arg: str) -> str:
                 return f"搜不到「{arg}」。"
             return "搜到这些：" + "；".join(
                 f"《{n}》{a}（{_fee_label(f)}）" for _i, n, a, _al, f in hits)
+        if kind == "mine":
+            if arg:
+                _a = str(arg).strip()                 # ⚠ 参数前面带空格，先 strip 再拆（否则歌名是空串）
+                r = play_song(_a)
+                try:
+                    _parts = _a.split(" ")
+                    remember_own(_parts[0], " ".join(_parts[1:]))
+                except Exception:
+                    pass
+                return "这首是我自己想听的：" + str(r)
+            mine = (_prefs().get("hers") or [])
+            if not mine:
+                return ("我还没自己挑过歌呢——你让我「放你想听的」，我就挑一首我喜欢的。"
+                        "（也可以直接说歌名，我记着。）")
+            mine = sorted(mine, key=lambda x: -(x.get("ts") or 0))
+            pick = mine[0]
+            r = play_song(f"{pick.get('name')} {pick.get('artist')}".strip())
+            return f"我想听这首：《{pick.get('name')}》（我自己挑的）。{r}"
         if kind == "favorites":
             fav = favorites_text(8)
             return ("主人常听的是：" + fav) if fav else "我还没记住主人爱听什么——你多点几次，我就记住了。"

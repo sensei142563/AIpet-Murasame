@@ -185,6 +185,10 @@ def check_wiring(results):
             __import__("tool.game", fromlist=["x"])._loop)
          and "正在操作电脑……\")" in inspect.getsource(
             __import__("tool.pc_task", fromlist=["x"])._loop)),
+        ("音乐：她自己的口味（我想听）", "def remember_own" in inspect.getsource(
+            __import__("tool.music", fromlist=["x"]))
+         and "def own_taste_text" in inspect.getsource(__import__("tool.music", fromlist=["x"]))
+         and '("mine"' in inspect.getsource(__import__("tool.music", fromlist=["x"]).parse)),
         ("过程说话（say 通道）", "def _say_progress" in inspect.getsource(M.Murasame)
          and "say=lambda s: self._say_progress" in inspect.getsource(M.Murasame)),
         ("游戏：关掉了就停手并如实说", "_window_alive(_state.get" in inspect.getsource(
