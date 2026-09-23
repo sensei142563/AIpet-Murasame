@@ -290,6 +290,27 @@ QPushButton:disabled {{ color: {Gray3.name()}; border-color: {Color5.name()}; }}
 """
 
 
+def _hold_btn_qss(accent: str) -> str:
+    """「按住说话」这类长按按钮：**按下时必须有明显变化**。
+
+    原来按住没有任何视觉反馈，用户不知道有没有在录（桌宠那边其实会弹出"正在录音"，
+    但启动器这侧一片安静）。这里按下时换成强调色实心 + 换文字（见 HomePage）。
+    """
+    a = QColor(accent)
+    return f"""
+QPushButton {{
+    background: {SF(0.08)}; color: {Color1.name()};
+    border: 1px solid {Color5.name()}; border-radius: 9px; padding: 9px 16px;
+    font-size: 13px; font-family: "{silicon_ui.M.font}";
+}}
+QPushButton:hover {{ background: {SF(0.16)}; border-color: {Color3.name()}; }}
+QPushButton:pressed {{
+    background: {accent}; color: white; border: 1px solid {accent}; font-weight: bold;
+}}
+QPushButton:disabled {{ color: {Gray3.name()}; border-color: {Color5.name()}; }}
+"""
+
+
 # ══════════════════════ 总览页 ══════════════════════
 class HomePage(QWidget):
     """总览：启动/关闭桌宠、QQ、微信 + 控制面板 + 运行状态"""
@@ -400,12 +421,15 @@ class HomePage(QWidget):
             self._action_btns.append((b, feat))
             act_row.addWidget(b)
         # 按住说话：press/release 两个事件
+        # ⚠ 桌宠侧只有 config 的 voice_trigger="true" 时才真的录音（main.py:910），
+        #   否则按下去什么都不发生（只打印一行"已关闭"）。所以这里按下就先看配置，
+        #   关着就**直接说清楚**，而不是装作在录音。
         self.btn_voice = QPushButton("🎤 按住说话")
-        self.btn_voice.setStyleSheet(_ghost_btn_qss())
+        self.btn_voice.setStyleSheet(_hold_btn_qss(accent))
         self.btn_voice.setMinimumHeight(38)
         self.btn_voice.setToolTip("按住不放说话，松开结束并识别")
-        self.btn_voice.pressed.connect(lambda: _send_control("voice/start"))
-        self.btn_voice.released.connect(lambda: _send_control("voice/end"))
+        self.btn_voice.pressed.connect(self._on_voice_press)
+        self.btn_voice.released.connect(self._on_voice_release)
         self._action_btns.append((self.btn_voice, "voice"))
         act_row.addWidget(self.btn_voice)
         # 重置桌宠位置：桌宠跑到屏幕外 / 找不到时一键回到屏幕中央
@@ -563,6 +587,7 @@ class HomePage(QWidget):
         try:
             alive, tts_ok, ctrl, cfg = getattr(self, "_probe_result",
                                                (False, False, {}, {}))
+            self._last_cfg = cfg          # 供「按住说话」判断 voice_trigger 是否开启
             self._probe_busy = False
             self.chip_pet.set_text("桌宠：运行中" if alive else "桌宠：未运行", alive)
             # 「正在关闭/启动中」期间不要被状态刷新覆盖文案
@@ -657,6 +682,45 @@ class HomePage(QWidget):
         _send_control(feat)
         QTimer.singleShot(1200, self.refresh_status)
         QTimer.singleShot(4000, self.refresh_status)
+
+    # ── 按住说话 ──
+    def _voice_enabled(self) -> bool:
+        """语音识别（voice_trigger）在配置里开着吗？这就是桌宠侧真正读的那个键。"""
+        cfg = getattr(self, "_last_cfg", None) or {}
+        return str(cfg.get("voice_trigger") or "").strip().lower() == "true"
+
+    def _on_voice_press(self):
+        """按下：开着就显示"录音中"，关着就直接说清楚为什么没反应"""
+        self._voice_recording = True
+        if not self._voice_enabled():
+            self.status_lbl.setText("语音识别是关的 → 设置 → 语音合成与识别 → 打开「语音识别」，"
+                                    "再按住说话才有效。")
+            self.btn_voice.setText("🎤 按住说话（未开启）")
+            return
+        self.btn_voice.setText("🎤 录音中…（松开结束）")
+        self.status_lbl.setText("正在录音…… 松开鼠标结束并识别。")
+        _send_control("voice/start")
+
+    def _on_voice_release(self):
+        """松开：显示"识别中…"，几秒后回到初始文案（识别结果由桌宠自己弹出来）"""
+        was = getattr(self, "_voice_recording", False)
+        self._voice_recording = False
+        if not self._voice_enabled():
+            self.btn_voice.setText("🎤 按住说话")
+            return
+        if was:
+            _send_control("voice/end")
+            self.btn_voice.setText("🎤 识别中…")
+            self.status_lbl.setText("录音结束，正在识别……（识别完桌宠会直接回复）")
+        QTimer.singleShot(6000, self._voice_reset)
+
+    def _voice_reset(self):
+        try:
+            self.btn_voice.setText("🎤 按住说话")
+            if self.status_lbl.text().startswith(("录音结束", "正在录音")):
+                self.status_lbl.setText("")
+        except Exception:
+            pass
 
     # ── 启动/关闭 ──
     # ── 启动/关闭：进行中按钮置灰 + 文案，防止连点 ──
