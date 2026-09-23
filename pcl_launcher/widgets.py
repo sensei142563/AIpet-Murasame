@@ -1641,6 +1641,12 @@ class PCLPetManager(QScrollArea):
         btn_row = QHBoxLayout()
         btn_row.setSpacing(int(8*S))
 
+        # 一行按钮里只该有"一个红"（配色语义，别再改回去）：
+        #   绿        = 设为活动（正向）
+        #   紫        = 立绘工坊（创作）。**固定色**，不跟随主题——crimson/red 主题的
+        #               主题色本身偏红，用它会被误读成"危险"
+        #   红        = 删除（唯一的危险动作）
+        #   白底描边  = 打开文件夹 / 设置（日常工具，不抢语义）
         if not p.get("is_active"):
             btn_active = QPushButton("⭐ 设为活动")
             btn_active.setStyleSheet(self._btn_style(GreenDark.name()))
@@ -1648,18 +1654,18 @@ class PCLPetManager(QScrollArea):
             btn_row.addWidget(btn_active)
 
         btn_open = QPushButton("📂 打开文件夹")
-        btn_open.setStyleSheet(self._btn_style(Color3.name()))
+        btn_open.setStyleSheet(self._btn_style_outline(Gray1.name()))
         btn_open.clicked.connect(lambda checked, pid=p["id"]: self._open_dir(pid))
         btn_row.addWidget(btn_open)
 
         # ⚙ 设置：打开桌宠向导（类型/立绘/Live2D/语音/人设 都能改）
         btn_settings = QPushButton("⚙ 设置")
-        btn_settings.setStyleSheet(self._btn_style("#3f8fd8"))
+        btn_settings.setStyleSheet(self._btn_style_outline(Gray1.name()))
         btn_settings.clicked.connect(lambda checked, pid=p["id"]: self._open_pet_wizard(pid))
         btn_row.addWidget(btn_settings)
         # 立绘工坊：换服装/表情/装饰，预览并保存为该角色的默认立绘
         btn_portrait = QPushButton("🎨 立绘工坊")
-        btn_portrait.setStyleSheet(self._btn_style("#c8506e"))
+        btn_portrait.setStyleSheet(self._btn_style("#7a5cd8"))
         btn_portrait.clicked.connect(
             lambda checked, pid=p["id"], nm=p.get("name", ""): self._open_portrait_studio(pid, nm))
         btn_row.addWidget(btn_portrait)
@@ -1803,6 +1809,21 @@ class PCLPetManager(QScrollArea):
                 padding: {int(5*S)}px {int(12*S)}px; font-size: {int(11*S)}px;
                 border-radius: {int(5*S)}px; font-family: 'Microsoft YaHei'; }}
             QPushButton:hover {{ opacity: 0.85; }}
+        """
+
+    @staticmethod
+    def _btn_style_outline(fg):
+        """次要按钮：浅底 + 描边 + 深色字。
+
+        用于"日常工具"类动作（打开文件夹 / 设置）——它们不该抢走
+        彩色按钮（设为活动=绿、立绘工坊=紫、删除=红）的语义。
+        """
+        return f"""
+            QPushButton {{ background: rgba(255,255,255,175); color: {fg};
+                border: 1px solid {Gray5.name()};
+                padding: {int(5*S)}px {int(12*S)}px; font-size: {int(11*S)}px;
+                border-radius: {int(5*S)}px; font-family: 'Microsoft YaHei'; }}
+            QPushButton:hover {{ background: rgba(255,255,255,240); }}
         """
 
     def _set_active(self, pet_id):
