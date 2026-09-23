@@ -3,6 +3,14 @@ PCL 风格 AIpet 启动器入口
 双击 run_launcher.py 或运行: python run_launcher.py
 """
 
+try:  # 控制台被重定向（管道/日志）时 Windows 会用 GBK 编码 stdout，
+    # 打印 emoji 会 UnicodeEncodeError 直接打断进程 → 统一降级成替换字符
+    import sys as _sys
+    _sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    _sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 import os
 import sys
 

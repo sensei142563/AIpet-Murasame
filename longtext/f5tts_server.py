@@ -18,6 +18,14 @@ F5-TTS HTTP 服务 — 长文本模式中文语音合成
 GPU 优先，CPU 回退。
 """
 
+try:  # 控制台被重定向（管道/日志）时 Windows 会用 GBK 编码 stdout，
+    # 打印 emoji 会 UnicodeEncodeError 直接打断进程 → 统一降级成替换字符
+    import sys as _sys
+    _sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    _sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 import io
 import os
 import sys
