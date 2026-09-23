@@ -477,27 +477,6 @@ class QQBotBridge:
             _t.sleep(1)
         return False
 
-    def _ws_auth_headers(self):
-        """NapCat 正向 WS 开启 token 鉴权时的握手头。
-
-        token 来源：config.json 的 qq_napcat_token；**没配就自动去 NapCat 自己的
-        onebot11_*.json 里读**（仅本机地址）——NapCat 重装/重置会随机换 token，
-        自动读取可以免掉"连上就断"这类故障。未拿到 token 时返回 None（兼容未开鉴权的 NapCat）。
-        """
-        token = str(self.cfg.get("napcat_token", "") or "").strip()
-        if not token:
-            try:
-                from qq.qq_config import discover_ws_token
-                token = discover_ws_token(self.ws_url) or ""
-                if token:
-                    self._auto_token = token
-                    self.cfg["napcat_token"] = token      # 本次运行内复用
-            except Exception as e:
-                print(f"[QQBridge] ⚠ 自动获取 token 失败: {e}")
-        if token:
-            return [f"Authorization: Bearer {token}"]
-        return None
-
     def _warn_auth_failed(self, raw: str = ""):
         """识别 NapCat 的 token 鉴权失败（retcode 1403）并说清楚怎么修。
 
@@ -534,7 +513,12 @@ class QQBotBridge:
         while self.running:
             try:
                 print(f"[QQBridge] 连接 NapCat: {self.ws_url}")
-                _header = self._ws_auth_headers(self.napcat_token)
+                # ⚠ 这里必须走 _napcat_token()：它 = config 优先 + 缺省时自动从 NapCat 配置读。
+                #   以前这里传的是 self.napcat_token（只在 __init__ 读一次，不会自动发现），
+                #   而且类里还留着一份同名的旧方法把它盖掉了 → 直接
+                #   "TypeError: _ws_auth_headers() takes 1 positional argument but 2 were given"
+                #   导致 QQ 桥接一次都连不上（用户报的就是这个）。
+                _header = self._ws_auth_headers(self._napcat_token())
                 if _header:
                     self.ws = websocket.create_connection(
                         self.ws_url, timeout=30, enable_multithread=True, header=_header

@@ -1438,27 +1438,6 @@ class SiliconLauncher(QWidget):
         except Exception:
             return default
 
-    def reload_background(self):
-        """实时重建主题背景（透明度/模糊度滑块拖动即生效，无需重启）"""
-        try:
-            if self._media is not None:
-                try:
-                    self._media.stop()
-                except Exception:
-                    pass
-                self._media = None
-            if self._bg_widget is not None:
-                try:
-                    self._bg_widget.hide()
-                    self._bg_widget.deleteLater()
-                except Exception:
-                    pass
-                self._bg_widget = None
-            self._load_background()
-            print("[NewUI] 背景已按新参数重建（实时生效）")
-        except Exception as e:
-            print(f"[NewUI] ⚠ 背景重建失败: {e}")
-
     def _load_background(self):
         """主题背景（图片/视频）：铺满整窗，内容叠在上面"""
         try:
