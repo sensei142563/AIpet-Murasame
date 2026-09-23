@@ -53,6 +53,7 @@ def check_wiring(results):
     import tool.pc_control as PC
     import main as MAIN
     src_m = inspect.getsource(M)
+    QSOUND_OK = ("QSound.stop()" in src_m)
     src_w = inspect.getsource(W)
     src_c = inspect.getsource(C)
     src_ca = inspect.getsource(CA)
@@ -179,6 +180,10 @@ def check_wiring(results):
             __import__("tool.game", fromlist=["x"]))
          and "find_game_window(name)" in inspect.getsource(
             __import__("tool.game", fromlist=["x"]).start)),
+        ("状态等她说完再显示（不挤台词）", "_pending_status" in inspect.getsource(M.Murasame._on_worker_status)
+         and "_flush_pending_status" in src_m
+         and "_flush_pending_status" in inspect.getsource(M.Murasame.__init__)),
+        ("干活时主人说话优先（打断碎碎念）", "_chatter_turn" in src_m and QSOUND_OK),
         ("游戏：找不到就接手最上面那个窗口", "wins[0][0], wins[0][1], False" in inspect.getsource(
             __import__("tool.game", fromlist=["x"]).find_game_window)),
         ("游戏：结果立刻显示（不等模型）", "self.show_text(str(_msg), typing=True)" in inspect.getsource(M.Murasame)

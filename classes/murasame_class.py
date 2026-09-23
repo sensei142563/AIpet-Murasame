@@ -505,11 +505,16 @@ class Murasame(QLabel):
         self.idle_timer = QTimer(self)
         self.idle_timer.setInterval(1000)
         self.idle_timer.timeout.connect(self.check_idle_state)
+        # 顺带：她空闲时把攒下的状态文字（"正在操作电脑……"）显示出来 —— 用户要求
+        # "等他说完话再显示正在进行某某操作"
+        self.idle_timer.timeout.connect(self._flush_pending_status)
         self.idle_timer.start()
 
         # 自主学习 / 电脑近况：每 4 分钟看一眼（内部自己限速：≥20 分钟才动手、
         # 主人刚说完话或她正忙就跳过；都在后台线程，界面不会卡）
         self._last_user_ts = 0.0
+        self._pending_status = ""      # 攒下的状态文字（等她说完再显示）
+        self._chatter_turn = False     # 当前这一轮是不是她自己发起的碎碎念
         self._last_pc_narrate = 0.0
         self._learn_timer = QTimer(self)
         self._learn_timer.setInterval(4 * 60 * 1000)
@@ -1621,12 +1626,33 @@ class Murasame(QLabel):
             print(f"[学习] ⚠ 立即自习失败: {e}")
 
     def _on_worker_status(self, text):
-        """Worker/任务循环报告"正在操作电脑……" → 在对话框显示一行状态（她不是哑巴）"""
+        """Worker/任务循环报告"正在操作电脑……" → 在对话框显示一行状态（她不是哑巴）。
+
+        ★ 用户要求：「应该等他说完话再显示正在进行某某操作」——
+          她正在说话/思考时，状态文字**先存起来**，等她这一轮说完再显示；
+          否则那句话会把她的台词直接挤掉（实测就是这样）。
+        """
         try:
             t = str(text or "").strip()
             if not t:
                 return
+            if self.is_busy_reply():
+                self._pending_status = t
+                return
             self.show_text(t, typing=False)
+        except Exception:
+            pass
+
+    def _flush_pending_status(self):
+        """（主线程定时器调用）她空闲了、且有攒下的状态文字 → 显示出来"""
+        try:
+            t = getattr(self, "_pending_status", "")
+            if not t:
+                return
+            if self.is_busy_reply():
+                return
+            self._pending_status = ""
+            self.show_text(str(t), typing=False)
         except Exception:
             pass
 
@@ -1643,6 +1669,7 @@ class Murasame(QLabel):
             if not text:
                 return
             print(f"[桌宠] 💬 过程中的一句：{text[:50]}")
+            self._chatter_turn = True      # 标记：这条是她自己发起的（主人说话要优先打断它）
             self._request_dialog.emit(
                 "（系统提示：你正在替主人玩游戏/操作电脑，刚刚做到：" + text +
                 "。顺手用你自己的口吻**很短**地说一句（十个字左右就行，别念这句提示、"
@@ -2522,6 +2549,8 @@ class Murasame(QLabel):
         #   （实测日志：[游戏] 开始玩「ATRI」→ [游戏] ⛔ 停止（主人开口说话了）→ 游戏零进展）。
         #   这些提示有统一前缀「（系统提示：」，据此区分。
         _is_internal = str(text or "").lstrip().startswith("（系统提示")
+        if not _is_internal:
+            self._chatter_turn = False     # 主人（或她自己发起之外）真的开口 → 清掉 marker
         if role == "user" and not _is_internal:
             self._last_user_ts = time.time()   # 自主学习用它判断"主人是不是刚说过话"
             try:      # 她在玩游戏时，主人一开口就停下来让位
@@ -2574,6 +2603,32 @@ class Murasame(QLabel):
             _busy = self.is_busy_reply()
             if _busy and role == "user" and self._debug_obey():
                 print("[桌宠] 🛠 调试模式：主人优先 → 立即打断当前回复")
+                _busy = False
+            # ★ 用户要求：「玩游戏/控制电脑/屏幕识别时应该能进行对话」——
+            #   她干活时每几轮会自己顺口说一句，那一轮会把对话管线占住 → 主人的话只能排队。
+            #   主人真的开口时**优先**：把她自己发起的那一轮（chatter/播报）打断，
+            #   立刻回主人（她自己的碎碎念不重要）。
+            if (_busy and role == "user"
+                    and getattr(self, "_chatter_turn", False)):
+                print("[桌宠] 🎤 主人说话优先 → 打断她自己的那一句（干活时不耽误对话）")
+                try:
+                    if self.worker is not None and self.worker.isRunning():
+                        self.worker.stop_all()
+                except Exception:
+                    pass
+                for _fn in (getattr(self, "_stop_stream", None),):
+                    try:
+                        if _fn:
+                            _fn()
+                    except Exception:
+                        pass
+                try:
+                    QSound.stop()
+                except Exception:
+                    pass
+                self._talking = False
+                self._stream_playing = False
+                self._chatter_turn = False
                 _busy = False
             if _busy:
                 if role == "user":
