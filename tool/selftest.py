@@ -179,6 +179,10 @@ def check_wiring(results):
             __import__("tool.game", fromlist=["x"]))
          and "find_game_window(name)" in inspect.getsource(
             __import__("tool.game", fromlist=["x"]).start)),
+        ("游戏：找不到就接手最上面那个窗口", "wins[0][0], wins[0][1], False" in inspect.getsource(
+            __import__("tool.game", fromlist=["x"]).find_game_window)),
+        ("游戏：结果立刻显示（不等模型）", "self.show_text(str(_msg), typing=True)" in inspect.getsource(M.Murasame)
+         or "show_text(str(_msg)" in inspect.getsource(M.Murasame)),
         ("游戏：快进模式（重复上一步提速）", "FAST_REPEAT" in inspect.getsource(
             __import__("tool.game", fromlist=["x"]))
          and "_fast_ok" in inspect.getsource(__import__("tool.game", fromlist=["x"]))),

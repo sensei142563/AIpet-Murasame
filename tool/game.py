@@ -654,6 +654,11 @@ def find_game_window(name: str = "", allow_foreground: bool = True):
                 return hwnd, t, True          # (窗口, 标题, 是不是按名字认出来的)
     if not allow_foreground:
         return 0, "", False
+    # ★ 名字对不上时的兜底：用**最上面那个真窗口**（EnumWindows 是按 Z 序给的，第一个就是
+    #   主人正在看的那个）。以前用"前台窗口"，但主人往往是先点桌宠说话 → 前台就是桌宠自己
+    #   （被过滤掉）→ 回退永远为空 → 明明开着游戏也说"没找到"（用户反馈"没反应"）。
+    if wins:
+        return wins[0][0], wins[0][1], False
     fg_h, fg_t = _foreground_window()
     if fg_h:
         return fg_h, fg_t, False
@@ -694,8 +699,12 @@ def start(name: str, goal: str = "", controls: str = "", minutes: int = None,
     mins = float(minutes or DEFAULT_MINUTES)
     _start_hotkey()
     threading.Thread(target=_loop, args=(mins, pet_name), daemon=True).start()
-    _log(f"开始玩「{name}」→ 窗口《{title[:40]}》(hwnd={hwnd})")
-    return (f"好，我来玩「{name}」（窗口是《{title[:30]}》）——我大概十几秒动一次手，"
+    _log(f"开始玩「{name}」→ 窗口《{title[:40]}》(hwnd={hwnd}，按名字认的={_by_name})")
+    if _by_name:
+        return (f"好，我来玩「{name}」（窗口是《{title[:30]}》）——我大概十几秒动一次手，"
+                f"打不过或者你觉得烦就按 F12，或者直接跟我说「停」。")
+    # 名字没对上、拿的是最上面那个窗口 → 说清楚拿到的是哪个，别让主人以为搞错了
+    return (f"我没找到叫「{name}」的窗口，看到你开着《{title[:30]}》，就先玩这个了——"
             f"打不过或者你觉得烦就按 F12，或者直接跟我说「停」。")
 
 

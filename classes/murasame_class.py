@@ -2114,6 +2114,13 @@ class Murasame(QLabel):
                         _msg = _gm.start(_p["name"], _p["goal"], _p["controls"],
                                          minutes=_p.get("minutes"), pet_name=self.pet_name)
                     print("[桌宠] 🎮 游戏：" + str(_msg)[:60])
+                    # ★ 先把结果**直接显示**在对话框（不等模型）：她忙的时候那句会被排队，
+                    #   主人会以为"点了没反应"（用户反馈）。这样至少立刻看得到发生了什么。
+                    try:
+                        self._talking = False
+                        self.show_text(str(_msg), typing=True)
+                    except Exception:
+                        pass
                     self._request_dialog.emit(
                         "（系统提示：你刚接下了「陪主人玩游戏」这件事，结果：" + str(_msg) +
                         "。用你自己的口吻跟他说一句（一两句），别念标记、别提系统提示。）",
