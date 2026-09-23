@@ -89,6 +89,9 @@ def prompt_rules() -> str:
         "要不要换一首免费的同名版本」，别硬说放好了。\n"
         "★ 会员/广告弹窗（开通黑胶VIP、收银台、活动页）桌宠会**自动点掉**；"
         "主人明确说「关弹窗」时可以用【音乐】关弹窗。\n"
+        "★ **点名某首歌时不要整单播放**：主人说「放我喜欢的音乐里的《X》」"
+        "「歌单里的那首 X」时，用【音乐】播放 X（**不是**【音乐】我喜欢）——"
+        "整单播放会放到歌单里存的那一版，而那版常常是要会员的（只能试听）。\n"
         "★ 主人说「帮我点歌」「放一首…」「换首歌」「暂停」「单曲循环」时就用它，"
         "不要自己去点搜索框猜坐标。\n"
         "★ 一次只做一件事；做完用你自己的话跟主人说一声。\n"
@@ -229,6 +232,21 @@ def _fee_label(fee: int) -> str:
     return {0: "免费", 8: "低音质免费", 1: "会员", 4: "付费专辑"}.get(int(fee or 0), "未知")
 
 
+def _fee_ok(fee) -> bool:
+    """这一版不用会员就能**整首放**吗？
+
+    ★ 2026-09-24 更正：fee=8「低音质免费」是**能整首放**的（用户歌单里那首
+      《蔡健雅-红色高跟鞋（DJ·less remix）》就是 fee=8，他一直听得好好的）。
+      之前我按界面上那句"正在试听"判定，得出"只有 fee=0 能整首放"——那是错的
+      （那句提示本身就时有时无，实测骗过好几次）。现在：0 和 8 都算能放，
+      只有 1（会员）/4（付费专辑）才需要换版本。
+    """
+    try:
+        return int(fee or 0) in (0, 8)
+    except Exception:
+        return True
+
+
 # ─────────── 记住主人爱听哪个版本（下次优先放那一版）───────────
 # 用户要求：「桌宠要记住爱听的是哪个版本的音乐，下次播放优先播放爱听的版本」。
 # 存在 pets/<角色>/memory/music_prefs.json，和她的其它记忆放一起。
@@ -353,7 +371,18 @@ def preferred_for(name: str) -> dict:
       现在的做法是：**直接拿记忆里的歌名+歌手去搜**，那就不依赖这次搜索的结果了。
     """
     try:
-        lst = (_prefs().get("songs") or {}).get(_song_key(name)) or []
+        songs = _prefs().get("songs") or {}
+        key = _song_key(name)
+        lst = songs.get(key)
+        if not lst and len(key) >= 3:
+            # ★ 精确查不到就宽松匹配：记忆里存的可能是**带歌手前缀**的歌名
+            #   （用户歌单里那版叫《蔡健雅-红色高跟鞋（DJ·less remix）》→ key 是
+            #    "蔡健雅红色高跟鞋"），而主人点歌只会说《红色高跟鞋》→ 精确查不到。
+            #   实测踩到：明明存了记忆却"下次没优先放"，就是这里对不上。
+            _cands = [(k, v) for k, v in songs.items() if v and _name_loose(k, key)]
+            if _cands:
+                _k, lst = max(_cands, key=lambda kv: max(
+                    [int(x.get("plays") or 0) for x in kv[1]] or [0]))
         if not lst:
             return {}
         best = sorted(lst, key=lambda x: (-(int(x.get("plays") or 0)), -(x.get("ts") or 0)))[0]
@@ -488,15 +517,15 @@ def _same_song(nm: str, top: str) -> bool:
 
 
 def pick_best(hits: list, query: str = "") -> tuple:
-    """从搜索结果里挑一首最该放的 —— **优先完全免费(fee=0)的**（用户要求）。
+    """从搜索结果里挑一首最该放的。
 
-    实测（2026-09-24，本机无黑胶 VIP）：
-        fee=0 完全免费 → 能整首放
-        fee=8 低音质免费 / fee=1 会员 / fee=4 付费 → **都只能试听 30 秒**
-      （判据是界面上的"正在试听，开通黑胶VIP听整首"，换 fee=0 的歌它就消失）
-    所以这里只把 fee=0 当"能完整放"。打分：
-        +60 完全免费   +40 歌手名在搜索词里（都是免费时挑原唱）   -index 保持一点排序权重
-    没有免费的（同名）就返回第一条（调用方会如实告诉主人"只有会员版"）。
+    规则（2026-09-24 修正）：
+      * 能整首放的（fee=0 免费 / 8 低音质免费）优先于要会员的（1 会员 / 4 付费）
+      * 都能放时，完全免费(0) 略优（音质好些）
+      * **歌手名出现在搜索词里** 的优先（避免为了一首免费去放别人的翻唱）
+        —— 用户歌单里那首《蔡健雅-红色高跟鞋（DJ·less remix）》就是 fee=8，
+        按老逻辑会被当成"会员曲"换掉，属于误判。
+      * 一个能放的都没有 → 返回第一条（调用方会如实告诉主人要会员）
     """
     if not hits:
         return None
@@ -513,9 +542,11 @@ def pick_best(hits: list, query: str = "") -> tuple:
             if not _same_song(_nm, top_name):
                 continue                      # 只要同一首歌的版本
             score = 0
-            if _fee == 0:
+            if _fee_ok(_fee):
                 score += 60
-            for part in re.split(r"[\s,/、]+", str(_art or "")):
+                if _fee == 0:
+                    score += 5
+            for part in re.split(r"[\s,/、·]+", str(_art or "")):
                 if part and part in q:
                     score += 40
                     break
@@ -525,8 +556,8 @@ def pick_best(hits: list, query: str = "") -> tuple:
             return hits[0]
         scored.sort(key=lambda x: (-x[0], x[1]))
         _best = scored[0][2]
-        if int((list(_best) + [0])[4] or 0) != 0:
-            return hits[0]                    # 一个免费的都没有 → 还是放主人点的那个
+        if not _fee_ok((list(_best) + [0])[4]):
+            return hits[0]                    # 一个能放的都没有 → 还是放主人点的那个
         return _best
     except Exception:
         return hits[0]
@@ -1082,12 +1113,14 @@ def _uia_play(name: str, artist: str, _skip_preview_check: bool = False) -> str:
                 # 结果页里有没有这首歌。★ 必须查**所有**元素类型：网易云把歌名挂在
                 # Group(50020) 上（不是 Text）——只查 Text 会误判"没搜到"，
                 # 于是明明搜出来了也不敢点（2026-09-24 实测踩到）。
+                # 比对用**宽松匹配**（带版本后缀的歌名 vs 行名只写歌名，见 _name_loose）。
                 # FindAll(全部) 实测 0.10s，比 walk 快得多，随便查。
                 els = U.find_all_fast(r2, None, limit=1200)
                 if not els:
                     els = [e for e, _n, _c, _a in U.walk(r2, limit=800)]
                 for el in els:
-                    if _name_hit(U.name_of(el), name):
+                    _nm2 = U.name_of(el)
+                    if _name_hit(_nm2, name) or _name_loose(_nm2, name):
                         got = True
                         break
             if got and cands:
@@ -1132,6 +1165,8 @@ def _uia_play(name: str, artist: str, _skip_preview_check: bool = False) -> str:
             return "ok"
         if _hit:
             return "ok"
+        # 没对上日志：把实际标题打出来，方便排查"明明点了却没认出来"
+        _log(f"⚠ 点了但没认出来：标题={str(window_title(hwnd))[:40]!r}｜要找的是《{name}》")
         # ② 歌换了但不是要的那首 → 如实说，不冒充成功
         _now = window_title(hwnd)
         if _now and _now != _before:
@@ -1144,7 +1179,7 @@ def _uia_play(name: str, artist: str, _skip_preview_check: bool = False) -> str:
 
 
 def _name_hit(text: str, name: str) -> bool:
-    """结果页里出现这首歌了吗（歌名或其前 4 个字命中；排除界面本身的"搜索"字样）"""
+    """结果页里出现这首歌了吗（歌名或其前 4 个字命中）"""
     s = str(text or "")
     n = str(name or "").strip()
     if not s or not n:
@@ -1155,8 +1190,35 @@ def _name_hit(text: str, name: str) -> bool:
     return len(key) >= 3 and key in s
 
 
+def _name_loose(text: str, name: str) -> bool:
+    """宽松匹配：只比"歌曲本体"，忽略括号里的版本标记、前后缀和**词序**。
+
+    为什么要它（2026-09-24 两次实测踩到）：
+      ① 主人点名的是带版本的名字《蔡健雅-红色高跟鞋（DJ·less remix）》，
+         客户端结果页的行名只写《红色高跟鞋》→ 严格比对判成"没搜到"，搜到了也不点；
+      ② 网易云的标题写《红色高跟鞋 - 蔡健雅》，我点名的是《蔡健雅-红色高跟鞋…》
+         → 歌名/歌手顺序相反，"包含"也不成立 → 误判"没放上"，然后去换版本
+         （正是用户不想要的）。
+    现在：去掉括号里的标记、去标点空格 → 一边包含另一边，或**有 4 个字重叠**就算同一首。
+    """
+    a, b = _song_key(text), _song_key(name)
+    if not a or not b:
+        return False
+    if a in b or b in a:
+        return True
+    short, long = (a, b) if len(a) <= len(b) else (b, a)
+    for i in range(max(0, len(short) - 3)):
+        if short[i:i + 4] in long:
+            return True
+    return False
+
+
 def _title_hit(title: str, name: str) -> bool:
-    """窗口标题里出现歌名（或歌名前几个字）就算点上了"""
+    """窗口标题里出现歌名（或歌名前几个字）就算点上了。
+
+    带版本后缀点名时（《蔡健雅-红色高跟鞋（DJ·less remix）》）标题只会写
+    《红色高跟鞋 - 蔡健雅》，所以这里也要走宽松匹配（只比歌曲本体）。
+    """
     t = str(title or "")
     n = str(name or "").strip()
     if not t or not n:
@@ -1164,7 +1226,9 @@ def _title_hit(title: str, name: str) -> bool:
     if n in t:
         return True
     key = n[:4]
-    return bool(key) and key in t
+    if bool(key) and key in t:
+        return True
+    return _name_loose(t, n)
 
 
 def play_song(query: str) -> str:
@@ -1209,22 +1273,49 @@ def play_song(query: str) -> str:
             _fee = 0
         _log(f"搜到：《{name}》{artist}（id={_sid}，{_fee_label(_fee)}）"
              + (f"｜候选 {len(hits)} 首，挑了免费的版本" if _pick is not hits[0] else ""))
-        # 依次尝试的顺序：
-        #   ① **主人爱听的那一版**（music_prefs.json 里记着，直接按它的歌名+歌手去搜，
-        #      不依赖这次的搜索结果——实测这样才稳）← 用户要求：下次优先放这一版
-        #   ② 主人这次点的那个（原唱/主流版本）
-        #   ③ 一些"完全免费"的同名版本（封面/翻唱/remix，客户端能整首放）
+        # 依次尝试的顺序（2026-09-24 修正版）：
+        #   ① **主人爱听的那一版**（music_prefs.json 里记着，直接按它的歌名+歌手去搜）
+        #   ② **主人点名的那一版** —— 只要它自己不用会员（fee=0/8）就直接放它，
+        #      **不替换**（用户歌单里那首《蔡健雅-红色高跟鞋（DJ·less remix）》是 fee=8，
+        #      能整首放；老逻辑会把它换成"完全免费"的翻唱版 → 属于误判/多此一举）
+        #   ③ 只有当点名那版**真的能不放**（fee=1/4 会员/付费）时，才去找能放的替代版本
         # 客户端只能放"搜索结果第一条"，所以换版本的办法是**换成那个版本的搜索词**再搜一次。
         _pref = preferred_for(name) if _prefer_free() else {}
         _tries, _seen = [], set()
         if _pref.get("name"):
             _tries.append((_pref["name"], _pref["artist"],
-                           f"你爱听的版本·听过 {_pref.get('plays') or 1} 次 "))
+                           f"你爱听的版本·听过 {_pref.get('plays') or 1} 次 ",
+                           int(_pref.get("fee") or 0)))
             _seen.add(_ver_key(_pref["name"], _pref["artist"]))
             _log(f"🎧 主人爱听的是：《{_pref['name']}》{_pref['artist']}"
                  f"（听过 {_pref.get('plays') or 1} 次）→ 优先放这一版")
+        _ask_fee = None
+        try:
+            _ask_hit = next((h for h in hits
+                             if _ver_key(h[1], h[2]) == _ver_key(name, artist)), None)
+            _ask_fee = int((_ask_hit or hits[0])[4] or 0)
+        except Exception:
+            _ask_fee = 0
+        if _fee_ok(_ask_fee) and _ver_key(name, artist) not in _seen:
+            _tries.append((name, artist, "", _ask_fee))     # 点名那版能放 → 直接放它
+            _seen.add(_ver_key(name, artist))
+        if _prefer_free() and not _fee_ok(_ask_fee):
+            try:                                      # 点名那版要会员 → 找能放的替代
+                for h in hits:
+                    if not _fee_ok(h[4]):
+                        continue
+                    if not _same_song(h[1], name):
+                        continue
+                    if _ver_key(h[1], h[2]) in _seen:
+                        continue
+                    _tries.append((str(h[1]), str(h[2]),
+                                   "免费版本 " if int(h[4] or 0) == 0 else "低音质免费版本 ",
+                                   int(h[4] or 0)))
+                    _seen.add(_ver_key(h[1], h[2]))
+            except Exception:
+                pass
         if _ver_key(name, artist) not in _seen:
-            _tries.append((name, artist, ""))
+            _tries.append((name, artist, "", _ask_fee))
             _seen.add(_ver_key(name, artist))
         if _prefer_free():
             try:
@@ -1257,47 +1348,44 @@ def play_song(query: str) -> str:
             return (f"我搜到了《{name}》{artist}，但网易云这会儿读不到界面"
                     f"（大概刚最小化/正在加载）——你把它点开一下，我再给你放。")
         _u, _preview, _label = "", False, ""
-        for _i, (_n2, _a2, _lab) in enumerate(_tries):
+        for _i, _try in enumerate(_tries):
+            _n2, _a2, _lab = str(_try[0]), str(_try[1]), str(_try[2])
+            _this_fee = int(_try[3] if len(_try) > 3 else 0) or 0
             if _i:
                 _log(f"上一版没成 → 换成「{_n2} {_a2}」再搜一次")
             _u = _uia_play(_n2, _a2)
             if _u == "ok" or str(_u).startswith("preview:"):
-                # ★ 歌确实换成了「这一版」——先把名字和它自己的 fee 记下来
+                # ★ 歌确实换成了「这一版」——名字和它自己的 fee 都跟着走
+                #   （以前靠"名字+歌手"回查，同名同歌手的不同版本会撞上原版的 fee：
+                #    换成 fee=8 的版本后，回查却拿到原版的 fee=1，于是又误报"这首是会员曲"）
                 name, artist, _label = _n2, _a2, _lab
-                _this_fee = int(_fee or 0)
-                try:
-                    for _h in hits:
-                        if (str(_h[1]).strip() == str(_n2).strip()
-                                and str(_h[2]).strip() == str(_a2).strip()):
-                            _this_fee = int(_h[4] or 0)
-                            break
-                except Exception:
-                    pass
                 _fee = _this_fee
                 if _u == "ok":
                     break
-                # ★ 界面上那句"正在试听"实测**不稳定**（同一首免费歌这次有、下次没有）：
-                #   如果这一版是 fee=0（完全免费），就不要因为这句话把它换掉 ——
-                #   否则"主人爱听的那一版"会被误换成别的版本（正是用户不想要的）。
-                if _this_fee == 0:
+                # ★ 界面上那句"正在试听"实测**不稳定**（同一首能放的歌这次有、下次没有）：
+                #   只要这一版自己**能整首放**（fee=0 免费 / 8 低音质免费），就不要因为
+                #   这句话把它换掉 —— 否则"主人爱听的那一版"会被误换成别的版本
+                #   （用户明确反馈：我歌单里那首 remix 是 fee=8、能放，却被当成会员曲换掉了）。
+                if _fee_ok(_this_fee):
                     _preview = False
-                    _log("（界面提示'试听'，但这一版是完全免费的 → 按放上了算，不换版本）")
+                    _log(f"（界面提示'试听'，但这一版是{_fee_label(_this_fee)}、能整首放 → 不换版本）")
                     break
                 _preview = True
                 continue
             _preview = False
             break                              # 其他结果（other/fail）不用再换版本了
         _played = _u == "ok" or str(_u).startswith("preview:")
-        _vip_only = int(_fee or 0) != 0        # 最终放的那一版不是完全免费 → 可能要会员
         # 点完顺手收拾弹窗：没会员时点会员歌 → 网易云会弹"开通黑胶VIP"的收银台
         _cleaned = ""
         try:
             _cleaned = close_popups(hwnd)
         except Exception:
             pass
-        # 到底是不是"只能试听"？界面提示不稳定，所以**连查两次**都出现才采信一次；
-        # 而且它只用来给 fee≠0 的歌加提示——fee=0（完全免费）的歌一律按"放上了"报。
-        if _played and not _label:
+        # 到底是不是"只能试听"？
+        # ★ 界面上那句"正在试听，开通黑胶VIP听整首"**不稳定**（能整首放的歌也会冒出来），
+        #   所以只对"本来就放不了"的版本（fee=1 会员 / 4 付费）采信，而且会**连查两次**；
+        #   能整首放的版本（fee=0 免费 / 8 低音质免费）一律不信它，不让它掀翻判断。
+        if _played and not _label and not _fee_ok(_fee):
             try:
                 if _has_preview_notice(hwnd):
                     time.sleep(1.8)
@@ -1306,7 +1394,7 @@ def play_song(query: str) -> str:
             except Exception:
                 pass
         _tag = f"（{_label}）" if _label else ""
-        _vip_only = int(_fee or 0) != 0        # 最终放的那一版不是完全免费 → 可能要会员
+        _vip_only = not _fee_ok(_fee)          # 最终那版要会员(fee=1/4) → 才提示
         # ★ 界面上的"正在试听"提示**不稳定**（同一首歌这次有、下次没有，实测），
         #   所以不让它推翻确定的判断：fee=0 的歌一律按"放上了"报，
         #   只有 fee≠0 的会员/付费曲才提示"可能要会员、只能试听"。
@@ -1366,6 +1454,118 @@ def play_song(query: str) -> str:
 
 
 # ─────────────────────── 状态与统一入口 ───────────────────────
+
+def _version_hint(hwnd, name: str, artist: str) -> str:
+    """在界面上找"这首歌的真实版本名"（含 remix/DJ版/Live 等标记）。
+
+    为什么要它：窗口标题只有「歌名 - 歌手」，光看这个去 API 里查，查到的往往是
+    **另一版**（用户歌单里那首是《蔡健雅-红色高跟鞋（DJ·less remix）》，按标题查却
+    查到要 VIP 的《红色高跟鞋》原版 → 误判成会员曲）。
+    歌单/列表里的行名带完整版本信息（实测行名形如
+    "05 蔡健雅-红色高跟鞋（DJ·less remix） jymaster DJ·"），拿它当线索最准。
+    """
+    try:
+        U = _uia()
+        root = U.root_for(hwnd)
+        if root is None:
+            return ""
+        key = _song_key(name)
+        for el in U.find_all_fast(root, None, limit=1500):
+            nm = str(U.name_of(el) or "")
+            if not nm or key and key not in _song_key(nm):
+                continue
+            if "(" not in nm and "（" not in nm and "remix" not in nm.lower() and "版" not in nm:
+                continue                       # 行名里没有版本标记 → 不是我们要的线索
+            if artist and artist not in nm:
+                continue
+            return nm[:60]
+    except Exception:
+        pass
+    return ""
+
+
+def _fee_of_version(name: str, artist: str, hint: str = "") -> int:
+    """查"这一版"的收费标记（-1 = 查不到）。
+
+    先用歌名+歌手+hint（行名里的版本标记）搜；能精确对上歌手/版本名的那条才采信。
+    """
+    try:
+        _hint = re.sub(r"^\s*\d+\s*", "", str(hint or "")).strip()
+        _hint = re.sub(r"\s+\S+\.\S+.*$", "", _hint)      # 去掉行名尾巴上的专辑/歌手串
+        q = f"{name} {artist} {_hint}".strip()
+        hits = search(q, limit=8)
+        if not hits and _hint:
+            hits = search(f"{_hint}".strip(), limit=8)
+        if not hits:
+            return -1
+        _seen = [h for h in hits if _same_song(h[1], name)]
+        if not _seen:
+            return -1
+        for h in _seen:                        # 版本名对得上（含括号里的标记）→ 最可信
+            if _hint and re.sub(r"\s", "", _hint).lower()[:18] in re.sub(r"\s", "", h[1]).lower():
+                return int(h[4] or 0)
+        for h in _seen:                        # 歌手对得上
+            if artist and (artist in str(h[2]) or str(h[2]) in artist):
+                return int(h[4] or 0)
+        return int(_seen[0][4] or 0)
+    except Exception:
+        return -1
+
+
+def fix_vip_now_playing(auto_switch: bool = False) -> str:
+    """现在放的这首是不是"只能试听"的会员曲？**如实报一句**（拿不准就不说）。
+
+    为什么需要（2026-09-24 用户反馈）：「我喜欢的音乐」里存的那一版是要 VIP 的，
+    整单开始播就是会员曲（只能试听 30 秒）→ 她说"给你放了"，主人听到的却是试听。
+    ⚠ 但更要紧的是**别乱说**：用户明确指出"我歌单里的红色高跟鞋并不是要 VIP 的那个原版"——
+      之前按窗口标题「歌名 - 歌手」去 API 里查，查到的是**同名另一版**（要 VIP 的原版），
+      于是把他那首 fee=8（低音质免费、能整首放）的 remix 误判成会员曲。
+    现在的做法：先拿界面上**歌单行里的完整版本名**当线索，查**那一版**的 fee；
+    查不到 / 对不上 / fee=0 或 8（能放） → 一律**闭嘴**，不打扰主人。
+    """
+    try:
+        if not uia_ready():
+            return ""
+        hwnd = find_window()
+        if not hwnd:
+            return ""
+        title = str(window_title(hwnd) or "").strip()
+        if not title or " - " not in title:
+            return ""
+        name, artist = re.split(r"\s+-\s+", title, 1)
+        name, artist = name.strip(), artist.strip()
+        # ① 主人爱听的那一版是不是就是它？（记忆里记着他听的那版的 fee）
+        pf = preferred_for(name)
+        if pf and pf.get("name") and (
+                (pf.get("artist") and artist
+                 and (artist in str(pf["artist"]) or str(pf["artist"]) in artist))):
+            _pff = int(pf.get("fee") or 0)
+            if _fee_ok(_pff):
+                _log(f"现在放的是主人爱听的版本《{name}》{pf.get('artist')}（{_fee_label(_pff)}）")
+                return ""                  # 能整首放 → 不用说什么
+        # ② 看界面上这首歌的真实版本名（歌单行）→ 查那一版的 fee
+        hint = _version_hint(hwnd, name, artist)
+        _fee = _fee_of_version(name, artist, hint)
+        _log(f"核对版本：《{name}》{artist}"
+             + (f"｜行名线索 {hint[:28]!r}" if hint else "（界面上没有版本线索）")
+             + f"｜查到 {_fee_label(_fee) if _fee >= 0 else '查不到'}")
+        if _fee < 0 or _fee_ok(_fee):
+            return ""                      # 查不到或能整首放 → 闭嘴（宁可不提，也别误判）
+        hits = search(f"{name} {artist}".strip(), limit=8)
+        _free = next((h for h in hits
+                      if _fee_ok(h[4]) and _same_song(h[1], name)), None)
+        if _free is not None and auto_switch:
+            _log(f"这首《{name}》是要会员的 → 换成能放的《{_free[1]}》{_free[2]}")
+            _r = play_song(f"{_free[1]} {_free[2]}")
+            return f"（不过《{name}》是要会员的，只能试听；我给你换了能放的版本《{_free[1]}》{_free[2]}。{str(_r)[:40]}）"
+        if _free is not None:
+            return (f"（不过这首《{name}》是{_fee_label(_fee)}曲、只能试听 30 秒；"
+                    f"想听整首就跟我说「放 {_free[1]} {_free[2]}」。）")
+        return f"（不过这首《{name}》是{_fee_label(_fee)}曲，没会员只能听 30 秒试听——网上没有能整首放的版本。）"
+    except Exception as e:
+        _log(f"⚠ 歌单会员曲处理出错: {type(e).__name__}: {e}")
+        return ""
+
 
 def status_text() -> str:
     """现在放的是什么、在不在放、循环方式（读不到就如实说读不到，不瞎猜）"""
@@ -1513,7 +1713,9 @@ def _run_locked(kind: str, arg: str) -> str:
         if kind == "liked":
             if _click_nav_item(hwnd, "我喜欢的音乐"):
                 if play_play_all(hwnd):
-                    return "给你放上「我喜欢的音乐」了。"
+                    time.sleep(1.2)
+                    _note = fix_vip_now_playing()      # 歌单里那首是会员曲？换成免费版
+                    return "给你放上「我喜欢的音乐」了。" + _note
                 return "打开了「我喜欢的音乐」，但没找到播放按钮。"
             return "没找到「我喜欢的音乐」入口。"
         if kind == "playlist":
@@ -1523,9 +1725,11 @@ def _run_locked(kind: str, arg: str) -> str:
             for nm in list_playlists():
                 if arg in str(nm) or str(nm) in arg:
                     if _click_nav_item(hwnd, str(nm)) and play_play_all(hwnd):
-                        return f"切到歌单「{nm}」放上了。"
+                        time.sleep(1.2)
+                        return f"切到歌单「{nm}」放上了。" + fix_vip_now_playing()
             if _click_nav_item(hwnd, arg) and play_play_all(hwnd):
-                return f"切到歌单「{arg}」放上了。"
+                time.sleep(1.2)
+                return f"切到歌单「{arg}」放上了。" + fix_vip_now_playing()
             return f"没找到叫「{arg}」的歌单。"
         if kind == "favorite":
             _invoke_player(hwnd, ["collect"])

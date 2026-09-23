@@ -120,7 +120,7 @@ def check_wiring(results):
             __import__("tool.music", fromlist=["x"])._walk_buttons)),
         ("音乐：搜索按钮轮询+按位置兜底", "button_next_to" in inspect.getsource(
             __import__("tool.music", fromlist=["x"])._uia_play)),
-        ("音乐：结果页查全部元素类型（歌名在 Group 上）", "_name_hit(U.name_of(el), name)" in inspect.getsource(
+        ("音乐：结果页查全部元素类型 + 宽松匹配", "_name_loose(_nm2, name)" in inspect.getsource(
             __import__("tool.music", fromlist=["x"])._uia_play)),
         ("音乐：重试是短冷却不是长时间封禁", "_ATTEMPT_GAP" in inspect.getsource(
             __import__("tool.music", fromlist=["x"]).play_song)),
@@ -141,6 +141,17 @@ def check_wiring(results):
             __import__("tool.music", fromlist=["x"]).play_song)),
         ("音乐：爱听什么查询", "favorites_text" in inspect.getsource(
             __import__("tool.music", fromlist=["x"]).favorites_text) or True),
+        ("音乐：歌单会员曲如实提示", "def fix_vip_now_playing" in inspect.getsource(
+            __import__("tool.music", fromlist=["x"]))),
+        ("音乐：fee 判定（0/8 都算能放）", "def _fee_ok" in inspect.getsource(
+            __import__("tool.music", fromlist=["x"]))),
+        ("音乐：宽松匹配（词序/版本后缀）", "def _name_loose" in inspect.getsource(
+            __import__("tool.music", fromlist=["x"]))),
+        ("音乐：记忆查找也宽松匹配", "_name_loose(k, key)" in inspect.getsource(
+            __import__("tool.music", fromlist=["x"]).preferred_for)),
+        ("音乐：免费版本排在点名版本之前", "_tries.append((str(h[1]), str(h[2]), \"免费版本 \")"
+         in inspect.getsource(__import__("tool.music", fromlist=["x"]).play_song)
+         or "免费版本 " in inspect.getsource(__import__("tool.music", fromlist=["x"]).play_song)),
         ("关窗不连带退出桌宠", "setQuitOnLastWindowClosed(False)" in inspect.getsource(MAIN)),
         ("视觉服务：限 CPU 线程", "_cap_threads" in inspect.getsource(
             __import__("tool.vision_service", fromlist=["x"]))),
