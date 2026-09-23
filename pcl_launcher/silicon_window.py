@@ -12,6 +12,7 @@
 设置、记忆、提示词、插件、主题；主题壁纸/背景视频、强调色、NapCat 工具、更新日志、
 打开配置/目录、关窗清理子进程。
 """
+import json
 import os
 import re
 import subprocess
@@ -260,6 +261,32 @@ QPushButton {{
     font-size: 13px; font-family: "{silicon_ui.M.font}";
 }}
 QPushButton:hover {{ background: {SF(0.16)}; border-color: {Color3.name()}; }}
+QPushButton:disabled {{ color: {Gray3.name()}; border-color: {Color5.name()}; }}
+"""
+
+
+def _switch_btn_qss(accent: str) -> str:
+    """开关按钮样式：**看得出现在是开还是关**。
+
+    首页的「长文本模式 / Live2D」其实是一次切换一次的开关，但原来用的是普通按钮样式，
+    点完外观毫无变化 → 用户不知道当前是开还是关（这是首页最"不清晰"的地方）。
+    这里 :checked 用强调色描边 + 淡强调底色，文字里也带上"开/关"（见 HomePage）。
+    """
+    a = QColor(accent)
+    fill = f"rgba({a.red()},{a.green()},{a.blue()},0.18)"
+    return f"""
+QPushButton {{
+    background: {SF(0.08)}; color: {Color1.name()};
+    border: 1px solid {Color5.name()}; border-radius: 9px; padding: 9px 16px;
+    font-size: 13px; font-family: "{silicon_ui.M.font}";
+}}
+QPushButton:hover {{ background: {SF(0.16)}; border-color: {Color3.name()}; }}
+QPushButton:checked {{
+    background: {fill}; color: {Color1.name()};
+    border: 1px solid {accent}; font-weight: bold;
+}}
+QPushButton:checked:hover {{ background: {fill}; border-color: {accent}; }}
+QPushButton:disabled {{ color: {Gray3.name()}; border-color: {Color5.name()}; }}
 """
 
 
@@ -323,36 +350,79 @@ class HomePage(QWidget):
         outer.addWidget(card)
 
         # ── 控制面板卡片 ──
+        # 分成两组，因为这两类的语义完全不同（后端 api.py 也确实是两回事）：
+        #   · 开关：longtext / live2d —— 点一次切一次，状态由桌宠维护（/control 的 status）
+        #   · 动作：camera / screenshot / voice / reset_position —— 点一次做一次
+        # 原来全混在一排且开关没有状态显示，用户看不出"现在是开还是关"。
         ctl = Card()
         cl2 = QVBoxLayout(ctl)
         cl2.setContentsMargins(18, 14, 18, 16)
-        cl2.setSpacing(10)
+        cl2.setSpacing(8)
         cl2.addWidget(silicon_ui.section_title("桌宠控制面板", accent))
-        grid = QHBoxLayout()
-        for text, feat in (("📝 长文本模式", "longtext"), ("🎭 Live2D", "live2d"),
-                           ("📷 摄像头识别", "camera"), ("🖥 屏幕识别", "screenshot"),
-                           ("🎤 按住说话", "voice")):
+
+        def _cap(text, hint=""):
+            lb = QLabel(text)
+            lb.setStyleSheet(f"color: {Gray3.name()}; font-size: 11px;"
+                             f" font-family: '{silicon_ui.M.font}';")
+            if hint:
+                lb.setToolTip(hint)
+            return lb
+
+        # —— 实时开关（状态跟随桌宠）——
+        cl2.addWidget(_cap("实时开关（点一下切换；下面的显示是桌宠的真实状态）"))
+        sw_row = QHBoxLayout()
+        self._switch_btns = {}
+        for text, feat in (("📝 长文本模式", "longtext"), ("🎭 Live2D", "live2d")):
+            b = QPushButton(text)
+            b.setCheckable(True)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setStyleSheet(_switch_btn_qss(accent))
+            b.setMinimumHeight(38)
+            b.setToolTip("需要先启动桌宠")
+            b.toggled.connect(lambda on, btn=b, t=text: btn.setText(
+                "%s：%s" % (t, "开" if on else "关")))
+            b.clicked.connect(lambda _=False, f=feat: self._on_switch_clicked(f))
+            self._switch_btns[feat] = (b, text)
+            sw_row.addWidget(b)
+        sw_row.addStretch()
+        cl2.addLayout(sw_row)
+
+        # —— 立即执行（点一次做一次）——
+        cl2.addWidget(_cap("立即执行（点一次做一次，不是开关）"))
+        act_row = QHBoxLayout()
+        self._action_btns = []
+        for text, feat, tip in (("📷 摄像头识别一次", "camera", "立刻用摄像头识别一次（不是常开开关）"),
+                                ("🖥 屏幕识别一次", "screenshot", "立刻截屏识别一次")):
             b = QPushButton(text)
             b.setStyleSheet(_ghost_btn_qss())
             b.setMinimumHeight(38)
-            if feat == "voice":
-                b.pressed.connect(lambda: _send_control("voice/start"))
-                b.released.connect(lambda: _send_control("voice/end"))
-            else:
-                b.clicked.connect(lambda _=False, f=feat: _send_control(f))
-            grid.addWidget(b)
+            b.setToolTip(tip)
+            b.clicked.connect(lambda _=False, f=feat: self._on_action_clicked(f))
+            self._action_btns.append((b, feat))
+            act_row.addWidget(b)
+        # 按住说话：press/release 两个事件
+        self.btn_voice = QPushButton("🎤 按住说话")
+        self.btn_voice.setStyleSheet(_ghost_btn_qss())
+        self.btn_voice.setMinimumHeight(38)
+        self.btn_voice.setToolTip("按住不放说话，松开结束并识别")
+        self.btn_voice.pressed.connect(lambda: _send_control("voice/start"))
+        self.btn_voice.released.connect(lambda: _send_control("voice/end"))
+        self._action_btns.append((self.btn_voice, "voice"))
+        act_row.addWidget(self.btn_voice)
         # 重置桌宠位置：桌宠跑到屏幕外 / 找不到时一键回到屏幕中央
         self.btn_reset_pos = QPushButton("🎯 重置桌宠位置")
         self.btn_reset_pos.setStyleSheet(_ghost_btn_qss())
         self.btn_reset_pos.setMinimumHeight(38)
         self.btn_reset_pos.setToolTip("把桌宠移回屏幕中央（找不到桌宠时点这里）")
         self.btn_reset_pos.clicked.connect(self.reset_pet_pos)
-        grid.addWidget(self.btn_reset_pos)
-        grid.addStretch()
-        cl2.addLayout(grid)
+        self._action_btns.append((self.btn_reset_pos, "reset_position"))
+        act_row.addWidget(self.btn_reset_pos)
+        act_row.addStretch()
+        cl2.addLayout(act_row)
         # 控制面板下面的一行状态提示
         self.status_lbl = QLabel("")
         self.status_lbl.setStyleSheet(f"color: {Gray2.name()}; font-size: 12px;")
+        self.status_lbl.setWordWrap(True)
         cl2.addWidget(self.status_lbl)
         outer.addWidget(ctl)
 
@@ -400,7 +470,16 @@ class HomePage(QWidget):
                     tts_ok = s.connect_ex(("127.0.0.1", 9880)) == 0
             except Exception:
                 pass
-            self._probe_result = (alive, tts_ok)
+            # 桌宠在跑时顺带取一次功能状态（GET /control 的 status：live2d/longtext 是
+            # 真开/关状态，camera/screenshot 是上次动作的结果），供首页开关显示用
+            ctrl = {}
+            if alive:
+                try:
+                    with urllib.request.urlopen(_CONTROL_BASE, timeout=3) as r:
+                        ctrl = (json.loads(r.read().decode("utf-8", "replace")) or {}).get("status") or {}
+                except Exception:
+                    ctrl = {}
+            self._probe_result = (alive, tts_ok, ctrl)
             try:
                 self._probe_signal.emit()
             except Exception:
@@ -412,7 +491,7 @@ class HomePage(QWidget):
     def _apply_status(self):
         """探测结果回到 UI 线程再更新（信号触发）"""
         try:
-            alive, tts_ok = getattr(self, "_probe_result", (False, False))
+            alive, tts_ok, ctrl = getattr(self, "_probe_result", (False, False, {}))
             self._probe_busy = False
             self.chip_pet.set_text("桌宠：运行中" if alive else "桌宠：未运行", alive)
             # 「正在关闭/启动中」期间不要被状态刷新覆盖文案
@@ -420,17 +499,63 @@ class HomePage(QWidget):
                 self.btn_pet.setText("  ⏹ 关闭桌宠" if alive else "  启动 AIpet 桌宠")
             accent = THEME_COLORS.get(str(ACCENT_ID), {}).get("title_start", "#2f6fd0")
             self.btn_pet.setStyleSheet(_accent_btn_qss(accent, danger=alive))
+            # 桌宠没跑 → 控制按钮置灰（点了也没反应，不如明确置灰）
             try:
-                self.btn_reset_pos.setEnabled(alive)
-                if self.btn_reset_pos.isEnabled():
-                    self.btn_reset_pos.setText("🎯 重置桌宠位置")
+                for _feat, (b, _t) in getattr(self, "_switch_btns", {}).items():
+                    b.setEnabled(alive)
+                    b.setToolTip("" if alive else "需要先启动桌宠")
+                for b, _feat in getattr(self, "_action_btns", []):
+                    b.setEnabled(alive)
+                    if not alive and _feat != "reset_position":
+                        b.setToolTip("需要先启动桌宠")
+                # 开关显示桌宠的真实状态（未知时显示"—"，不要瞎猜成"关"）
+                for _feat, (b, title) in getattr(self, "_switch_btns", {}).items():
+                    val = str((ctrl or {}).get(_feat, "") or "").lower()
+                    if not alive or val not in ("on", "off"):
+                        b.setChecked(False)
+                        b.setText("%s：—" % title)
+                    else:
+                        b.setChecked(val == "on")
+                        b.setText("%s：%s" % (title, "开" if val == "on" else "关"))
+                # 一次性动作的上次结果放进 tooltip（不新增控件、不挤版面）
+                _res = {"triggered": "上次：已触发", "failed": "上次：失败",
+                        "off": "上次：未触发"}
+                for b, _feat in getattr(self, "_action_btns", []):
+                    v = str((ctrl or {}).get(_feat, "") or "").lower()
+                    if _feat in ("camera", "screenshot") and v:
+                        b.setToolTip("%s（%s）" % (
+                            "立刻用摄像头识别一次（不是常开开关）" if _feat == "camera"
+                            else "立刻截屏识别一次", _res.get(v, v)))
             except Exception:
                 pass
             qq_on = self.shell._qq_proc is not None and self.shell._qq_proc.poll() is None
             self.chip_qq.set_text("QQ：运行中" if qq_on else "QQ：未运行", qq_on)
             self.chip_tts.set_text("语音服务：在线" if tts_ok else "语音服务：未启动", tts_ok)
+            # 桌宠没跑时给一句人话（不覆盖"正在关闭桌宠…"这类临时提示）
+            try:
+                if alive:
+                    if self.status_lbl.text().startswith("桌宠未运行"):
+                        self.status_lbl.setText("")
+                elif not self.status_lbl.text().strip():
+                    self.status_lbl.setText("桌宠未运行 —— 先点上面的「启动 AIpet 桌宠」，"
+                                            "下面的开关和按钮才有反应。")
+            except Exception:
+                pass
         except Exception as e:
             print(f"[NewUI] ⚠ 状态更新失败: {e}")
+
+    # ── 控制面板：开关 / 动作 ──
+    def _on_switch_clicked(self, feat: str):
+        """开关：发一次切换指令，然后尽快回读真实状态（按钮的 checked 只是暂时乐观显示）"""
+        _send_control(feat)
+        QTimer.singleShot(700, self.refresh_status)
+        QTimer.singleShot(2500, self.refresh_status)
+
+    def _on_action_clicked(self, feat: str):
+        """一次性动作：发一次指令 + 回读结果（结果会显示在按钮 tooltip 上）"""
+        _send_control(feat)
+        QTimer.singleShot(1200, self.refresh_status)
+        QTimer.singleShot(4000, self.refresh_status)
 
     # ── 启动/关闭 ──
     # ── 启动/关闭：进行中按钮置灰 + 文案，防止连点 ──
