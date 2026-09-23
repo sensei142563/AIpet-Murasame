@@ -683,6 +683,16 @@ def detect_capabilities(pet_id: str = None) -> dict:
     fg_dir = os.path.join(pet_dir, "fgimages")
     caps["has_fgimages"] = os.path.isdir(fg_dir) and len(os.listdir(fg_dir)) > 0
 
+    # has_touch / touch_on：触摸互动是**逐角色做出来的**（和 has_live2d 一样按角色数据判定）
+    # 没配过区域 = 没有这个能力 → 运行时不开（照旧：摸头 / 点下半身开输入框）
+    try:
+        from tool.touch_areas import has_areas as _has_areas, touch_enabled as _touch_on
+        caps["has_touch"] = bool(_has_areas(pet_id))
+        caps["touch_on"] = bool(_touch_on(pet_id))
+    except Exception:
+        caps["has_touch"] = False
+        caps["touch_on"] = False
+
     return caps
 
 

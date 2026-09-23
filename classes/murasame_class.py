@@ -243,11 +243,12 @@ class Murasame(QLabel):
             self._touch_areas = self._touch_sets[self._touch_mode_key()]
             self._touch_enabled = touch_enabled(_pid)
         except Exception as _e:
-            print(f"[桌宠] ⚠ 读取触摸区域失败（用默认）: {_e}")
+            print(f"[桌宠] ⚠ 读取触摸区域失败（本次不启用触摸）: {_e}")
             self._touch_sets = {"2d": {}, "live2d": {}}
             self._touch_disabled = {"2d": set(), "live2d": set()}
             self._touch_areas = {}
-            self._touch_enabled = True
+            # 读不到就当"这个角色没做过触摸"：不开（照旧用 摸头 / 点下半身开输入框）
+            self._touch_enabled = False
         self._touch_hit = ""          # 本次按下命中的区域
         self._touch_press = None      # 按下坐标（用来区分轻点 / 抚摸）
         self._touch_fired = False     # 本次按下是否已经触发过（每次按压只触发一次反应）

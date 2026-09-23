@@ -1707,6 +1707,12 @@ class PCLPetManager(QScrollArea):
             badges.append(("长语音", "#30a030"))
         if caps.get("has_fgimages") is False and not caps.get("has_live2d"):
             badges.append(("纯文本", "#808080"))
+        # 触摸互动：只有**配过坐标**（或显式开过）的角色才有这个能力
+        # （判定方式与 has_live2d 一致）；关掉时也标出来，省得"点了没反应却不知道是自己关的"
+        if caps.get("touch_on"):
+            badges.append(("触摸", "#30a030"))
+        elif caps.get("has_touch"):
+            badges.append(("触摸·关", "#808080"))
         if badges:
             cap_row = QHBoxLayout()
             cap_row.setSpacing(int(4*S))

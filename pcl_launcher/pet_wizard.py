@@ -437,19 +437,24 @@ def build_pet_json(spec: dict, existing: dict = None) -> dict:
         chk = getattr(self, "chk_touch", None)
         if chk is not None:
             t["enabled"] = bool(chk.isChecked())
-        t.setdefault("enabled", True)
-        # 2D 与 Live2D **各写一套**默认范围（两套独立，互不影响；之后可在编辑器里分别调）
-        try:
-            from tool.touch_areas import defaults as _ta_defaults
-            _d = _ta_defaults()
-            t.setdefault("areas_2d", dict(_d))
-            t.setdefault("areas_live2d", dict(_d))
-            t.setdefault("disabled_2d", [])
-            t.setdefault("disabled_live2d", [])
-            if not t.get("areas"):
-                t["areas"] = dict(_d)            # 旧键兼容
-        except Exception as _e:
-            print(f"[Wizard] ⚠ 写入默认触摸范围失败: {_e}")
+        # ⚠ 只在"确实要开触摸"（勾了开关）或"本来就配过区域"时才补默认范围。
+        #   以前这里无条件给每个角色塞一套 14 个通用框 → 等于"没做过的角色也开了触摸"，
+        #   而且通用框对 Live2D 全身模型位置全是错的（用户要的是：没做的不开）。
+        if t.get("enabled") or any(t.get(k) for k in ("areas", "areas_2d", "areas_live2d")):
+            # 2D 与 Live2D **各写一套**默认范围（两套独立，互不影响；之后可在编辑器里分别调）
+            try:
+                from tool.touch_areas import defaults as _ta_defaults
+                _d = _ta_defaults()
+                t.setdefault("areas_2d", dict(_d))
+                t.setdefault("areas_live2d", dict(_d))
+                t.setdefault("disabled_2d", [])
+                t.setdefault("disabled_live2d", [])
+                if not t.get("areas"):
+                    t["areas"] = dict(_d)        # 旧键兼容
+            except Exception as _e:
+                print(f"[Wizard] ⚠ 写入默认触摸范围失败: {_e}")
+        else:
+            print("[Wizard] 未启用触摸互动 → 不写默认触摸区域（保持「没做过就不开」）")
         cfg["touch"] = t
     except Exception as e:
         print(f"[Wizard] ⚠ 写入触摸设置失败: {e}")
@@ -2320,7 +2325,9 @@ class PCLPetWizard(SiliconDialog):
         lay.addWidget(tip)
 
         self.chk_touch = QCheckBox("启用全身触摸互动（头 / 胸口 / 小腹 / 下体 / 大腿 / 小腿 / 脚 / 胳膊 / 手掌）")
-        self.chk_touch.setChecked(True)
+        # 默认**不勾**：触摸区域是逐角色调的，没做过的角色不该凭空开
+        # （下面几行会用该角色真实的 touch_enabled 覆盖一次）
+        self.chk_touch.setChecked(False)
         lay.addWidget(self.chk_touch)
 
         gb = QGroupBox("部位区域（可在编辑器里拖动/缩放 / 增删，保存后桌宠立刻生效）")
@@ -2345,14 +2352,20 @@ class PCLPetWizard(SiliconDialog):
         lay.addWidget(gb)
         lay.addStretch()
         try:
-            from tool.touch_areas import touch_enabled, get_pet_areas
-            self.chk_touch.setChecked(bool(touch_enabled(getattr(self, "pet_id", None))))
-            from tool.touch_areas import custom_keys as _ck
+            from tool.touch_areas import touch_enabled, get_pet_areas, has_areas
             _pid = getattr(self, "pet_id", None)
+            _configured = bool(has_areas(_pid))
+            self.chk_touch.setChecked(bool(touch_enabled(_pid)))
+            from tool.touch_areas import custom_keys as _ck
             _n = len(get_pet_areas(_pid))
             _c = len(_ck(_pid))
-            self.lbl_touch_state.setText(
-                f"当前已有 {_n} 个部位区域" + (f"（其中自定义 {_c} 个，可在编辑器里删）" if _c else ""))
+            if _configured:
+                self.lbl_touch_state.setText(
+                    f"当前已有 {_n} 个部位区域" + (f"（其中自定义 {_c} 个，可在编辑器里删）" if _c else ""))
+            else:
+                self.lbl_touch_state.setText(
+                    "这个角色还没配过触摸区域 → 默认不启用（照旧：摸头 / 点下半身开输入框）。\n"
+                    f"想让身体部位能摸，点上面「调节触摸区域」把 {_n} 个框拖到她的身上并保存，即为该角色开启。")
         except Exception:
             pass
         return w
