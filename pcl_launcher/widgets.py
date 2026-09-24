@@ -1694,10 +1694,30 @@ class PCLPetManager(QScrollArea):
         title.setStyleSheet(f"color: {Color1.name()};")
         self._layout.addWidget(title)
 
-        desc = QLabel("管理你的桌宠角色。设为活动后，启动桌宠 / QQ 将使用该角色的人设、声音与形象。")
+        desc = QLabel("把「我的桌宠」里的角色拖进「当前使用」的框里就换上："
+                      "桌宠会立刻切换，QQ / 微信下一次回复就用新角色的人设与声音。"
+                      "从框里拖出去 = 取消指定（QQ / 微信取消后跟随桌宠）。")
         desc.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(12*S)}px;")
         desc.setWordWrap(True)
         self._layout.addWidget(desc)
+
+        # ══ 「当前使用」三个槽位（桌宠 / QQ / 微信）——拖拽指定 ══
+        try:
+            from .pet_slots import CurrentUsePanel
+            self._slots_panel = CurrentUsePanel(
+                on_pet_switch=self._schedule_pet_switch,
+                on_toast=lambda text: self._toast_msg(text),
+                on_refresh_all=self._refresh_cards_only)
+            self._layout.addWidget(self._slots_panel)
+        except Exception as e:
+            import traceback
+            print(f"[PCL] ⚠ 创建「当前使用」面板失败: {e}\n{traceback.format_exc()[:400]}")
+            self._slots_panel = None
+
+        self._all_head = QLabel("全部桌宠（详细信息）")
+        self._all_head.setFont(QFont("Microsoft YaHei", int(14 * S), QFont.Bold))
+        self._all_head.setStyleSheet(f"color: {Color1.name()};")
+        self._layout.addWidget(self._all_head)
 
         # 桌宠列表
         self._pet_list = QWidget()
@@ -1721,16 +1741,24 @@ class PCLPetManager(QScrollArea):
         self._refresh()
 
     def _refresh(self):
-        """刷新桌宠列表"""
-        # 顺手让总览页后台探一次桌宠状态：卡片上那个按钮写「设为活动」还是
-        # 「切换到这个桌宠」靠它缓存的 _pet_alive_cache（这里不能自己发网络探测）
+        """刷新桌宠列表 = 「当前使用」槽位 + 全部桌宠卡片"""
+        # 顺手让总览页后台探一次桌宠状态：槽位/卡片上要显示"桌宠在跑吗"
         try:
             _home = getattr(self.window(), "pages", {}).get("home")
             if _home is not None:
                 _home.refresh_status()
         except Exception:
             pass
+        # 槽位面板跟着 config 重画（别的地方改了活动角色也能立刻反映）
+        try:
+            if self._slots_panel is not None:
+                self._slots_panel.refresh()
+        except Exception as e:
+            print(f"[PCL] ⚠ 刷新「当前使用」失败: {e}")
+        self._refresh_cards_only()
 
+    def _refresh_cards_only(self):
+        """只重画「全部桌宠」卡片（槽位面板拖拽后调它，避免整页重建）"""
         while self._pet_layout.count():
             w = self._pet_layout.takeAt(0)
             if w.widget():
@@ -1797,8 +1825,16 @@ class PCLPetManager(QScrollArea):
         name.setFont(QFont("Microsoft YaHei", int(14*S), QFont.Bold))
         name.setStyleSheet(f"color: {Color1.name()}; border: none;")
         hdr.addWidget(name)
-        if p.get("is_active"):
-            badge = QLabel(" 活动 ")
+        # 槽位标记：这个角色当前被哪些槽在用（桌宠 / QQ / 微信）——
+        # 用户把"活动"改成"当前使用三个槽"后，卡片上就说清它现在替谁说话。
+        try:
+            from pets.pet_registry import get_slot_map, SLOT_LABELS
+            _in_use = [SLOT_LABELS[s] for s, info in get_slot_map().items()
+                       if info.get("effective") == p["id"]]
+        except Exception:
+            _in_use = []
+        for _lbl in _in_use:
+            badge = QLabel(" %s " % _lbl)
             badge.setStyleSheet(f"""
                 background: {GreenDark.name()}; color: white; border: none;
                 padding: {int(2*S)}px {int(8*S)}px; font-size: {int(10*S)}px;
@@ -1860,10 +1896,6 @@ class PCLPetManager(QScrollArea):
         #   红        = 删除（唯一的危险动作）
         #   白底描边  = 打开文件夹 / 设置（日常工具，不抢语义）
         if not p.get("is_active"):
-            # 桌宠正在跑的时候，这个按钮的实际含义是「切到它」——点一下自动把旧的关掉、
-            # 用它的形象重新启动（0.5 秒防误触）。文案说清楚，别让人以为只是改个标记。
-            # ⚠ 这里绝不能调 _pet_api_alive()（那是带 3 秒超时的网络探测，卡片一多会把
-            #   界面卡住）。读总览页状态探测留下的缓存值就够了。
             _pet_running = False
             try:
                 _w = self.window()
@@ -1871,13 +1903,13 @@ class PCLPetManager(QScrollArea):
                 _pet_running = bool(getattr(_sh, "_pet_alive_cache", False))
             except Exception:
                 pass
-            btn_active = QPushButton("🔄 切换到这个桌宠" if _pet_running else "⭐ 设为活动")
-            btn_active.setToolTip(
-                "点一下：关掉当前桌宠，立刻用它重新启动（0.5 秒防误触；跨角色要等它启动几秒）"
-                if _pet_running else
-                "设为活动角色：之后启动桌宠 / QQ 都用它的人设、声音与形象")
+            # 不再有"设为活动"按钮：指定角色改成把上面的胶囊拖进「当前使用」的框。
+            # 这里只留一个快捷方式（桌宠槽 = 桌宠形象），省得每换一次都要拖。
+            btn_active = QPushButton("🐾 用作桌宠形象" if _pet_running else "🐾 设为桌宠角色")
+            btn_active.setToolTip("等于把这个角色拖进「当前使用 → 桌宠」槽"
+                                  "（桌宠正在跑的话会自动关掉重开成它）")
             btn_active.setStyleSheet(self._btn_style(GreenDark.name()))
-            btn_active.clicked.connect(lambda checked, pid=p["id"]: self._set_active(pid))
+            btn_active.clicked.connect(lambda checked, pid=p["id"]: self._slot_assign("pet", pid))
             btn_row.addWidget(btn_active)
 
         btn_open = QPushButton("📂 打开文件夹")
@@ -2047,6 +2079,53 @@ class PCLPetManager(QScrollArea):
         """
         return outline_btn_qss(fg, pad_v=int(5 * S), pad_h=int(12 * S),
                                font_size=int(11 * S), radius=int(5 * S))
+
+    def _slot_assign(self, slot, pet_id):
+        """把某个槽位指定给某个角色（拖拽与卡片按钮共用一条路）"""
+        try:
+            from .pet_slots import CurrentUsePanel          # noqa: F401（确保模块可用）
+            if self._slots_panel is not None:
+                self._slots_panel._assign(slot, pet_id)
+                return
+        except Exception as e:
+            print(f"[PCL] ⚠ 槽位面板不可用，退化为直接写配置: {e}")
+        try:
+            from pets.pet_registry import set_slot_pet_id, get_pet_config
+            if set_slot_pet_id(slot, pet_id):
+                cfg = get_pet_config(pet_id) or {}
+                name = cfg.get("display_name") or cfg.get("name") or pet_id
+                if slot == "pet":
+                    self._schedule_pet_switch(name)
+                self._toast_msg(f"已把「{name}」放进「{slot}」槽")
+                self._refresh()
+            else:
+                page_msg(self, "换角色", "设置失败：角色不存在或 config.json 不可写")
+        except Exception as e:
+            print(f"[PCL] ⚠ 槽位指定失败: {e}")
+
+    def _schedule_pet_switch(self, pet_name):
+        """桌宠槽换人：正在跑就交给总览页自动关旧开新（0.5 秒防误触）"""
+        try:
+            from .silicon_window import _pet_api_alive
+            _running = False
+            try:
+                _w = self.window()
+                _sh = getattr(_w, "shell", None) or _w
+                _running = bool(getattr(_sh, "_pet_alive_cache", False))
+            except Exception:
+                _running = False
+            home = getattr(self.window(), "pages", {}).get("home")
+            if home is not None and _running:
+                home.schedule_pet_switch(pet_name)
+        except Exception as e:
+            print(f"[PCL] ⚠ 通知桌宠换角色失败: {e}")
+
+    def _toast_msg(self, text):
+        try:
+            from .widgets import show_save_toast
+            show_save_toast(self, text)
+        except Exception:
+            print("[PCL] %s" % text)
 
     def _set_active(self, pet_id):
         from pets.pet_registry import set_active_pet_id, get_active_pet_id
