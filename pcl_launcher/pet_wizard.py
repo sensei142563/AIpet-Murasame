@@ -637,7 +637,7 @@ def create_or_update_pet(spec: dict, log=print) -> tuple:
 
 
 # ══════════════════════ 向导界面 ══════════════════════
-from .silicon_dialog import SiliconDialog  # noqa: E402
+from .silicon_dialog import SiliconDialog, page_msg, page_confirm  # noqa: E402
 
 
 class DisplayPreview(QWidget):
@@ -971,7 +971,7 @@ class _LayerTuneDialog(QDialog):
             print(f"[LayerTune] 已保存 {self._set_name} 套微调: {tbl}")
             self.accept()
         except Exception as e:
-            QMessageBox.warning(self, "保存失败", str(e))
+            page_msg(self, "保存失败", str(e))
 
 
 class PCLPetWizard(SiliconDialog):
@@ -2376,9 +2376,7 @@ class PCLPetWizard(SiliconDialog):
             from pcl_launcher.touch_editor import TouchAreaEditor
             pid = getattr(self, "pet_id", None)
             if not pid:
-                QMessageBox.information(
-                    self, "触摸区域调节",
-                    "新建中的角色还没有保存，触摸区域要在角色创建完成后再调。\n"
+                page_msg(self, "触摸区域调节", "新建中的角色还没有保存，触摸区域要在角色创建完成后再调。\n"
                     "先走完向导点「完成」，再回到这一步打开编辑器即可。")
                 return
             ed = getattr(self, "_touch_editor", None)
@@ -2397,7 +2395,7 @@ class PCLPetWizard(SiliconDialog):
                 pass
         except Exception as e:
             print(f"[Wizard] ⚠ 打开触摸编辑器失败: {e}")
-            QMessageBox.warning(self, "触摸区域调节", f"打开失败：{e}")
+            page_msg(self, "触摸区域调节", f"打开失败：{e}")
 
     def _page_voice(self):
         w = QWidget()
@@ -2689,9 +2687,10 @@ class PCLPetWizard(SiliconDialog):
             self._goto(0)
             return
         if s["kind"] == "2d" and s["portrait_mode"] == "single" and not s["emotion_images"]:
-            if not QMessageBox.question(self, "还没有立绘",
-                                        "你还没有为任何表情选择图片。\n没有立绘时桌宠也可以聊天，"
-                                        "但不会显示形象。\n仍要继续吗？") == QMessageBox.Yes:
+            if not page_confirm(self, "还没有立绘",
+                                "你还没有为任何表情选择图片。",
+                                "没有立绘时桌宠也可以聊天，但不会显示形象。仍要继续吗？",
+                                ok_text="继续创建", danger=False):
                 return
         try:
             _pid, notes = create_or_update_pet(s)
@@ -2701,7 +2700,7 @@ class PCLPetWizard(SiliconDialog):
             return
         self._spec = s
         msg = "\n".join(notes) or "已保存"
-        QMessageBox.information(self, "完成", f"「{s['name']}」已{'保存' if self.is_edit else '创建'}！\n\n{msg}\n\n"
+        page_msg(self, "完成", f"「{s['name']}」已{'保存' if self.is_edit else '创建'}！\n\n{msg}\n\n"
                                               "下一步：在桌宠卡片点「⭐ 设为活动」，再启动桌宠。")
         self.saved.emit(_pid)
         self.accept()

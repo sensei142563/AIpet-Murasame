@@ -26,33 +26,11 @@ S = 1.0
 
 
 # ==================== 页面对话框（替掉 QMessageBox）====================
+# 定义在 silicon_dialog 里（各处页面共用一份实现），这里转出来给本模块的页面用。
 # 为什么不用 QMessageBox（用户反馈"弹窗看不清字"）：它按平台风格自绘，正文颜色/字号
 # 不受启动器主题控制 → 深色主题下发灰；里面的 emoji 在部分机器上会渲染成方块。
 # 崩溃类（带 traceback 的 critical）保持原生：那种场合要的是原始信息，不是好看。
-
-def page_msg(parent, title, text, detail=""):
-    """页面里的提示框（信息 / 轻量失败），主题一致、可复制细节"""
-    try:
-        from .silicon_dialog import message as _m
-        win = parent.window() if parent is not None else None
-        _m(win, title, text, detail)
-    except Exception as e:
-        print(f"[PCL] ⚠ 消息框失败: {e}")
-
-
-def page_confirm(parent, title, text, detail="", ok_text="确定", danger=False) -> bool:
-    """页面里的确认框（替代 QMessageBox.question）。点「确定」返回 True。
-
-    danger=True → 确认键变红（删除 / 清空这类不可恢复的动作必须一眼看出危险）。
-    任何异常都返回 False：宁可什么都不做，也不要在没确认的情况下执行破坏性操作。
-    """
-    try:
-        from .silicon_dialog import confirm as _c
-        win = parent.window() if parent is not None else None
-        return bool(_c(win, title, text, detail, ok_text=ok_text, danger=danger))
-    except Exception as e:
-        print(f"[PCL] ⚠ 确认框失败: {e}")
-        return False
+from .silicon_dialog import page_msg, page_confirm      # noqa: E402,F401
 
 
 class BoolSwitch(QAbstractButton):

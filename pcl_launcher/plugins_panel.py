@@ -17,7 +17,7 @@ import subprocess
 from PyQt5.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve
 from PyQt5.QtWidgets import (
     QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QScrollArea,
-    QCheckBox, QFrame, QMessageBox, QFileDialog, QDialog,
+    QCheckBox, QFrame, QFileDialog, QDialog,
     QSpinBox, QDoubleSpinBox, QComboBox, QLineEdit, QButtonGroup,
     QGraphicsOpacityEffect
 )
@@ -228,7 +228,7 @@ def _time_guard_set(enabled: bool) -> bool:
         return False
 
 
-from .silicon_dialog import SiliconDialog  # noqa: E402
+from .silicon_dialog import SiliconDialog, page_msg, page_confirm  # noqa: E402
 
 
 class PCLPluginSettingsDialog(SiliconDialog):
@@ -651,8 +651,7 @@ class PCLPluginsPanel(QScrollArea):
     def _on_toggle(self, meta, state):
         ok = set_enabled(meta, bool(state))
         if not ok:
-            QMessageBox.information(self, "插件",
-                                    f"「{meta.get('name')}」切换失败（可能缺少运行环境）")
+            page_msg(self, "插件", f"「{meta.get('name')}」切换失败（可能缺少运行环境）")
             self._reload()
             return
         self.plugin_toggled.emit(str(meta.get("id", "")), bool(state))
@@ -668,20 +667,18 @@ class PCLPluginsPanel(QScrollArea):
     def _delete_plugin(self, meta):
         if bool(meta.get("builtin", True)):
             msg = "这是随程序自带的官方内置插件，不可删除。" + chr(10) + "不需要时可在列表里关闭它的开关即可。"
-            QMessageBox.information(self, "删除插件", msg)
+            page_msg(self, "删除插件", msg)
             return
         if meta.get("id") in ("auto_offline", "lively", "adult_mode", "galgame",
                               "slang_search", "time_guard", "auto_learning",
                               "request_music"):
-            QMessageBox.information(self, "删除插件",
-                                    "这是内置插件。删除后该功能将失去管控入口："
+            page_msg(self, "删除插件", "这是内置插件。删除后该功能将失去管控入口："
                                     "功能类会同时被停用（config 键置 false）。\n"
                                     "如误删可重新生成，或联系开发者恢复。")
-        ret = QMessageBox.question(
-            self, "确认删除",
-            f"确定要删除插件「{meta.get('name')}」吗？\n（目录：{meta.get('_dir')}）",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-        if ret != QMessageBox.Yes:
+        if not page_confirm(self, "确认删除",
+                            f"确定要删除插件「{meta.get('name')}」吗？",
+                            f"目录会被永久删除：{meta.get('_dir')}",
+                            ok_text="删除", danger=True):
             return
         try:
             # feature 插件删除 → 停用对应功能
@@ -697,7 +694,7 @@ class PCLPluginsPanel(QScrollArea):
             self.plugin_toggled.emit(str(meta.get("id", "")), False)
             self._reload()
         except Exception as e:
-            QMessageBox.warning(self, "删除失败", str(e))
+            page_msg(self, "删除失败", str(e))
 
     def _import_plugin(self):
         path, _ = QFileDialog.getOpenFileName(self, "选择插件包 (zip)", "",
@@ -714,17 +711,17 @@ class PCLPluginsPanel(QScrollArea):
                         target = n
                         break
                 if target is None:
-                    QMessageBox.warning(self, "导入失败", "压缩包内未找到 plugin.json")
+                    page_msg(self, "导入失败", "压缩包内未找到 plugin.json")
                     return
                 base_dir = target.replace("\\", "/").rsplit("/", 1)[0]
                 meta = json.loads(zf.read(target).decode("utf-8"))
                 pid = str(meta.get("id", "")).strip()
                 if not pid or not str(pid).replace("_", "").isalnum():
-                    QMessageBox.warning(self, "导入失败", "plugin.json 缺少合法 id")
+                    page_msg(self, "导入失败", "plugin.json 缺少合法 id")
                     return
                 dst = os.path.join(_plugins_dir(), pid)
                 if os.path.exists(dst):
-                    QMessageBox.warning(self, "导入失败", f"插件 {pid} 已存在，请先删除旧版本")
+                    page_msg(self, "导入失败", f"插件 {pid} 已存在，请先删除旧版本")
                     return
                 os.makedirs(dst, exist_ok=True)
                 for n in names:
@@ -749,7 +746,7 @@ class PCLPluginsPanel(QScrollArea):
                                 json.dump(_m2, f, ensure_ascii=False, indent=2)
                     except Exception:
                         pass
-            QMessageBox.information(self, "导入成功", f"插件「{meta.get('name', pid)}」已导入（我的插件）")
+            page_msg(self, "导入成功", f"插件「{meta.get('name', pid)}」已导入（我的插件）")
             self._reload()
         except Exception as e:
-            QMessageBox.warning(self, "导入失败", f"导入出错：{e}")
+            page_msg(self, "导入失败", f"导入出错：{e}")

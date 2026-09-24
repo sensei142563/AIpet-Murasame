@@ -388,6 +388,39 @@ def confirm(parent, title, text, detail="", ok_text="确定", cancel_text="取�
         return r == QMessageBox.Yes
 
 
+def page_msg(parent, title, text, detail=""):
+    """页面 / 面板通用的提示框：自动挂到 top-level window 上。
+
+    各页面（桌宠 / 记忆 / 提示词 / 主题 / 插件…）统一用它，别再各写一份，
+    也避免有人图省事直接调 QMessageBox（深色主题下发灰、emoji 变方块）。
+    """
+    try:
+        win = parent.window() if parent is not None else None
+    except Exception:
+        win = parent
+    try:
+        message(win, title, text, detail)
+    except Exception as e:
+        print(f"[SiliconUI] ⚠ page_msg 失败: {e}")
+
+
+def page_confirm(parent, title, text, detail="", ok_text="确定", danger=False) -> bool:
+    """页面 / 面板通用的确认框（替代 QMessageBox.question）：点「确定」返回 True。
+
+    danger=True → 确认键变红（删除 / 清空这类不可恢复的动作必须一眼看出危险）。
+    任何异常都返回 False：宁可什么都不做，也不要在没确认的情况下执行破坏性操作。
+    """
+    try:
+        win = parent.window() if parent is not None else None
+    except Exception:
+        win = parent
+    try:
+        return bool(confirm(win, title, text, detail, ok_text=ok_text, danger=danger))
+    except Exception as e:
+        print(f"[SiliconUI] ⚠ page_confirm 失败: {e}")
+        return False
+
+
 class _DlgBack(QWidget):
     """对话框圆角底"""
 

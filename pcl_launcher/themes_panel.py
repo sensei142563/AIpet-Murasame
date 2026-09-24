@@ -15,7 +15,7 @@ import zipfile
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (
     QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QScrollArea,
-    QFrame, QMessageBox, QFileDialog, QDialog, QInputDialog
+    QFrame, QFileDialog, QDialog, QInputDialog
 )
 from PyQt5.QtGui import QFont
 
@@ -23,7 +23,7 @@ from .colors import *
 from .colors import _list_themes  # 下划线名不随 * 导出，需显式导入
 
 
-from .silicon_dialog import SiliconDialog  # noqa: E402
+from .silicon_dialog import SiliconDialog, page_msg, page_confirm  # noqa: E402
 
 
 class PCLThemeBgDialog(SiliconDialog):
@@ -633,18 +633,18 @@ class PCLThemesPanel(QScrollArea):
                         full = os.path.join(root, fn)
                         rel = os.path.relpath(full, base)
                         zf.write(full, os.path.join(meta["id"], rel))
-            QMessageBox.information(self, "导出成功", f"主题已导出到：\n{path}")
+            page_msg(self, "导出成功", f"主题已导出到：\n{path}")
         except Exception as e:
-            QMessageBox.warning(self, "导出失败", str(e))
+            page_msg(self, "导出失败", str(e))
 
     def _delete(self, meta):
         if meta["builtin"]:
-            QMessageBox.information(self, "删除主题", "官方主题不可删除。")
+            page_msg(self, "删除主题", "官方主题不可删除。")
             return
-        ret = QMessageBox.question(self, "确认删除",
-                                   f"确定删除自定义主题「{meta['name']}」吗？",
-                                   QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-        if ret != QMessageBox.Yes:
+        if not page_confirm(self, "确认删除",
+                            f"确定删除自定义主题「{meta['name']}」吗？",
+                            "主题目录会被永久删除，无法恢复。",
+                            ok_text="删除", danger=True):
             return
         try:
             shutil.rmtree(meta["_dir"], ignore_errors=True)
@@ -657,7 +657,7 @@ class PCLThemesPanel(QScrollArea):
                 self.theme_applied.emit(fallback)
             self._reload()
         except Exception as e:
-            QMessageBox.warning(self, "删除失败", str(e))
+            page_msg(self, "删除失败", str(e))
 
     def _rename(self, meta):
         """主题重命名（官方/我的均可；仅改显示名 name，主题目录 id 不变）"""
@@ -667,10 +667,10 @@ class PCLThemesPanel(QScrollArea):
             return
         new_name = (new_name or "").strip()
         if not new_name:
-            QMessageBox.warning(self, "重命名主题", "名称不能为空。")
+            page_msg(self, "重命名主题", "名称不能为空。")
             return
         if len(new_name) > 40:
-            QMessageBox.warning(self, "重命名主题", "名称过长（最多 40 字）。")
+            page_msg(self, "重命名主题", "名称过长（最多 40 字）。")
             return
         try:
             pj = os.path.join(meta["_dir"], "theme.json")
@@ -681,7 +681,7 @@ class PCLThemesPanel(QScrollArea):
             print(f"[Themes] 主题 {meta['id']} 已重命名为: {new_name}")
             self._reload()
         except Exception as e:
-            QMessageBox.warning(self, "重命名失败", str(e))
+            page_msg(self, "重命名失败", str(e))
 
     def _open_dir(self, meta):
         """打开主题所在目录（资源文件浏览器）"""
@@ -713,7 +713,7 @@ class PCLThemesPanel(QScrollArea):
             print(f"[Themes] 已复制为我的主题: {cand}")
             self._reload()
         except Exception as e:
-            QMessageBox.warning(self, "复制失败", str(e))
+            page_msg(self, "复制失败", str(e))
 
     def _import_theme(self):
         path, _ = QFileDialog.getOpenFileName(self, "选择主题包 (zip)", "",
@@ -729,17 +729,17 @@ class PCLThemesPanel(QScrollArea):
                         target = n
                         break
                 if target is None:
-                    QMessageBox.warning(self, "导入失败", "压缩包内未找到 theme.json")
+                    page_msg(self, "导入失败", "压缩包内未找到 theme.json")
                     return
                 base_dir = target.replace("\\", "/").rsplit("/", 1)[0]
                 meta = json.loads(zf.read(target).decode("utf-8"))
                 tid = str(meta.get("id", "")).strip()
                 if not tid or not str(tid).replace("_", "").isalnum():
-                    QMessageBox.warning(self, "导入失败", "theme.json 缺少合法 id")
+                    page_msg(self, "导入失败", "theme.json 缺少合法 id")
                     return
                 dst = os.path.join(THEME_DIR, tid)
                 if os.path.exists(dst):
-                    QMessageBox.warning(self, "导入失败", f"主题 {tid} 已存在，请先删除旧版本")
+                    page_msg(self, "导入失败", f"主题 {tid} 已存在，请先删除旧版本")
                     return
                 os.makedirs(dst, exist_ok=True)
                 for n in names:
@@ -764,7 +764,7 @@ class PCLThemesPanel(QScrollArea):
                             json.dump(_m2, f, ensure_ascii=False, indent=2)
                 except Exception:
                     pass
-            QMessageBox.information(self, "导入成功", f"主题「{meta.get('name', tid)}」已导入（我的主题）")
+            page_msg(self, "导入成功", f"主题「{meta.get('name', tid)}」已导入（我的主题）")
             self._reload()
         except Exception as e:
-            QMessageBox.warning(self, "导入失败", f"导入出错：{e}")
+            page_msg(self, "导入失败", f"导入出错：{e}")
