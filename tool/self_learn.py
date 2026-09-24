@@ -72,7 +72,7 @@ def set_enabled(on: bool) -> bool:
         _log(f"自主学习 → {'已开启' if on else '已关闭'}")
         return True
     except Exception as e:
-        _log(f"⚠ 开关写入失败: {e}")
+        _log(f"开关写入失败:{e}")
         return False
 
 
@@ -135,7 +135,7 @@ def _save(d: dict):
             json.dump(d, f, ensure_ascii=False, indent=2)
         os.replace(tmp, p)
     except Exception as e:
-        _log(f"⚠ 记忆写入失败: {e}")
+        _log(f"记忆写入失败:{e}")
 
 
 def add_note(kind: str, text: str, topic: str = "") -> bool:
@@ -166,7 +166,7 @@ def add_episode(text: str, kind: str = "event") -> bool:
         _save(d)
         return True
     except Exception as e:
-        _log(f"⚠ 记情节失败: {e}")
+        _log(f"记情节失败:{e}")
         return False
 
 
@@ -431,7 +431,7 @@ def _ask(system: str, user: str, max_tokens: int = 400) -> str:
         _last_call_day[1] += 1
         return str(txt or "").strip()
     except Exception as e:
-        _log(f"⚠ 调用失败: {type(e).__name__}: {e}")
+        _log(f"调用失败:{type(e).__name__}: {e}")
         return ""
 
 
@@ -588,7 +588,7 @@ def consolidate(history: list, pet_name: str = "我") -> str:
                 if isinstance(_p, dict):
                     prof = {str(k)[:16]: str(v)[:60] for k, v in list(_p.items())[:4]}
         except Exception as e:
-            _log(f"⚠ 整理结果解析失败: {e}")
+            _log(f"整理结果解析失败:{e}")
         n = 0
         for f in facts:
             if add_note("fact", f):
@@ -601,7 +601,7 @@ def consolidate(history: list, pet_name: str = "我") -> str:
         _log(f"整理完成：新增 {n} 条长期记忆、{len(prof)} 条画像")
         return f"整理 {n} 条" if n else ""
     except Exception as e:
-        _log(f"⚠ 整理失败: {type(e).__name__}: {e}")
+        _log(f"整理失败:{type(e).__name__}: {e}")
         return ""
 
 
@@ -626,7 +626,7 @@ def maybe_cycle(history: list, pet_name: str = "我", last_user_ts: float = 0.0,
             if _c:
                 return _c
         except Exception as _ec:
-            _log(f"⚠ 整理跳过: {_ec}")
+            _log(f"整理跳过:{_ec}")
         # ② 日记
         if diary(history, pet_name):
             return "日记"
@@ -642,7 +642,7 @@ def maybe_cycle(history: list, pet_name: str = "我", last_user_ts: float = 0.0,
         t = study(history, pet_name)
         return ("自习：" + t) if t else ""
     except Exception as e:
-        _log(f"⚠ 学习循环出错: {type(e).__name__}: {e}")
+        _log(f"学习循环出错:{type(e).__name__}: {e}")
         return ""
 
 

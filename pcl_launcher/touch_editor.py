@@ -271,7 +271,7 @@ class TouchControlPanel(QFrame):
         lay.setContentsMargins(10, 10, 10, 10)
         lay.setSpacing(6)
 
-        t = QLabel("🎭 Live2D 身体部位调节")
+        t = QLabel("Live2D 身体部位调节")
         t.setStyleSheet("font-size:15px;font-weight:bold;color:#e8e8f0;")
         lay.addWidget(t)
         tip = QLabel("· 拖框 = 移动，拖边/角 = 缩放；数值框可精确调\n"
@@ -286,13 +286,13 @@ class TouchControlPanel(QFrame):
         lay.addWidget(self.cmb_area)
 
         row = QHBoxLayout()
-        b_add = QPushButton("➕ 添加")
+        b_add = QPushButton("添加")
         b_add.clicked.connect(self._add)
         row.addWidget(b_add)
-        b_del = QPushButton("🗑 删除")
+        b_del = QPushButton("删除")
         b_del.clicked.connect(self._del)
         row.addWidget(b_del)
-        self.btn_dis = QPushButton("🚫 禁用")
+        self.btn_dis = QPushButton("禁用")
         self.btn_dis.clicked.connect(self._toggle_disabled)
         row.addWidget(self.btn_dis)
         lay.addLayout(row)
@@ -311,7 +311,7 @@ class TouchControlPanel(QFrame):
             lay.addLayout(r)
 
         row2 = QHBoxLayout()
-        b_reset = QPushButton("♻ 恢复默认")
+        b_reset = QPushButton("恢复默认")
         b_reset.clicked.connect(self._reset)
         row2.addWidget(b_reset)
         row2.addStretch()
@@ -322,7 +322,7 @@ class TouchControlPanel(QFrame):
         self.status.setWordWrap(True)
         lay.addWidget(self.status)
 
-        b_save = QPushButton("💾 保存到角色")
+        b_save = QPushButton("保存到角色")
         b_save.setStyleSheet("QPushButton{background:#c8506e;color:#fff;border-radius:8px;"
                              "font-size:14px;font-weight:bold;padding:8px;}")
         b_save.clicked.connect(lambda: self._save())
@@ -343,9 +343,9 @@ class TouchControlPanel(QFrame):
             self.cmb_area.blockSignals(True)
             self.cmb_area.clear()
             for k, _n, _d, _a, _b in AREAS:
-                self.cmb_area.addItem(("🚫 " if k in self._disabled else "") + labs.get(k, k), k)
+                self.cmb_area.addItem((""if k in self._disabled else "") + labs.get(k, k), k)
             for k in custom_keys(self.pet_id):
-                self.cmb_area.addItem(("🚫 " if k in self._disabled else "⭐ ") + labs.get(k, k), k)
+                self.cmb_area.addItem((""if k in self._disabled else "") + labs.get(k, k), k)
             i = self.cmb_area.findData(keep) if keep else -1
             self.cmb_area.setCurrentIndex(i if i >= 0 else 0)
             self.cmb_area.blockSignals(False)
@@ -358,7 +358,7 @@ class TouchControlPanel(QFrame):
         key = self.cmb_area.currentData()
         self.overlay.current = key
         self.overlay.update()
-        self.btn_dis.setText("✅ 启用该部位" if key in self._disabled else "🚫 禁用该部位")
+        self.btn_dis.setText("启用该部位"if key in self._disabled else "禁用该部位")
         self._sync()
 
     def _on_selected(self, key):
@@ -396,7 +396,7 @@ class TouchControlPanel(QFrame):
                 return
             key = add_pet_area(self.pet_id, str(name).strip())
             if not key:
-                self.status.setText("❌ 添加失败")
+                self.status.setText("添加失败")
                 return
             self.overlay.areas[key] = list(touch_defaults().get("chest"))
             self._rebuild(key)
@@ -409,14 +409,14 @@ class TouchControlPanel(QFrame):
         if not key:
             return
         if key in LABELS_DEFAULT:
-            self.status.setText("⚠ 默认部位不能删（可用「🚫 禁用」停用它）")
+            self.status.setText("默认部位不能删（可用「 禁用」停用它）")
             return
         if remove_pet_area(self.pet_id, key):
             self.overlay.areas.pop(key, None)
             self._disabled.discard(key)
             self._rebuild()
             self._save(silent=True)
-            self.status.setText("🗑 已删除该部位")
+            self.status.setText("已删除该部位")
 
     def _toggle_disabled(self):
         key = self.cmb_area.currentData()
@@ -424,10 +424,10 @@ class TouchControlPanel(QFrame):
             return
         if key in self._disabled:
             self._disabled.discard(key)
-            self.status.setText("✅ 已启用该部位")
+            self.status.setText("已启用该部位")
         else:
             self._disabled.add(key)
-            self.status.setText("🚫 已禁用该部位（桌宠摸到这里不再有反应）")
+            self.status.setText("已禁用该部位（桌宠摸到这里不再有反应）")
         self._rebuild(key)
         self._save(silent=True)
 
@@ -436,8 +436,8 @@ class TouchControlPanel(QFrame):
                             labels=touch_labels(self.pet_id), mode=self.mode,
                             disabled=sorted(self._disabled))
         if not silent:
-            self.status.setText("✅ 已保存（Live2D 这套）；桌宠在运行会立刻刷新"
-                                if ok else "❌ 保存失败，看日志")
+            self.status.setText("已保存（Live2D 这套）；桌宠在运行会立刻刷新"
+                                if ok else "保存失败，看日志")
         if ok:
             try:
                 import json as _json
@@ -518,13 +518,13 @@ class TouchAreaEditor(QWidget):
         self.cmb_area.currentIndexChanged.connect(self._on_area_changed)
         gv.addWidget(self.cmb_area)
         row_add = QHBoxLayout()
-        self.btn_add_area = QPushButton("➕ 添加部位")
+        self.btn_add_area = QPushButton("添加部位")
         self.btn_add_area.clicked.connect(self._add_area)
         row_add.addWidget(self.btn_add_area)
-        self.btn_del_area = QPushButton("🗑 删除该部位")
+        self.btn_del_area = QPushButton("删除该部位")
         self.btn_del_area.clicked.connect(self._del_area)
         row_add.addWidget(self.btn_del_area)
-        self.btn_dis_area = QPushButton("🚫 禁用")
+        self.btn_dis_area = QPushButton("禁用")
         self.btn_dis_area.clicked.connect(self._toggle_area_disabled)
         row_add.addWidget(self.btn_dis_area)
         gv.addLayout(row_add)
@@ -556,15 +556,15 @@ class TouchAreaEditor(QWidget):
         self.cmb_base = QComboBox()
         # 2D 只有一种：自动识别该角色是「多图拼合」还是「每个表情一张整图」
         # （同一个角色不可能两种并存，所以不需要分成两个选项）
-        self.cmb_base.addItem("🖼 2D 立绘（自动识别：多图拼合 / 单图整图）", "2d")
-        self.cmb_base.addItem("🎭 Live2D 模型（框画在实时预览窗口上面）", "live2d")
+        self.cmb_base.addItem("2D 立绘（自动识别：多图拼合 / 单图整图）", "2d")
+        self.cmb_base.addItem("Live2D 模型（框画在实时预览窗口上面）", "live2d")
         self.cmb_base.currentIndexChanged.connect(lambda *_: self._load_preview())
         g3.addWidget(self.cmb_base)
         self.cmb_emotion = QComboBox()
         self.cmb_emotion.currentIndexChanged.connect(lambda *_: self._load_preview())
         self.cmb_emotion.setVisible(False)
         g3.addWidget(self.cmb_emotion)
-        b_reload = QPushButton("🔄 重新加载底图")
+        b_reload = QPushButton("重新加载底图")
         b_reload.clicked.connect(self._load_preview)
         g3.addWidget(b_reload)
         right.addWidget(gb3)
@@ -575,7 +575,7 @@ class TouchAreaEditor(QWidget):
         right.addWidget(self.status)
 
         row = QHBoxLayout()
-        b_def = QPushButton("♻ 恢复默认区域")
+        b_def = QPushButton("恢复默认区域")
         b_def.clicked.connect(self._reset)
         row.addWidget(b_def)
         right.addLayout(row)
@@ -584,7 +584,7 @@ class TouchAreaEditor(QWidget):
         b_close = QPushButton("关闭")
         b_close.clicked.connect(self.close)
         row2.addWidget(b_close)
-        b_save = QPushButton("💾 保存到角色")
+        b_save = QPushButton("保存到角色")
         b_save.setStyleSheet("QPushButton{background:#c8506e;color:#fff;border-radius:8px;"
                              "font-size:14px;font-weight:bold;padding:8px;}")
         b_save.clicked.connect(self._save)
@@ -608,14 +608,14 @@ class TouchAreaEditor(QWidget):
             _dis = set(getattr(self.overlay, "disabled", set()) or set())
             for k, _n, _d, _a, _b in AREAS:
                 if k in (self._active().areas if hasattr(self, "overlay") else {}) or k in labs:
-                    self.cmb_area.addItem(("🚫 " if k in _dis else "") + labs.get(k, k), k)
+                    self.cmb_area.addItem((""if k in _dis else "") + labs.get(k, k), k)
             for k in custom_keys(self.pet_id):
                 self.cmb_area.addItem("⭐ " + labs.get(k, k), k)
             i = self.cmb_area.findData(keep) if keep else -1
             self.cmb_area.setCurrentIndex(i if i >= 0 else 0)
             self.cmb_area.blockSignals(False)
             self.lbl_area_hint.setText(
-                f"共 {self.cmb_area.count()} 个部位（默认 14 个不可删；⭐ 为自定义，可删）")
+                f"共 {self.cmb_area.count()}个部位（默认 14 个不可删； 为自定义，可删）")
         except Exception as e:
             print(f"[TouchEditor] ⚠ 重建部位列表失败: {e}")
 
@@ -628,7 +628,7 @@ class TouchAreaEditor(QWidget):
                 return
             key = add_pet_area(self.pet_id, str(name).strip())
             if not key:
-                self.status.setText("❌ 添加失败，看控制台日志")
+                self.status.setText("添加失败，看控制台日志")
                 return
             # 同步到两层框（默认给一个中间位置的小框，拖到身上即可）
             self.overlay.areas[key] = list(touch_defaults().get("chest"))
@@ -637,9 +637,9 @@ class TouchAreaEditor(QWidget):
                 ov.areas[key] = list(self.overlay.areas[key])
             self._rebuild_area_combo(key)
             self._on_area_changed()
-            self.status.setText(f"➕ 已添加部位「{str(name).strip()}」——把它拖到身上对应位置，再点保存")
+            self.status.setText(f"已添加部位「{str(name).strip()}」——把它拖到身上对应位置，再点保存")
         except Exception as e:
-            self.status.setText(f"❌ 添加部位失败: {e}")
+            self.status.setText(f"添加部位失败:{e}")
 
     def _toggle_area_disabled(self):
         """禁用 / 启用当前部位（默认部位不能删，但可以禁用；每模式独立）"""
@@ -659,8 +659,8 @@ class TouchAreaEditor(QWidget):
                 ov.disabled = set(dis)
             if save_pet_areas(self.pet_id, self.overlay.areas_dict(), mode=mode,
                               labels=touch_labels(self.pet_id), disabled=sorted(dis)):
-                self.status.setText(("✅ 已启用该部位" if key not in dis
-                                     else "🚫 已禁用该部位（桌宠摸到这里不再有反应）"))
+                self.status.setText(("已启用该部位"if key not in dis
+                                     else "已禁用该部位（桌宠摸到这里不再有反应）"))
                 self._rebuild_area_combo(key)
                 self.overlay.update()
                 try:
@@ -672,7 +672,7 @@ class TouchAreaEditor(QWidget):
                 except Exception:
                     pass
         except Exception as e:
-            self.status.setText(f"❌ 禁用/启用失败: {e}")
+            self.status.setText(f"禁用/启用失败:{e}")
 
     def _del_area(self):
         """删除当前选中的自定义部位（默认部位不允许删）"""
@@ -682,7 +682,7 @@ class TouchAreaEditor(QWidget):
             if not key:
                 return
             if key in _DEF:
-                self.status.setText("⚠ 默认部位不能删除（可以改位置/大小；不想要就把框拖到画面外的小角落）")
+                self.status.setText("默认部位不能删除（可以改位置/大小；不想要就把框拖到画面外的小角落）")
                 return
             if remove_pet_area(self.pet_id, key):
                 for ov in (self.overlay, getattr(self, "_live_overlay", None)):
@@ -691,9 +691,9 @@ class TouchAreaEditor(QWidget):
                         ov.update()
                 self._rebuild_area_combo()
                 self._on_area_changed()
-                self.status.setText("🗑 已删除该部位（已保存）")
+                self.status.setText("已删除该部位（已保存）")
         except Exception as e:
-            self.status.setText(f"❌ 删除部位失败: {e}")
+            self.status.setText(f"删除部位失败:{e}")
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
@@ -762,14 +762,14 @@ class TouchAreaEditor(QWidget):
                             disabled=sorted(getattr(ov, "disabled", set()) or set()),
                             enabled=self.chk_enabled.isChecked())
         if ok:
-            self.status.setText("✅ 已保存；桌宠在下次启动/重开后生效（正在运行的桌宠会立刻刷新）")
+            self.status.setText("已保存；桌宠在下次启动/重开后生效（正在运行的桌宠会立刻刷新）")
             self.saved.emit(self.pet_id)
             try:
                 self._notify_pet()
             except Exception:
                 pass
         else:
-            self.status.setText("❌ 保存失败，看控制台日志")
+            self.status.setText("保存失败，看控制台日志")
 
     def _notify_pet(self):
         """通知正在运行的桌宠立刻刷新触摸区域（走它的 HTTP 接口）"""
@@ -951,7 +951,7 @@ class TouchAreaEditor(QWidget):
         if single:
             self.cmb_emotion.setVisible(True)
             if not self.cmb_emotion.count() and not self._fill_emotions():
-                self.status.setText("⚠ 这个角色没有「每个表情一张整图」的表情素材")
+                self.status.setText("这个角色没有「每个表情一张整图」的表情素材")
                 return
         else:
             self.cmb_emotion.setVisible(False)
@@ -980,7 +980,7 @@ class TouchAreaEditor(QWidget):
             from pcl_launcher.portrait_studio import _runtime_python, _base_dir
             import json as _json
             if not os.path.exists(_runtime_python()):
-                self.status.setText("⚠ 当前环境没有 runtime venv，无法合成立绘（框仍可调、保存可用）")
+                self.status.setText("当前环境没有 runtime venv，无法合成立绘（框仍可调、保存可用）")
                 return
             out, err = self._cli(["list"])
             data = {}
@@ -997,7 +997,7 @@ class TouchAreaEditor(QWidget):
                     emos = list((pt.get("emotions") or {}).keys())
                     emo = str(pt.get("default_emotion") or (emos[0] if emos else ""))
                 if not emo:
-                    self.status.setText("⚠ 这个角色没有单图表情素材（没有可预览的整图）")
+                    self.status.setText("这个角色没有单图表情素材（没有可预览的整图）")
                     return
                 # 套装名与下面「多图拼合」分支取同一来源（历史上前者漏了这句，
                 # set_name 从未定义 → 单图角色点预览必报 NameError）
@@ -1046,12 +1046,12 @@ class TouchAreaEditor(QWidget):
                     self._preview_pm = pm
                     self.overlay.set_background(pm)
                     how = "单张整图" if (force_single or mode == "single") else "多图拼合"
-                    self.status.setText(f"🖼 2D 底图（{how}）：{os.path.basename(path)}"
+                    self.status.setText(f"2D 底图（{how}）：{os.path.basename(path)}"
                                         f"（把框拖到对应部位即可）")
                     return
-            self.status.setText(f"⚠ 没合成出预览图（框仍可调、保存可用）{se[:60]}")
+            self.status.setText(f"没合成出预览图（框仍可调、保存可用）{se[:60]}")
         except Exception as e:
-            self.status.setText(f"⚠ 预览加载失败（框仍可调）: {e}")
+            self.status.setText(f"预览加载失败（框仍可调）:{e}")
 
     def _attach_to_live2d(self):
         """把框挂到 Live2D 实时预览窗口上（框在最上层 → 能边看模型边调）"""
@@ -1060,7 +1060,7 @@ class TouchAreaEditor(QWidget):
             from pcl_launcher.live2d_preview import open_live2d_window
             mj = get_live2d_model_json(self.pet_id) or ""
             if not mj:
-                self.status.setText("⚠ 该角色没有 Live2D 模型，已改用 2D 立绘调框")
+                self.status.setText("该角色没有 Live2D 模型，已改用 2D 立绘调框")
                 try:
                     self.cmb_base.blockSignals(True)
                     self.cmb_base.setCurrentIndex(0)
@@ -1071,7 +1071,7 @@ class TouchAreaEditor(QWidget):
                 return
             win = open_live2d_window(mj, None, pet_id=getattr(self, "pet_id", None))
             if win is None:
-                self.status.setText("⚠ 打开 Live2D 预览失败（看 tmp/live2d_window.log）")
+                self.status.setText("打开 Live2D 预览失败（看 tmp/live2d_window.log）")
                 return
             # 覆盖层：作为预览窗口的子控件，盖在 GL 控件上（半透明，模型可见）
             ov = getattr(win, "_touch_overlay", None)
@@ -1141,7 +1141,7 @@ class TouchAreaEditor(QWidget):
             QTimer.singleShot(120, self._refresh_live_overlay)
             QTimer.singleShot(420, self._refresh_live_overlay)
         except Exception as e:
-            self.status.setText(f"⚠ Live2D 调框失败: {e}")
+            self.status.setText(f"Live2D 调框失败:{e}")
 
     def _refresh_live_overlay(self):
         ov = getattr(self, "_live_overlay", None)

@@ -73,7 +73,7 @@ def parse_readme(path: str = None):
             start = i + 1
             break
     if start is None:
-        raise SystemExit("README 里找不到「## 🆕 最新版本」章节，无法生成更新日志")
+        raise SystemExit("README 里找不到「## 最新版本」章节，无法生成更新日志")
     end = len(lines)
     for i in range(start, len(lines)):
         if lines[i].startswith("## "):

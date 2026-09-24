@@ -55,7 +55,7 @@ def set_abort(reason: str = "主人喊停"):
     """
     _abort[0] = str(reason or "停")
     _abort[1] = time.time()
-    _log_line(f"⛔ 收到停止请求（{_abort[0]}）→ 后续动作不再执行")
+    _log_line(f"收到停止请求（{_abort[0]}）→ 后续动作不再执行")
 
 
 def clear_abort():
@@ -360,7 +360,7 @@ def _write_flag(key: str, on: bool, label: str) -> bool:
         _log_line(f"{label} → {'已开启' if on else '已关闭'}")
         return True
     except Exception as e:
-        _log_line(f"⚠ {label}开关写入失败: {e}")
+        _log_line(f"{label}开关写入失败: {e}")
         return False
 
 
@@ -532,7 +532,7 @@ def _post_click(hwnd, x, y, kind="click") -> bool:
             u.PostMessageW(hwnd, WM_LBUTTONUP, 0, lparam)
         return True
     except Exception as e:
-        _log_line(f"⚠ 后台点击失败（退回真鼠标）: {type(e).__name__}: {e}")
+        _log_line(f"后台点击失败（退回真鼠标）:{type(e).__name__}: {e}")
         return False
 
 
@@ -684,7 +684,7 @@ def scan(text: str):
         if got:
             acts.extend(got)
         elif str(seg).strip():
-            _log_line(f"⚠ 这条指令看不懂，已跳过: {str(seg).strip()[:60]}")
+            _log_line(f"这条指令看不懂，已跳过:{str(seg).strip()[:60]}")
     val = (acts[:SAFETY_MAX] if SAFETY_MAX else acts, spans)
     _SCAN_CACHE["src"] = src
     _SCAN_CACHE["val"] = val
@@ -788,7 +788,7 @@ def execute(actions: list, dry_run: bool = False, auto: bool = False, notify=Non
             return []
         if any(str(a.get("type")) in _REAL_TYPES for a in actions):
             _last_auto_ts[0] = time.time()
-        _log_line("⭐ 她主自动手（主人没开口）")
+        _log_line("她主自动手（主人没开口）")
 
     x0, y0, sw, sh = _screen_size()
     try:
@@ -812,7 +812,7 @@ def execute(actions: list, dry_run: bool = False, auto: bool = False, notify=Non
                 if _ok:
                     _kept.append(_a)
                 else:
-                    _log_line(f"🛡 自主模式下拦下这个动作（{_a.get('type')}）：{_why}")
+                    _log_line(f"自主模式下拦下这个动作（{_a.get('type')}）：{_why}")
                     if notify:
                         try:
                             notify(_why)
@@ -823,18 +823,18 @@ def execute(actions: list, dry_run: bool = False, auto: bool = False, notify=Non
                 if not _acts:
                     return []
         except Exception as _ea:
-            _log_line(f"⚠ 分档检查失败（照常执行）: {_ea}")
+            _log_line(f"分档检查失败（照常执行）:{_ea}")
     for a in _acts:
         t = a.get("type")
         # ── 立刻停手：主人喊停 / 任务中止 ──
         if not dry_run and abort_requested():
-            _log_line(f"⛔ 已停止（{_abort[0]}）→ 丢弃剩下的动作")
+            _log_line(f"已停止（{_abort[0]}）→ 丢弃剩下的动作")
             _drop(f"主人叫停了（{_abort[0]}），剩下的动作我没做")
             break
         # ── 重复抑制：同一个地方连着点太多次才算"卡住"（允许两次） ──
         if not dry_run and not no_dup and _is_dup(a):
             _dup_hits[0] += 1
-            _log_line(f"⏭ 这个地方已经点过两次了（{_act_key(a)}）→ 跳过，别再重复")
+            _log_line(f"这个地方已经点过两次了（{_act_key(a)}）→ 跳过，别再重复")
             _drop("你在反复点同一个地方（%s）。它已经点过了，再点也不会有变化——"
                   "换个办法（比如【看屏幕】看清位置再点），或者直接跟主人说你做不了。"
                   % _act_key(a))
@@ -843,7 +843,7 @@ def execute(actions: list, dry_run: bool = False, auto: bool = False, notify=Non
             if t in ("move", "click", "double", "right"):
                 x, y = int(a["x"]), int(a["y"])
                 if not (x0 <= x <= x0 + sw and y0 <= y <= y0 + sh):
-                    _log_line(f"⚠ 坐标 ({x},{y}) 超出屏幕 {sw}x{sh} → 丢弃")
+                    _log_line(f"坐标 ({x},{y}) 超出屏幕 {sw}x{sh} → 丢弃")
                     continue
                 if dry_run:
                     _log_line(f"[演练] {t} ({x},{y})")
@@ -902,7 +902,7 @@ def execute(actions: list, dry_run: bool = False, auto: bool = False, notify=Non
             elif t == "key":
                 k = _resolve_key(a.get("key"))
                 if k is None:
-                    _log_line(f"⚠ 不认识的按键: {a.get('key')}")
+                    _log_line(f"不认识的按键:{a.get('key')}")
                     continue
                 if dry_run:
                     _log_line(f"[演练] key {a.get('key')}")
@@ -916,7 +916,7 @@ def execute(actions: list, dry_run: bool = False, auto: bool = False, notify=Non
                 keys = [_resolve_key(k) for k in (a.get("keys") or [])]
                 keys = [k for k in keys if k is not None]
                 if not keys:
-                    _log_line(f"⚠ 不认识的组合键: {a.get('keys')}")
+                    _log_line(f"不认识的组合键:{a.get('keys')}")
                     continue
                 if dry_run:
                     _log_line(f"[演练] hotkey {'+'.join(a.get('keys') or [])}")
@@ -935,12 +935,12 @@ def execute(actions: list, dry_run: bool = False, auto: bool = False, notify=Non
                 _log_line(f"wait {s}s")
                 done.append(a)
         except Exception as e:
-            _log_line(f"⚠ 执行 {t} 失败: {type(e).__name__}: {e}")
+            _log_line(f"执行{t} 失败: {type(e).__name__}: {e}")
         # 动作之间留点间隔，别让鼠标瞬移
         if not dry_run and t not in ("wait",):
             time.sleep(STEP_DELAY)
     if not dry_run and len(done) < len(_acts):
-        _log_line(f"⚠ 本轮 {len(_acts)} 个动作里只做成了 {len(done)} 个"
+        _log_line(f"本轮{len(_acts)} 个动作里只做成了 {len(done)} 个"
                   f"（有重复的、坐标越界的或没做成的）")
     # 做完了 → 让桌宠给她一次"说一句"的机会（我做了什么 / 接下来想干什么）
     if not dry_run and done and _narrator[0]:

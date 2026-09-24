@@ -517,16 +517,16 @@ def offline_report(n_msgs: int, stats: dict) -> str:
       是真的没消息，还是接口不可用（两种情况处理方式完全不同）。现在按拉取统计分开说。
     """
     if n_msgs:
-        return f"🔄 发现 {n_msgs} 条离线消息，逐条补回复..."
+        return f"发现{n_msgs} 条离线消息，逐条补回复..."
     sessions = int((stats or {}).get("sessions", 0))
     ok = int((stats or {}).get("ok", 0))
     fail = int((stats or {}).get("fail", 0))
     if sessions == 0:
-        return "📭 没有可查的会话（好友列表为空，或 NapCat 不支持 get_friend_list）"
+        return "没有可查的会话（好友列表为空，或 NapCat 不支持 get_friend_list）"
     if ok == 0 and fail:
-        return (f"⚠ 拉不到历史：{fail} 次 get_friend_msg_history 全部失败"
+        return (f"拉不到历史：{fail} 次 get_friend_msg_history 全部失败"
                 f"（NapCat 未支持该 API 或响应超时）→ 本次没有补拉")
-    return f"📭 没有需要补的离线消息（查了 {sessions} 个会话，历史接口正常）"
+    return f"没有需要补的离线消息（查了{sessions} 个会话，历史接口正常）"
 
 
 def _extract_msg_text(message):

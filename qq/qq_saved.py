@@ -269,5 +269,5 @@ def summary() -> str:
             if not ns:
                 return f"{label}：无"
             return f"{label}（{len(ns)}/{MAX_PER_KIND}）：{'、'.join(ns[:10])}"
-        return "\n".join([fmt("images", "🖼 收藏图片"), fmt("videos", "🎬 收藏视频"),
-                          fmt("stickers", "😊 收藏表情")])
+        return "\n".join([fmt("images", "收藏图片"), fmt("videos", "收藏视频"),
+                          fmt("stickers", "收藏表情")])

@@ -108,9 +108,9 @@ def handle_qq_command(text: str, session_key: str, user_id) -> str:
                 return "这个指令只有主人能用哦~（当前仍是普通模式）"
             set_enabled(_tg)
             if _tg:
-                return (f"🌙 已开启限制级模式。只有主人你面前{_pref()}才会放开 18+ 的内容，"
+                return (f"已开启限制级模式。只有主人你面前{_pref()}才会放开 18+ 的内容，"
                         f"其他人面前{_pref()}还是会保持得体的哦~")
-            return "☀️ 已关闭限制级模式，恢复正常聊天。"
+            return "已关闭限制级模式，恢复正常聊天。"
     except Exception:
         pass
 
@@ -126,7 +126,7 @@ def handle_qq_command(text: str, session_key: str, user_id) -> str:
         if _hit_on or _hit_off or "galgame模式" in _low2 or "好感度模式" in _low2:
             from qq.qq_config import get_qq_config as _gq_cfg
             if not _gq_cfg().get("galgame_allowed", True):
-                return "🎮 Galgame 玩法已被停用（可在启动器「插件」页重新启用）"
+                return "Galgame 玩法已被停用（可在启动器「插件」页重新启用）"
             if not (_hit_on or _hit_off):
                 return "跟我说「开启galgame模式」就能开始好感度养成哦~（详细玩法见 /help）"
             if not _cur_gid:
@@ -142,7 +142,7 @@ def handle_qq_command(text: str, session_key: str, user_id) -> str:
                         "（说「关闭galgame模式」可结束）")
             set_member_enabled(_gid, user_id, False)
             print(f"[QQCmd] 🎮 Galgame 模式已在群 {_gid} 对 QQ{user_id} 关闭")
-            return "🎮 你的 Galgame 模式已关闭，回到普通聊天啦。"
+            return "你的 Galgame 模式已关闭，回到普通聊天啦。"
     except Exception:
         pass
 
@@ -154,7 +154,7 @@ def handle_qq_command(text: str, session_key: str, user_id) -> str:
                 return "这个玩法要在群里 @我 才能玩哦~"
             from qq.qq_config import get_qq_config as _gq_cfg2
             if not _gq_cfg2().get("galgame_allowed", True):
-                return "🎮 Galgame 玩法已被停用（可在启动器「插件」页重新启用）"
+                return "Galgame 玩法已被停用（可在启动器「插件」页重新启用）"
             if not _me(_cur_gid, user_id):
                 return ("🎮 你还没开启 Galgame 模式哦～ 先在这个群里对我说「开启galgame模式」，"
                         "才能解锁好感度养成和约会玩法（玩法见 /help）")
@@ -173,27 +173,27 @@ def handle_qq_command(text: str, session_key: str, user_id) -> str:
             _gid = _cur_gid
             from qq.qq_config import get_qq_config as _gq_cfg3
             if not _gq_cfg3().get("galgame_allowed", True):
-                return "🎮 Galgame 玩法已被停用（可在启动器「插件」页重新启用）"
+                return "Galgame 玩法已被停用（可在启动器「插件」页重新启用）"
             from qq.qq_galgame import member_enabled as _me2
             if not _me2(_gid, user_id):
                 return ("🎮 你还没开启 Galgame 模式哦～ 在群里对我说「开启galgame模式」"
                         "就能开始好感度养成和约会玩法啦（玩法见 /help）")
             from qq.qq_memory import is_owner as _is_owner
             if _is_owner(user_id):
-                return f"❤️ {_pref()}对主人的好感度当然是永远的 100 分啦～你可是{_pref()}最重要的人！"
+                return f"{_pref()}对主人的好感度当然是永远的 100 分啦～你可是{_pref()}最重要的人！"
             from qq.qq_galgame import get_affection as _get_aff
             _aff = _get_aff(_gid, user_id)
             if _aff >= 90:
-                _tier = f"💕 亲密恋人级——{_pref()}的心已经向你敞开了"
+                _tier = f"亲密恋人级——{_pref()}的心已经向你敞开了"
             elif _aff >= 70:
-                _tier = "💗 亲近级——可以适当亲密互动哦"
+                _tier = "亲近级——可以适当亲密互动哦"
             elif _aff >= 50:
-                _tier = "😊 普通朋友级——继续加油培养感情吧"
+                _tier = "普通朋友级——继续加油培养感情吧"
             elif _aff >= 30:
-                _tier = f"🧊 冷淡级……{_pref()}暂时不太想理你"
+                _tier = f"冷淡级……{_pref()}暂时不太想理你"
             else:
-                _tier = f"💢 讨厌级！离{_pref()}远一点！"
-            return f"🎮 {_pref()}对你的好感度：{_aff} / 100\n{_tier}"
+                _tier = f"讨厌级！离{_pref()}远一点！"
+            return f"{_pref()}对你的好感度：{_aff} / 100\n{_tier}"
     except Exception:
         pass
 
@@ -215,7 +215,7 @@ def handle_qq_command(text: str, session_key: str, user_id) -> str:
 
     # /which — 查看当前服务的是哪个桌宠（所有人可用）
     if cmd == "/which":
-        return f"🐾 当前为你服务的是：{_pet_display_name()}"
+        return f"当前为你服务的是：{_pet_display_name()}"
 
     # /status — 查看当前模型/服务状态（所有人可用）
     if cmd == "/status":
@@ -227,20 +227,20 @@ def handle_qq_command(text: str, session_key: str, user_id) -> str:
             model = mcfg["model"] if mcfg else "未配置"
             vcfg = get_vision_model_config()
             vision_model = vcfg["model"] if vcfg else "未配置"
-            f5tts = "✅ 就绪" if check_port_open(F5TTS_PORT) else "❌ 未运行"
-            vision = "✅ 开启" if cfg["vision_enabled"] else "❌ 关闭"
-            voice = "✅ 开启" if cfg["send_voice"] else "❌ 关闭"
-            sticker = "✅ 开启" if cfg["send_sticker"] else "❌ 关闭"
+            f5tts = "就绪"if check_port_open(F5TTS_PORT) else "未运行"
+            vision = "开启"if cfg["vision_enabled"] else "关闭"
+            voice = "开启"if cfg["send_voice"] else "关闭"
+            sticker = "开启"if cfg["send_sticker"] else "关闭"
             pet_name = _pet_display_name()
             return (
-                f"🍃 {pet_name}状态\n"
+                f"{pet_name}状态\n"
                 f"🤖 长文本模型：{model}\n"
                 f"👁 视觉模型：{vision_model}\n"
                 f"🎙 语音输出：{voice}\n"
                 f"🎙 F5-TTS：{f5tts}\n"
                 f"👁 图片识别：{vision}\n"
                 f"🖼 表情包：{sticker}\n"
-                f"👥 群聊@：{'✅' if cfg['allow_groups'] else '❌'}"
+                f"👥 群聊@：{''if cfg['allow_groups'] else ''}"
             )
         except Exception as e:
             return f"查询状态失败：{e}"
@@ -254,7 +254,7 @@ def handle_qq_command(text: str, session_key: str, user_id) -> str:
     if cmd in ("/install", "/help", "/extensions"):
         pet_name = _pet_display_name()
         lines = [
-            f"🍃 {pet_name}指令列表：",
+            f"{pet_name}指令列表：",
             "/which       查看当前服务的是哪个桌宠",
             "/status      查看模型/语音/F5-TTS/图片识别/表情包状态",
             "/memory      查看当前会话记忆轮数",
@@ -268,21 +268,21 @@ def handle_qq_command(text: str, session_key: str, user_id) -> str:
         else:
             lines.append("/clear、/switch 与成人模式开关仅主人白名单可用")
         lines.append("")
-        lines.append("🎮 Galgame 好感度玩法（普通成员可玩）：")
+        lines.append("Galgame 好感度玩法（普通成员可玩）：")
         lines.append("· 对 @我 说「开启galgame模式」开始（任意群成员都可以开）")
         lines.append("· 好感度 0~100（初始 50）：聊天有礼貌/有趣/关心会加分，冒犯/没礼貌会扣分")
         lines.append("· 好感 ≥70 可亲密互动（撒娇、抱抱…）；≥90 可满足较过分的要求（会扣好感）")
         lines.append(f"· 好感 <50 时亲密和过分要求会被{_pref()}拒绝哦")
-        lines.append("· 💕 约会玩法：对我说「和我约会吧」可以约会——成功大加好感(+15~25)，失败会扣大额好感；好感越高越容易成功，每次约会间隔 60 分钟")
-        lines.append(f"· 📊 对我说「查看好感度」可查看{_pref()}对你的好感度（初始50，0~100）")
+        lines.append("· 约会玩法：对我说「和我约会吧」可以约会——成功大加好感(+15~25)，失败会扣大额好感；好感越高越容易成功，每次约会间隔 60 分钟")
+        lines.append(f"· 对我说「查看好感度」可查看{_pref()}对你的好感度（初始50，0~100）")
         lines.append("· 说「关闭galgame模式」结束玩法")
         lines.append("")
-        lines.append("🌐 自主学习：")
+        lines.append("自主学习：")
         lines.append("· 发链接给我（网页/B站/快手等）→ 我会打开看内容再回复")
         lines.append("· 问「搜索/查一下/帮我查 xxx」「这是什么/不懂/不认识」→ 我会联网搜索答案")
         lines.append("· 图片不认识 → 发图问我「这是什么」即可")
         lines.append("")
-        lines.append("🖼 媒体收藏（图片/表情/视频各最多10个，满了自动替换最旧）：")
+        lines.append("媒体收藏（图片/表情/视频各最多10个，满了自动替换最旧）：")
         lines.append("· 搜图 猫咪 → 联网搜图并保存+发给你")
         lines.append("· 搜视频 猫 搞笑 → 搜索并直接下载发送视频")
         lines.append("· 看到表情/图片后说「保存表情」/「保存这张图」→ 收藏")
@@ -311,7 +311,7 @@ def handle_qq_command(text: str, session_key: str, user_id) -> str:
             cfg["longtext_model_name"] = FAMILY_DEFAULT_MODEL[target]
             with open(cfg_path, "w", encoding="utf-8") as f:
                 _json.dump(cfg, f, ensure_ascii=False, indent=2)
-            return f"✅ 长文本模型已切换为：{target}（{cfg['longtext_model_name']}）"
+            return f"长文本模型已切换为：{target}（{cfg['longtext_model_name']}）"
         except Exception as e:
             return f"切换失败：{e}"
 

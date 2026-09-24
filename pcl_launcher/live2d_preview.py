@@ -645,9 +645,9 @@ class Live2DPreviewWindow(QWidget):
         lay.addWidget(self.view, 1)
         bar = QHBoxLayout()
         bar.setContentsMargins(8, 4, 8, 8)
-        self.btn_reload = QPushButton("🔄 重新加载")
+        self.btn_reload = QPushButton("重新加载")
         self.btn_reload.clicked.connect(lambda: self.view.load_model(self._model_json) if self._model_json else None)
-        self.btn_fit = QPushButton("🎯 适合窗口")
+        self.btn_fit = QPushButton("适合窗口")
         self.btn_fit.clicked.connect(self._fit)
         for _b in (self.btn_reload, self.btn_fit):
             # ⚠ 画布是**写死的深色**（QColor(30,30,38)），而全局 QSS 给按钮的文字色是

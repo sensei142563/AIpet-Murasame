@@ -235,13 +235,12 @@ class PCLPluginSettingsDialog(SiliconDialog):
     """插件设置对话框：按 plugin.json 的 settings 声明渲染表单并写回 config.json"""
 
     def __init__(self, meta, parent=None):
-        super().__init__(parent)
         # 去掉标题栏右上角那个点了没反应的「?」帮助按钮（Qt 默认给 QDialog 加）
         try:
             self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
         except Exception:
             pass
-        _title = f"⚙ {meta.get('name', meta.get('id', '插件'))} 设置"
+        _title = f"{meta.get('name', meta.get('id', '插件'))} 设置"
         super().__init__(_title, parent, width=560, height=620)
         self.setWindowTitle(_title)
         self._meta = meta
@@ -318,7 +317,7 @@ class PCLPluginSettingsDialog(SiliconDialog):
 
         # 底部按钮
         btns = QHBoxLayout()
-        btn_save = QPushButton("  💾 保存")
+        btn_save = QPushButton("保存")
         btn_cancel = QPushButton("  取消")
         for b in (btn_save, btn_cancel):
             b.setStyleSheet(f"""
@@ -338,7 +337,7 @@ class PCLPluginSettingsDialog(SiliconDialog):
 
         # 人脸识别插件：照片库直接内嵌在本设置对话框里（原来的顶部「人脸」目录已移除）
         if meta.get("id") == "face":
-            info = QLabel("📷 主人 / 其他人的照片在这里添加、删除；下面是识别参数。")
+            info = QLabel("主人 / 其他人的照片在这里添加、删除；下面是识别参数。")
             info.setWordWrap(True)
             info.setStyleSheet(f"color: {Color3.name()}; font-size: {int(12*S)}px;"
                                f"background: {Color6.name()}; border-radius: {int(4*S)}px;"
@@ -410,7 +409,7 @@ class PCLPluginsPanel(QScrollArea):
         self._layout.setSpacing(int(14 * S))
         self.setWidget(self._container)
 
-        title = QLabel("  🧩 插件管理")
+        title = QLabel("插件管理")
         title.setFont(QFont("Microsoft YaHei", int(16 * S), QFont.Bold))
         title.setStyleSheet(f"color: {Color1.name()};")
         self._layout.addWidget(title)
@@ -456,8 +455,8 @@ class PCLPluginsPanel(QScrollArea):
 
         # 顶部操作行
         top = QHBoxLayout()
-        btn_import = QPushButton("  📦 导入插件 (zip)")
-        btn_refresh = QPushButton("  🔄 刷新")
+        btn_import = QPushButton("导入插件 (zip)")
+        btn_refresh = QPushButton("刷新")
         for b in (btn_import, btn_refresh):
             b.setStyleSheet(f"""
                 QPushButton {{ background: {Color3.name()}; color: white; border: none;
@@ -619,10 +618,10 @@ class PCLPluginsPanel(QScrollArea):
         chk.stateChanged.connect(lambda st, m=meta: self._on_toggle(m, st))
         right.addWidget(chk)
 
-        btn_cfg = QPushButton("⚙ 设置")
-        btn_open = QPushButton("📁 打开位置")
+        btn_cfg = QPushButton("设置")
+        btn_open = QPushButton("打开位置")
         # 官方内置插件不可删除；仅第三方（我的插件）显示删除按钮
-        btn_del = None if _official else QPushButton("🗑 删除")
+        btn_del = None if _official else QPushButton("删除")
         small_style = f"""
             QPushButton {{ background: {Color6.name()}; color: {Color1.name()};
                 border: 1px solid {Color5.name()}; padding: {int(4*S)}px {int(8*S)}px;

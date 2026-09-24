@@ -259,7 +259,7 @@ def search(query: str, limit: int = 5) -> list:
                 continue
         return out
     except Exception as e:
-        _log(f"⚠ 搜索失败: {type(e).__name__}: {e}")
+        _log(f"搜索失败:{type(e).__name__}: {e}")
         return []
 
 
@@ -354,7 +354,7 @@ def _save_prefs(d: dict):
             json.dump(d, f, ensure_ascii=False, indent=1)
         _pref_cache["data"] = d
     except Exception as e:
-        _log(f"⚠ 保存听歌偏好失败: {type(e).__name__}: {e}")
+        _log(f"保存听歌偏好失败:{type(e).__name__}: {e}")
 
 
 def remember_play(name: str, artist: str, song_id: int = 0, fee: int = 0) -> str:
@@ -390,10 +390,10 @@ def remember_play(name: str, artist: str, song_id: int = 0, fee: int = 0) -> str
             liked.setdefault("songs", []).append(nm)
             liked["songs"] = liked["songs"][-30:]
         _save_prefs(d)
-        _log(f"📝 记住这个版本：《{nm}》{ar}（已听 {hit['plays']} 次）")
+        _log(f"记住这个版本：《{nm}》{ar}（已听 {hit['plays']} 次）")
         return f"《{nm}》{ar}"
     except Exception as e:
-        _log(f"⚠ 记听歌偏好出错: {type(e).__name__}: {e}")
+        _log(f"记听歌偏好出错:{type(e).__name__}: {e}")
         return ""
 
 
@@ -427,7 +427,7 @@ def preferred_for(name: str) -> dict:
                 "id": int(best.get("id") or 0), "fee": int(best.get("fee") or 0),
                 "plays": int(best.get("plays") or 0)}
     except Exception as e:
-        _log(f"⚠ 查听歌偏好出错: {type(e).__name__}: {e}")
+        _log(f"查听歌偏好出错:{type(e).__name__}: {e}")
     return {}
 
 
@@ -468,10 +468,10 @@ def remember_own(name: str, artist: str = "") -> str:
         if len(lst) > 30:
             d["hers"] = sorted(lst, key=lambda x: x.get("ts") or 0)[-30:]
         _save_prefs(d)
-        _log(f"🎵 记下她自己挑的歌：《{nm}》{artist}")
+        _log(f"记下她自己挑的歌：《{nm}》{artist}")
         return nm
     except Exception as e:
-        _log(f"⚠ 记她自己挑的歌失败: {type(e).__name__}: {e}")
+        _log(f"记她自己挑的歌失败:{type(e).__name__}: {e}")
         return ""
 
 
@@ -725,10 +725,10 @@ def ensure_uia(hwnd) -> bool:
             if _uia_children(hwnd) > 1:
                 _log("网易云是最小化的 → 临时还原（没抢焦点、压在最后）才能后台操作")
                 return True
-        _log("⚠ 还原了网易云却还是读不到控件")
+        _log("还原了网易云却还是读不到控件")
         return False
     except Exception as e:
-        _log(f"⚠ 还原最小化窗口失败: {type(e).__name__}: {e}")
+        _log(f"还原最小化窗口失败:{type(e).__name__}: {e}")
         return False
 
 
@@ -808,11 +808,11 @@ def close_popups(hwnd=None, force: bool = False) -> str:
             except Exception:
                 pass
         if done:
-            _log(f"🧹 自动关掉了弹窗（{popup_hint or '手动'}）：{'、'.join(done)}")
+            _log(f"自动关掉了弹窗（{popup_hint or '手动'}）：{'、'.join(done)}")
             return (f"我把弹窗关了（{popup_hint or '按你说的'}）。" if force
                     else f"顺手关掉了一个弹窗：{popup_hint or done[0]}")
     except Exception as e:
-        _log(f"⚠ 关弹窗出错: {type(e).__name__}: {e}")
+        _log(f"关弹窗出错:{type(e).__name__}: {e}")
     return ""
 
 
@@ -978,18 +978,18 @@ def ensure_sound(hwnd) -> str:
     try:
         if not muted(hwnd):
             return ""
-        _log("⚠ 网易云是静音状态（音量 0%）→ 点一下音量键恢复声音")
+        _log("网易云是静音状态（音量 0%）→ 点一下音量键恢复声音")
         for el, nm, r in _walk_buttons(hwnd):
             if nm.strip().lower() in ("mute", "volume0"):
                 if _uia().invoke(el):
                     time.sleep(0.9)
                     if muted(hwnd):
                         return "（它现在是静音的，我点了一下但好像没开成，你手动点一下小喇叭）"
-                    _log("✅ 已解除静音（音量键回到正常）")
+                    _log("已解除静音（音量键回到正常）")
                     return "（它刚才被静音了，我已经把声音打开了）"
                 break
     except Exception as e:
-        _log(f"⚠ 解除静音出错: {type(e).__name__}: {e}")
+        _log(f"解除静音出错:{type(e).__name__}: {e}")
     return ""
 
 
@@ -1032,7 +1032,7 @@ def progress_moving(hwnd, seconds: float = 3.0):
             return None
         return _sc.hash_distance(h1, h2) > 0
     except Exception as e:
-        _log(f"⚠ 进度检测出错: {type(e).__name__}")
+        _log(f"进度检测出错:{type(e).__name__}")
         return None
 
 
@@ -1068,12 +1068,12 @@ def _kick_playback(hwnd, force: bool = True) -> str:
                 return "（按播放键的时候歌变了，我先停手了）"
             if is_playing(hwnd) is True:
                 if was is True:
-                    _log("✅ 已暂停再播放（用户说的那种卡住，靠这个重拉播放流）→ 现在状态是在放")
+                    _log("已暂停再播放（用户说的那种卡住，靠这个重拉播放流）→ 现在状态是在放")
                     return "（刚才它有点卡，我暂停再播放重新拉了一次）"
                 return ""
         return "（它好像卡住了，我暂停再播放也没弄通——你手动点一下播放键试试）"
     except Exception as e:
-        _log(f"⚠ 踹播放出错: {type(e).__name__}: {e}")
+        _log(f"踹播放出错:{type(e).__name__}: {e}")
         return ""
 
 
@@ -1108,14 +1108,14 @@ def _ensure_playing(hwnd, tries: int = 2) -> bool:
                 break
             time.sleep(1.0)
             if window_title(hwnd) != _t0:
-                _log("⚠ 按了播放键之后歌变了 → 立刻停手（不冒充放上了）")
+                _log("按了播放键之后歌变了 → 立刻停手（不冒充放上了）")
                 return False
             if is_playing(hwnd) is True:
-                _log(f"✅ 按了播放条上的键（{nm}）→ 真的响起来了")
+                _log(f"按了播放条上的键（{nm}）→ 真的响起来了")
                 return True
         return is_playing(hwnd) is True
     except Exception as e:
-        _log(f"⚠ 恢复播放出错: {type(e).__name__}: {e}")
+        _log(f"恢复播放出错:{type(e).__name__}: {e}")
         return False
 
 
@@ -1156,7 +1156,7 @@ def set_loop_mode(hwnd, want: str) -> str:
                 return _LOOP_MODES[want]
         return _LOOP_MODES.get(cur, "")
     except Exception as e:
-        _log(f"⚠ 设置循环方式失败: {e}")
+        _log(f"设置循环方式失败:{e}")
         return ""
 
 
@@ -1312,7 +1312,7 @@ def _click_nav_item(hwnd, name: str) -> bool:
                     time.sleep(1.1)
                     return True
     except Exception as e:
-        _log(f"⚠ 打开歌单失败: {e}")
+        _log(f"打开歌单失败:{e}")
     return False
 
 
@@ -1466,7 +1466,7 @@ def _uia_play(name: str, artist: str, _skip_preview_check: bool = False) -> str:
                 #   （用户反馈"播放进度条也卡着不动"）→ 暂停再播放，就是主人手动那一套
                 _note(_kick_playback(hwnd))
             except Exception as _e2:
-                _log(f"⚠ 确认播放状态出错: {type(_e2).__name__}")
+                _log(f"确认播放状态出错:{type(_e2).__name__}")
             # 顺手看一眼界面上的"正在试听…"——但**不作为唯一判据**：实测它可能一闪而过
             # （网易云切歌瞬间会短暂出现），所以调用方会再确认一次才当数。
             try:
@@ -1478,11 +1478,11 @@ def _uia_play(name: str, artist: str, _skip_preview_check: bool = False) -> str:
         if _hit:
             return "ok"
         # 没对上日志：把实际标题打出来，方便排查"明明点了却没认出来"
-        _log(f"⚠ 点了但没认出来：标题={str(window_title(hwnd))[:40]!r}｜要找的是《{name}》")
+        _log(f"点了但没认出来：标题={str(window_title(hwnd))[:40]!r}｜要找的是《{name}》")
         # ② 歌换了但不是要的那首 → 如实说，不冒充成功
         _now = window_title(hwnd)
         if _now and _now != _before:
-            _log(f"⚠ 点上了，但放的不是《{name}》，而是《{_now}》")
+            _log(f"点上了，但放的不是《{name}》，而是《{_now}》")
             return "other:" + str(_now)
         return "fail"
     except Exception as e:
@@ -1599,7 +1599,7 @@ def play_song(query: str) -> str:
                            f"你爱听的版本·听过 {_pref.get('plays') or 1} 次 ",
                            int(_pref.get("fee") or 0)))
             _seen.add(_ver_key(_pref["name"], _pref["artist"]))
-            _log(f"🎧 主人爱听的是：《{_pref['name']}》{_pref['artist']}"
+            _log(f"主人爱听的是：《{_pref['name']}》{_pref['artist']}"
                  f"（听过 {_pref.get('plays') or 1} 次）→ 优先放这一版")
         _ask_fee = None
         try:
@@ -1875,7 +1875,7 @@ def fix_vip_now_playing(auto_switch: bool = False) -> str:
                     f"想听整首就跟我说「放 {_free[1]} {_free[2]}」。）")
         return f"（不过这首《{name}》是{_fee_label(_fee)}曲，没会员只能听 30 秒试听——网上没有能整首放的版本。）"
     except Exception as e:
-        _log(f"⚠ 歌单会员曲处理出错: {type(e).__name__}: {e}")
+        _log(f"歌单会员曲处理出错:{type(e).__name__}: {e}")
         return ""
 
 
@@ -1905,7 +1905,7 @@ def run(text: str) -> str:
     try:
         _r = _run_locked(kind, arg)
     except Exception as e:
-        _log(f"⚠ 执行 {kind} 失败: {type(e).__name__}: {e}")
+        _log(f"执行{kind} 失败: {type(e).__name__}: {e}")
         _r = f"我这边操作音乐出了点问题（{type(e).__name__}）。"
     # ★ 网易云有时会自己跳到前台（开始/切换播放时）→ 把前台还给主人原来的窗口
     try:
@@ -2016,7 +2016,7 @@ def _run_locked(kind: str, arg: str) -> str:
             #   以前只找 "play" → 正在播放时找不到按钮，暂停就静默失败了
             #   （还会谎报"给你接着放了"）。这里两个名字都认。
             if not _ensure_playing(hwnd):
-                _log("⚠ 没能让它放起来（播放条上的切换键都试过了）")
+                _log("没能让它放起来（播放条上的切换键都试过了）")
                 return "我按了播放条，但它好像没反应——你手动按一下吧。"
             time.sleep(0.6)
             now_playing = is_playing(hwnd)
@@ -2071,7 +2071,7 @@ def _run_locked(kind: str, arg: str) -> str:
             _invoke_player(hwnd, ["Volume1"])
             return "切换了静音。"
     except Exception as e:
-        _log(f"⚠ 执行 {kind} 失败: {type(e).__name__}: {e}")
+        _log(f"执行{kind} 失败: {type(e).__name__}: {e}")
         return f"我这边操作音乐出了点问题（{type(e).__name__}）。"
     return ""
 

@@ -129,9 +129,9 @@ def show(parent=None):
 
     # 我们的 SiliconDialog 还没有 opaque 形参（他那边是给 Live2D 调试器用的）
     try:
-        dlg = SiliconDialog("📜 更新日志", parent, width=900, height=660, opaque=True)
+        dlg = SiliconDialog("更新日志", parent, width=900, height=660, opaque=True)
     except TypeError:
-        dlg = SiliconDialog("📜 更新日志", parent, width=900, height=660)
+        dlg = SiliconDialog("更新日志", parent, width=900, height=660)
     lay = QVBoxLayout()
     lay.setContentsMargins(14, 10, 14, 12)
     lay.setSpacing(10)
@@ -176,13 +176,13 @@ def show(parent=None):
 
     row = QHBoxLayout()
     row.setSpacing(8)
-    b_dir = QPushButton("📂 打开目录")
+    b_dir = QPushButton("打开目录")
     b_dir.setStyleSheet(f"""
         QPushButton {{ background: {Color3.name()}; color: white; border: none;
             padding: 7px 16px; font-size: 13px; border-radius: {int(btn_radius())}px; }}
         QPushButton:hover {{ background: {Color4.name()}; }}
     """)
-    b_open = QPushButton("📄 用系统程序打开")
+    b_open = QPushButton("用系统程序打开")
     b_open.setStyleSheet(f"""
         QPushButton {{ background: transparent; color: {Gray2.name()};
             border: 1px solid {Color5.name()}; padding: 7px 16px; font-size: 13px;

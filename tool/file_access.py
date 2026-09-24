@@ -107,7 +107,7 @@ def set_enabled(on: bool) -> bool:
         _log(f"读取电脑文件 → {'已开启' if on else '已关闭'}")
         return True
     except Exception as e:
-        _log(f"⚠ 开关写入失败: {e}")
+        _log(f"开关写入失败:{e}")
         return False
 
 
@@ -298,7 +298,7 @@ def _read_file(path: str) -> str:
     low = os.path.basename(path).lower()
     for w in _SENSITIVE:
         if w in low:
-            _log(f"⛔ 拒绝读取敏感文件：{path}")
+            _log(f"拒绝读取敏感文件：{path}")
             return "这个文件名字看着像密码/密钥之类的，我不看（看了也不该说出口）"
     if not _is_text(path):
         return f"{os.path.basename(path)} 是二进制/媒体文件，看不到里面的内容（只能看文本类文件）"

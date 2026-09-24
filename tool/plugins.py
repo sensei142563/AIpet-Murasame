@@ -188,7 +188,7 @@ def rules_text() -> str:
                     lines.append(r[:300])
     except Exception:
         pass
-    lines.append("★ 标记那一行不会念出来；插件返回的结果桌宠会交给你，你用自己的话讲给主人。")
+    lines.append("标记那一行不会念出来；插件返回的结果桌宠会交给你，你用自己的话讲给主人。")
     return chr(10).join(lines)
 
 

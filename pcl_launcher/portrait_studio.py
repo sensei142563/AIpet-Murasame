@@ -275,7 +275,7 @@ class PortraitStudio(SiliconDialog):
             return False
         cli = os.path.join(_base_dir(), "tool", "portrait_cli.py")
         if not os.path.exists(cli):
-            self.status_lbl.setText(f"⚠ 缺少合成脚本：{cli}")
+            self.status_lbl.setText(f"缺少合成脚本：{cli}")
             print(f"[PortraitStudio] ⚠ 缺少 portrait_cli.py: {cli}")
             return False
         return True
@@ -375,7 +375,7 @@ class PortraitStudio(SiliconDialog):
         g4 = QVBoxLayout(gb4)
         self.scene_combo = QComboBox()
         self.scene_combo.setStyleSheet("padding:6px; font-size:13px;")
-        self.scene_combo.addItem("🎲 随机场景", "")
+        self.scene_combo.addItem("随机场景", "")
         self.scene_combo.currentIndexChanged.connect(self._schedule)
         g4.addWidget(self.scene_combo)
         right.addWidget(gb4)
@@ -398,15 +398,15 @@ class PortraitStudio(SiliconDialog):
             return b
 
         row1 = QHBoxLayout()
-        row1.addWidget(_btn("💾 保存为默认立绘", self._on_save, (
+        row1.addWidget(_btn("保存为默认立绘", self._on_save, (
             "QPushButton{background:#c8506e;color:#fff;border-radius:8px;font-size:14px;font-weight:bold;}"
             "QPushButton:hover{background:#e0607e;}")))
-        row1.addWidget(_btn("🎲 随机换装", self._on_random))
+        row1.addWidget(_btn("随机换装", self._on_random))
         right.addLayout(row1)
 
         row2 = QHBoxLayout()
-        row2.addWidget(_btn("📂 打开立绘素材位置", self._on_open_dir))
-        row2.addWidget(_btn("🏞 打开场景文件夹", self._on_open_scene_dir))
+        row2.addWidget(_btn("打开立绘素材位置", self._on_open_dir))
+        row2.addWidget(_btn("打开场景文件夹", self._on_open_scene_dir))
         right.addLayout(row2)
 
         row3 = QHBoxLayout()
@@ -418,14 +418,14 @@ class PortraitStudio(SiliconDialog):
         gd = QVBoxLayout(self.gb_display)
         self.disp_combo = QComboBox()
         self.disp_combo.setStyleSheet("padding:6px; font-size:13px;")
-        self.disp_combo.addItem("🖼 2D 立绘", "2d")
-        self.disp_combo.addItem("🎭 Live2D 模型", "live2d")
+        self.disp_combo.addItem("2D 立绘", "2d")
+        self.disp_combo.addItem("Live2D 模型", "live2d")
         self.disp_combo.currentIndexChanged.connect(self._on_display_changed)
         gd.addWidget(self.disp_combo)
         right.addWidget(self.gb_display)
 
         # ── 单图模式（每个表情一张整图）：设默认表情 ──
-        self.btn_def_emo = _btn("⭐ 把当前表情设为默认", self._on_set_default_emotion,
+        self.btn_def_emo = _btn("把当前表情设为默认", self._on_set_default_emotion,
                                 "QPushButton{background:#3f6f4f;color:#fff;border-radius:8px;"
                                 "font-size:13px;font-weight:bold;}QPushButton:hover{background:#4f8f63;}")
         right.addWidget(self.btn_def_emo)
@@ -598,7 +598,7 @@ class PortraitStudio(SiliconDialog):
             try:
                 self.scene_combo.blockSignals(True)
                 self.scene_combo.clear()
-                self.scene_combo.addItem("🎲 随机场景", "")
+                self.scene_combo.addItem("随机场景", "")
                 for sp in (data.get("scenes") or []):
                     self.scene_combo.addItem(os.path.basename(str(sp)), str(sp))
                 self.scene_combo.blockSignals(False)
@@ -624,7 +624,7 @@ class PortraitStudio(SiliconDialog):
             # 只有"本该有 2D 图层却读不到选项"才算异常；没有素材的角色由 _apply_mode_ui 说明原因
             if (not self._clothes and self._mode != "single"
                     and bool((data or {}).get("has_fgimages"))):
-                self.tip_lbl.setText("⚠ 未读取到立绘选项（runtime venv 或素材缺失？）")
+                self.tip_lbl.setText("未读取到立绘选项（runtime venv 或素材缺失？）")
             self._refresh_preview()
         except Exception as e:
             print(f"[PortraitStudio] ⚠ 应用选项失败: {e}")
@@ -697,7 +697,7 @@ class PortraitStudio(SiliconDialog):
         if is_l2d:
             self.tip_lbl.setText(f"「{pname}」使用 Live2D 模型显示：\n"
                                  "点下面按钮在新窗口里看实时预览（和桌宠同一套渲染）。")
-            self.status_lbl.setText("🎭 点「打开 Live2D 实时预览窗口」查看模型")
+            self.status_lbl.setText("点「打开 Live2D 实时预览窗口」查看模型")
             try:
                 from pets.pet_registry import get_live2d_model_json
                 mj = get_live2d_model_json(getattr(self, "_pet_id", None)) if getattr(self, "_pet_id", None) else ""
@@ -773,7 +773,7 @@ class PortraitStudio(SiliconDialog):
         """在右侧放两个按钮：打开 Live2D 实时预览窗口 / 动作·表情调试器（可打标签）"""
         try:
             if getattr(self, "btn_l2d_open", None) is None:
-                self.btn_l2d_open = QPushButton("🎭 打开 Live2D 实时预览窗口")
+                self.btn_l2d_open = QPushButton("打开 Live2D 实时预览窗口")
                 self.btn_l2d_open.setMinimumHeight(34)
                 self.btn_l2d_open.clicked.connect(
                     lambda: self._open_l2d_window(self._current_l2d_model()))
@@ -785,7 +785,7 @@ class PortraitStudio(SiliconDialog):
                     self.btn_l2d_open.show()
             if getattr(self, "btn_l2d_debug", None) is None:
                 # 调试器：逐个播/切模型的每个表情与动作，并给它们打标签
-                self.btn_l2d_debug = QPushButton("🔍 动作 / 表情调试器（打标签）")
+                self.btn_l2d_debug = QPushButton("动作 / 表情调试器（打标签）")
                 self.btn_l2d_debug.setMinimumHeight(34)
                 self.btn_l2d_debug.setToolTip("逐个查看每个 *.exp3.json / *.motion3.json 是什么效果，"
                                               "给它起名字，再照着配 pet.json")
@@ -807,10 +807,10 @@ class PortraitStudio(SiliconDialog):
             pid = getattr(self, "_pet_id", None)
             w = open_debugger(pid, self.window())
             self.status_lbl.setText(
-                "🔍 已打开 Live2D 调试器：点表情/动作看效果，填「标签」并保存 → 复制对照表"
-                if w else "⚠ 打开调试器失败（看日志）")
+                "已打开 Live2D 调试器：点表情/动作看效果，填「标签」并保存 → 复制对照表"
+                if w else "打开调试器失败（看日志）")
         except Exception as e:
-            self.status_lbl.setText(f"⚠ 打开调试器失败：{e}")
+            self.status_lbl.setText(f"打开调试器失败：{e}")
 
     def _current_l2d_model(self) -> str:
         try:
@@ -823,13 +823,13 @@ class PortraitStudio(SiliconDialog):
             from .live2d_preview import open_live2d_window
             mj = model_json or self._current_l2d_model()
             if not mj:
-                self.status_lbl.setText("⚠ 该角色没有可用的 Live2D 模型文件")
+                self.status_lbl.setText("该角色没有可用的 Live2D 模型文件")
                 return
             w = open_live2d_window(mj, None, pet_id=getattr(self, "_pet_id", None))
-            self.status_lbl.setText("🎭 已在新窗口打开 Live2D 实时预览（可拖动模型 / 缩放窗口）"
-                                    if w else "⚠ 打开 Live2D 预览窗口失败（看日志）")
+            self.status_lbl.setText("已在新窗口打开 Live2D 实时预览（可拖动模型 / 缩放窗口）"
+                                    if w else "打开 Live2D 预览窗口失败（看日志）")
         except Exception as e:
-            self.status_lbl.setText(f"⚠ 打开失败：{e}")
+            self.status_lbl.setText(f"打开失败：{e}")
 
     def _model_texture_pixmap(self, model_json: str):
         """把 Live2D 模型目录里的贴图（texture *.png）拼成一张静态预览图。
@@ -857,9 +857,9 @@ class PortraitStudio(SiliconDialog):
         try:
             self._l2d_force = True
             w = self._ensure_l2d_preview()
-            self.status_lbl.setText("🎭 Live2D 预览已强制加载" if w else "⚠ 强制加载失败（看日志）")
+            self.status_lbl.setText("Live2D 预览已强制加载"if w else "强制加载失败（看日志）")
         except Exception as e:
-            self.status_lbl.setText(f"⚠ 强制加载失败：{e}")
+            self.status_lbl.setText(f"强制加载失败：{e}")
 
     def _ensure_l2d_preview(self):
         """Live2D 实时预览（懒创建：只有 Live2D 角色才需要 OpenGL）"""
@@ -873,7 +873,7 @@ class PortraitStudio(SiliconDialog):
             from .live2d_preview import Live2DPreviewWidget
             mj = str(((self._data or {}).get("live2d") or {}).get("model_json") or "")
             if not mj:
-                self.status_lbl.setText("⚠ 该角色没有可用的 Live2D 模型文件")
+                self.status_lbl.setText("该角色没有可用的 Live2D 模型文件")
                 return None
             # ⚠ 个别显卡驱动下 Live2D 的 GL 初始化会直接终止进程 → 先子进程试跑一次，
             #   失败就不在这里加载（否则会把整个启动器带崩）
@@ -911,7 +911,7 @@ class PortraitStudio(SiliconDialog):
             return w
         except Exception as e:
             print(f"[PortraitStudio] ⚠ Live2D 预览创建失败: {e}")
-            self.status_lbl.setText(f"⚠ Live2D 预览失败：{e}")
+            self.status_lbl.setText(f"Live2D 预览失败：{e}")
             return None
 
     def _on_display_changed(self, *_):
@@ -925,13 +925,13 @@ class PortraitStudio(SiliconDialog):
                 if self._data is not None:
                     self._data["default_display"] = want
                 self.status_lbl.setText(
-                    f"✅ 桌宠显示方式已切换为 {'Live2D 模型' if want == 'live2d' else '2D 立绘'}"
+                    f"桌宠显示方式已切换为{'Live2D 模型'if want == 'live2d'else '2D 立绘'}"
                     f"（重启桌宠生效）")
                 self._apply_mode_ui()
             else:
-                self.status_lbl.setText(f"⚠ 切换失败：{(out or err)[:120]}")
+                self.status_lbl.setText(f"切换失败：{(out or err)[:120]}")
         except Exception as e:
-            self.status_lbl.setText(f"⚠ 切换失败：{e}")
+            self.status_lbl.setText(f"切换失败：{e}")
 
     def _on_set_default_emotion(self):
         """单图模式：把当前预览的表情设为角色默认表情（桌宠平时/搭话时显示的那张）"""
@@ -944,11 +944,11 @@ class PortraitStudio(SiliconDialog):
             if "OK" in (out or ""):
                 if self._data is not None:
                     (self._data.setdefault("portrait", {}))["default_emotion"] = emo
-                self.status_lbl.setText(f"✅ 默认表情已设为「{emo}」（重启桌宠生效）")
+                self.status_lbl.setText(f"默认表情已设为「{emo}」（重启桌宠生效）")
             else:
-                self.status_lbl.setText(f"⚠ 设置失败：{(out or err)[:120]}")
+                self.status_lbl.setText(f"设置失败：{(out or err)[:120]}")
         except Exception as e:
-            self.status_lbl.setText(f"⚠ 设置失败：{e}")
+            self.status_lbl.setText(f"设置失败：{e}")
 
     def _on_set_changed(self, *_):
         """切换立绘类型：重填选项 + 重新预览"""
@@ -1102,7 +1102,7 @@ class PortraitStudio(SiliconDialog):
                     hint = "预览图被占用：关掉图片查看器/资源管理器预览后重试"
                 else:
                     hint = "请查看 tmp/portrait_studio.log 末尾的原因"
-                self.status_lbl.setText(f"❌ 合成失败 —— {hint}")
+                self.status_lbl.setText(f"合成失败 ——{hint}")
             except Exception:
                 self.status_lbl.setText("合成失败（素材缺失？）")
             self.preview_lbl.setText("合成失败")
@@ -1204,11 +1204,11 @@ class PortraitStudio(SiliconDialog):
                         "cloth": name, "cloth_id": cloth, "decor": decors}
                 self._data["active"] = set_name
                 self.status_lbl.setText(
-                    f"✅ 已保存 {set_name} 立绘（{name}）——QQ 与桌宠都将使用该套装扮")
+                    f"已保存{set_name} 立绘（{name}）——QQ 与桌宠都将使用该套装扮")
             else:
-                self.status_lbl.setText(f"❌ 保存失败 {err[:80]}")
+                self.status_lbl.setText(f"保存失败{err[:80]}")
         except Exception as e:
-            self.status_lbl.setText(f"❌ 保存失败: {e}")
+            self.status_lbl.setText(f"保存失败:{e}")
 
     def _on_random(self):
         import random as _rnd
@@ -1255,7 +1255,7 @@ class PortraitStudio(SiliconDialog):
                 _sp.Popen(["explorer", os.path.normpath(d)],
                           creationflags=getattr(_sp, "CREATE_NO_WINDOW", 0))
                 try:
-                    self.status_lbl.setText("🏞 已打开场景素材文件夹（放图片进去即可用于立绘背景）")
+                    self.status_lbl.setText("已打开场景素材文件夹（放图片进去即可用于立绘背景）")
                 except Exception:
                     pass
             else:

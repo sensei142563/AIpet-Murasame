@@ -31,11 +31,19 @@ def _app_base_dir() -> str:
 
 
 def _read_base_color() -> str:
-    """启动器底板色：用户自选了 config.ui_bg_color 就用它，否则用当前主题的底色。
+    """二级窗口的底板色：**优先跟当前主题自己的底色**。
 
-    ⚠ 以前这里硬编码回退 "#000000"，把二级窗口的底板刷成纯黑，而经典/樱华主题
-      的文字是深色 → 窗口里"字看不见"。回退必须落到主题底色。
+    ⚠ 用户把「启动器底色」设成纯黑（config.ui_bg_color=#000000）时，整界面会被派生成
+      "黑底浅字"；浅色主题（经典 / 樱华 / 千恋万花）的二级窗口就跟着变纯黑一块，
+      看着像"什么都没显示"（用户反馈"主题背景调节窗口又变成全黑色了"）。
+      二级窗口按主题原始底色来，才跟主题一致、内容也清楚。
     """
+    try:
+        theme_bg, _fg = theme_plate_colors()
+        if theme_bg:
+            return theme_bg
+    except Exception:
+        pass
     try:
         from .colors import base_bg_color
         return base_bg_color().name()
@@ -141,7 +149,7 @@ class SiliconDialog(QDialog):
                         f" font-family: '{M.font}'; background: transparent;")
         bl.addWidget(t)
         bl.addStretch()
-        btn_close = QPushButton("✕")
+        btn_close = QPushButton("")
         btn_close.setFixedSize(34, 28)
         btn_close.setCursor(Qt.PointingHandCursor)
         btn_close.setStyleSheet(f"""
@@ -261,6 +269,21 @@ class SiliconDialog(QDialog):
             # 对话框不做亚克力：亚克力会让窗口半透明（用户反馈「界面变透明了」），
             # 这里用不透明主题色底板，保证内容清晰可读。
             fade_in(self, 200)
+            # 兜底自检：1.5 秒后若窗口上还挂着图形特效，强制摘掉
+            # （QGraphicsOpacityEffect 挂在顶层窗口上会导致整窗黑屏）
+            def _clear_effect_guard():
+                try:
+                    if self.graphicsEffect() is not None:
+                        self.setGraphicsEffect(None)
+                        print("[SiliconUI] 已摘掉窗口上的图形特效（防止黑窗）")
+                        self.update()
+                except Exception:
+                    pass
+            try:
+                from PyQt5.QtCore import QTimer as _QT
+                _QT.singleShot(1500, _clear_effect_guard)
+            except Exception:
+                pass
 
     def resizeEvent(self, event):
         """窗口尺寸变化后强制「底板 + 所有子布局」重新排布 + 清掉窗口遮罩。
@@ -540,7 +563,31 @@ class _DlgBack(QWidget):
 
 # ══════════════ 过渡动画 ══════════════
 def fade_in(widget: QWidget, ms: int = 200, start: float = 0.0):
-    """淡入（用 QGraphicsOpacityEffect；只给单个控件用，避免大范围重绘）"""
+    """淡入。
+
+     顶层窗口（对话框）绝对不能用 QGraphicsOpacityEffect：Qt 官方不支持给顶层窗口加
+      图形特效，Windows 上会把整窗渲染成**纯黑**（用户反馈"主题背景设置窗口全黑"）。
+      顶层窗口一律改用 windowOpacity 动画（官方支持、不依赖特效缓冲）。
+      非顶层控件才走 QGraphicsOpacityEffect。
+    """
+    try:
+        if widget.isWindow():
+            widget.setWindowOpacity(float(start))
+            anim = QPropertyAnimation(widget, b"windowOpacity", widget)
+            anim.setDuration(max(60, int(ms)))
+            anim.setStartValue(float(start))
+            anim.setEndValue(1.0)
+            anim.setEasingCurve(QEasingCurve.OutCubic)
+            anim.start(QPropertyAnimation.DeleteWhenStopped)
+            widget._fade_anim = anim        # 防 GC
+            return anim
+    except Exception as _e:
+        print(f"[SiliconUI]  窗口淡入失败（直接显示）: {_e}")
+        try:
+            widget.setWindowOpacity(1.0)
+        except Exception:
+            pass
+        return None
     try:
         eff = QGraphicsOpacityEffect(widget)
         eff.setOpacity(start)
@@ -556,9 +603,6 @@ def fade_in(widget: QWidget, ms: int = 200, start: float = 0.0):
         return anim
     except Exception:
         return None
-
-
-# ── 合并保留：我们这边的配色辅助（无外部引用，留作主题派生用）──
 def _theme_bg_hex() -> str:
     """二级窗口的底板色：优先用**当前主题的 Color8**。
 

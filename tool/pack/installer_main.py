@@ -165,7 +165,7 @@ def _write_venv_cfg(install_dir: str, log=None) -> None:
             f.write("\n".join(out) + "\n")
         (log or print)(f"[安装] 已修正运行环境指向: {py_home}")
     except Exception as e:
-        (log or print)(f"[安装] ⚠ 修正 pyvenv.cfg 失败: {e}")
+        (log or print)(f"[安装] 修正 pyvenv.cfg 失败:{e}")
 
 
 def _ensure_config(install_dir: str, log=None) -> None:
@@ -188,7 +188,7 @@ def _ensure_config(install_dir: str, log=None) -> None:
             json.dump(cfg, f, ensure_ascii=False, indent=2)
         (log or print)("[安装] 已生成 config.json（请在启动器里填 API Key 与主人 QQ 号）")
     except Exception as e:
-        (log or print)(f"[安装] ⚠ 生成 config.json 失败: {e}")
+        (log or print)(f"[安装] 生成 config.json 失败:{e}")
 
 
 def _ensure_dirs(install_dir: str) -> None:
@@ -247,7 +247,7 @@ def _make_shortcut(install_dir: str, log=None) -> bool:
         (log or print)(f"[安装] 桌面快捷方式: {'已创建' if ok else '创建失败 ' + r.stderr.decode('utf-8', 'ignore')[:120]}")
         return ok
     except Exception as e:
-        (log or print)(f"[安装] ⚠ 创建快捷方式失败: {e}")
+        (log or print)(f"[安装] 创建快捷方式失败:{e}")
         return False
 
 
@@ -289,7 +289,7 @@ def _write_uninstaller(install_dir: str, log=None) -> None:
             f.write(body)
         (log or print)(f"[安装] 已生成卸载脚本: {UNINSTALL_BAT}")
     except Exception as e:
-        (log or print)(f"[安装] ⚠ 生成卸载脚本失败: {e}")
+        (log or print)(f"[安装] 生成卸载脚本失败:{e}")
         return
     try:
         import winreg
@@ -308,7 +308,7 @@ def _write_uninstaller(install_dir: str, log=None) -> None:
         winreg.CloseKey(k)
         (log or print)("[安装] 已注册到「应用和功能」（可从这里卸载）")
     except Exception as e:
-        (log or print)(f"[安装] ⚠ 注册卸载项失败（不影响使用）: {e}")
+        (log or print)(f"[安装] 注册卸载项失败（不影响使用）:{e}")
 
 
 def _safe_target(install_dir: str, rel: str):
@@ -471,7 +471,7 @@ def install(install_dir: str, progress=None, make_shortcut=True,
                        "常见原因：旧版还在运行 / 目标目录被别的程序占用 / 磁盘写满。"
                        % e), logs
     if skipped:
-        log(f"[安装] ⚠ 跳过 {len(skipped)} 个路径越界的条目（安装包可能已损坏）")
+        log(f"[安装] 跳过{len(skipped)} 个路径越界的条目（安装包可能已损坏）")
 
     log(f"[安装] 文件解压完成，共 {done / 1e9:.2f} GB")
     _write_venv_cfg(install_dir, log)
@@ -628,7 +628,7 @@ def run_gui():
         pct.config(text="100%" if ok else pct.cget("text"))
         say(msg)
         if ok:
-            lbl.config(text="安装完成 ✓")
+            lbl.config(text="安装完成 ")
             btn.config(text="完成", state="normal", command=root.destroy)
             if var_open.get():
                 try:

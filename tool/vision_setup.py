@@ -187,17 +187,17 @@ def download_model(model_dir: str, log=None, progress=None, stop=None) -> bool:
                     break
             except (urllib.error.URLError, urllib.error.HTTPError, OSError, TimeoutError) as e:
                 last_err = e
-                _log(log, f"[视觉] ⚠ {host} 下载失败：{type(e).__name__}: {e}")
+                _log(log, f"[视觉]{host} 下载失败：{type(e).__name__}: {e}")
         if not ok:
-            _log(log, f"[视觉] ✗ {name} 没下完（下次运行会自动续传）：{last_err}")
+            _log(log, f"[视觉]{name} 没下完（下次运行会自动续传）：{last_err}")
             return False
         done_total += size
         if progress:
             progress(done_total, MODEL_TOTAL, name)
     if not model_complete(model_dir):
-        _log(log, "[视觉] ✗ 下载完了但校验没过（可能有文件被截断）")
+        _log(log, "[视觉] 下载完了但校验没过（可能有文件被截断）")
         return False
-    _log(log, f"[视觉] ✅ 模型就绪：{model_dir}（{MODEL_TOTAL / 1e9:.2f} GB）")
+    _log(log, f"[视觉] 模型就绪：{model_dir}（{MODEL_TOTAL / 1e9:.2f} GB）")
     return True
 
 
@@ -299,10 +299,10 @@ def ensure_runtime(app_dir: str = "", log=None, install_if_missing=True) -> str:
                                encoding="utf-8", errors="replace", timeout=600,
                                creationflags=(subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0))
             if r.returncode != 0 or not os.path.isfile(venv_py):
-                _log(log, f"[视觉] ✗ 建虚拟环境失败：{(r.stderr or r.stdout or '')[-300:]}")
+                _log(log, f"[视觉] 建虚拟环境失败：{(r.stderr or r.stdout or '')[-300:]}")
                 return ""
         except Exception as e:
-            _log(log, f"[视觉] ✗ 建虚拟环境异常：{type(e).__name__}: {e}")
+            _log(log, f"[视觉] 建虚拟环境异常：{type(e).__name__}: {e}")
             return ""
     if _has_torch(venv_py):
         _log(log, "[视觉] 运行环境已存在，跳过安装")
@@ -318,12 +318,12 @@ def ensure_runtime(app_dir: str = "", log=None, install_if_missing=True) -> str:
                                timeout=7200,
                                creationflags=(subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0))
             if r.returncode == 0 and _has_torch(venv_py):
-                _log(log, f"[视觉] ✅ 依赖装好了（源：{idx}）")
+                _log(log, f"[视觉] 依赖装好了（源：{idx}）")
                 return venv_py
-            _log(log, f"[视觉] ⚠ {idx} 安装没成功：{(r.stderr or r.stdout or '')[-200:]}")
+            _log(log, f"[视觉]{idx} 安装没成功：{(r.stderr or r.stdout or '')[-200:]}")
         except Exception as e:
-            _log(log, f"[视觉] ⚠ {idx} 安装异常：{type(e).__name__}: {e}")
-    _log(log, "[视觉] ✗ 依赖没装上，本地视觉暂时用不了（识别会走云端 API）")
+            _log(log, f"[视觉]{idx} 安装异常：{type(e).__name__}: {e}")
+    _log(log, "[视觉] 依赖没装上，本地视觉暂时用不了（识别会走云端 API）")
     return ""
 
 

@@ -169,7 +169,7 @@ def section(menu: StoryMenu, text: str):
 
 
 def item(menu: StoryMenu, text: str, checked: bool = False, enabled: bool = True):
-    """普通条目（勾选态用金色菱形表示，不再用 ✅ 文本）"""
+    """普通条目（勾选态用金色菱形表示，不再用 文本）"""
     a = menu.addAction(text)
     a.setCheckable(True)
     a.setChecked(bool(checked))

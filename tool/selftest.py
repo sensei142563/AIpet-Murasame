@@ -13,8 +13,8 @@ import os
 import sys
 import time
 
-OK = "✅"
-BAD = "❌"
+OK = ""
+BAD = ""
 
 
 def _try(fn, name, results):

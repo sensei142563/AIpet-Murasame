@@ -298,7 +298,7 @@ def handle(text, msg_ctx=None):
         if not item:
             return f"没有找到图片「{_strip(m.group(1))}」。说「图列表」查看全部收藏", []
         acts.append({"type": "image", "file": item["file"], "extra": None})
-        return f"🖼 给你～（{item['name']}）", acts
+        return f"给你～（{item['name']}）", acts
     m = re.search(r"(?:发表情|发自定义表情)\s*[:：]?\s*(.+)", t)
     if m:
         # ⚠ 手动指令也要受「表情包发送」开关约束（以前它绕过开关静默发送）
@@ -313,7 +313,7 @@ def handle(text, msg_ctx=None):
         if not item:
             return f"没有找到表情「{_strip(m.group(1))}」。说「表情列表」查看全部收藏", []
         acts.append({"type": "sticker", "file": item["file"], "extra": None})
-        return f"😊 来啦～（{item['name']}）", acts
+        return f"来啦～（{item['name']}）", acts
     m = re.search(r"(?:发视频)\s*[:：]?\s*(.+)", t)
     if m:
         item = saved.find("videos", _strip(m.group(1)))

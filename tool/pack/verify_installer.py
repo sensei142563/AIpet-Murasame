@@ -92,7 +92,7 @@ try:
     _want = _anchor.get("napcat", "")
     print("  NapCat: 实际 %s / 锁定 %s → %s"
           % (_got or "未读到", _want or "未读到",
-             "✅ 一致" if (_got and _got == _want) else "⚠ 不一致（打包机上的 NapCat 被更新过？）"))
+             "一致"if (_got and _got == _want) else "不一致（打包机上的 NapCat 被更新过？）"))
     _vj = os.path.join(TEST, "NapCat.Shell.Windows.OneKey", "bootmain", "versions", "config.json")
     if os.path.isfile(_vj):
         import json as _json
@@ -101,8 +101,8 @@ try:
         _max = _anchor.get("qq_max_supported", "")
         print("  QQ: 实际 %s / 支持上限 %s → %s"
               % (_cur or "未知", _max or "未知",
-                 "✅ 在支持范围内" if (not _max or _cur <= _max)
-                 else "⚠ 超出支持表（NapCat 会报「不支持当前QQ版本架构」）"))
+                 "在支持范围内"if (not _max or _cur <= _max)
+                 else "超出支持表（NapCat 会报「不支持当前QQ版本架构」）"))
 except Exception as _e:
     print("  版本校验失败（不影响其它检查）: %s" % _e)
 

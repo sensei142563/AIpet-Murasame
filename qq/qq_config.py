@@ -182,7 +182,7 @@ def discover_webui_url() -> dict:
                     pass
                 token = str(d.get("token", "") or "").strip()
                 if d.get("disableWebUI") is True:
-                    source = "webui.json（⚠ 已禁用 WebUI）"
+                    source = "webui.json（ 已禁用 WebUI）"
                 else:
                     source = "webui.json"
             # 退一步：用 config.json 里配的 NapCat HTTP 地址（历史上把它当 WebUI 口用过）

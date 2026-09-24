@@ -123,7 +123,7 @@ def _audit_payload(items: list) -> None:
             bad.append(r)
     if bad:
         _log("")
-        _log("✗ 载荷里出现了个人数据/凭据，已中止构建（不会生成安装包）：")
+        _log("载荷里出现了个人数据/凭据，已中止构建（不会生成安装包）：")
         for r in sorted(set(bad))[:30]:
             _log(f"    {r}")
         if len(set(bad)) > 30:
@@ -172,7 +172,7 @@ def collect_payload() -> list:
                 items.append((os.path.join(dp, fn), f"app/python/{rel}"))
         _log(f"  [app/python] 便携解释器 {len(items) - n2} 个文件 ← {BASE_PY}")
     else:
-        _log(f"  ⚠ 未找到系统 Python：{BASE_PY}（安装后需自带解释器才能跑，请检查）")
+        _log(f"未找到系统 Python：{BASE_PY}（安装后需自带解释器才能跑，请检查）")
 
     # ── 4) 场景素材（若绿色版没带上）
     scene = os.path.join(BASE, "场景素材")
@@ -237,7 +237,7 @@ def build_payload(level_big: int = 1, level_small: int = 3,
                             compresslevel=(level_small if sz <= small_limit else level_big))
                 done += sz
             except Exception as e:
-                _log(f"  ⚠ 跳过 {rel}: {e}")
+                _log(f"跳过{rel}: {e}")
             if i % 4000 == 0 or time.time() - t_last > 20:
                 el = time.time() - t0
                 _log(f"  打包中 {i}/{len(items)}  {done / 1e9:.2f}/{total / 1e9:.2f} GB  ({el:.0f}s)")
@@ -247,12 +247,12 @@ def build_payload(level_big: int = 1, level_small: int = 3,
          f"用时 {time.time() - t0:.0f}s，直存 {n_stored} 个已压缩文件")
     if size > 3.6e9:
         _log("")
-        _log("⚠⚠ 警告：payload 超过 3.6 GB，组装后的安装包可能 > 4 GB 而无法在 Windows 运行！")
+        _log("警告：payload 超过 3.6 GB，组装后的安装包可能 > 4 GB 而无法在 Windows 运行！")
         with zipfile.ZipFile(PAYLOAD_ZIP) as zz:
             for i in sorted(zz.infolist(), key=lambda x: -x.file_size)[:10]:
                 _log(f"      {i.file_size / 1e9:6.2f} GB  {i.filename}")
     else:
-        _log(f"  ✅ 体积正常（组装后约 {(size + 15e6) / 1e9:.2f} GB < 4GB 上限）")
+        _log(f"体积正常（组装后约{(size + 15e6) / 1e9:.2f} GB < 4GB 上限）")
     return PAYLOAD_ZIP, size, total
 
 
@@ -285,7 +285,7 @@ def build_installer_exe(windowed=True):
     if os.path.exists(icon):
         _log(f"  图标: {icon}")
     else:
-        _log(f"  ⚠ 未找到图标 {icon}，将用默认图标")
+        _log(f"未找到图标{icon}，将用默认图标")
     r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if r.returncode != 0:
         _log(r.stdout[-3000:])

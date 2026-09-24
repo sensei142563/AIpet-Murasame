@@ -36,12 +36,12 @@ _CONTROL_BASE = "http://localhost:28565/control"
 
 # 导航项（key, 图标, 标题, 副标题）
 NAV = [
-    ("home",    "🏠", "总览",  "启动与状态"),
-    ("pets",    "🐾", "桌宠",  "角色与立绘"),
-    ("memory",  "🧠", "记忆",  "对话与备份"),
-    ("prompt",  "📝", "提示词", "人设微调"),
-    ("plugins", "🧩", "插件",  "功能开关"),
-    ("themes",  "🎨", "主题",  "外观与配色"),
+    ("home",    "", "总览",  "启动与状态"),
+    ("pets",    "", "桌宠",  "角色与立绘"),
+    ("memory",  "", "记忆",  "对话与备份"),
+    ("prompt",  "", "提示词", "人设微调"),
+    ("plugins", "", "插件",  "功能开关"),
+    ("themes",  "", "主题",  "外观与配色"),
 ]
 
 
@@ -704,7 +704,8 @@ class HomePage(QWidget):
         self.chip_pet = StatusChip(f"桌宠{_tag0}：未运行")
         self.chip_qq = StatusChip("QQ：未运行")
         self.chip_tts = StatusChip("语音服务：未知")
-        for c in (self.chip_pet, self.chip_qq, self.chip_tts):
+        self.chip_vision = StatusChip("视觉服务：未知")
+        for c in (self.chip_pet, self.chip_qq, self.chip_tts, self.chip_vision):
             head.addWidget(c)
         outer.addLayout(head)
 
@@ -763,9 +764,9 @@ class HomePage(QWidget):
         cl2.setSpacing(10)
         cl2.addWidget(silicon_ui.section_title("桌宠控制面板", accent))
         grid = QHBoxLayout()
-        for text, feat in (("📝 长文本模式", "longtext"), ("🎭 Live2D", "live2d"),
-                           ("📷 摄像头识别", "camera"), ("🖥 屏幕识别", "screenshot"),
-                           ("🎤 按住说话", "voice")):
+        for text, feat in (("长文本模式", "longtext"), ("Live2D", "live2d"),
+                           ("摄像头识别", "camera"), ("屏幕识别", "screenshot"),
+                           ("按住说话", "voice")):
             b = QPushButton(text)
             b.setStyleSheet(_ghost_btn_qss())
             b.setMinimumHeight(38)
@@ -776,7 +777,7 @@ class HomePage(QWidget):
                 b.clicked.connect(lambda _=False, f=feat: _send_control(f))
             grid.addWidget(b)
         # 重置桌宠位置：桌宠跑到屏幕外 / 找不到时一键回到屏幕中央
-        self.btn_reset_pos = QPushButton("🎯 重置桌宠位置")
+        self.btn_reset_pos = QPushButton("重置桌宠位置")
         self.btn_reset_pos.setStyleSheet(_ghost_btn_qss())
         self.btn_reset_pos.setMinimumHeight(38)
         self.btn_reset_pos.setToolTip("把桌宠移回屏幕中央（找不到桌宠时点这里）")
@@ -800,12 +801,12 @@ class HomePage(QWidget):
         tl.setSpacing(10)
         tl.addWidget(silicon_ui.section_title("快捷工具", accent))
         tr = QHBoxLayout()
-        for text, slot in (("🎨 立绘工坊", self.open_studio),
-                           ("⚙ 桌宠设置", self.open_pet_settings),
-                           ("🔑 NapCat WebUI", self.open_napcat_webui),
-                           ("📱 重新扫码登录", self.napcat_relogin),
-                           ("📂 打开程序目录", self.open_app_dir),
-                           ("📜 更新日志", self.open_changelog)):
+        for text, slot in (("立绘工坊", self.open_studio),
+                           ("桌宠设置", self.open_pet_settings),
+                           ("NapCat WebUI", self.open_napcat_webui),
+                           ("重新扫码登录", self.napcat_relogin),
+                           ("打开程序目录", self.open_app_dir),
+                           ("更新日志", self.open_changelog)):
             b = QPushButton(text)
             b.setStyleSheet(_ghost_btn_qss())
             b.clicked.connect(slot)
@@ -823,7 +824,7 @@ class HomePage(QWidget):
             _has_story = False
         if _has_story:
             sr = QHBoxLayout()
-            b_story = QPushButton("🎬 剧情模式")
+            b_story = QPushButton("剧情模式")
             b_story.setStyleSheet(_ghost_btn_qss())
             b_story.setToolTip("进入 Galgame 风格的剧情玩法（独立窗口）")
             b_story.clicked.connect(self._open_story)
@@ -1139,6 +1140,22 @@ class HomePage(QWidget):
 
     # ── 本地视觉服务预载 ──
 
+    def apply_text_color(self, hexv: str = ""):
+        """文字颜色即时生效：写盘后走「实时换肤」路径（重算色板 + 重建当前页）。"""
+        try:
+            from .themes_panel import _load_config, _save_config
+            cfg = _load_config() or {}
+            cfg["ui_text_color"] = str(hexv or "")
+            _save_config(cfg)
+        except Exception as e:
+            print(f"[NewUI]  文字颜色写盘失败: {e}")
+        try:
+            from .colors import current_theme_id as _ctid
+            self.apply_theme_live(_ctid(), persist=False)
+            print(f"[NewUI] 文字颜色已实时应用: {hexv or '自动'}")
+        except Exception as e:
+            print(f"[NewUI]  文字颜色实时应用失败（重启启动器后生效）: {e}")
+
     def refresh_status(self):
         """后台线程探测运行状态（绝不在 UI 线程做网络探测 → 不卡界面）"""
         if getattr(self, "_probe_busy", False):
@@ -1161,7 +1178,17 @@ class HomePage(QWidget):
                     tts_ok = s.connect_ex(("127.0.0.1", 9880)) == 0
             except Exception:
                 pass
-            self._probe_result = (alive, tts_ok)
+            # 视觉：设置成云端就显示「云端」，本地就探服务端口在不在
+            vis_state = "unknown"
+            try:
+                _vcfg = _vision_cfg()
+                if str(_vcfg.get("vision_source") or "local").strip().lower() != "local":
+                    vis_state = "cloud"
+                else:
+                    vis_state = "online" if _vision_alive(_vision_port(_vcfg)) else "offline"
+            except Exception:
+                pass
+            self._probe_result = (alive, tts_ok, vis_state)
             try:
                 self._probe_signal.emit()
             except Exception:
@@ -1173,7 +1200,7 @@ class HomePage(QWidget):
     def _apply_status(self):
         """探测结果回到 UI 线程再更新（信号触发）"""
         try:
-            alive, tts_ok = getattr(self, "_probe_result", (False, False))
+            alive, tts_ok, vis_state = getattr(self, "_probe_result", (False, False, "unknown"))
             self._probe_busy = False
             # 缓存给别的页面用（例如「桌宠」页卡片上那个按钮该写"设为活动"还是"切换到这个桌宠"）——
             # 卡片构建时不能自己发网络探测，否则一屏卡片能把界面卡住好几秒
@@ -1188,19 +1215,22 @@ class HomePage(QWidget):
             self.chip_pet.set_text(f"桌宠{tag}：运行中" if alive else f"桌宠{tag}：未运行", alive)
             # 「正在关闭/启动中」期间不要被状态刷新覆盖文案
             if self.btn_pet.isEnabled():
-                self.btn_pet.setText(f"  ⏹ 关闭桌宠{tag}" if alive
+                self.btn_pet.setText(f"关闭桌宠{tag}"if alive
                                      else f"  启动 AIpet 桌宠{tag}")
             accent = THEME_COLORS.get(str(ACCENT_ID), {}).get("title_start", "#2f6fd0")
             self.btn_pet.setStyleSheet(_accent_btn_qss(accent, danger=alive))
             try:
                 self.btn_reset_pos.setEnabled(alive)
                 if self.btn_reset_pos.isEnabled():
-                    self.btn_reset_pos.setText("🎯 重置桌宠位置")
+                    self.btn_reset_pos.setText("重置桌宠位置")
             except Exception:
                 pass
             qq_on = self.shell._qq_proc is not None and self.shell._qq_proc.poll() is None
             self.chip_qq.set_text("QQ：运行中" if qq_on else "QQ：未运行", qq_on)
             self.chip_tts.set_text("语音服务：在线" if tts_ok else "语音服务：未启动", tts_ok)
+            _vis_txt = {"online": "视觉服务：在线", "offline": "视觉服务：未启动",
+                        "cloud": "视觉服务：云端 API", "unknown": "视觉服务：未知"}.get(vis_state, "视觉服务：未知")
+            self.chip_vision.set_text(_vis_txt, vis_state == "online")
         except Exception as e:
             print(f"[NewUI] ⚠ 状态更新失败: {e}")
 
@@ -1241,15 +1271,15 @@ class HomePage(QWidget):
             return
         if _running:
             # 关闭桌宠：显示「正在关闭中…」并禁用按钮，避免重复点击
-            self._busy_btn(self.btn_pet, "⏳ 正在关闭中…", 8000)
-            self.status_lbl.setText("⏳ 正在关闭桌宠…")
+            self._busy_btn(self.btn_pet, "正在关闭中…", 8000)
+            self.status_lbl.setText("正在关闭桌宠…")
             QTimer.singleShot(9000, lambda: self.status_lbl.setText(""))
             print("[NewUI] 正在关闭桌宠…")
             _send_control("shutdown")
             # 轮询等它真的退出（最多 12 秒），再刷新状态
             self._wait_pet_gone(12)
             return
-        self._busy_btn(self.btn_pet, "⏳ 正在启动中…", 15000)
+        self._busy_btn(self.btn_pet, "正在启动中…", 15000)
         if self._launch_pet():
             # 用 0.5 秒轮询等它起来（以前固定等 6 秒，起来了也要干等）
             self._poll_pet_up()
@@ -1285,7 +1315,7 @@ class HomePage(QWidget):
         self._switch_timer.start(max(0, int(delay_ms)))
         try:
             self.chip_pet.set_text(f"桌宠（{self._switch_name}）：正在切换…", False)
-            self.status_lbl.setText(f"⏳ 正在切换成「{self._switch_name}」…")
+            self.status_lbl.setText(f"正在切换成「{self._switch_name}」…")
         except Exception:
             pass
         print(f"[NewUI] 已排队换角色 → {self._switch_name}（{delay_ms}ms 防误触）")
@@ -1300,15 +1330,15 @@ class HomePage(QWidget):
         name = getattr(self, "_switch_name", "") or self._active_pet_name()
         if not _pet_api_alive():
             try:
-                self.status_lbl.setText(f"✅ 已设为「{name}」｜回总览点「启动 AIpet 桌宠」即可")
+                self.status_lbl.setText(f"已设为「{name}」｜回总览点「启动 AIpet 桌宠」即可")
                 QTimer.singleShot(6000, lambda: self.status_lbl.setText(""))
             except Exception:
                 pass
             self.refresh_status()
             return
         try:
-            self._busy_btn(self.btn_pet, "⏳ 正在切换角色…", 30000)
-            self.status_lbl.setText(f"⏳ 正在把桌宠换成「{name}」…")
+            self._busy_btn(self.btn_pet, "正在切换角色…", 30000)
+            self.status_lbl.setText(f"正在把桌宠换成「{name}」…")
         except Exception:
             pass
         print(f"[NewUI] 换角色：先关掉当前桌宠（{name}）")
@@ -1337,7 +1367,7 @@ class HomePage(QWidget):
         """换角色收尾（UI 线程）：按钮恢复 + 立刻刷新状态，不再等 6 秒"""
         try:
             self.btn_pet.setEnabled(True)
-            self.status_lbl.setText(f"✅ 桌宠已换成「{name}」")
+            self.status_lbl.setText(f"桌宠已换成「{name}」")
             QTimer.singleShot(4000, lambda: self.status_lbl.setText(""))
         except Exception:
             pass
@@ -1418,9 +1448,9 @@ class HomePage(QWidget):
         if not _pet_api_alive():
             self._msg("重置桌宠位置", "桌宠还没启动哦，先点「启动 AIpet 桌宠」。")
             return
-        self._busy_btn(self.btn_reset_pos, "⏳ 正在移动…", 4000)
+        self._busy_btn(self.btn_reset_pos, "正在移动…", 4000)
         _send_control("reset_position")
-        self.status_lbl.setText("🎯 让桌宠回到屏幕中央…")
+        self.status_lbl.setText("让桌宠回到屏幕中央…")
         QTimer.singleShot(4500, lambda: self.status_lbl.setText(""))
         print("[NewUI] 已发送「重置桌宠位置」")
 
@@ -1433,7 +1463,7 @@ class HomePage(QWidget):
         """
         if self.shell._qq_proc is not None and self.shell._qq_proc.poll() is None:
             self.shell._qq_proc = None      # 已经退出/异常 → 允许重启
-        self._busy_btn(self.btn_qq, "⏳ 正在检查 NapCat…", 120000)
+        self._busy_btn(self.btn_qq, "正在检查 NapCat…", 120000)
         self._ensure_napcat("start_qq")
 
     def start_wechat(self):
@@ -1458,7 +1488,7 @@ class HomePage(QWidget):
                 return
         except Exception as e:
             print(f"[NewUI] ⚠ 读取微信开关失败（继续尝试启动）: {e}")
-        self._busy_btn(self.btn_wx, "⏳ 正在启动微信…", 12000)
+        self._busy_btn(self.btn_wx, "正在启动微信…", 12000)
         try:
             self.shell._wx_proc = subprocess.Popen([py, os.path.join(base, "run_wechat.py")], cwd=base,
                                                    creationflags=subprocess.CREATE_NEW_CONSOLE)
@@ -1497,7 +1527,7 @@ class HomePage(QWidget):
         端口/token 仍从 NapCat 自己的 webui.json 读（config.json 里没有 WebUI token）。
         """
         self._busy_btn(getattr(self, "btn_webui", self.btn_reset_pos),
-                       "⏳ 正在启动 NapCat…", 120000)
+                       "正在启动 NapCat…", 120000)
         self._ensure_napcat("open_webui")
 
     def napcat_relogin(self):
@@ -1549,7 +1579,7 @@ class HomePage(QWidget):
             self._msg("QQ AIpet", "未找到 QQ 模块（run_qq.py）。",
                       "QQ 桥接随程序包一起提供；如果你是精简安装，请把 qq 目录补回来。")
             return
-        self._busy_btn(self.btn_qq, "⏳ 正在启动 QQ…", 12000)
+        self._busy_btn(self.btn_qq, "正在启动 QQ…", 12000)
         try:
             self.shell._qq_proc = subprocess.Popen([py, os.path.join(base, "run_qq.py")], cwd=base,
                                                    creationflags=subprocess.CREATE_NEW_CONSOLE)
@@ -1767,7 +1797,7 @@ class SiliconLauncher(QWidget):
 
         self._chrome_btns = []          # 最小化/关闭（换肤时一起重上样式）
         for text, slot, tip in (("—", self.showMinimized, "最小化"),
-                                ("✕", self.close, "关闭")):
+                                ("", self.close, "关闭")):
             b = QPushButton(text)
             b.setFixedSize(36, 30)
             b.setToolTip(tip)
@@ -1826,7 +1856,7 @@ class SiliconLauncher(QWidget):
         sep.setFixedHeight(1)
         sep.setStyleSheet(f"background: {Color5.name()}; border: none;")
         lay.addWidget(sep)
-        b_set = NavRailButton("⚙", "设置", "模型 · 语音 · 外观", icon_key="settings")
+        b_set = NavRailButton("", "设置", "模型 · 语音 · 外观", icon_key="settings")
         b_set.clicked.connect(lambda _=False: self._goto("settings"))
         self.nav_btns["settings"] = b_set
         lay.addWidget(b_set)

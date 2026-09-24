@@ -109,9 +109,9 @@ def log(msg, level="INFO"):
     """打印日志；纯净模式下控制台被隐藏 → 同时追加到 data/pet_run.log，方便事后排查"""
     levels = {
         "INFO": "[AIpet]",
-        "WARN": "⚠️ [警告]",
-        "ERROR": "❌ [错误]",
-        "SUCCESS": "✅ [成功]",
+        "WARN": "[警告]",
+        "ERROR": "[错误]",
+        "SUCCESS": "[成功]",
     }
     prefix = levels.get(level, "[AIpet]")
     print(f"{prefix} {msg}")
@@ -461,7 +461,7 @@ def setup_runtime_and_pytorch(config_path="config.json", cfg=None, hardware_type
             ], check=True, creationflags=_console_flags())
             import torch
             log("已安装与当前 CUDA 匹配的 PyTorch 版本。", "SUCCESS")
-            log("⚠️⚠️请关闭并重新运行程序，以加载新的 PyTorch 版本。⚠️⚠️", "INFO")
+            log("请关闭并重新运行程序，以加载新的 PyTorch 版本。", "INFO")
             sys.exit(0)
 
     except ImportError:

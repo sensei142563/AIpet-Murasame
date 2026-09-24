@@ -841,7 +841,7 @@ if __name__ == "__main__":
     if live2d_widget:
         live2d_widget.trigger_text.connect(lambda text: pet.show_text(text, typing=True))
         live2d_widget.trigger_touch_head.connect(
-            lambda: pet.start_thread("主人摸了摸你的头（★ 这一轮只是寒暄：不要输出任何操作指令）",
+            lambda: pet.start_thread("主人摸了摸你的头（ 这一轮只是寒暄：不要输出任何操作指令）",
                                      role="system")
         )
         # 身体各处触摸（头/胸/腹/下体/四肢/自定义部位）—— Live2D 模式下由模型控件转发，

@@ -190,10 +190,10 @@ class ModelCanvas(QOpenGLWidget):
     def start_record(self, fname):
         """开始录一段动作（真实时间逐帧快照）。返回是否真的开始录。"""
         if not self._ready or self.model is None:
-            self._say("⚠ 模型还没就绪，等它加载完再录")
+            self._say("模型还没就绪，等它加载完再录")
             return False
         if fname not in self.motions:
-            self._say("⚠ 这个动作还没注册（换个动作或等列表刷新）")
+            self._say("这个动作还没注册（换个动作或等列表刷新）")
             return False
         self._restore_auto()
         try:
@@ -238,7 +238,7 @@ class ModelCanvas(QOpenGLWidget):
     def hold_index(self, idx):
         """定格到第 idx 帧（0 基）：把那一帧的参数写回模型，之后只画不更新"""
         if not self._rec_frames:
-            self._say("⚠ 还没录制：先点「录这段动作」")
+            self._say("还没录制：先点「录这段动作」")
             return False
         idx = max(0, min(int(idx), len(self._rec_frames) - 1))
         if not self._ready or self.model is None:
@@ -597,11 +597,11 @@ class Live2DDebuggerDialog(SiliconDialog):
         row2.addWidget(self.ed_note, 1)
         pl.addLayout(row2)
         row3 = QGridLayout()
-        b_save = QPushButton("💾 保存标签")
+        b_save = QPushButton("保存标签")
         b_save.clicked.connect(self._on_save_label)
-        b_copy = QPushButton("📋 复制对照表")
+        b_copy = QPushButton("复制对照表")
         b_copy.clicked.connect(self._on_copy_table)
-        b_exp = QPushButton("📄 导出对照表")
+        b_exp = QPushButton("导出对照表")
         b_exp.clicked.connect(self._on_export_table)
         for i, b in enumerate((b_save, b_copy, b_exp)):
             b.setStyleSheet(_btn_qss())
@@ -692,7 +692,7 @@ class Live2DDebuggerDialog(SiliconDialog):
         tl.setSpacing(4)
 
         row = QHBoxLayout()
-        self.btn_rec = QPushButton("🔴 录这段动作")
+        self.btn_rec = QPushButton("录这段动作")
         self.btn_rec.setToolTip("先点右边「动作」里的一个动作选中它，再点这里录；"
                                 "录完拖下面的进度条就能定格到任意一帧")
         self.btn_rec.clicked.connect(self._on_record)
@@ -740,15 +740,15 @@ class Live2DDebuggerDialog(SiliconDialog):
         self.tl_slider.blockSignals(False)
         self.tl_slider.setEnabled(False)
         self.moving_view.setPlainText("")
-        self.tl_lbl.setText(tip or "先在右边「动作」里点一个动作，再点「🔴 录这段动作」")
+        self.tl_lbl.setText(tip or "先在右边「动作」里点一个动作，再点「 录这段动作」")
 
     def _on_record(self):
         if not self.canvas:
             return
         kind, fname = self._sel
         if kind != "mot" or not fname:
-            self.status_lbl.setText("⚠ 先在右边「动作」里点一个要录的动作，再点「🔴 录这段动作」")
-            self.tl_lbl.setText("⚠ 还没选动作：先点右边「动作」里的一个")
+            self.status_lbl.setText("先在右边「动作」里点一个要录的动作，再点「 录这段动作」")
+            self.tl_lbl.setText("还没选动作：先点右边「动作」里的一个")
             return
         self.moving_view.setPlainText("")
         self._rec_name = fname
@@ -760,7 +760,7 @@ class Live2DDebuggerDialog(SiliconDialog):
         self.tl_lbl.setText("🔴 正在录「%s」…跟着它播完（几秒）" % fname)
         if not self.canvas.start_record(fname):
             self._rec_name = ""
-            self.tl_lbl.setText("⚠ 没能开始录制：看下面状态栏的原因")
+            self.tl_lbl.setText("没能开始录制：看下面状态栏的原因")
 
     def _on_progress(self, n):
         # 录制中让进度条自己涨，但别触发定格（所以 blockSignals）
@@ -801,7 +801,7 @@ class Live2DDebuggerDialog(SiliconDialog):
         if not self.canvas:
             return
         if not self.canvas.rec_count():
-            self.status_lbl.setText("ℹ 还没录过动作：先点「🔴 录这段动作」")
+            self.status_lbl.setText("ℹ 还没录过动作：先点「 录这段动作」")
             return
         self.canvas.resume_live()
         self.tl_lbl.setText("▶ 已解除定格（已录「%s」共 %d 帧，拖进度条可再定格）"
@@ -844,7 +844,7 @@ class Live2DDebuggerDialog(SiliconDialog):
         self._timeline_reset()
 
         if not model_json or not os.path.exists(model_json):
-            self.status_lbl.setText("⚠ 这个角色没有 Live2D 模型文件")
+            self.status_lbl.setText("这个角色没有 Live2D 模型文件")
             return
         self.canvas = ModelCanvas(
             model_json, pet_dir,
@@ -926,7 +926,7 @@ class Live2DDebuggerDialog(SiliconDialog):
     def _on_save_label(self):
         kind, fname = self._sel
         if not fname or not self._store:
-            self.status_lbl.setText("⚠ 先在列表里点一个表情或动作，再保存标签")
+            self.status_lbl.setText("先在列表里点一个表情或动作，再保存标签")
             return
         self._store.set(fname, kind, self.ed_label.text().strip(), self.ed_note.text().strip())
         p = self._store.save()
@@ -946,7 +946,7 @@ class Live2DDebuggerDialog(SiliconDialog):
         try:
             from PyQt5.QtWidgets import QApplication
             QApplication.clipboard().setText(text)
-            self.status_lbl.setText("📋 对照表已复制到剪贴板（可直接贴给我）")
+            self.status_lbl.setText("对照表已复制到剪贴板（可直接贴给我）")
         except Exception as e:
             self.status_lbl.setText("⚠ 复制失败：%s" % e)
 

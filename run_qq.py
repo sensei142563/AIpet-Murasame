@@ -158,7 +158,7 @@ def _napcat_version_selfcheck():
     try:
         from tool.napcat_version import check as _version_check
         for f in _version_check(BASE_DIR):
-            mark = {"warn": "⚠", "ok": "✓"}.get(f.get("level"), " ")
+            mark = {"warn": "", "ok": ""}.get(f.get("level"), " ")
             print(f"[版本] {mark} {f.get('msg', '')}")
     except Exception as e:
         print(f"[版本] 自检跳过: {e}")
