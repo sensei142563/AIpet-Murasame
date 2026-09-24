@@ -4926,12 +4926,7 @@ class Murasame(QLabel):
 
         # 5. Attach to the QLabel and request a repaint
         self.setPixmap(pixmap)
-        # 对话框留位那块已经烘进图片里了（见 _scale_portrait_pixmap 的说明），
-        # 所以这里居中即可、窗口尺寸直接跟图片一致 —— 立绘本身没有被缩放。
-        try:
-            self.setAlignment(Qt.AlignCenter)
-        except Exception as _e:
-            print(f"[桌宠] ⚠ 立绘对齐设置失败: {_e}")
+        # 窗口尺寸跟立绘一致（不做任何"留白/加高"——加高过窗口曾导致超出屏幕被切一半）
         self._ensure_window_fits_pixmap(pixmap)      # 图比窗口宽就先放大窗口，别裁图
         self.resize(pixmap.size())
         self.update()
@@ -5062,64 +5057,12 @@ class Murasame(QLabel):
         if pixmap.height() >= 240:
             target_height = max(240, target_height)
 
-        # ★ 给对话框（气泡）留位置，但**不缩小立绘**：气泡按窗口比例占掉一块
-        #   （夏目/丛雨都是顶部：上边距 5% + 高 38% = 实际到 43%），立绘又按整窗高度缩放
-        #   → 头和上半身压在气泡底下（用户反馈"显示不完全、像被遮挡"；缩小立绘又会被嫌
-        #   "桌宠变小了"）。做法：把**窗口加高** —— 立绘保持原尺寸、整体下移，上方空出来
-        #   的那块正好是气泡的位置（视觉小说的标准排法）。屏幕实在放不下才缩立绘。
-        self._text_reserve = 0
-        self._text_box_side = ""
-        try:
-            _b2 = getattr(self, "_text_box_2d", None)
-            if _b2 and len(_b2) >= 4:
-                _by, _bh = float(_b2[1]), float(_b2[3])
-                # ⚠ 气泡实际占的是「上边距 + 高度」：只留高度的话，她的头顶仍会被压住
-                #   （实测残留 48px 重叠 → 用户说"疑似被遮挡"）。
-                _side0 = "top" if _by < 0.5 else "bottom"
-                _res_frac = (_by + _bh) if _side0 == "top" else (1.0 - _by)
-                _res_frac = max(0.0, min(0.7, _res_frac))
-                if _res_frac > 0.05:
-                    _side = _side0
-                    self._text_box_side = _side
-                    _room = int(available_height) if available_height else 0
-                    _want_h = int(round(target_height / max(0.05, 1.0 - _res_frac)))
-                    _H = min(_room, _want_h) if _room else _want_h
-                    _new_h = max(140, int(round(_H * (1.0 - _res_frac))))
-                    self._text_reserve = max(0, _H - _new_h)
-                    if _new_h < target_height:
-                        print(f"[桌宠] 屏幕高度 {_room}px 不够放下 {_want_h}px 的窗口 → "
-                              f"立绘 {target_height} → {_new_h}px，"
-                              f"{('上方' if _side == 'top' else '下方')}留 {self._text_reserve}px 给气泡")
-                    else:
-                        print(f"[桌宠] 气泡占{('顶部' if _side == 'top' else '底部')} "
-                              f"{_res_frac*100:.0f}%（含边距）→ 窗口 {_H}px"
-                              f"（立绘 {_new_h}px，尺寸不变）")
-                    target_height = _new_h
-        except Exception as _e:
-            print(f"[桌宠] ⚠ 对话框留位失败（按原尺寸显示）: {_e}")
-
         # 计算文本缩放
         scale_factor = target_height / max(1, pixmap.height())
         self._current_scale = max(scale_factor, 0.1)
         self._update_text_scaling()
 
         out = pixmap.scaledToHeight(target_height, Qt.SmoothTransformation)
-        # 把"留位"那块补在图片的上边（气泡在顶部）或下边（气泡在底部）：透明像素，
-        # 窗口会跟着变高，而立绘本身一个像素都没缩放。
-        try:
-            _rsv = int(getattr(self, "_text_reserve", 0) or 0)
-            _side = str(getattr(self, "_text_box_side", "") or "")
-            if _rsv > 0 and _side in ("top", "bottom"):
-                _cw, _ch = max(1, out.width()), out.height() + _rsv
-                _cv = QPixmap(_cw, _ch)
-                _cv.fill(Qt.transparent)
-                _pp = QPainter(_cv)
-                _pp.drawPixmap((_cw - out.width()) // 2,
-                               _rsv if _side == "top" else 0, out)
-                _pp.end()
-                out = _cv
-        except Exception as _e:
-            print(f"[桌宠] ⚠ 立绘留位失败（按原尺寸显示）: {_e}")
         # ★ 稳定画布：同一套立绘 + 同一目标高度下，画布宽度"只增不减"。
         #   合成图宽度 = 当前图层（表情/动作/服装）的包围盒宽度，换一次表情就变一次；
         #   窗口要是跟着缩，对话框（按窗口宽高归一化）就会忽大忽小 ——
