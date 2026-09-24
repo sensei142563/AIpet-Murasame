@@ -12,7 +12,7 @@ from PyQt5.QtWidgets import (QWidget, QDialog, QLabel, QPushButton, QVBoxLayout,
                              QHBoxLayout, QGraphicsOpacityEffect, QFrame, QLineEdit)
 
 from .colors import (Color1, Color5, Color8, Gray1, Gray2, RedDark,   # noqa: F401
-                     ACCENT_ID, THEME_COLORS)
+                     ACCENT_ID, THEME_COLORS, surface_fill)
 from .silicon_ui import M, apply_acrylic
 
 
@@ -362,10 +362,10 @@ def _dialog_btn_qss(bg=None, outline=False) -> str:
     """对话框里的按钮：主操作 = 强调色（或危险色），次要 = 描边。"""
     m = int(M.font_size)
     if outline:
-        return (f"QPushButton {{ background: rgba(255,255,255,175); color: {Gray1.name()};"
+        return (f"QPushButton {{ background: {surface_fill(175, 24)}; color: {Gray1.name()};"
                 f" border: 1px solid {QColor(Gray1.name()).lighter(150).name()};"
                 f" border-radius: 8px; padding: 6px 18px; font-size: {m}px; }}"
-                f"QPushButton:hover {{ background: rgba(255,255,255,235); }}")
+                f"QPushButton:hover {{ background: {surface_fill(235, 40)}; }}")
     base = bg.name() if bg is not None else accent_hex()
     return (f"QPushButton {{ background: {base}; color: white; border: none;"
             f" border-radius: 8px; padding: 6px 18px; font-size: {m}px; }}"

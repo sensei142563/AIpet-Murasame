@@ -1225,7 +1225,7 @@ class SiliconLauncher(QWidget):
                 self._nav_sep.setStyleSheet(f"background: {Color5.name()}; border: none;")
             if getattr(self, "_nav_ver", None) is not None:
                 self._nav_ver.setStyleSheet(
-                    f"color: {Gray3.name()}; font-size: 11px; padding: 2px 8px;")
+                    f"color: {Gray2.name()}; font-size: 11px; padding: 2px 8px;")
             self._accent = accent_hex()
             for b in getattr(self, "nav_btns", {}).values():
                 try:

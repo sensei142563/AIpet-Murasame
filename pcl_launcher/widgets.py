@@ -209,11 +209,11 @@ class PCLSettingsPanel(QWidget):
         self._cat_filter = "all"
         self._cur_layout = self._layout
         chip_style = f"""
-            QPushButton {{ background: rgba(255,255,255,150); color: {Color1.name()};
+            QPushButton {{ background: {surface_fill()}; color: {Color1.name()};
                 border: 1px solid {Gray5.name()}; padding: {int(5*S)}px {int(14*S)}px;
                 font-size: {int(12*S)}px; border-radius: {btn_radius()}px;
                 font-family: 'Microsoft YaHei'; }}
-            QPushButton:hover {{ background: rgba(255,255,255,220); }}
+            QPushButton:hover {{ background: {surface_fill(220, 44)}; }}
             QPushButton:checked {{ background: {Color3.name()}; color: white;
                 border-color: {Color3.name()}; font-weight: bold; }}
         """
@@ -456,7 +456,7 @@ class PCLSettingsPanel(QWidget):
         # 底部条改成反馈区：左边显示「已自动保存 ✓ 时间」，右边给一个重启桌宠的明确入口
         # （有些配置要桌宠重启后才生效，与其让用户自己去找「关闭桌宠」，不如放在这儿）。
         self._status_lbl = QLabel("改动会自动保存")
-        self._status_lbl.setStyleSheet(f"color: {Gray3.name()}; font-size: {int(11*S)}px;")
+        self._status_lbl.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(11*S)}px;")
         btn_restart = QPushButton("🔄 重启桌宠以生效")
         btn_restart.setCursor(Qt.PointingHandCursor)
         btn_restart.setToolTip("关闭当前运行中的桌宠；下次启动时使用最新配置")
@@ -627,7 +627,7 @@ class PCLSettingsPanel(QWidget):
         lbl.setStyleSheet(
             f"color: {Color3.name()}; margin-top: {int(18*S)}px;"
             f"padding: {int(5*S)}px {int(10*S)}px;"
-            f"background: rgba(255,255,255,120);"
+            f"background: {surface_fill(120, 20)};"
             f"border-left: 4px solid {Color3.name()}; border-radius: {int(4*S)}px;")
         self._cur_layout.addWidget(lbl)
         return lbl
@@ -644,7 +644,7 @@ class PCLSettingsPanel(QWidget):
         inp.setStyleSheet(f"""
             QLineEdit {{ border: 1px solid {Gray5.name()}; padding: {int(6*S)}px;
                 font-size: {int(12*S)}px; border-radius: {int(4*S)}px;
-                background: rgba(255,255,255,190); font-family: 'Microsoft YaHei'; }}
+                background: {surface_fill(190, 26)}; font-family: 'Microsoft YaHei'; }}
             QLineEdit:focus {{ border: 1px solid {Color3.name()}; }}
         """)
         if not secure:
@@ -661,11 +661,11 @@ class PCLSettingsPanel(QWidget):
             eye.setFixedWidth(int(76 * S))
             eye.setToolTip("临时显示明文（再点一次恢复打码）")
             eye.setStyleSheet(f"""
-                QPushButton {{ background: rgba(255,255,255,170); color: {Gray1.name()};
+                QPushButton {{ background: {surface_fill(170, 24)}; color: {Gray1.name()};
                     border: 1px solid {Gray5.name()}; padding: {int(6*S)}px 0;
                     font-size: {int(12*S)}px; border-radius: {int(4*S)}px;
                     font-family: 'Microsoft YaHei'; }}
-                QPushButton:hover {{ background: rgba(255,255,255,235); }}
+                QPushButton:hover {{ background: {surface_fill(235, 40)}; }}
                 QPushButton:checked {{ background: {Color3.name()}; color: white;
                     border-color: {Color3.name()}; }}
             """)
@@ -783,9 +783,9 @@ class PCLSettingsPanel(QWidget):
         combo.setStyleSheet(f"""
             QComboBox {{ border: 1px solid {Gray5.name()}; padding: {int(4*S)}px;
                 font-size: {int(12*S)}px; border-radius: {int(4*S)}px;
-                background: rgba(255,255,255,190); font-family: 'Microsoft YaHei'; }}
+                background: {surface_fill(190, 26)}; font-family: 'Microsoft YaHei'; }}
             QComboBox:focus {{ border: 1px solid {Color3.name()}; }}
-            QComboBox QAbstractItemView {{ background: rgba(255,255,255,190); selection-background-color: {Color3.name()}; }}
+            QComboBox QAbstractItemView {{ background: {surface_fill(190, 26)}; selection-background-color: {Color3.name()}; }}
         """)
         self._block_wheel(combo)
         if hint:
@@ -1778,7 +1778,7 @@ class PCLPetManager(QScrollArea):
 
         if not pets:
             empty = QLabel("暂未发现任何桌宠角色。")
-            empty.setStyleSheet(f"color: {Gray3.name()}; font-size: {int(12*S)}px;")
+            empty.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(12*S)}px;")
             self._pet_layout.addWidget(empty)
             return
 
@@ -2525,11 +2525,11 @@ def outline_btn_qss(fg=None, pad_v: int = 8, pad_h: int = 16, font_size: int = 1
     fg = fg if fg is not None else Gray1.name()
     r = int(radius if radius is not None else 6 * S)
     return f"""
-        QPushButton {{ background: rgba(255,255,255,175); color: {fg};
+        QPushButton {{ background: {surface_fill(175, 24)}; color: {fg};
             border: 1px solid {Gray5.name()};
             padding: {pad_v}px {pad_h}px; font-size: {font_size}px;
             border-radius: {r}px; font-family: 'Microsoft YaHei'; }}
-        QPushButton:hover {{ background: rgba(255,255,255,240); }}
+        QPushButton:hover {{ background: {surface_fill(240, 44)}; }}
     """
 
 

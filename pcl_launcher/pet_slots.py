@@ -155,7 +155,7 @@ class PetSlot(QFrame):
                                      f" font-size: {int(12*S)}px; font-weight: bold;")
         v.addWidget(self.title_lbl)
         self.hint_lbl = QLabel(hint)
-        self.hint_lbl.setStyleSheet(f"color: {Gray3.name()}; border: none;"
+        self.hint_lbl.setStyleSheet(f"color: {Gray2.name()}; border: none;"
                                     f" font-size: {int(10*S)}px;")
         self.hint_lbl.setVisible(bool(hint))
         self._base_hint = hint or ""

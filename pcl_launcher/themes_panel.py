@@ -205,7 +205,7 @@ class PCLThemesPanel(QScrollArea):
         acc_label.setStyleSheet(
             f"color: {Color3.name()}; margin-top: {int(8*S)}px;"
             f"padding: {int(5*S)}px {int(10*S)}px;"
-            f"background: rgba(255,255,255,120);"
+            f"background: {surface_fill(120, 20)};"
             f"border-left: 4px solid {Color3.name()}; border-radius: {int(4*S)}px;")
         self._layout.addWidget(acc_label)
         acc_row = QHBoxLayout(); acc_row.setSpacing(int(10 * S))
@@ -248,7 +248,7 @@ class PCLThemesPanel(QScrollArea):
         self._layout.addWidget(self._list_widget)
 
         path_lbl = QLabel(f"主题目录：{THEME_DIR}")
-        path_lbl.setStyleSheet(f"color: {Gray3.name()}; font-size: {int(11*S)}px;")
+        path_lbl.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(11*S)}px;")
         self._layout.addWidget(path_lbl)
         self._layout.addStretch()
 
@@ -447,7 +447,7 @@ class PCLThemesPanel(QScrollArea):
         return box
 
     def _section_label(self, text, count):
-        lbl = QLabel(f"  {text}  <span style='color:{Gray3.name()};font-size:{int(11*S)}px;'>"
+        lbl = QLabel(f"  {text}  <span style='color:{Gray2.name()};font-size:{int(11*S)}px;'>"
                      f"共 {count} 个</span>")
         lbl.setFont(QFont("Microsoft YaHei", int(13 * S), QFont.Bold))
         lbl.setStyleSheet(f"color: {Color1.name()}; margin-top: {int(8*S)}px;"

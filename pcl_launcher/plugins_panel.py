@@ -586,7 +586,7 @@ class PCLPluginsPanel(QScrollArea):
                 if _official else
                 f"<span style='color:{_mine};font-size:{int(10*S)}px;'>我的</span>")
         name_lbl = QLabel(f"{meta.get('name', meta['id'])}  {_tag}  "
-                          f"<span style='color:{Gray3.name()};font-size:{int(10*S)}px;'>v{meta.get('version','1.0.0')}"
+                          f"<span style='color:{Gray2.name()};font-size:{int(10*S)}px;'>v{meta.get('version','1.0.0')}"
                           f" · {'功能' if meta.get('kind')=='feature' else '工具'}</span>")
         name_lbl.setFont(QFont("Microsoft YaHei", int(14*S), QFont.Bold))
         name_lbl.setStyleSheet(f"color: {Color1.name()}; background: transparent; border: none;")
