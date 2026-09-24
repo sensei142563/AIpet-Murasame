@@ -1242,40 +1242,15 @@ class PCLSettingsPanel(QWidget):
         return os.path.join(folder, cands[0])
 
     def _view_changelog(self):
-        folder = self._changelog_dir()
-        newest = self._latest_log_file(folder)
-        if not newest:
-            QMessageBox.information(self, "更新日志", f"更新日志文件夹为空：\n{folder}")
-            return
+        # 合并朋友 1.17.2：走统一的更新日志阅读窗口（按版本号排序 + 主题化 + 可切版本）。
+        # 老实现按文件 mtime 取"最新"、自绘一个写死浅底色的文本框 —— 浅色主题下发白。
         try:
-            with open(newest, "r", encoding="utf-8") as f:
-                text = f.read()
-        except Exception as e:
-            QMessageBox.warning(self, "读取失败", str(e))
+            from . import changelog as _cl
+            _cl.show(self)
             return
-        dlg = QDialog(self)
-        dlg.setWindowTitle(f" 更新日志 — {os.path.basename(newest)}")
-        dlg.resize(int(780 * S), int(560 * S))
-        lay = QVBoxLayout(dlg)
-        lay.setContentsMargins(int(14 * S), int(12 * S), int(14 * S), int(12 * S))
-        lay.setSpacing(int(10 * S))
-        txt = QPlainTextEdit()
-        txt.setReadOnly(True)
-        txt.setPlainText(text)
-        txt.setStyleSheet(
-            f"QPlainTextEdit {{ background: #fbfbfb; color: #333333; border: 1px solid {Gray5.name()};"
-            f" border-radius: {int(6*S)}px; font-family: 'Microsoft YaHei'; font-size: {int(13*S)}px; }}")
-        lay.addWidget(txt)
-        btn_close = QPushButton("  关闭")
-        btn_close.setStyleSheet(f"""
-            QPushButton {{ background: {Color3.name()}; color: white; border: none;
-                padding: {int(7*S)}px {int(20*S)}px; font-size: {int(13*S)}px;
-                border-radius: {btn_radius()}px; font-family: 'Microsoft YaHei'; }}
-            QPushButton:hover {{ background: {Color4.name()}; }}
-        """)
-        btn_close.clicked.connect(dlg.accept)
-        lay.addWidget(btn_close, 0, Qt.AlignRight)
-        dlg.exec_()
+        except Exception as e:
+            print(f"[PCL] 打开更新日志失败（回退系统提示）: {e}")
+            QMessageBox.information(self, "更新日志", f"打开失败：{e}")
 
     def _export_changelog(self):
         folder = self._changelog_dir()

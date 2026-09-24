@@ -107,7 +107,14 @@ def readme_history():
 # ══════════════════════ 主题化阅读窗口 ══════════════════════
 def show(parent=None):
     """打开更新日志阅读窗口（可切版本）。返回对话框；没有任何内容时给提示。"""
-    from .silicon_dialog import page_msg, SiliconDialog
+    try:
+        from .silicon_dialog import page_msg, SiliconDialog
+    except Exception:      # 我们的对话框模块还没有 page_msg → 退回原生提示
+        from PyQt5.QtWidgets import QMessageBox as _QMB
+        SiliconDialog = None
+        def page_msg(parent, title, text, detail=""):
+            msg = (text or "") + (("\n\n" + detail) if detail else "")
+            _QMB.information(parent, title, msg)
     es = entries()
     fallback = None
     if not es:
@@ -120,7 +127,11 @@ def show(parent=None):
                      "（源码版可执行 `python tool/gen_changelog.py` 从 README 生成）")
             return None
 
-    dlg = SiliconDialog("📜 更新日志", parent, width=900, height=660, opaque=True)
+    # 我们的 SiliconDialog 还没有 opaque 形参（他那边是给 Live2D 调试器用的）
+    try:
+        dlg = SiliconDialog("📜 更新日志", parent, width=900, height=660, opaque=True)
+    except TypeError:
+        dlg = SiliconDialog("📜 更新日志", parent, width=900, height=660)
     lay = QVBoxLayout()
     lay.setContentsMargins(14, 10, 14, 12)
     lay.setSpacing(10)

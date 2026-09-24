@@ -500,3 +500,96 @@ def apply_accent_live(accent_key: str) -> str:
         print(f"[Colors]  强调色写回主题失败: {e}")
     print(f"[Colors] 强调色已实时切换 → {key} ({accent_hex(key)})")
     return accent_hex(key)
+
+def rel_luminance(c) -> float:
+    """WCAG 相对亮度"""
+    def _f(v):
+        v = v / 255.0
+        return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+    return 0.2126 * _f(c.red()) + 0.7152 * _f(c.green()) + 0.0722 * _f(c.blue())
+
+def contrast_ratio(a, b) -> float:
+    """两色对比度（WCAG，1.0~21.0；正文建议 ≥ 4.5）"""
+    la, lb = rel_luminance(a), rel_luminance(b)
+    hi, lo = max(la, lb), min(la, lb)
+    return (hi + 0.05) / (lo + 0.05)
+
+def readable_on(color, bg=None, target: float = 4.5):
+    """把 color 沿明暗调到在当前主题底板上达到 target 对比度。
+
+    bg 默认取「窗口底板色」base_bg_color()。已经够清楚就原样返回（不改变设计色）。
+    """
+    c = QColor(color)
+    b = QColor(bg) if bg is not None else base_bg_color()
+    if contrast_ratio(c, b) >= target:
+        return c
+    dark_bg = rel_luminance(b) < 0.5
+    out = QColor(c)
+    for _ in range(40):
+        out = out.lighter(112) if dark_bg else out.darker(112)
+        if contrast_ratio(out, b) >= target:
+            return out
+    return QColor("#ffffff") if dark_bg else QColor("#000000")
+
+def ok_text():
+    """成功 / 已生效的状态字（跟着主题自动压暗或提亮）"""
+    return readable_on(GreenDark)
+
+def warn_text():
+    """警告 / 失败的状态字"""
+    return readable_on(RedDark)
+
+def surface_fill(light_alpha: int = 150, dark_alpha: int = 22) -> str:
+    """「磨砂面板 / 卡片」的填充色（CSS 片段，可直接塞进 QSS）。
+
+    浅色主题：乳白半透明（透出壁纸，老界面的观感）；
+    深色主题：极淡白膜（跟 `silicon_qss` 里 `rgba(255,255,255,0.03~0.06)` 一个路子）。
+
+    ⚠ 老代码把这一层写死成 `rgba(255,255,255,150)`：在**深色主题**下它等于往深底上
+      盖一层 59% 的白 → 合成出中灰板（实测插件页卡片 #9e9fa4），而卡片文字跟主题走
+      是**浅色**的 → 1.2:1，等于看不见（用户报的"插件页卡片看不清"）。
+    """
+    try:
+        if rel_luminance(QColor(Color8)) < 0.25:      # 深色主题
+            return f"rgba(255,255,255,{int(dark_alpha)})"
+    except Exception:
+        pass
+    return f"rgba(255,255,255,{int(light_alpha)})"
+
+
+# ===== 6 套强调色（accent）=====
+THEME_COLORS = {
+    "blue": {
+        # Silicon 现代蓝（新界面主色）：深→亮渐变，胶囊/高亮统一用它
+        "title_start": "#2f6fd0", "title_end": "#4c8dff",
+        "btn_start": "#4c8dff", "btn_end": "#2f6fd0",
+        "sidebar_bg": QColor(241, 255, 255, 242),
+    },
+    "red": {
+        "title_start": "#e03030", "title_end": "#f06060",
+        "btn_start": "#f06060", "btn_end": "#e03030",
+        "sidebar_bg": QColor(255, 241, 241, 242),
+    },
+    "green": {
+        "title_start": "#30a030", "title_end": "#60c060",
+        "btn_start": "#60c060", "btn_end": "#30a030",
+        "sidebar_bg": QColor(241, 255, 241, 242),
+    },
+    "gold": {
+        "title_start": "#d4a020", "title_end": "#e8c040",
+        "btn_start": "#e8c040", "btn_end": "#d4a020",
+        "sidebar_bg": QColor(255, 251, 240, 242),
+    },
+    "dark": {
+        "title_start": "#404040", "title_end": "#606060",
+        "btn_start": "#606060", "btn_end": "#404040",
+        "sidebar_bg": QColor(240, 240, 240, 242),
+    },
+    "crimson": {
+        "title_start": "#8e2b3a", "title_end": "#c05a68",
+        "btn_start": "#c05a68", "btn_end": "#8e2b3a",
+        "sidebar_bg": QColor(253, 240, 235, 242),
+    },
+}
+
+# ===== 主题资源与控件风格（供页面/按钮渲染） =====

@@ -1134,6 +1134,15 @@ class HomePage(QWidget):
             print(f"[NewUI] 打开目录失败: {e}")
 
     def open_changelog(self):
+        # 合并朋友 1.17.2：统一走 pcl_launcher.changelog（按版本号排序 + 主题化阅读窗口）。
+        # 老实现是 sorted(glob)[0] + 甩给系统默认程序 —— 按文件名字典序会把 V1.8.0 排在
+        # V1.16.1 前面（点开的是旧版本），没装阅读器时还会弹"打开方式"。
+        try:
+            from . import changelog as _cl
+            _cl.show(self)
+            return
+        except Exception as e:
+            print(f"[PCL] ⚠ 打开更新日志失败（回退系统程序）: {e}")
         import glob
         base = _app_base_dir()
         files = sorted(glob.glob(os.path.join(base, "更新日志", "*")), reverse=True)
@@ -2595,6 +2604,19 @@ def launch() -> int:
     from PyQt5.QtWidgets import QApplication
     from . import silicon_ui as _sui
     from .colors import current_theme_id
+    # ⚠ 必须在 QApplication 之前（合并朋友 1.17.2）：启动器里最多同时有三个 Live2D 画布
+    #   （立绘工坊内嵌预览 / 实时预览窗口 / 动作表情调试器）。Cubism 原生引擎是进程级单例、
+    #   GL 资源绑在第一个上下文上 → 不共享上下文时第 2、3 个画布画不出模型（"频闪 / 崩坏"）。
+    try:
+        _sui.enable_shared_gl_contexts()
+    except Exception as _e:
+        print(f"[PCL] ⚠ 共享 GL 上下文开关失败（多个 Live2D 画布可能画不出来）: {_e}")
+    # 首次运行生成空白 config.json（绿色版故意不带；缺它微信/QQ 入口会直接秒退）
+    try:
+        from tool.config import ensure_config as _ensure_cfg
+        _ensure_cfg("./config.json")
+    except Exception as _e:
+        print(f"[PCL] ⚠ 生成 config.json 失败（继续）: {_e}")
     app = QApplication.instance() or QApplication(sys.argv)
     try:
         from . import safety as _safety

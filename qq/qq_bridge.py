@@ -2,10 +2,11 @@
 """
 NapCat WebSocket 桥 — 连接 OneBot11 协议，收发 QQ 消息。
 
-- 正向 WS（ws://127.0.0.1:3001）：接收 QQ 事件上报（消息/群@等）
-- HTTP API（http://127.0.0.1:6099）：发送消息/图片/语音
-  注意：6099 是 NapCat WebUI 面板端口，OneBot API 与 WS 同端。
-  实际发消息通过 WS 发送 API 调用（send_msg 等），HTTP 备用。
+- 正向 WS（ws://127.0.0.1:3001）：接收 QQ 事件上报（消息/群@等），**API 调用也走这条**
+- HTTP：config.json 的 qq_napcat_http（默认 http://127.0.0.1:6099）**不是** OneBot 接口，
+  6099 是 NapCat 的 WebUI 面板端口；本文件不发 HTTP 请求，它只在启动器
+  「NapCat WebUI」按钮读不到 NapCat/config/webui.json 时当兜底地址用。
+  （旧注释写成"HTTP API：发送消息/图片/语音"，是误导：真实发送全走 WS。）
 
 实际实现：
 - 连接正向 WebSocket 3001（OneBot11 事件上报 + API 调用共用）
@@ -21,7 +22,6 @@ import re
 import time
 import uuid
 import threading
-import requests
 import websocket  # pip install websocket-client
 
 from qq.qq_config import get_qq_config, STICKER_DIR, check_port_open, F5TTS_PORT
@@ -160,7 +160,6 @@ _PRIVATE_RIGHT_QUOTES = {
     "\u0022",  # " ASCII 双引号
     "\u0027",  # ' ASCII 单引号
 }
-_PRIVATE_MAX_LEN = 30  # 兜底强制切
 
 # 私聊逐条发送间隔（秒）
 _PRIVATE_SEND_INTERVAL = (0.6, 1.2)
@@ -226,6 +225,35 @@ def split_sentences(reply: str):
     return clauses
 
 
+def _wrap_long_clause(clause: str, limit: int):
+    """把「超长且没有句末标点」的片段按逗号/顿号强制分段（实在没有逗号才硬切）。
+
+    为什么需要：split_by_char_limit 只按【句子】边界打包，模型吐出一条"全是逗号、
+    没有句末标点"的长句时，整条会被当成一句发出 —— 用户设的「单次回复字数上限」
+    就被整个绕过。基线里这一步由 split_private_reply 的 30 字兜底强制切负责，
+    换成按句分句的实现时丢了（旧的 `_PRIVATE_MAX_LEN` 常量成了死代码，就是它的墓碑）。
+    """
+    if limit <= 0 or len(clause) <= limit:
+        return [clause]
+    out, buf = [], ""
+    for piece in re.split(r"(?<=[，,、])", clause):     # 逗号留在片段末尾
+        while len(piece) > limit:                       # 该段本身还是超长 → 硬切
+            if buf:
+                out.append(buf)
+                buf = ""
+            out.append(piece[:limit])
+            piece = piece[limit:]
+        if len(buf) + len(piece) <= limit:
+            buf += piece
+        else:
+            if buf:
+                out.append(buf)
+            buf = piece
+    if buf:
+        out.append(buf)
+    return out or [clause]
+
+
 def split_by_char_limit(text, limit, max_parts=3):
     """按「单次回复字数上限」把回复切成若干条短消息。
 
@@ -245,6 +273,12 @@ def split_by_char_limit(text, limit, max_parts=3):
     if lim <= 0:
         return [text]
     clauses = split_sentences(text) or [text]
+    # 兜底：单句超长时先按逗号强制分段（见 _wrap_long_clause 的说明），
+    # 否则"只有逗号没有句末标点"的长句会整条发出、绕过字数上限。
+    _wrapped = []
+    for _c in clauses:
+        _wrapped.extend(_wrap_long_clause(_c, lim))
+    clauses = _wrapped
     # ① 贪心打包：每段尽量贴近但不超过 limit
     parts = []
     for c in clauses:
@@ -279,88 +313,15 @@ def split_by_char_limit(text, limit, max_parts=3):
     return [p for p in merged if p]
 
 
-def split_private_reply(reply: str):
-    """
-    将 AI 完整回复按强断句符切分为多条短消息。
-    规则：
-    - 强断句：。！？…；; 换行
-    - 右引号随断句符并入前句
-    - 不足 4 字的残段并入最后一条
-    - 兜底 30 字强制切
-    返回: [str, str, ...]
-    """
-    reply = (reply or "").strip()
-    if not reply:
-        return []
-
-    clauses = []
-    buffer = ""
-
-    i = 0
-    while i < len(reply):
-        ch = reply[i]
-        buffer += ch
-
-        # 检查强断句符
-        if ch in _PRIVATE_STRONG_BREAKS:
-            # 并入后续右引号
-            j = i + 1
-            while j < len(reply) and reply[j] in _PRIVATE_RIGHT_QUOTES:
-                buffer += reply[j]
-                j += 1
-            # 连续省略号
-            while j < len(reply) and reply[j] == "\u2026":
-                buffer += reply[j]
-                j += 1
-            i = j - 1
-            # 切句（去掉首尾空白）
-            clause = buffer.strip()
-            if len(clause) >= 4:
-                clauses.append(clause)
-                buffer = ""
-        # 兜底：超长无断句
-        elif len(buffer) >= _PRIVATE_MAX_LEN:
-            # 找最后一个逗号切（避免硬切）
-            last_comma = max(buffer.rfind("，"), buffer.rfind(","), buffer.rfind("、"))
-            if last_comma >= 4:
-                clause = buffer[:last_comma + 1].strip()
-                if clause:
-                    clauses.append(clause)
-                buffer = buffer[last_comma + 1:]
-            else:
-                clause = buffer.strip()
-                if clause:
-                    clauses.append(clause)
-                buffer = ""
-        i += 1
-
-    # 剩余残段
-    tail = buffer.strip()
-    if tail:
-        # 清理纯符号残留
-        while tail and tail[0] in _PRIVATE_RIGHT_QUOTES:
-            tail = tail[1:]
-        if not tail:
-            tail = ""
-        if tail:
-            if clauses:
-                # 残段很短（<4字）→ 并入最后一条
-                if len(tail) < 4:
-                    clauses[-1] = clauses[-1] + tail
-                else:
-                    clauses.append(tail)
-            else:
-                clauses.append(tail)
-
-    return clauses
-
-
 class QQBotBridge:
     """NapCat 正向 WebSocket 桥接器"""
 
     def __init__(self):
         self.cfg = get_qq_config()
         self.ws_url = self.cfg["ws_url"]
+        # ⚠ 这里**不要**再存一份 self.napcat_token：它在 __init__ 只读一次、不会自动发现，
+        #   鉴权统一走 self._napcat_token()（config 优先 + 缺省时从 NapCat 配置里读）。
+        #   以前留着的那个属性只写不读（交接文档里挂着的清理项，2026-09-24 确认后删掉）。
         self.ws = None
         self.running = False
         self.self_id = None  # 登录的 QQ 号（识别是否自己发的消息）
@@ -368,6 +329,7 @@ class QQBotBridge:
         self._lock = threading.Lock()
         self._send_fail_count = 0  # 断线窗口内发送失败计数（重连成功后清零）
         self._stt_warm_started = False  # 语音模型预热只做一次（重连循环避免反复下载/刷屏）
+        self._napcat_diagnosed = False  # NapCat 环境诊断只提示一次（connect/重连共用）
 
         # 消息调度器：FIFO 队列 + 串行处理 + 会话合并
         self.scheduler = MessageScheduler(handler=self._handle_queued_message)
@@ -414,6 +376,13 @@ class QQBotBridge:
         # ===== 主人昵称学习（识别"有人喊主人的 QQ 名字"场景，防认不出主人）=====
         self._master_nicks_lock = threading.Lock()
         self._master_nicks = {}            # str(QQ号) -> {昵称/群名片, ...}
+    @staticmethod
+    def _ws_auth_headers(token=""):
+        """NapCat OneBot11 WS 鉴权头；token 为空返回 None（不鉴权，兼容旧 NapCat）"""
+        token = (token or "").strip()
+        if not token:
+            return None
+        return [f"Authorization: Bearer {token}"]
 
     def connect(self):
         """建立 WebSocket 连接并进入事件循环（阻塞）。
@@ -430,9 +399,54 @@ class QQBotBridge:
                              name="QQBackgroundWatcher").start()
         host, port = self._ws_url_parts()
         if port and not self._napcat_ready(port, host=host):
-            print(f"[QQBridge] ⏳ 等待 NapCat 就绪（{host}:{port}）..."
-                  "若一直卡在这里，说明 NapCat 未正常启动/扫码，请运行 start_napcat.bat 并扫码登录。")
+            print(f"[QQBridge] ⏳ 等待 NapCat 就绪（{host}:{port}）...")
+            self._napcat_diagnosed = True  # connect 已诊断 → 重连循环不再重复打印
+            self._diagnose_napcat(host, port)
         self._reconnect_loop()
+
+    @staticmethod
+    def _napcat_process_running() -> bool:
+        """NapCat 相关进程是否在运行（QQ.exe / NapCat 注入进程，tasklist 探测）。"""
+        try:
+            import subprocess as _sp
+            out = _sp.run(["tasklist", "/FO", "CSV", "/NH"],
+                          capture_output=True, text=True, timeout=10,
+                          encoding="utf-8", errors="replace").stdout.lower()
+            return any(k in out for k in ("qq.exe", "napcatwinbootmain"))
+        except Exception:
+            return False  # 探测失败不误报
+
+    @staticmethod
+    def _diagnose_napcat(host, port):
+        """NapCat 端口就绪超时后的环境诊断（纯提示，不阻塞、不改配置）。
+
+        区分三种情况（A 卡真机实测，onebot 配置被重置属高频坑）：
+        1. NapCat 进程都没跑 → 提示启动 start_napcat.bat 扫码
+        2. 进程在跑但 3001 不通 → 极可能 onebot11_<uin>.json 的 websocketServers
+           被重置/清空（NapCat 在线收消息但 bot 连不上的"割裂"正是此因）
+        3. 其他 → 通用提示
+        """
+        import socket as _sock
+        # 再快速确认一次端口
+        try:
+            with _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM) as s:
+                s.settimeout(2)
+                if s.connect_ex((host, port)) == 0:
+                    return  # 已就绪，无需提示
+        except Exception:
+            pass
+
+        if QQBotBridge._napcat_process_running():
+            print(f"[QQBridge] 🔍 检测到 NapCat 进程在运行，但 {host}:{port} 未监听。")
+            print("[QQBridge]   这通常是 NapCat 的 onebot 配置文件被重置/清空所致：")
+            print("[QQBridge]   请检查 NapCat 目录下 NapCat\\config\\onebot11_<QQ号>.json")
+            print("[QQBridge]   的 network.websocketServers 是否含正向 WS（host=127.0.0.1, port=3001）。")
+            print("[QQBridge]   为空则 NapCat 虽在线却不提供 WS 端口 → 需要补回该段并重启 NapCat。")
+            print("[QQBridge]   （NapCat WebUI 或异常退出可能重置此文件）")
+        else:
+            print("[QQBridge] ⚠ 未检测到 NapCat 进程，或启动异常。")
+            print("[QQBridge]   请运行 NapCat.Shell.Windows.OneKey\\start_napcat.bat 并扫码登录，")
+            print("[QQBridge]   确认控制台出现 WebSocket服务: 127.0.0.1:3001 已启动。")
 
     @staticmethod
     def _ws_url_parts():
@@ -464,27 +478,6 @@ class QQBotBridge:
                 pass
             _t.sleep(1)
         return False
-
-    def _ws_auth_headers(self):
-        """NapCat 正向 WS 开启 token 鉴权时的握手头。
-
-        token 来源：config.json 的 qq_napcat_token；**没配就自动去 NapCat 自己的
-        onebot11_*.json 里读**（仅本机地址）——NapCat 重装/重置会随机换 token，
-        自动读取可以免掉"连上就断"这类故障。未拿到 token 时返回 None（兼容未开鉴权的 NapCat）。
-        """
-        token = str(self.cfg.get("napcat_token", "") or "").strip()
-        if not token:
-            try:
-                from qq.qq_config import discover_ws_token
-                token = discover_ws_token(self.ws_url) or ""
-                if token:
-                    self._auto_token = token
-                    self.cfg["napcat_token"] = token      # 本次运行内复用
-            except Exception as e:
-                print(f"[QQBridge] ⚠ 自动获取 token 失败: {e}")
-        if token:
-            return [f"Authorization: Bearer {token}"]
-        return None
 
     def _warn_auth_failed(self, raw: str = ""):
         """识别 NapCat 的 token 鉴权失败（retcode 1403）并说清楚怎么修。
@@ -518,13 +511,25 @@ class QQBotBridge:
     def _reconnect_loop(self):
         """断开后自动重连（不退出），给用户 NapCat 就绪时间窗口"""
         delay = 5
+        fail_count = 0
         while self.running:
             try:
                 print(f"[QQBridge] 连接 NapCat: {self.ws_url}")
-                self.ws = websocket.create_connection(
-                    self.ws_url, timeout=30, enable_multithread=True,
-                    header=self._ws_auth_headers(),
-                )
+                # ⚠ 这里必须走 _napcat_token()：它 = config 优先 + 缺省时自动从 NapCat 配置读。
+                #   以前这里传的是 self.napcat_token（只在 __init__ 读一次，不会自动发现），
+                #   而且类里还留着一份同名的旧方法把它盖掉了 → 直接
+                #   "TypeError: _ws_auth_headers() takes 1 positional argument but 2 were given"
+                #   导致 QQ 桥接一次都连不上（用户报的就是这个）。
+                _header = self._ws_auth_headers(self._napcat_token())
+                if _header:
+                    self.ws = websocket.create_connection(
+                        self.ws_url, timeout=30, enable_multithread=True, header=_header
+                    )
+                else:
+                    self.ws = websocket.create_connection(
+                        self.ws_url, timeout=30, enable_multithread=True
+                    )
+                fail_count = 0  # 连上即清零
                 self._on_connected()   # 内部处理 login_info + 离线补拉 + 进入事件循环（阻塞）
                 # 正常走到这里说明事件循环因断开退出 → 重置 delay 后重连
                 if not self.running:
@@ -533,7 +538,14 @@ class QQBotBridge:
                 delay = 5
                 time.sleep(delay)
             except Exception as e:
+                fail_count += 1
                 print(f"[QQBridge] ⚠ 连接失败: {e}")
+                # 持续失败（可能 NapCat 中途退出/配置被重置）→ 提示一次环境诊断，不刷屏
+                # 注意：connect() 若已因初始未就绪诊断过（_napcat_diagnosed=True），此处不再重复
+                if fail_count == 3 and not getattr(self, "_napcat_diagnosed", False):
+                    self._napcat_diagnosed = True
+                    host, port = self._ws_url_parts()
+                    self._diagnose_napcat(host, port)
                 if not self._sleep(delay):
                     break
                 # 指数退避，最多 30 秒
@@ -575,7 +587,7 @@ class QQBotBridge:
 
     def _master_mention_note(self, text):
         """消息文本里提到主人昵称时给出对照注记（防认不出主人）。
-        返回如：『（注：「申余不是鱼」是主人 QQ 1851959578 的名字，提到 ta 就是在说你的主人）』"""
+        返回如：『（注：「示例昵称」是主人 QQ 123456789 的名字，提到 ta 就是在说你的主人）』"""
         try:
             t = str(text or "")
             if not t:
@@ -728,7 +740,7 @@ class QQBotBridge:
             "action": "set_online_status",
             "params": {"status": int(status), "ext_status": 0, "battery_status": 0},
             "echo": f"status_{uuid.uuid4().hex[:8]}",
-        }, label="状态设置 ")
+        }, label="状态设置 ", count_fail=False)
 
     def _wake_from_offline(self):
         """主人来消息 → 恢复在线状态并清除离线标志"""
@@ -854,7 +866,6 @@ class QQBotBridge:
     # ================= 自主学习（官方插件）辅助 =================
     def _maybe_learn_group_link(self, group_id, user_id, nickname, text):
         """群链接学习：打开链接提取内容入库(每群 5 分钟限流, 异步)"""
-        import urllib.parse as _up
         m_url = None
         try:
             import re as _re
@@ -958,7 +969,7 @@ class QQBotBridge:
         超限时优先淘汰更早的自动收藏（不挤掉用户手动收藏）。"""
         try:
             from qq.qq_config import get_qq_config as _g
-            if not _g().get("auto_learn_sticker_save", True):
+            if not _g().get("auto_learn_sticker_save", False):
                 return
             url, _summary = self._sticker_url_from_seg(message)
             if not url:
@@ -1090,7 +1101,7 @@ class QQBotBridge:
             "action": "get_group_info",
             "params": {"group_id": int(group_id)},
             "echo": f"grpname_{gid}",
-        }, label="群名查询 ")
+        }, label="群名查询 ", count_fail=False)
 
     def _group_display_name(self, group_id) -> str:
         """群显示名：缓存群名优先，未知名用群号兜底"""
@@ -1152,6 +1163,10 @@ class QQBotBridge:
         核心判据：get_status 的 online 字段（QQ 真掉线时为 false，
         而 get_login_info 在掉线后仍会成功返回缓存的登录信息，不可靠）。"""
         now = time.time()
+        # 还没连上就别探：启动瞬间的第一次 tick 会在建连前发出探针，
+        # 失败后打出"活性探测 发送失败 / 1 次回复未送达"这种吓人的假警报（用户日志里就有）。
+        if not getattr(self, "running", False) or self.ws is None:
+            return
         # 无在途探针且距上次 >=50s → 发探针(get_status)
         if self._health_pending == 0 and now - self._last_recover_ts >= 50:
             self._health_seq += 1
@@ -1160,7 +1175,7 @@ class QQBotBridge:
                 _sent = self._safe_send({
                     "action": "get_status",
                     "echo": f"health_{self._health_seq}",
-                }, label="活性探测 ")
+                }, label="活性探测 ", count_fail=False)
                 if not _sent:
                     # WS 未连接/发送失败(重连中) → 不计失败，等重连后再探
                     self._health_pending = 0
@@ -1341,12 +1356,14 @@ class QQBotBridge:
         import os as _os
         base = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
         try:
-            # 1. 杀 NapCat 全家(D:\QQ 注入链 + 引导器)
+            # 1. 杀 NapCat 全家：引导器 NapCatWinBootMain.exe + 被 NapCat 注入的 QQ.exe
+            #    ⚠ 判据是进程名 / CommandLine 含 NapCat，**不是**安装路径（旧版按 D:\QQ 路径杀，
+            #      装到别的盘就失效，还会误杀用户自己开的 QQ）
             _sp.run(
                 ["powershell", "-NoProfile", "-Command",
                  "Get-CimInstance Win32_Process | Where-Object { "
                  "$_.Name -eq 'NapCatWinBootMain.exe' -or "
-                 "($_.Name -eq 'QQ.exe' -and $_.ExecutablePath -like 'D:\QQ\*') } | "
+                 "($_.Name -eq 'QQ.exe' -and $_.CommandLine -like '*NapCat*') } | "
                  "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"],
                 capture_output=True, timeout=20,
                 creationflags=getattr(_sp, "CREATE_NO_WINDOW", 0))
@@ -1605,29 +1622,29 @@ class QQBotBridge:
             if _is_fluff:
                 print(f"[QQBridge] ⚠ 活泼发言为 API 兜底文案，跳过: {reply[:30]}")
                 return
-                # 对话调节：单次回复字数上限（0=不限）；活泼发言额外兜底 200 字防刷屏
-                # —— 超限不再硬截断，改为按句子边界拆成至多 2 条短消息发出（内容不丢）
-                reply = self._apply_cloth_marker(reply)
-                lively_parts = self._reply_parts(reply, 2, hard_limit=200) or [reply]
-                ok = True
-                for _i, _part in enumerate(lively_parts):
-                    ok = self._safe_send({
-                        "action": "send_msg",
-                        "params": {
-                            "message_type": "group",
-                            "group_id": int(group_id),
-                            "message": _part,
-                        },
-                        "echo": f"lively_{uuid.uuid4().hex[:8]}",
-                    }, label=f"活泼群{group_id} ")
-                    if not ok:
-                        break
-                    _tag = f"（{_i+1}/{len(lively_parts)}）" if len(lively_parts) > 1 else ""
-                    print(f"[QQBridge] 🎉 活泼群 {group_id} 发言{_tag}: {_part[:40]}...")
-                    if _i < len(lively_parts) - 1:
-                        time.sleep(_PRIVATE_SEND_INTERVAL[0])
-                if ok:
-                    reply = lively_parts[0]
+            # 对话调节：单次回复字数上限（0=不限）；活泼发言额外兜底 200 字防刷屏
+            # —— 超限不再硬截断，改为按句子边界拆成至多 2 条短消息发出（内容不丢）
+            reply = self._apply_cloth_marker(reply)
+            lively_parts = self._reply_parts(reply, 2, hard_limit=200) or [reply]
+            ok = True
+            for _i, _part in enumerate(lively_parts):
+                ok = self._safe_send({
+                    "action": "send_msg",
+                    "params": {
+                        "message_type": "group",
+                        "group_id": int(group_id),
+                        "message": _part,
+                    },
+                    "echo": f"lively_{uuid.uuid4().hex[:8]}",
+                }, label=f"活泼群{group_id} ")
+                if not ok:
+                    break
+                _tag = f"（{_i+1}/{len(lively_parts)}）" if len(lively_parts) > 1 else ""
+                print(f"[QQBridge] 🎉 活泼群 {group_id} 发言{_tag}: {_part[:40]}...")
+                if _i < len(lively_parts) - 1:
+                    time.sleep(_PRIVATE_SEND_INTERVAL[0])
+            if ok:
+                reply = lively_parts[0]
             # ⚠ 表情包开关关闭时不发（连自存池随机逻辑都不执行）——见 _stickers_on()
             for path in (resolve_sticker_files(stickers)[0] if self._stickers_on() else []):
                 if path:
@@ -1742,15 +1759,38 @@ class QQBotBridge:
         print("[QQBridge] 连接已断开（将由重连循环自动恢复）")
 
     def _warm_stt(self):
-        """后台预热 faster-whisper 模型（进程级单例，只加载一次）"""
+        """后台预热 faster-whisper 模型。
+
+        重连循环每次进入 _on_connected 都会调到这里；为避免"下载失败机器每次重连都刷
+        一次注定失败的联网下载"，成功才置完成标志；失败最多重试 3 次（warmup 返回 bool）。
+
+        ⚠ 以前这里无条件 `setdefault("HF_HUB_OFFLINE", "1")` —— 于是**模型还没下载**的
+          机器会被永久锁在离线模式，第一次也下不下来（用户日志里那句
+          "Cannot find an appropriate cached snapshot folder ... outgoing traffic has been
+          disabled" 就是这么来的，而语音识别开关还显示"开"）。现在只有本地缓存确实可用
+          才进离线；没有缓存就允许联网下载（走 download_stt.py 或 HF_ENDPOINT 镜像）。
+        """
+        if getattr(self, "_stt_warm_done", False):
+            return
+        self._stt_warm_tries = getattr(self, "_stt_warm_tries", 0) + 1
+        if self._stt_warm_tries > 3:
+            return
         try:
-            # 模型已本地缓存（首次由镜像下载）：离线模式加载，避免每次联网探测
-            # huggingface.co（本机不可达）导致预热失败
-            os.environ.setdefault("HF_HUB_OFFLINE", "1")
-            from tool.stt import warmup
-            warmup()
+            from tool.stt import warmup, cache_state, stt_hint
+            cached, _where = cache_state()
+            if cached:
+                os.environ.setdefault("HF_HUB_OFFLINE", "1")   # 缓存完整才离线，省掉联网探测
+            else:
+                os.environ.pop("HF_HUB_OFFLINE", None)          # 没缓存就别锁死，允许下载
+            if warmup():
+                self._stt_warm_done = True
+            elif self._stt_warm_tries >= 3:
+                # 重试用尽 → 把"怎么修"完整打一次（第 1、2 次只报异常，别刷屏）
+                print("[QQBridge] 语音识别仍不可用：" + stt_hint().replace("\n", "\n[QQBridge] "))
+                print("[QQBridge] 提示：不需要语音识别就在设置里关掉「语音识别」，"
+                      "关掉后不会再尝试加载模型。")
         except Exception as e:
-            print(f"[QQBridge] ⚠ 语音识别模型预热失败: {e}")
+            print(f"[QQBridge] ⚠ 语音识别模型预热异常（第 {self._stt_warm_tries} 次）: {e}")
 
     def _handle(self, raw: str):
         """处理一条 WS 消息（JSON）"""
@@ -1782,7 +1822,7 @@ class QQBotBridge:
                                 "action": "get_stranger_info",
                                 "params": {"user_id": int(_m)},
                                 "echo": f"mstnick_{_m}",
-                            }, label="主人昵称查询 ")
+                            }, label="主人昵称查询 ", count_fail=False)
                         except Exception:
                             pass
                 except Exception:
@@ -2429,23 +2469,33 @@ class QQBotBridge:
             print(f"[QQBridge] ⚠ 群指令回复失败: {e}")
 
     # ===== 断线安全的发送 =====
-    def _safe_send(self, payload: dict, label: str = "") -> bool:
+    def _safe_send(self, payload: dict, label: str = "", count_fail: bool = True) -> bool:
         """
         向 NapCat 发送一条 API 调用。断线/重连窗口内 self.ws 可能已关闭或为 None：
         发送失败不抛异常冒泡（会被调度线程吞掉造成丢消息），而是提示并计数返回 False。
+
+        count_fail 只对**真正的回复**用（默认 True）—— 它决定失败是否计入
+        「断线期间 N 次回复未送达」。控制类调用（活性探测 / 查群名 / 查昵称 /
+        改在线状态）不算"回复"，否则每次启动都会看到一句吓人的
+        「已重新连接（此前断线期间 1 次回复未送达，请对方重发）」，其实一条都没丢。
         """
         if self.ws is None:
-            self._send_fail_count += 1
-            print(f"[QQBridge] ⚠ {label}发送失败：连接尚未建立（累计 {self._send_fail_count} 次发送失败）")
+            if count_fail:
+                self._send_fail_count += 1
+                print(f"[QQBridge] ⚠ {label}发送失败：连接尚未建立"
+                      f"（累计 {self._send_fail_count} 次回复未送达）")
             return False
         try:
             with self._lock:
                 self.ws.send(json.dumps(payload, ensure_ascii=False))
             return True
         except Exception as e:
-            self._send_fail_count += 1
-            print(f"[QQBridge] ⚠ {label}发送失败（连接可能已断开）: {e}"
-                  f"（累计 {self._send_fail_count} 次发送失败，重连后请对方重发）")
+            if count_fail:
+                self._send_fail_count += 1
+                print(f"[QQBridge] ⚠ {label}发送失败（连接可能已断开）: {e}"
+                      f"（累计 {self._send_fail_count} 次发送失败，重连后请对方重发）")
+            else:
+                print(f"[QQBridge] ⚠ {label}发送失败（连接可能已断开，不影响回复）: {e}")
             return False
 
     def _stickers_on(self) -> bool:

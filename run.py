@@ -1056,6 +1056,20 @@ if __name__ == "__main__":
             pass
         sys.exit(0)
     cfg = load_runtime_config()
+    # ⚠ 顺序要紧：这两步必须在**任何 PyQt5 / torch 之前**（合并朋友 1.17.2）
+    # 1) 修 MSVC 运行时冲突：PyQt5-Qt5 自带的旧 vcruntime 会先被加载进进程，
+    #    稍后 torch 的 c10.dll 初始化失败 → 症状是"启动到 CUDA 检测那行就卡退、无 traceback"。
+    try:
+        from tool.msvc_runtime import fix_if_needed as _fix_msvc
+        _fix_msvc(log=lambda m: log(m, "INFO"))
+    except Exception as _e:
+        log(f"MSVC 运行时自检不可用（继续）: {_e}", "WARN")
+    # 2) 首次运行生成空白 config.json（绿色版故意不带；缺它微信/QQ 入口会直接秒退）
+    try:
+        from tool.config import ensure_config as _ensure_cfg
+        _ensure_cfg("./config.json")
+    except Exception as _e:
+        log(f"生成 config.json 失败（继续）: {_e}", "WARN")
     # 强制使用 CPU 模式，跳过所有显卡检测
     hardware_type = "cpu"
     check_python()

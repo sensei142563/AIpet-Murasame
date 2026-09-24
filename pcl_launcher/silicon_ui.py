@@ -457,3 +457,30 @@ def accent_hex_static() -> str:
         return THEME_COLORS.get(str(ACCENT_ID), {}).get("title_start", "#2f6fd0")
     except Exception:
         return "#2f6fd0"
+
+
+def enable_shared_gl_contexts() -> bool:
+    """**必须在 QApplication 创建之前调用**：让所有 QOpenGLWidget 共享 GL 上下文。
+
+    为什么必须有它（用户报的"Live2D 画布频闪 / 预览窗口崩坏"的真正根因）：
+      Cubism 原生引擎是**进程级全局单例**，而 `LAppModel` 的 GL 资源（着色器/纹理）
+      绑在**第一个**建立起来的 GL 上下文上。启动器里可能同时存在三个 Live2D 画布：
+        ① 立绘工坊里那块内嵌预览（角色没有 2D 素材时会显示 Live2D）
+        ② 「打开实时预览窗口」的独立窗口
+        ③ 动作/表情调试器的画布
+      不共享上下文时，第 2、3 个画布在自己的上下文里画不出东西 → 实测帧缓冲里
+      **模型墨迹 0.0%、帧间跳变 0.0%**（完全空白/冻结），用户看到的就是"崩坏 / 频闪"
+      （_audit_fish9269/probe_l2d_two_canvases.py 三种画布同时开的实测）。
+      打开 Qt 的共享上下文开关后，三个画布各自 40.3% / 39.8% / 29.1% 墨迹、都在动。
+
+    ⚠ 只能在 QApplication 构造前设置（Qt 的硬性要求，晚设置无效且会打警告），
+      所以启动入口（silicon_window.launch / debug_live2d.py）在创建 app 前调它。
+    """
+    try:
+        from PyQt5.QtCore import Qt
+        from PyQt5.QtWidgets import QApplication
+        QApplication.setAttribute(Qt.AA_ShareOpenGLContexts, True)
+        return True
+    except Exception as e:
+        print(f"[SiliconUI] ⚠ 共享 GL 上下文开关失败（多个 Live2D 画布可能画不出来）: {e}")
+        return False
