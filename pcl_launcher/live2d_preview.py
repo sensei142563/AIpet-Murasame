@@ -717,14 +717,10 @@ def open_live2d_window(model_json: str = "", parent=None, pet_id: str = None) ->
     try:
         from PyQt5.QtWidgets import QApplication
         app = QApplication.instance()
-        # ★ 反方向也要保证"同一时刻只有一个 Live2D 画面"：调试器的画布是另一个
-        #   QOpenGLWidget（另一个上下文），开着调试器再打开预览窗口 → 两边互相抢
-        #   Cubism 全局引擎 = 屏闪。open_debugger 已经会关预览窗口，这里对称处理。
-        try:
-            from . import live2d_debugger as _dbg
-            _dbg.close_open_debuggers()
-        except Exception as _de:
-            _l2d_log(f"关闭调试器窗口失败（可能仍会屏闪）：{_de}")
+        # ⚠ 不再关闭调试器窗口：以前以为"两个 Live2D 画布会互相抢引擎"，其实根因是各画布
+        #   用了各自的 GL 上下文；入口打开 Qt 的共享上下文开关后（enable_shared_gl_contexts）
+        #   预览窗口与调试器能并排渲染（实测 probe_l2d_two_canvases.py）。
+        #   用户拍板允许同时开着 → 这里不关任何窗口。
         # ★ 关键：**复用同一个窗口/同一个 QOpenGLWidget**。
         #   Cubism 的 glInit 是绑定在「当前 GL 上下文」上的；每新建一个 QOpenGLWidget
         #   就是换了一个上下文 → 引擎在那个上下文里没初始化 → 第二/第三次打开就画不出来。

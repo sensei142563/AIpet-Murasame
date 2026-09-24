@@ -312,6 +312,24 @@ def warn_text():
     return readable_on(RedDark)
 
 
+def surface_fill(light_alpha: int = 150, dark_alpha: int = 22) -> str:
+    """「磨砂面板 / 卡片」的填充色（CSS 片段，可直接塞进 QSS）。
+
+    浅色主题：乳白半透明（透出壁纸，老界面的观感）；
+    深色主题：极淡白膜（跟 `silicon_qss` 里 `rgba(255,255,255,0.03~0.06)` 一个路子）。
+
+    ⚠ 老代码把这一层写死成 `rgba(255,255,255,150)`：在**深色主题**下它等于往深底上
+      盖一层 59% 的白 → 合成出中灰板（实测插件页卡片 #9e9fa4），而卡片文字跟主题走
+      是**浅色**的 → 1.2:1，等于看不见（用户报的"插件页卡片看不清"）。
+    """
+    try:
+        if rel_luminance(QColor(Color8)) < 0.25:      # 深色主题
+            return f"rgba(255,255,255,{int(dark_alpha)})"
+    except Exception:
+        pass
+    return f"rgba(255,255,255,{int(light_alpha)})"
+
+
 # ===== 6 套强调色（accent）=====
 THEME_COLORS = {
     "blue": {

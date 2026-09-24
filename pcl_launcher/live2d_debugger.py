@@ -972,26 +972,12 @@ class Live2DDebuggerDialog(SiliconDialog):
 def open_debugger(pet_id=None, parent=None):
     """打开调试器（失败时给出主题一致的提示，绝不静默）
 
-    ⚠ 打开前先关掉「Live2D 实时预览窗口」：Cubism 的原生引擎是**全局单例**、glInit 绑在
-      当前 GL 上下文上（见 live2d_preview 里的说明）。调试器的画布是一个新的 QOpenGLWidget
-      = 新的上下文，两个 Live2D 画面同时在就会互相抢引擎 → 交替画不出来 = **屏闪**
-      （用户报的"还是屏闪"）。所以同一时刻只保留一个 Live2D 画面。
+    ⚠ 以前这里会先关掉「Live2D 实时预览窗口」，理由是"Cubism 引擎是全局单例、两个画布
+      会互相抢"→ 屏闪。**那个判断是错的**（真正的根因是各画布用了各自的 GL 上下文，
+      入口用 silicon_ui.enable_shared_gl_contexts() 打开共享上下文后三个画布能并排渲染，
+      实测见 _audit_fish9269/probe_l2d_two_canvases.py）。
+      用户拍板：允许预览窗口与调试器同时开着（省得打个标签被顶掉），所以这里不再关任何窗口。
     """
-    try:
-        from . import live2d_preview as _lp
-        for _w in list(getattr(_lp, "_WINDOWS", []) or []):
-            try:
-                if _w is not None and _w.isVisible():
-                    _w.close()
-                    print("[L2DDebug] 已关闭实时预览窗口（两个 GL 上下文会互相抢 Live2D 引擎）")
-            except Exception:
-                pass
-        try:
-            _lp._WINDOWS.clear()
-        except Exception:
-            pass
-    except Exception as _e:
-        print(f"[L2DDebug] ⚠ 关闭预览窗口失败（可能仍会屏闪）: {_e}")
     try:
         dlg = Live2DDebuggerDialog(pet_id=pet_id, parent=parent)
         dlg.setModal(False)
@@ -1004,32 +990,3 @@ def open_debugger(pet_id=None, parent=None):
         print(f"[L2DDebug] ⚠ 打开失败: {e}\n{traceback.format_exc()[:400]}")
         page_msg(parent, "打开 Live2D 调试器", "打开失败。", str(e))
         return None
-
-
-def close_open_debuggers() -> int:
-    """关掉所有还开着的调试器窗口，返回关掉的个数。
-
-    为什么要它：Cubism 原生引擎是**全局单例**、glInit 绑在当前 GL 上下文上（见
-    open_debugger 的说明）。所以"调试器 + 实时预览窗口"不能同时在 ——
-    open_debugger 会先关预览窗口，反方向（开着调试器又打开预览）也必须关掉调试器，
-    否则两个 Live2D 画面互相抢引擎 = **屏闪**（用户报的"还是屏闪"）。
-    调用方：live2d_preview.open_live2d_window（延迟导入，避免循环依赖）。
-    """
-    n = 0
-    try:
-        from PyQt5.QtWidgets import QApplication
-        app = QApplication.instance()
-        if app is None:
-            return 0
-        for w in app.topLevelWidgets():
-            try:
-                if isinstance(w, Live2DDebuggerDialog) and w.isVisible():
-                    w.close()
-                    n += 1
-            except Exception:
-                pass
-        if n:
-            print("[L2DDebug] 已关闭调试器窗口（两个 GL 上下文会互相抢 Live2D 引擎）")
-    except Exception as e:
-        print(f"[L2DDebug] ⚠ 关闭调试器窗口失败（可能仍会屏闪）: {e}")
-    return n

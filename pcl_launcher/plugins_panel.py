@@ -427,11 +427,11 @@ class PCLPluginsPanel(QScrollArea):
         filt_row = QHBoxLayout()
         filt_row.setSpacing(int(6 * S))
         chip_style = f"""
-            QPushButton {{ background: rgba(255,255,255,150); color: {Color1.name()};
+            QPushButton {{ background: {surface_fill()}; color: {Color1.name()};
                 border: 1px solid {Gray5.name()}; padding: {int(5*S)}px {int(14*S)}px;
                 font-size: {int(12*S)}px; border-radius: {btn_radius()}px;
                 font-family: 'Microsoft YaHei'; }}
-            QPushButton:hover {{ background: rgba(255,255,255,220); }}
+            QPushButton:hover {{ background: {surface_fill(220, 44)}; }}
             QPushButton:checked {{ background: {Color3.name()}; color: white;
                 border-color: {Color3.name()}; font-weight: bold; }}
         """
@@ -570,7 +570,7 @@ class PCLPluginsPanel(QScrollArea):
     def _make_card(self, meta, cfg):
         frame = QFrame()
         frame.setStyleSheet(f"""
-            QFrame {{ background: rgba(255,255,255,150); border: 1px solid {Gray5.name()};
+            QFrame {{ background: {surface_fill()}; border: 1px solid {Gray5.name()};
                 border-radius: {int(8*S)}px; }}
         """)
         row = QHBoxLayout(frame)
@@ -580,9 +580,11 @@ class PCLPluginsPanel(QScrollArea):
         left = QVBoxLayout()
         left.setSpacing(int(2*S))
         _official = bool(meta.get("builtin", True))
+        # ⚠ 标签色也要按当前主题底板算：写死的 #c98a1e 在浅色卡片上只有 2.9:1（看不清）
+        _mine = readable_on(QColor("#c98a1e")).name()
         _tag = (f"<span style='color:{Color3.name()};font-size:{int(10*S)}px;'>官方</span>"
                 if _official else
-                f"<span style='color:#c98a1e;font-size:{int(10*S)}px;'>我的</span>")
+                f"<span style='color:{_mine};font-size:{int(10*S)}px;'>我的</span>")
         name_lbl = QLabel(f"{meta.get('name', meta['id'])}  {_tag}  "
                           f"<span style='color:{Gray3.name()};font-size:{int(10*S)}px;'>v{meta.get('version','1.0.0')}"
                           f" · {'功能' if meta.get('kind')=='feature' else '工具'}</span>")

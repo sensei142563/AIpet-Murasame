@@ -1099,7 +1099,9 @@ class SiliconLauncher(QWidget):
         self.nav_btns["settings"] = b_set
         lay.addWidget(b_set)
         ver = QLabel("Silicon UI · 新版")
-        ver.setStyleSheet(f"color: {Gray3.name()}; font-size: 11px; padding: 2px 8px;")
+        # ⚠ 以前用 Gray3：浅色主题下这条页脚压在侧栏的浅色面上只有 1.6:1（实测），
+        #   基本看不见；换成主题的次级文字色（浅色主题 5.2:1 / 深色主题 9.9:1）。
+        ver.setStyleSheet(f"color: {Gray2.name()}; font-size: 11px; padding: 2px 8px;")
         lay.addWidget(ver)
         self._nav_rail = rail
         self._nav_sep = sep
@@ -2173,8 +2175,51 @@ def _make_transparent(root_widget, alpha: float = 0.35, recurse: bool = True):
         pass
 
     hex_re = re.compile(r"(background(?:-color)?\s*:\s*)(#[0-9a-fA-F]{6}|#[0-9a-fA-F]{8}|rgba?\([^)]*\))")
+    # 文字色：用来判断"这块是不是**实心强调色按钮 + 白字**"
+    fg_re = re.compile(r"(?:^|;|\{)\s*color\s*:\s*(#[0-9a-fA-F]{6}|#[0-9a-fA-F]{3}|white)")
+
+    def _color_of(txt: str):
+        """'#rrggbb' / 'rgba(r,g,b,a)' → QColor（解析不了给 None）"""
+        try:
+            if txt.startswith("#"):
+                return QColor(txt)
+            inside = txt[txt.find("(") + 1:txt.rfind(")")]
+            parts = [int(float(x)) for x in inside.split(",")[:3]]
+            return QColor(*parts) if len(parts) == 3 else None
+        except Exception:
+            return None
+
+    def _is_filled_accent(css: str) -> bool:
+        """实心强调色按钮 + 白字：这种块压透明后会变成"淡底白字"看不清，必须保持不透明。
+
+        ⚠ 必须扫**所有** color 声明：一个按钮的样式表里通常既有
+          `QPushButton { background: 浅面; color: 主题文字色 }`
+          又有 `QPushButton:checked { background: 强调色; color: white }`。
+          只看第一处 color 会得出"文字是深色" → 漏判 → 选中态照样被压成淡蓝 + 白字
+          （实测插件页选中胶囊 1.70:1）。
+        """
+        light_text = False
+        for m in fg_re.finditer(css):
+            v = m.group(1)
+            c = QColor("#ffffff") if v == "white" else QColor(v)
+            if c.isValid() and rel_luminance(c) >= 0.6:
+                light_text = True
+                break
+        if not light_text:
+            return False
+        for m in hex_re.finditer(css):
+            c = _color_of(m.group(2))
+            if c is not None and c.isValid() and c.saturation() > 60:
+                return True
+        return False
 
     def _translucent(css: str) -> str:
+        # ⚠ 实心强调色按钮（背景很彩 + 白字）**不许压透明**：压到 0.35 之后，
+        #   浅色页面上会变成"淡蓝底 + 白字"（实测插件页选中胶囊 1.70:1、导入/刷新 1.72:1，
+        #   白字糊在淡底上）。这类小控件本来也不需要透出壁纸。
+        if _is_filled_accent(css):
+            return css
+
         def _rep(m):
             head, col = m.group(1), m.group(2)
             try:
