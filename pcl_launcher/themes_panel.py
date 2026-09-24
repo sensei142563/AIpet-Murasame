@@ -448,22 +448,61 @@ class PCLThemesPanel(QScrollArea):
                     f"QPushButton {{ background: {c.name()}; border: 1px solid rgba(255,255,255,0.35);"
                     f" border-radius: 6px; }}")
 
+            def _apply_everywhere(hexv):
+                """把文字色应用到界面：先找带 apply_text_color 的窗口（一路往上找），
+                找不到就直接重算色板 —— 两条路都走一遍，保证"选了就变"。"""
+                done = False
+                try:
+                    w = self
+                    for _ in range(12):                      # 逐级向上找外壳（页面 → 外壳窗口）
+                        fn = getattr(w, "apply_text_color", None) if w is not None else None
+                        if callable(fn):
+                            fn(hexv or "")
+                            done = True
+                            break
+                        nxt = w.parentWidget() if w is not None else None
+                        if nxt is None and w is not None and w is not w.window():
+                            nxt = w.window()
+                        if nxt is None or nxt is w:
+                            break
+                        w = nxt
+                except Exception as _e:
+                    print(f"[Themes] ⚠ 找外壳应用文字色失败: {_e}")
+                if not done:
+                    try:
+                        from . import colors as _C
+                        _C.apply_theme_live(_C.current_theme_id())
+                        from PyQt5.QtWidgets import QApplication as _QA
+                        _app = _QA.instance()
+                        if _app is not None:                     # 全局样式跟着重刷一遍
+                            from . import silicon_ui as _sui
+                            _sui.install(_app, accent=_C.accent_hex())
+                    except Exception as _e:
+                        print(f"[Themes] ⚠ 直接重算色板失败: {_e}")
+                try:
+                    from .silicon_dialog import refresh_all_dialog_colors
+                    refresh_all_dialog_colors()                  # 已打开的二级窗口一起换
+                except Exception:
+                    pass
+                return done
+
             def _save_text_color(hexv):
-                """写 ui_text_color → 走实时换肤（重算色板 + 重建当前页），不用重启"""
+                """写 ui_text_color → 立即应用（重算色板 + 重建当前页），不用重启"""
                 if hexv:
                     self._text_color = _QC2(hexv)
                 _paint_txt_btn()
                 cc = _load_config() or {}
                 cc["ui_text_color"] = str(hexv or "")
                 _save_config(cc)
+                ok = _apply_everywhere(hexv)
                 try:
-                    win = self.window()
-                    fn = getattr(win, "apply_text_color", None)
-                    if callable(fn):
-                        fn(hexv or "")
-                except Exception as _e:
-                    print(f"[Themes] ⚠ 文字色实时应用失败: {_e}")
-                print(f"[Themes] 文字颜色 → {hexv or '自动'}（已实时生效）")
+                    self._text_hint.setText(
+                        ("已应用：文字颜色 %s（立即生效）" % (hexv or "跟随主题")) if hexv
+                        else "已切回「跟随主题」自带的文字配色")
+                    self._text_hint.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(11*S)}px;")
+                except Exception:
+                    pass
+                print(f"[Themes] 文字颜色 → {hexv or '自动'}（应用路径：{'外壳' if ok else '直接重算色板'}）")
 
             def _pick_text_color():
                 c = _QCD2.getColor(self._text_color, self, "选择文字颜色")

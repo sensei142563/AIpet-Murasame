@@ -1827,7 +1827,7 @@ class SiliconLauncher(QWidget):
 
         self._chrome_btns = []          # 最小化/关闭（换肤时一起重上样式）
         for text, slot, tip in (("—", self.showMinimized, "最小化"),
-                                ("", self.close, "关闭")):
+                                ("✕", self.close, "关闭")):
             b = QPushButton(text)
             b.setFixedSize(36, 30)
             b.setToolTip(tip)

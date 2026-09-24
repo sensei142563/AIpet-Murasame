@@ -149,7 +149,7 @@ class SiliconDialog(QDialog):
                         f" font-family: '{M.font}'; background: transparent;")
         bl.addWidget(t)
         bl.addStretch()
-        btn_close = QPushButton("")
+        btn_close = QPushButton("✕")   # ✕ 是符号，不是表情，上一轮被误删过
         btn_close.setFixedSize(34, 28)
         btn_close.setCursor(Qt.PointingHandCursor)
         btn_close.setStyleSheet(f"""
@@ -204,6 +204,17 @@ class SiliconDialog(QDialog):
         _bg.setAlpha(255)
         _dark_bg = _bg.lightness() < 140
         _fg = QColor("#eef1f7") if _dark_bg else QColor("#20242e")
+        # 用户自定义了文字颜色（config.ui_text_color）→ 二级窗口也跟着用
+        try:
+            import json as _json
+            with open(os.path.join(_app_base_dir(), "config.json"), encoding="utf-8") as _f:
+                _ut = str((_json.load(_f) or {}).get("ui_text_color") or "").strip()
+            if _ut and _ut.lower() not in ("auto", "自动"):
+                _c = QColor(_ut)
+                if _c.isValid():
+                    _fg = _c
+        except Exception:
+            pass
         # ⚠ 配色保持原样（用户要求不要动主题外观）
         _field = QColor(self._base).lighter(160) if _dark_bg else QColor(self._base).darker(106)
         pal = QPalette()

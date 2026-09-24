@@ -1368,7 +1368,7 @@ class PCLPetWizard(SiliconDialog):
         le.setPlaceholderText("图片文件")
         b = QPushButton("选择…")
         b.setFixedWidth(70)
-        del_btn = QPushButton("")
+        del_btn = QPushButton("✕")
         del_btn.setFixedWidth(30)
 
         def pick():
@@ -1990,7 +1990,7 @@ class PCLPetWizard(SiliconDialog):
         le.setPlaceholderText("图片文件")
         pb = QPushButton("选择…")
         pb.setFixedWidth(60)
-        db = QPushButton("")
+        db = QPushButton("✕")
         db.setFixedWidth(28)
         db.setToolTip("删除这个表情")
 
