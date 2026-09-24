@@ -1245,6 +1245,50 @@ class Murasame(QLabel):
             self.start_thread(prompt, role="system", t=True)
 
     # qwen3 线程的槽函数
+    def _parse_ai_emotions(self, portrait_list):
+        """把 Live2D 模式下"立绘"那一步的返回值解析成逐句表情词。
+
+        - 只有**发请求时是 Live2D 模式**（`_reply_live2d`）才解析：2D 模式下这个列表是
+          图层 ID，硬当成表情词会乱套。
+        - 只保留在该角色词表里的词（AI 偶尔会自造词/夹带解释），其余位置留空 → 走兜底。
+        """
+        if not getattr(self, "_reply_live2d", False) or not portrait_list:
+            return []
+        try:
+            from pets.pet_registry import get_live2d_choice_words
+            words = set(get_live2d_choice_words())
+            if not words:
+                return []
+            out = []
+            for x in portrait_list:
+                s = str(x).strip()
+                out.append(s if s in words else "")
+            return out
+        except Exception as e:
+            print(f"[Live2D] ⚠ 解析 AI 表情选择失败: {e}")
+            return []
+
+    def _resolve_display_emotion(self, sentence, index):
+        """Live2D 这一句该用哪个表情词（按优先级挑）。
+
+        ① 句内【情绪】标签（人设写死的特例，如诺瓦的【白】）
+        ② AI 自己选的表情词（`_live2d_ai_emotions`：只在 Live2D 模式生成，见 start_thread）
+        ③ 语音情绪列表 `_last_emotion_list`（给 TTS 选音色的那份，顺带兜底显示）
+
+        返回空串 = 这一句没有可用的情绪（`_live2d_set_emotion("")` 收尾回默认表情）。
+        单独拆出来是为了能直接测优先级（不依赖整个 on_reply 流程）。
+        """
+        tag = extract_emotion_tag(sentence) or ""
+        if tag:
+            return tag
+        ai = getattr(self, "_live2d_ai_emotions", None) or []
+        if index < len(ai) and str(ai[index] or "").strip():
+            return str(ai[index]).strip()
+        voice = getattr(self, "_last_emotion_list", None) or []
+        if index < len(voice) and str(voice[index] or "").strip():
+            return str(voice[index]).strip()
+        return ""
+
     def _live2d_set_emotion(self, name, hold=False):
         """Live2D 表情/动作联动：name 非空 = 切表情+起动作并保持；
         name 空 = 收尾（动作播完自然结束，恢复默认表情）。
@@ -1267,8 +1311,14 @@ class Murasame(QLabel):
         self.portrait_history = portrait_history
         self.history = history
         self._save_history()
-        # 逐句情绪标签（qwen-emotion 输出）——Live2D 表情/动作联动的数据源
+        # 逐句情绪标签（qwen-emotion 输出）——Live2D 表情/动作联动的**兜底**数据源
+        # （语音音色用它；显示优先用 AI 自己选的表情词，见 _resolve_display_emotion）
         self._last_emotion_list = emotion_list or []
+        # Live2D 模式下，立绘那一步返回的是"AI 每句挑的表情词"（portrait_list）：
+        # 只在**发请求时就是 Live2D 模式**的这一轮才当表情词用（见 start_thread 的 _reply_live2d）。
+        self._live2d_ai_emotions = self._parse_ai_emotions(portrait_list)
+        if self._live2d_ai_emotions:
+            print("[Live2D] AI 选的表情：%s" % self._live2d_ai_emotions)
         # 每轮回复重新开始情绪追踪（保证第一句总能触发动作）
         self._live2d_emotion_name = None
 
@@ -1326,13 +1376,13 @@ class Murasame(QLabel):
 
             if self._live2d_mode:
                 # Live2D 模式：不更换立绘，改用 Live2D 表情 + 动作
-                # 情绪来源：①句内【情绪】括号标签；②qwen-emotion 的逐句情绪列表
-                # 句起：切表情 + 起动作并保持（动作播完自动重播直到句末）
-                emotion = extract_emotion_tag(sentence) or None
-                if not emotion:
-                    el = getattr(self, "_last_emotion_list", []) or []
-                    if index < len(el):
-                        emotion = el[index]
+                # 情绪来源（按优先级）：
+                #   ① 句内【情绪】括号标签（人设里写死的特例，如诺瓦的【白】）
+                #   ② **AI 自己选的表情词** —— Live2D 模式下立绘那一步换成了
+                #      "把 model.emotions / model.motions 的词表交给 AI，每句选一个"
+                #      （用户 2026-09-24 拍板：像 2D 立绘那样给列表让 AI 自己选）
+                #   ③ 语音情绪列表兜底（它是给 TTS 选音色的，顺带当显示兜底）
+                emotion = self._resolve_display_emotion(sentence, index)
                 if emotion:
                     self._live2d_set_emotion(emotion, hold=True)
                 else:
@@ -1432,13 +1482,18 @@ class Murasame(QLabel):
         self._talking = True
 
         # 启动新线程
+        # Live2D 模式：这一轮的"立绘"这一步改成让 AI 从表情/动作列表里自己选
+        # （用户 2026-09-24 拍板："Live2D 也要给列表让 AI 自己选"）。
+        # 记住**发请求时**的模式：回复回来时模式可能已被切走，解析要按当时那套。
+        _l2d_now = bool(self._live2d_mode and self._live2d_widget)
+        self._reply_live2d = _l2d_now
         if model_type == "local":
             self.worker = qwen3_lora_Worker(
-                self.history, self.portrait_history, text, role, t=t
+                self.history, self.portrait_history, text, role, t=t, live2d=_l2d_now
             )
         else:
             self.worker = cloud_API_Worker(
-                self.history, self.portrait_history, text, role, t=t
+                self.history, self.portrait_history, text, role, t=t, live2d=_l2d_now
             )
 
         self.worker.finished.connect(self.on_reply)

@@ -308,12 +308,13 @@ class CurrentUsePanel(QWidget):
     def refresh(self):
         """按 config 里的槽位现状重画三个槽 + 胶囊列表
 
-        「当前使用」显示的是**你显式指定的**角色：
-          · 指定过 → 显示胶囊（虚线框隐藏）
-          · 没指定 → 灰色虚线框 + 加号，提示里写清"空着时实际用谁"
-            （QQ/微信空 = 跟桌宠一样；桌宠空 = 用默认角色）
+        用户 2026-09-24 定的规则：
+          · 桌宠槽：**总是显示当前生效的角色**（没显式指定过就是默认角色，通常「丛雨」）
+            —— 桌宠永远得有一个形象，所以这个槽不给虚线空态
+          · QQ / 微信槽：显示的是**你显式指定的**角色；没指定就是灰色虚线框 + 加号，
+            提示里写清"空着时跟桌宠一样（<角色名>）"
         """
-        from pets.pet_registry import get_slot_map, get_pet_config
+        from pets.pet_registry import get_slot_map, get_pet_config, get_slot_pet_id
         smap = get_slot_map()
         for slot, info in smap.items():
             sl = self.slots.get(slot)
@@ -322,13 +323,16 @@ class CurrentUsePanel(QWidget):
             eff = info.get("effective") or ""
             cfg = get_pet_config(eff) or {} if eff else {}
             eff_name = (cfg.get("display_name") or cfg.get("name") or eff) if eff else "（没有角色）"
-            if info.get("raw"):
+            if slot == "pet":
+                # 桌宠槽永远填着实效角色（虚线空态只在"一个角色都没有"时出现）
+                if eff:
+                    sl.set_pet(eff, eff_name, cfg.get("avatar") or "", not info.get("raw"))
+                else:
+                    sl.clear_slot_view("还没有任何桌宠角色")
+            elif info.get("raw"):
                 sl.set_pet(eff, eff_name, cfg.get("avatar") or "", False)
             else:
-                if slot == "pet":
-                    sl.clear_slot_view("空 = 使用默认角色（%s）" % eff_name)
-                else:
-                    sl.clear_slot_view("空 = 跟桌宠一样（%s）" % eff_name)
+                sl.clear_slot_view("空 = 跟桌宠一样（%s）" % eff_name)
 
         # 「我的桌宠」胶囊（清空重画）
         while self.capsule_grid.count():
@@ -381,11 +385,15 @@ class CurrentUsePanel(QWidget):
                 pass
 
     def _clear(self, slot):
-        from pets.pet_registry import clear_slot_pet_id, SLOT_LABELS
+        from pets.pet_registry import clear_slot_pet_id, SLOT_LABELS, get_slot_pet_id, get_pet_config
         clear_slot_pet_id(slot)
         label = SLOT_LABELS.get(slot, slot)
         if slot == "pet":
-            self._toast("桌宠槽已清空 —— 回到默认角色")
+            # 桌宠槽清空 = 回到默认角色（仍然填着，不会变成虚线空框）
+            eff = get_slot_pet_id("pet")
+            cfg = get_pet_config(eff) or {}
+            name = cfg.get("display_name") or cfg.get("name") or eff
+            self._toast("桌宠槽已清空 —— 回到默认角色「%s」" % name)
         else:
             self._toast(f"{label} 已取消指定 —— 跟随桌宠")
         print(f"[PCL] 槽位 {slot} 已清空")

@@ -154,7 +154,7 @@ def cloud_talk(history: list, user_input: str, role: str):
     history.append({"role": "assistant", "content": reply})  # 加入历史
     return reply, history
 
-def cloud_portrait(sentence: str, history: list, type: str):
+def cloud_portrait(sentence: str, history: list, type: str, live2d: bool = False):
     # ===== 修复：杜绝「立绘历史污染」======================
     # 旧实现把完整 history（含历史返回的图层 ID）塞进 system，导致：
     #   某次 AI 偶发返回了另一套服装的 ID（如 A 模式出现 B 套 1475）→ 写入历史 →
@@ -166,6 +166,25 @@ def cloud_portrait(sentence: str, history: list, type: str):
     cfg = _short_model_cfg()
     if not cfg:
         return "（未配置对话模型 API Key）", history
+
+    # ===== Live2D 模式：把可选表情/动作列表交给 AI 自己选（用户 2026-09-24 拍板）=====
+    if live2d:
+        from tool.chat import build_live2d_prompt
+        l2d_prompt = build_live2d_prompt()
+        if l2d_prompt:
+            payload = {
+                "messages": [{"role": "system",
+                              "content": f"{l2d_prompt}\n{build_time_context()}"},
+                             {"role": "user", "content": sentence}],
+                "model": cfg["model"],
+                "max_tokens": 4096,
+                "stream": False,
+            }
+            payload.update(cfg["reasoning"])
+            reply = post(name=f"{cfg['name']}-live2d", payload=payload,
+                         api_key=cfg["api_key"])
+            history.append((sentence, reply))
+            return reply, history
 
     # ===== 从角色包读取立绘映射（无则回退默认提示）=====
     from pets.pet_registry import get_portrait_prompts

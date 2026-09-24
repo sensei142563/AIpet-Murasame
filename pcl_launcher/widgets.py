@@ -1838,8 +1838,15 @@ class PCLPetManager(QScrollArea):
             _in_use = []
         for _lbl in _in_use:
             badge = QLabel(" %s " % _lbl)
+            # 用户 2026-09-24："徽章色统一为跟随主题" → 三个槽共用一个颜色，
+            # 而且用**主题强调色**（和启动器里其它强调色元素一致），不再固定用绿。
+            try:
+                from .colors import accent_hex as _accent_hex
+                _badge_bg = _accent_hex()
+            except Exception:
+                _badge_bg = GreenDark.name()
             badge.setStyleSheet(f"""
-                background: {GreenDark.name()}; color: white; border: none;
+                background: {_badge_bg}; color: white; border: none;
                 padding: {int(2*S)}px {int(8*S)}px; font-size: {int(10*S)}px;
                 border-radius: {int(4*S)}px; font-weight: bold;
             """)

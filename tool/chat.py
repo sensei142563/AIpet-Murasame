@@ -163,7 +163,57 @@ def ollama_qwen3_sentence(sentence: str):
     reply = ollama_post("ollama-qwen3-sentence", prompt)
     return reply
 
-def ollama_qwen3_portrait(sentence: str, history: list, type):
+def build_live2d_prompt(pet_id: str = None) -> str:
+    """构造「Live2D 表情/动作由 AI 自己选」的提示词（两个模型族共用）。
+
+    用户 2026-09-24 拍板：Live2D 也要像 2D 立绘那样，把**可选列表交给 AI** 让它自己挑。
+    可选词 = 角色 pet.json 的 `model.emotions`（表情）+ `model.motions`（动作）的键；
+    角色可用 `live2d_prompts.json` 覆盖模板（{"prompt_template": ..., "extra_words": [...]}）。
+    角色一个词都没有 → 返回空串（调用方走原来的 2D 图层提示）。
+    """
+    from pets.pet_registry import (get_live2d_choice_words, get_live2d_prompts,
+                                   get_pet_config, get_chat_pet_id)
+    pid = pet_id or get_chat_pet_id()
+    cfg = get_pet_config(pid) or {}
+    name = cfg.get("display_name") or cfg.get("name") or pid
+    try:
+        custom = get_live2d_prompts(pid) or {}
+    except Exception:
+        custom = {}
+    words = list(get_live2d_choice_words(pid))
+    for w in (custom.get("extra_words") or []):
+        if str(w).strip() and str(w) not in words:
+            words.append(str(w))
+    if not words:
+        return ""
+    words_txt = "，".join(words)
+    example = '["%s", "%s"]' % (words[0], words[1] if len(words) > 1 else words[0])
+    template = str(custom.get("prompt_template") or "").strip()
+    if template:
+        return (template.replace("{words}", words_txt)
+                        .replace("{name}", name)
+                        .replace("{example}", example))
+    return (
+        f"你是「{name}」的 Live2D 表情/动作选择助手。用户会给你她要说的一串句子，"
+        f"你要为**每一个句子**挑一个最贴合的心情词（表情，会连带触发对应的动作）。\n"
+        f"可选的词**只有**：{words_txt}。\n"
+        f"要求：分句数 = 词数，顺序一一对应；每个词都必须从上面的列表里选，绝不自己编词；"
+        f"不要重复用同一个词，除非两句确实同一种心情。\n"
+        f"直接返回纯 JSON 列表，不要任何解释：{example}"
+    )
+
+
+def ollama_qwen3_portrait(sentence: str, history: list, type, live2d: bool = False):
+    # ===== Live2D 模式：把可选表情/动作列表交给 AI 自己选（用户 2026-09-24 拍板）=====
+    if live2d:
+        l2d_prompt = build_live2d_prompt()
+        if l2d_prompt:
+            # Live2D 这条路不需要"衣服连贯"那套历史提炼（没有服装 ID）
+            prompt = {"model": "qwen3:14b",
+                      "prompt": f"{l2d_prompt}\n{build_time_context()} 句子：{sentence}",
+                      "stream": False}
+            reply = ollama_post("ollama-qwen3-live2d", prompt)
+            return reply, history
     # ===== 从角色包读取立绘映射（无则回退通用提示）=====
     from pets.pet_registry import get_portrait_prompts
     portrait_cfg = get_portrait_prompts()

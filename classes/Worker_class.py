@@ -138,13 +138,16 @@ def _align_lists(reply_list, translate_list, emotion_list, portrait_list):
 class qwen3_lora_Worker(QThread):
     finished = pyqtSignal(list, list, list, list, list, list)  # (AI回复, 立绘, history, 立绘历史, 语音, 情绪列表)
 
-    def __init__(self, history, portrait_history, user_input, role="user", t = False):
+    def __init__(self, history, portrait_history, user_input, role="user", t = False,
+                 live2d: bool = False):
         super().__init__()
         self.history = history
         self.portrait_history = portrait_history
         self.user_input = user_input
         self.role = role
         self.t = t
+        # Live2D 模式：立绘那一步换成"把可选表情/动作列表交给 AI 自己选"（用户 2026-09-24 拍板）
+        self.live2d = bool(live2d)
         self.force_stop = False
 
     def stop_all(self):
@@ -170,7 +173,7 @@ class qwen3_lora_Worker(QThread):
         reply = ollama_qwen3_sentence(reply)  # 句子分割
         if self.force_stop: print("[ollama-qwn3] 已中断生成。");return
         history[-1]["content"] = reply
-        portrait_list, portrait_history = ollama_qwen3_portrait(reply, self.portrait_history, current_portrait_type())  # 立绘
+        portrait_list, portrait_history = ollama_qwen3_portrait(reply, self.portrait_history, current_portrait_type(), live2d=self.live2d)  # 立绘
         if self.force_stop: print("[ollama-qwn3] 已中断生成。");return
         emotion_list = ollama_qwen3_emotion(history)  # 情感
         if self.force_stop: print("[ollama-qwn3] 已中断生成。");return
@@ -223,7 +226,8 @@ class qwen3_lora_Worker(QThread):
 class cloud_API_Worker(QThread):
     finished = pyqtSignal(list, list, list, list, list, list)
 
-    def __init__(self, history, portrait_history, user_input, role="user", t = False):
+    def __init__(self, history, portrait_history, user_input, role="user", t = False,
+                 live2d: bool = False):
         super().__init__()
         self.history = history
         self.portrait_history = portrait_history
@@ -231,6 +235,8 @@ class cloud_API_Worker(QThread):
         self.role = role
         self.force_stop = False
         self.t = t
+        # Live2D 模式：立绘那一步换成"把可选表情/动作列表交给 AI 自己选"（用户 2026-09-24 拍板）
+        self.live2d = bool(live2d)
 
     def stop_all(self):
         """外部调用，用于请求线程中断"""
@@ -264,7 +270,7 @@ class cloud_API_Worker(QThread):
         if self.force_stop:print("[deepseek] 已中断生成。");return
         with ThreadPoolExecutor(max_workers=5) as executor:  # 增加线程数
             # 提交所有任务（下游拿到切好的句子列表，保证对齐）
-            future_portrait = executor.submit(cloud_portrait, reply_json, self.portrait_history, current_portrait_type())
+            future_portrait = executor.submit(cloud_portrait, reply_json, self.portrait_history, current_portrait_type(), self.live2d)
             future_translate = executor.submit(cloud_translate, reply_json)
             future_emotion = executor.submit(cloud_emotion, history)
 

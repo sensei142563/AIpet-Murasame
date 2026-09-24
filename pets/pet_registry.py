@@ -280,6 +280,41 @@ def clear_slot_pet_id(slot: str) -> bool:
     return True
 
 
+# ── Live2D 表情/动作候选词（给 AI 自己选：与 2D 立绘"给一份图层列表让 AI 选"同一个思路）──
+def get_live2d_choice_words(pet_id: str = None) -> list:
+    """角色 Live2D 可选的心情/动作词。
+
+    来源：pet.json 的 `model.emotions`（表情）+ `model.motions`（动作）的**键**，
+    按"表情优先、动作补充"去重排序 —— 这就是交给 AI 的候选列表。
+    """
+    disp = get_live2d_display(pet_id)
+    words = []
+    for k in (disp.get("emotions") or {}):
+        if str(k).strip() and str(k) not in words:
+            words.append(str(k))
+    for k in (disp.get("motions") or {}):
+        if str(k).strip() and str(k) not in words:
+            words.append(str(k))
+    return words
+
+
+def get_live2d_prompts(pet_id: str = None) -> dict:
+    """角色自定义的 Live2D 提示词（可选文件 `live2d_prompts.json`）。
+
+    结构：{"prompt_template": "...{words}...{example}...", "extra_words": [...]}
+    没有这个文件时返回 {}（由 tool/chat.py 用内置模板 + get_live2d_choice_words 兜底）。
+    """
+    pet_id = pet_id or get_active_pet_id()
+    path = os.path.join(PETS_DIR, pet_id, "live2d_prompts.json")
+    data = _load_json(path, None)
+    if not isinstance(data, dict):
+        return {}
+    extra = data.get("extra_words")
+    if extra is not None and not isinstance(extra, list):
+        data.pop("extra_words", None)
+    return data
+
+
 def get_slot_map() -> dict:
     """给界面用：每个槽的 {slot, label, raw, effective, is_default}"""
     out = {}
