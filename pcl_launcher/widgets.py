@@ -1722,6 +1722,15 @@ class PCLPetManager(QScrollArea):
 
     def _refresh(self):
         """刷新桌宠列表"""
+        # 顺手让总览页后台探一次桌宠状态：卡片上那个按钮写「设为活动」还是
+        # 「切换到这个桌宠」靠它缓存的 _pet_alive_cache（这里不能自己发网络探测）
+        try:
+            _home = getattr(self.window(), "pages", {}).get("home")
+            if _home is not None:
+                _home.refresh_status()
+        except Exception:
+            pass
+
         while self._pet_layout.count():
             w = self._pet_layout.takeAt(0)
             if w.widget():
@@ -1851,7 +1860,22 @@ class PCLPetManager(QScrollArea):
         #   红        = 删除（唯一的危险动作）
         #   白底描边  = 打开文件夹 / 设置（日常工具，不抢语义）
         if not p.get("is_active"):
-            btn_active = QPushButton("⭐ 设为活动")
+            # 桌宠正在跑的时候，这个按钮的实际含义是「切到它」——点一下自动把旧的关掉、
+            # 用它的形象重新启动（0.5 秒防误触）。文案说清楚，别让人以为只是改个标记。
+            # ⚠ 这里绝不能调 _pet_api_alive()（那是带 3 秒超时的网络探测，卡片一多会把
+            #   界面卡住）。读总览页状态探测留下的缓存值就够了。
+            _pet_running = False
+            try:
+                _w = self.window()
+                _sh = getattr(_w, "shell", None) or _w     # 外壳自己就是 shell 时用它本身
+                _pet_running = bool(getattr(_sh, "_pet_alive_cache", False))
+            except Exception:
+                pass
+            btn_active = QPushButton("🔄 切换到这个桌宠" if _pet_running else "⭐ 设为活动")
+            btn_active.setToolTip(
+                "点一下：关掉当前桌宠，立刻用它重新启动（0.5 秒防误触；跨角色要等它启动几秒）"
+                if _pet_running else
+                "设为活动角色：之后启动桌宠 / QQ 都用它的人设、声音与形象")
             btn_active.setStyleSheet(self._btn_style(GreenDark.name()))
             btn_active.clicked.connect(lambda checked, pid=p["id"]: self._set_active(pid))
             btn_row.addWidget(btn_active)

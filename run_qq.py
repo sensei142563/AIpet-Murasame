@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """QQ AIpet 独立启动入口 — 不依赖桌宠（PyQt5）即可运行。"""
 import os
+from pets.pet_registry import get_chat_pet_id
 import sys
 import time
 import socket
@@ -152,12 +153,19 @@ def _napcat_version_selfcheck():
 
 def main():
     _setup_file_log()
+    # 声明本进程替「QQ」频道说话 → 取角色时走 QQ 槽位（没单独设过就回落到桌宠槽）。
+    # 有了它，QQ 与微信才能各用不同角色（用户新界面「当前使用」的三个槽）。
+    try:
+        from pets.pet_registry import set_chat_channel
+        set_chat_channel("qq")
+    except Exception as _e:
+        print(f"[QQ] ⚠ 声明聊天频道失败（按桌宠角色继续）: {_e}")
     print("=" * 50)
     # 当前角色显示名（从 pets 注册中心读取）
     pet_name = "丛雨"
     try:
         from pets.pet_registry import get_pet_config
-        _pc = get_pet_config()
+        _pc = get_pet_config(get_chat_pet_id())
         pet_name = _pc.get("display_name") or _pc.get("name") or "丛雨"
     except Exception:
         pass

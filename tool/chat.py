@@ -8,7 +8,7 @@ import requests
 
 from tool.config import get_config
 from tool.time_utils import build_time_context
-from pets.pet_registry import get_short_emotion_dirs, get_short_voices_dir, get_short_emotions
+from pets.pet_registry import get_chat_pet_id, get_short_emotion_dirs, get_short_voices_dir, get_short_emotions
 
 
 def now_time():
@@ -206,11 +206,11 @@ def ollama_qwen3_translate(sentence: str):
     from pets.pet_registry import get_pet_config, get_active_pet_id
     identity = ""
     try:
-        identity = ((get_pet_config() or {}).get("translate_rules") or "").strip()
+        identity = ((get_pet_config(get_chat_pet_id()) or {}).get("translate_rules") or "").strip()
     except Exception:
         identity = ""
     if not identity:
-        if get_active_pet_id() == "murasame":
+        if get_chat_pet_id() == "murasame":
             identity = '你是一个翻译助手，负责将用户输入的中文翻译成日文。要求：要将中文的“本座”翻译为“吾輩（わがはい）”；将“主人翻译为“ご主人（ごしゅじん）”；将“丛雨”翻译为“ムラサメ”；“小雨”则是丛雨的昵称，翻译为“ムラサメちゃん”。且日文要有强烈的古日语风格。你只需要返回翻译即可，不需要对其中的日文汉字进行注音。给你提供的格式是["句子1", "句子2"]这样，必须按照原格式输出，逐句翻译。'
         else:
             identity = '你是一个翻译助手，负责将用户输入的中文翻译成日文。要求：翻译自然、口语化、符合可爱少女说话习惯，不要古日语风格，不要添加任何说明，不需要注音。给你提供的格式是["句子1", "句子2"]这样，必须按照原格式输出，逐句翻译，只输出纯JSON文本。'
@@ -225,7 +225,7 @@ def ollama_qwen3_emotion(history: list):
     # 只列出包含 asr.txt 的情感目录（过滤 long_chinese 等非情感参考）
     emotion_dirs = get_short_emotion_dirs()
     from pets.pet_registry import get_pet_config
-    pet_cfg = get_pet_config()
+    pet_cfg = get_pet_config(get_chat_pet_id())
     pet_name = pet_cfg.get("name", "丛雨")
     vcfg = pet_cfg.get("voices", {}) or {}
     labels = '，'.join(emotion_dirs) if emotion_dirs else '平静'
@@ -353,7 +353,7 @@ def gpt_sovits_tts(sentence: str, emotion: str, aux_ref_audio_paths: list = []):
 
     # 情感目录从角色语音包动态解析
     from pets.pet_registry import get_pet_config
-    pet_cfg = get_pet_config()
+    pet_cfg = get_pet_config(get_chat_pet_id())
     voices_dir = get_short_voices_dir()
     emotion_dirs = get_short_emotion_dirs()
     # 情感不在可用列表中 → 回退到「平静」（若存在）或第一个可用情感

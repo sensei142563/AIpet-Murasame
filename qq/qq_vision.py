@@ -12,6 +12,7 @@ QQ 图片识别 — 收到图片消息时调用视觉模型识别内容（模型
 """
 
 import os
+from pets.pet_registry import get_chat_pet_id
 import base64
 import requests
 
@@ -160,7 +161,7 @@ def _get_pet_name():
     """按当前活动角色自称（多角色架构：诺瓦/阿洛娜等角色不能自称丛雨）"""
     try:
         from pets.pet_registry import get_pet_config
-        return (get_pet_config() or {}).get("name") or "丛雨"
+        return (get_pet_config(get_chat_pet_id()) or {}).get("name") or "丛雨"
     except Exception:
         return "丛雨"
 

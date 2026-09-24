@@ -22,7 +22,7 @@ import threading
 import requests
 
 from longtext.longtext_history import load_long_history, save_long_history, sync_to_short_history
-from pets.pet_registry import get_prompt_path, get_sticker_dir, get_pet_config
+from pets.pet_registry import get_chat_pet_id, get_prompt_path, get_sticker_dir, get_pet_config
 
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -37,8 +37,8 @@ STICKER_NAMES = []
 def _pname() -> str:
     """当前角色显示名（日志/提示语用）"""
     try:
-        from pets.pet_registry import get_active_pet_id, get_pet_config
-        pid = get_active_pet_id()
+        from pets.pet_registry import get_pet_config
+        pid = get_chat_pet_id()
         cfg = get_pet_config(pid) or {}
         return str(cfg.get("display_name") or cfg.get("name") or pid or "角色")
     except Exception:
@@ -86,7 +86,7 @@ def _default_chat_style() -> str:
 def _load_sticker_names():
     """扫描当前角色表情包目录，返回表情包名列表"""
     global STICKER_NAMES
-    sticker_dir = get_sticker_dir()
+    sticker_dir = get_sticker_dir(get_chat_pet_id())
     if not sticker_dir:
         sticker_dir = os.path.join(BASE_DIR, "biaoqingbao")  # 兜底旧路径
     if os.path.isdir(sticker_dir):
@@ -109,7 +109,7 @@ def load_system_prompt():
                     return content
     except Exception as e:
         print(f"[QQChat] 读取 prompt 失败: {e}")
-    pet_cfg = get_pet_config()
+    pet_cfg = get_pet_config(get_chat_pet_id())
     pet_name = pet_cfg.get("display_name") or pet_cfg.get("name") or "桌宠"
     return (
         f"你是一个住在用户身边的人工智能桌宠角色——{pet_name}。"

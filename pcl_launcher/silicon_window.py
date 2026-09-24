@@ -507,6 +507,12 @@ class HomePage(QWidget):
         try:
             alive, tts_ok = getattr(self, "_probe_result", (False, False))
             self._probe_busy = False
+            # 缓存给别的页面用（例如「桌宠」页卡片上那个按钮该写"设为活动"还是"切换到这个桌宠"）——
+            # 卡片构建时不能自己发网络探测，否则一屏卡片能把界面卡住好几秒
+            try:
+                self.shell._pet_alive_cache = bool(alive)
+            except Exception:
+                pass
             # 桌宠名字带上：用户问过"怎么启动诺瓦？"——总览页得说清现在启的是哪一只
             # （活动角色在「桌宠」页用「⭐ 设为活动」切换；换角色后这里 6 秒内自动跟上）
             name = self._active_pet_name()

@@ -221,6 +221,97 @@ def set_active_pet_id(pet_id: str) -> bool:
     return True
 
 
+# ══════════════ 三个「当前使用」槽位（桌宠 / QQ / 微信） ══════════════
+# 用户 2026-09-24 的界面要求："取消这个所谓的活动"，改成「当前使用」三个槽：
+#   桌宠 / QQAIPet聊天 / 微信chatbot聊天 —— 把「我的桌宠」里的胶囊拖进槽里就换上。
+# 落盘仍是 config.json：桌宠槽 = 老键 active_pet（兼容一切老代码/老配置），
+# QQ / 微信槽各用一个新键；**没单独设过 → 回落到桌宠槽**，所以老配置行为完全不变。
+SLOTS = ("pet", "qq", "wechat")
+SLOT_LABELS = {"pet": "桌宠", "qq": "QQAIPet聊天", "wechat": "微信chatbot聊天"}
+_SLOT_KEYS = {"pet": "active_pet", "qq": "qq_active_pet", "wechat": "wechat_active_pet"}
+
+
+def slot_key(slot: str) -> str:
+    """槽位 → config.json 里的键名（未知槽位按桌宠处理）"""
+    return _SLOT_KEYS.get(str(slot or "pet"), _SLOT_KEYS["pet"])
+
+
+def get_slot_raw(slot: str = "pet") -> str:
+    """该槽**显式**指定的角色 ID（没设过 = 空串；用于界面区分"已指定/跟随桌宠"）"""
+    cfg = _load_json(os.path.join(BASE_DIR, "config.json"), {})
+    pid = str(cfg.get(slot_key(slot)) or "").strip()
+    return pid if pid in get_pet_ids() else ""
+
+
+def get_slot_pet_id(slot: str = "pet") -> str:
+    """该槽**生效**的角色 ID。
+
+    - 桌宠槽：显式值 → 老键 active_pet → 注册表默认（与 get_active_pet_id 一致）
+    - QQ / 微信槽：显式值 → 回落到桌宠槽（没拖过就是"跟桌宠一样"）
+    """
+    slot = str(slot or "pet")
+    raw = get_slot_raw(slot)
+    if raw:
+        return raw
+    return get_active_pet_id()
+
+
+def set_slot_pet_id(slot: str, pet_id: str) -> bool:
+    """把某个槽指到某个角色（写 config.json）。桌宠槽就是老键 active_pet。"""
+    if pet_id not in get_pet_ids():
+        return False
+    cfg = _load_json(os.path.join(BASE_DIR, "config.json"), {})
+    cfg[slot_key(slot)] = pet_id
+    _save_json(os.path.join(BASE_DIR, "config.json"), cfg)
+    return True
+
+
+def clear_slot_pet_id(slot: str) -> bool:
+    """清空某个槽（从槽里拖出去 = 取消指定）。
+
+    桌宠槽清空 → 回到注册表默认角色；QQ / 微信槽清空 → 跟随桌宠槽。
+    """
+    cfg = _load_json(os.path.join(BASE_DIR, "config.json"), {})
+    key = slot_key(slot)
+    if key not in cfg:
+        return True
+    cfg.pop(key, None)
+    _save_json(os.path.join(BASE_DIR, "config.json"), cfg)
+    return True
+
+
+def get_slot_map() -> dict:
+    """给界面用：每个槽的 {slot, label, raw, effective, is_default}"""
+    out = {}
+    for s in SLOTS:
+        raw = get_slot_raw(s)
+        eff = get_slot_pet_id(s)
+        out[s] = {"slot": s, "label": SLOT_LABELS[s], "raw": raw,
+                  "effective": eff, "is_default": not raw}
+    return out
+
+
+# ── 聊天频道（每个进程一个，由入口 run_qq.py / run_wechat.py / main.py 设定）──
+# 桌宠进程 = "pet"（默认，行为与以前完全一致）；QQ 桥 = "qq"；微信桥 = "wechat"。
+# 这样 QQ / 微信可以各用不同的角色，而桌宠自己的对话仍然只认「桌宠」槽。
+_CHAT_CHANNEL = "pet"
+
+
+def set_chat_channel(channel: str) -> None:
+    """声明"本进程在替哪个频道说话"（在入口文件里调一次；默认 pet = 桌宠自己）"""
+    global _CHAT_CHANNEL
+    _CHAT_CHANNEL = str(channel or "pet")
+
+
+def get_chat_channel() -> str:
+    return _CHAT_CHANNEL
+
+
+def get_chat_pet_id() -> str:
+    """本进程当前该用的角色：按频道取槽位（没单独设过就回落到桌宠槽）"""
+    return get_slot_pet_id(_CHAT_CHANNEL)
+
+
 def get_pet_config(pet_id: str = None) -> dict:
     """返回指定桌宠（或当前活动）的完整 pet.json 配置。"""
     pet_id = pet_id or get_active_pet_id()

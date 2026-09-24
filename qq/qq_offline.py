@@ -15,6 +15,7 @@ C. 首次运行只补最近若干条：防把历史记录全刷一遍
 """
 
 import os
+from pets.pet_registry import get_chat_pet_id
 import json
 import time
 import uuid
@@ -40,7 +41,7 @@ def _pet_name() -> str:
     """当前角色显示名（日志用；以前写死「丛雨」，排查时容易误以为整个 QQ 模块都是丛雨）"""
     try:
         from pets.pet_registry import get_active_pet_id, get_pet_config
-        pid = get_active_pet_id()
+        pid = get_chat_pet_id()
         cfg = get_pet_config(pid) or {}
         return str(cfg.get("display_name") or cfg.get("name") or pid or "角色")
     except Exception:

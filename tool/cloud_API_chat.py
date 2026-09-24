@@ -7,7 +7,7 @@ import requests
 
 from tool.config import get_config
 from tool.time_utils import build_time_context
-from pets.pet_registry import get_prompt_path, get_short_emotion_dirs
+from pets.pet_registry import get_chat_pet_id, get_prompt_path, get_short_emotion_dirs
 
 url = get_config("./config.json")["local_api"]["cloud_api"]
 
@@ -218,11 +218,11 @@ def cloud_translate(sentence: str):
     from pets.pet_registry import get_pet_config, get_active_pet_id
     identity = ""
     try:
-        identity = ((get_pet_config() or {}).get("translate_rules") or "").strip()
+        identity = ((get_pet_config(get_chat_pet_id()) or {}).get("translate_rules") or "").strip()
     except Exception:
         identity = ""
     if not identity:
-        if get_active_pet_id() == "murasame":
+        if get_chat_pet_id() == "murasame":
             identity = '你是一个翻译助手，负责将用户输入的中文翻译成日文。要求：要将中文的“本座”翻译为“吾輩（わがはい）”；将“主人翻译为“ご主人（ごしゅじん）”；将“丛雨”翻译为“ムラサメ”；“小雨”则是丛雨的昵称，翻译为“ムラサメちゃん”。且日文要有强烈的古日语风格。你只需要返回翻译即可，不需要对其中的日文汉字进行注音。给你提供的格式是["句子1", "句子2", "句子3", .....]，必须严格按照原格式，输出一个json列表，逐句翻译。'
         else:
             identity = '你是一个翻译助手，负责将用户输入的中文翻译成日文。要求：翻译自然、口语化、符合可爱少女说话习惯，不要古日语风格，不要添加任何说明，不需要注音。给你提供的格式是["句子1", "句子2", "句子3", .....]，必须严格按照原格式，输出一个json列表，逐句翻译，只输出纯JSON文本。'
@@ -246,7 +246,7 @@ def cloud_emotion(history: list):
 
     emotion_dirs = get_short_emotion_dirs()
     from pets.pet_registry import get_pet_config
-    pet_cfg = get_pet_config()
+    pet_cfg = get_pet_config(get_chat_pet_id())
     pet_name = pet_cfg.get("name", "丛雨")
     labels = '，'.join(emotion_dirs) if emotion_dirs else '平静'
     if emotion_dirs:

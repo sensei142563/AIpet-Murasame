@@ -16,7 +16,7 @@ import threading
 import cv2
 import numpy as np
 
-from pets.pet_registry import get_fgimages_dir, get_active_pet_id, get_pet_config
+from pets.pet_registry import get_chat_pet_id, get_fgimages_dir, get_pet_config
 
 _lock = threading.Lock()
 
@@ -63,7 +63,7 @@ def pet_portrait_cfg() -> dict:
     """当前活动角色的 portrait 配置块（向导创建的新角色用；老角色返回 {}）"""
     try:
         from pets.pet_registry import get_pet_config
-        pt = (get_pet_config() or {}).get("portrait") or {}
+        pt = (get_pet_config(get_chat_pet_id()) or {}).get("portrait") or {}
         return pt if isinstance(pt, dict) and pt else {}
     except Exception:
         return {}
@@ -332,7 +332,7 @@ def compose_custom(cloth, hair, expr, decors=None, out_name="qq_portrait_studio.
 
 
 def _resolve_dir():
-    pet_id = get_active_pet_id()
+    pet_id = get_chat_pet_id()
     fg_dir = get_fgimages_dir(pet_id)
     # 前缀统一解析：model.fgimages_prefix → portrait.prefix → 角色ID（绝不为空）
     try:
@@ -555,7 +555,7 @@ def build_portrait(emotion: str = "", bg_kw: str = "",
         # 图层微调（防穿模）：网页版/QQ 立绘与桌面立绘共用同一份设置
         try:
             from tool.generate import _adjust_table
-            _adj = _adjust_table(get_active_pet_id(), s)
+            _adj = _adjust_table(get_chat_pet_id(), s)
         except Exception:
             _adj = {}
         for lid in layers:

@@ -15,6 +15,7 @@
 - 识图不阻塞收包线程：收包线程只解析入队，图片下载+识图延后到调度线程
 """
 import os
+from pets.pet_registry import get_chat_pet_id
 import uuid
 import time
 
@@ -288,7 +289,7 @@ class WeChatBridge:
         if stickers and text:
             try:
                 from pets.pet_registry import get_sticker_dir
-                sdir = get_sticker_dir()
+                sdir = get_sticker_dir(get_chat_pet_id())
                 path = None
                 for ext in (".gif", ".png", ".jpg", ".jpeg"):
                     p = os.path.join(sdir, f"{stickers[0]}{ext}")
