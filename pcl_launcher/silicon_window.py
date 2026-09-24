@@ -365,7 +365,9 @@ class HomePage(QWidget):
                             f" font-family: '{silicon_ui.M.font}';")
         head.addWidget(title)
         head.addStretch()
-        self.chip_pet = StatusChip("桌宠：未运行")
+        # 活动角色名：首屏就带上（不然要等第一次状态刷新才有名字）
+        _tag0 = f"（{self._active_pet_name()}）" if self._active_pet_name() else ""
+        self.chip_pet = StatusChip(f"桌宠{_tag0}：未运行")
         self.chip_qq = StatusChip("QQ：未运行")
         self.chip_tts = StatusChip("语音服务：未知")
         for c in (self.chip_pet, self.chip_qq, self.chip_tts):
@@ -379,7 +381,6 @@ class HomePage(QWidget):
         cl.setSpacing(12)
         row = QHBoxLayout()
         # 按钮上直接写出"要启动哪一只"（活动角色在「桌宠」页切换）
-        _tag0 = f"（{self._active_pet_name()}）" if self._active_pet_name() else ""
         self.btn_pet = QPushButton(f"  启动 AIpet 桌宠{_tag0}")
         self.btn_pet.setStyleSheet(_accent_btn_qss(accent))
         self.btn_pet.setMinimumHeight(46)
