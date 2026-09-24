@@ -15,6 +15,7 @@
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -114,12 +115,56 @@ def _ensure_src_on_path():
     return False
 
 
-def _find_python(base: str) -> str:
+# 各入口真正跑起来需要的模块（用来判断"系统 Python 装了没装依赖"）。
+# 与三个 bat 的探针**同一套口径**（启动桌宠.bat / 启动QQ.bat / 启动微信.bat 里的 find_spec）：
+#   桌宠 PyQt5+torch ／ QQ websocket+requests ／ 微信 requests+Crypto+qrcode
+PET_NEED = ("PyQt5", "torch")
+QQ_NEED = ("websocket", "requests")
+WX_NEED = ("requests", "Crypto", "qrcode")
+
+
+def _python_has(py: str, need=()) -> bool:
+    """这个解释器能不能找到 need 里的模块（find_spec 只查不导入，毫秒级，不触发 DLL 加载）"""
+    if not need:
+        return True
+    try:
+        code = ("import importlib.util as u, sys;"
+                "sys.exit(0 if all(u.find_spec(m) for m in %r) else 1)" % (list(need),))
+        # 启动器是 windowed exe：不抑制控制台的话，探测时会闪黑框
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        return subprocess.run([py, "-c", code], timeout=20,
+                              creationflags=flags).returncode == 0
+    except Exception:
+        return False
+
+
+def _find_python(base: str, need=()) -> str:
+    """按顺序找能用的解释器；找不到返回空串（调用方给准确提示）。
+
+    ⚠ 历史坑（用户 2026-09-24 实测）：这里原来只有下面 ①②，且打包版直接 `return ""`
+      —— 而**它自己的报错文案写着"启动器需要 runtime\\venv 或系统 Python"**，
+      三个 bat 也都会回落系统 Python（`set "PYTHON_CMD=python"` + 依赖探针）。
+      于是同一个项目里"bat 能用系统 Python、exe 不能用"，打包版解压后点按钮就只会
+      报"没找到 Python 解释器/未找到微信模块"，把人指向错误方向。现在补齐 ③：
+
+      ① 包内运行环境 runtime\\venv（install.bat 建的，或自带）
+      ② 包内便携解释器 python.exe
+      ③ 系统 Python（PATH 上的 python / python3）—— **必须先过依赖探针**：
+         "能启动、一跑就崩"比直接说清楚更糟
+      ④ 源码模式：当前解释器（启动器自己跑得起来，说明它至少有 PyQt5）
+    """
     for rel in (os.path.join("runtime", "venv", "Scripts", "python.exe"), "python.exe"):
         p = os.path.join(base, rel)
         if os.path.exists(p):
             return p
-    return sys.executable if not getattr(sys, "frozen", False) else ""
+    if not getattr(sys, "frozen", False):
+        # 源码模式：正在跑启动器的这个解释器就是它（别再另挑一个，避免和 .venv 打架）
+        return sys.executable
+    for name in ("python", "python3"):
+        p = shutil.which(name)
+        if p and _python_has(p, need):
+            return p
+    return ""
 
 
 def _pet_api_alive() -> bool:
@@ -663,17 +708,42 @@ class HomePage(QWidget):
         self.refresh_status()
         print(f"[NewUI] 换角色完成 → {name}")
 
+    def _require_python(self, what: str, need=()) -> str:
+        """启动桌宠/QQ/微信前先确认有可用解释器；没有就说清**为什么**、**怎么修**。
+
+        ⚠ 三个入口原来各写一份 `py = _find_python(base)`，微信那处还把"没有解释器"和
+          "缺 run_wechat.py"混在同一个 if 里 → 包内明明有 run_wechat.py，却报
+          "未找到微信模块（run_wechat.py）"，把人指向完全错误的方向（用户实测反馈）。
+          现在统一成一处，并把"系统 Python 找到了但缺依赖"这种最常见情况单独说清。
+        """
+        base = _app_base_dir()
+        need = tuple(need)
+        py = _find_python(base, need)
+        if py:
+            return py
+        mods = "、".join(need)
+        sys_py = shutil.which("python") or shutil.which("python3")
+        if sys_py:
+            why = (f"系统里找到 Python（{sys_py}），但它**缺少运行依赖**"
+                   + (f"（需要：{mods}）" if mods else "") + "，所以没有被采用。")
+        else:
+            why = ("系统里也没找到 Python（PATH 上没有 python）。"
+                   + (f"{what}需要这些模块：{mods}。" if mods else ""))
+        fix = ("修法：在程序目录里双击一次 install.bat —— 它会建好 runtime\\venv 并装齐依赖，"
+               "装完再点这个按钮。\n（或按 README 装好 Python 3.10，安装时勾上 "
+               "\"Add Python to PATH\"，再重跑 install.bat。）"
+               if getattr(sys, "frozen", False) else
+               "修法：按 README 跑一次 install.bat（建 runtime\\venv 并装依赖）；"
+               "或者用一个装好依赖的 Python 运行 run_launcher.py。")
+        self._msg(f"{what}起不来", f"没有可用的运行环境（缺 {mods or '依赖'}）。",
+                  f"{why}\n\n{fix}")
+        return ""
+
     def _launch_pet(self):
         """启动桌宠进程（toggle_pet 与换角色共用）"""
         base = _app_base_dir()
-        py = _find_python(base)
+        py = self._require_python("桌宠", PET_NEED)
         if not py:
-            try:
-                self._msg("启动失败", "没找到 Python 解释器，桌宠起不来。",
-                          "启动器需要 runtime\\venv 或系统 Python。打包版请确认 runtime 目录完整；"
-                          "源码版请先按 README 装好依赖。")
-            except Exception:
-                pass
             return False
         try:
             self.shell._pet_proc = subprocess.Popen([py, os.path.join(base, "run.py")], cwd=base,
@@ -727,8 +797,11 @@ class HomePage(QWidget):
 
     def start_wechat(self):
         base = _app_base_dir()
-        py = _find_python(base)
-        if not py or not os.path.exists(os.path.join(base, "run_wechat.py")):
+        py = self._require_python("微信 AIpet", WX_NEED)
+        if not py:
+            return
+        # 解释器有了，再单独查"文件在不在"（两件事分开报，别混成一句误导话）
+        if not os.path.exists(os.path.join(base, "run_wechat.py")):
             self._msg("微信 AIpet", "未找到微信模块（run_wechat.py）。",
                       "微信桥接随程序包一起提供；如果你是精简安装，请把 wechat 目录补回来。")
             return
@@ -816,8 +889,12 @@ class HomePage(QWidget):
 
     def _do_start_qq(self):
         base = _app_base_dir()
-        py = _find_python(base)
+        py = self._require_python("QQ AIpet", QQ_NEED)
         if not py:
+            return
+        if not os.path.exists(os.path.join(base, "run_qq.py")):
+            self._msg("QQ AIpet", "未找到 QQ 模块（run_qq.py）。",
+                      "QQ 桥接随程序包一起提供；如果你是精简安装，请把 qq 目录补回来。")
             return
         self._busy_btn(self.btn_qq, "⏳ 正在启动 QQ…", 12000)
         try:
