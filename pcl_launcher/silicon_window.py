@@ -25,7 +25,7 @@ from PyQt5.QtCore import Qt, QTimer, QSize, QUrl, QThread, pyqtSignal
 from PyQt5.QtGui import (QColor, QFont, QIcon, QImage, QPainter, QPainterPath,
                          QPixmap)
 from PyQt5.QtWidgets import (QScrollArea, QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
-                             QStackedWidget, QFrame, QMessageBox, QSizePolicy)
+                             QStackedWidget, QFrame, QSizePolicy)
 
 from .colors import *          # noqa: F401,F403  (Color1..8 / Gray* / S / THEME_COLORS / btn_radius …)
 from . import silicon_ui
@@ -546,7 +546,9 @@ class HomePage(QWidget):
         base = _app_base_dir()
         py = _find_python(base)
         if not py:
-            QMessageBox.warning(self, "启动失败", "未找到 Python 解释器（runtime/venv）")
+            self._msg("启动失败", "没找到 Python 解释器，桌宠起不来。",
+                      "启动器需要 runtime\\venv 或系统 Python。打包版请确认 runtime 目录完整；"
+                      "源码版请先按 README 装好依赖。")
             return
         try:
             self.shell._pet_proc = subprocess.Popen([py, os.path.join(base, "run.py")], cwd=base,
@@ -554,7 +556,7 @@ class HomePage(QWidget):
             print("[NewUI] 已启动桌宠（run.py）")
             QTimer.singleShot(6000, self.refresh_status)
         except Exception as e:
-            QMessageBox.warning(self, "启动失败", str(e))
+            self._msg("启动失败", "桌宠没能启动。", str(e))
 
     def _wait_pet_gone(self, seconds: int):
         """后台轮询：桌宠真的退出了再恢复按钮（期间保持「正在关闭中…」）"""
@@ -574,7 +576,7 @@ class HomePage(QWidget):
     def reset_pet_pos(self):
         """把桌宠移回屏幕中央（找不到桌宠时用）"""
         if not _pet_api_alive():
-            QMessageBox.information(self, "重置桌宠位置", "桌宠还没启动哦，先点「启动 AIpet 桌宠」。")
+            self._msg("重置桌宠位置", "桌宠还没启动哦，先点「启动 AIpet 桌宠」。")
             return
         self._busy_btn(self.btn_reset_pos, "⏳ 正在移动…", 4000)
         _send_control("reset_position")
@@ -598,14 +600,15 @@ class HomePage(QWidget):
         base = _app_base_dir()
         py = _find_python(base)
         if not py or not os.path.exists(os.path.join(base, "run_wechat.py")):
-            QMessageBox.information(self, "微信 AIpet", "未找到微信模块（run_wechat.py）")
+            self._msg("微信 AIpet", "未找到微信模块（run_wechat.py）。",
+                      "微信桥接随程序包一起提供；如果你是精简安装，请把 wechat 目录补回来。")
             return
         self._busy_btn(self.btn_wx, "⏳ 正在启动微信…", 12000)
         try:
             self.shell._wx_proc = subprocess.Popen([py, os.path.join(base, "run_wechat.py")], cwd=base,
                                                    creationflags=subprocess.CREATE_NEW_CONSOLE)
         except Exception as e:
-            QMessageBox.warning(self, "启动失败", str(e))
+            self._msg("启动失败", "微信桥接没能启动。", str(e))
 
     # ── 工具 ──
 
@@ -617,7 +620,7 @@ class HomePage(QWidget):
             self.shell._portrait_studio = self._studio
             self._studio.show(); self._studio.raise_(); self._studio.activateWindow()
         except Exception as e:
-            QMessageBox.warning(self, "立绘工坊", f"打开失败：{e}")
+            self._msg("立绘工坊", "打开失败。", str(e))
 
     def open_pet_settings(self):
         try:
@@ -626,7 +629,7 @@ class HomePage(QWidget):
             dlg = PCLPetWizard(get_active_pet_id(), self.window())
             dlg.show(); dlg.raise_(); dlg.activateWindow()   # 非模态，避免锁住预览窗口
         except Exception as e:
-            QMessageBox.warning(self, "桌宠设置", f"打开失败：{e}")
+            self._msg("桌宠设置", "打开失败。", str(e))
 
     def open_napcat_webui(self):
         """打开 NapCat WebUI。**没在跑就先把它拉起来**，而不是弹一个打不开的对话框。
@@ -670,12 +673,13 @@ class HomePage(QWidget):
         base = _app_base_dir()
         files = sorted(glob.glob(os.path.join(base, "更新日志", "*")), reverse=True)
         if not files:
-            QMessageBox.information(self, "更新日志", "未找到更新日志文件")
+            self._msg("更新日志", "未找到更新日志文件。",
+                      "程序目录下的「更新日志」文件夹是空的 —— 打包/精简安装时可能没带上。")
             return
         try:
             os.startfile(files[0])           # noqa
         except Exception as e:
-            QMessageBox.information(self, "更新日志", f"打开失败：{e}")
+            self._msg("更新日志", "打开失败。", str(e))
 
     def _do_start_qq(self):
         base = _app_base_dir()

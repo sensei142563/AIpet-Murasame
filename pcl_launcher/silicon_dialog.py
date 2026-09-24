@@ -11,7 +11,8 @@ from PyQt5.QtGui import QColor, QPainter, QPainterPath, QPixmap
 from PyQt5.QtWidgets import (QWidget, QDialog, QLabel, QPushButton, QVBoxLayout,
                              QHBoxLayout, QGraphicsOpacityEffect, QFrame)
 
-from .colors import Color1, Color5, Color8, Gray2, ACCENT_ID, THEME_COLORS  # noqa: F401
+from .colors import (Color1, Color5, Color8, Gray1, Gray2, RedDark,   # noqa: F401
+                     ACCENT_ID, THEME_COLORS)
 from .silicon_ui import M, apply_acrylic
 
 
@@ -295,11 +296,14 @@ class MessageDialog(SiliconDialog):
       · 它按平台风格自绘，正文颜色/字号不受启动器主题控制 → 深色主题下发灰
       · 里面的 emoji 在部分字体环境下渲染成方块（用户截图里那句提示的 📱 就是方块）
     这里用启动器自己的圆角对话框：正文用主题主文字色（SiliconDialog 的调色板已保证
-    高对比），细节（路径、原因）单独一段小字并可选中复制，底部只有一个「知道了」。
+    高对比），细节（路径、原因）单独一段小字并可选中复制。
+      · 只有一个按钮时 = 提示框（默认「知道了」）
+      · 传了 cancel_text 就是二选一确认框（危险操作把 danger=True，确认键变红）
     正文里**不要用 emoji**，需要强调就用【】或直接写清楚。
     """
 
-    def __init__(self, parent, title, text, detail="", ok_text="知道了", width=470):
+    def __init__(self, parent, title, text, detail="", ok_text="知道了", width=470,
+                 cancel_text=None, danger=False):
         super().__init__(title, parent, width=width, height=210)
         self.setModal(True)
         lay = self.content
@@ -317,13 +321,18 @@ class MessageDialog(SiliconDialog):
         lay.addStretch()
         row = QHBoxLayout()
         row.addStretch()
+        if cancel_text:
+            # 次要动作在左、主操作在右（Windows 习惯）
+            bc = QPushButton(cancel_text)
+            bc.setCursor(Qt.PointingHandCursor)
+            bc.setMinimumHeight(32)
+            bc.setStyleSheet(_dialog_btn_qss(Gray1, outline=True))
+            bc.clicked.connect(self.reject)
+            row.addWidget(bc)
         b = QPushButton(ok_text)
         b.setCursor(Qt.PointingHandCursor)
         b.setMinimumHeight(32)
-        b.setStyleSheet(
-            f"QPushButton {{ background: {accent_hex()}; color: white; border: none;"
-            f" border-radius: 8px; padding: 6px 18px; font-size: {m}px; }}"
-            f"QPushButton:hover {{ background: {QColor(accent_hex()).lighter(115).name()}; }}")
+        b.setStyleSheet(_dialog_btn_qss(RedDark if danger else None))
         b.clicked.connect(self.accept)
         row.addWidget(b)
         lay.addLayout(row)
@@ -333,6 +342,20 @@ class MessageDialog(SiliconDialog):
             self.resize(max(int(width), self.width()), h)
         except Exception:
             pass
+
+
+def _dialog_btn_qss(bg=None, outline=False) -> str:
+    """对话框里的按钮：主操作 = 强调色（或危险色），次要 = 描边。"""
+    m = int(M.font_size)
+    if outline:
+        return (f"QPushButton {{ background: rgba(255,255,255,175); color: {Gray1.name()};"
+                f" border: 1px solid {QColor(Gray1.name()).lighter(150).name()};"
+                f" border-radius: 8px; padding: 6px 18px; font-size: {m}px; }}"
+                f"QPushButton:hover {{ background: rgba(255,255,255,235); }}")
+    base = bg.name() if bg is not None else accent_hex()
+    return (f"QPushButton {{ background: {base}; color: white; border: none;"
+            f" border-radius: 8px; padding: 6px 18px; font-size: {m}px; }}"
+            f"QPushButton:hover {{ background: {QColor(base).lighter(115).name()}; }}")
 
 
 def message(parent, title, text, detail="", ok_text="知道了"):
@@ -345,6 +368,24 @@ def message(parent, title, text, detail="", ok_text="知道了"):
         from PyQt5.QtWidgets import QMessageBox
         QMessageBox.information(parent, title, text + (("\n\n" + detail) if detail else ""))
         return 0
+
+
+def confirm(parent, title, text, detail="", ok_text="确定", cancel_text="取消",
+            danger=False) -> bool:
+    """二选一确认框（替掉 QMessageBox.question）：点「确定」返回 True。
+
+    danger=True 时确认键是红的 —— 删除 / 清空这类不可恢复的操作必须一眼看出危险。
+    任何异常都回退系统弹窗，绝不让"确认框打不开"卡住流程。
+    """
+    try:
+        d = MessageDialog(parent, title, text, detail, ok_text,
+                          cancel_text=cancel_text, danger=danger)
+        return d.exec_() == QDialog.Accepted
+    except Exception as e:
+        print(f"[SiliconUI] ⚠ 确认框失败，回退系统弹窗: {e}")
+        from PyQt5.QtWidgets import QMessageBox
+        r = QMessageBox.question(parent, title, text + (("\n\n" + detail) if detail else ""))
+        return r == QMessageBox.Yes
 
 
 class _DlgBack(QWidget):

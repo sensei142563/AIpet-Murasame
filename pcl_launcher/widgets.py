@@ -11,7 +11,7 @@ from PyQt5.QtGui import QColor, QFont, QPainter, QPixmap
 from PyQt5.QtWidgets import (
     QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QSpinBox, QScrollArea,
     QLineEdit, QSlider, QDoubleSpinBox, QComboBox, QTextEdit, QAbstractButton,
-    QDialog, QPlainTextEdit, QMessageBox, QFileDialog, QFrame
+    QDialog, QPlainTextEdit, QFileDialog, QFrame
 )
 
 from .colors import *
@@ -23,6 +23,36 @@ from .silicon_ui import card_qss, section_title
 from .portrait_studio import PortraitStudio  # noqa: F401
 
 S = 1.0
+
+
+# ==================== 页面对话框（替掉 QMessageBox）====================
+# 为什么不用 QMessageBox（用户反馈"弹窗看不清字"）：它按平台风格自绘，正文颜色/字号
+# 不受启动器主题控制 → 深色主题下发灰；里面的 emoji 在部分机器上会渲染成方块。
+# 崩溃类（带 traceback 的 critical）保持原生：那种场合要的是原始信息，不是好看。
+
+def page_msg(parent, title, text, detail=""):
+    """页面里的提示框（信息 / 轻量失败），主题一致、可复制细节"""
+    try:
+        from .silicon_dialog import message as _m
+        win = parent.window() if parent is not None else None
+        _m(win, title, text, detail)
+    except Exception as e:
+        print(f"[PCL] ⚠ 消息框失败: {e}")
+
+
+def page_confirm(parent, title, text, detail="", ok_text="确定", danger=False) -> bool:
+    """页面里的确认框（替代 QMessageBox.question）。点「确定」返回 True。
+
+    danger=True → 确认键变红（删除 / 清空这类不可恢复的动作必须一眼看出危险）。
+    任何异常都返回 False：宁可什么都不做，也不要在没确认的情况下执行破坏性操作。
+    """
+    try:
+        from .silicon_dialog import confirm as _c
+        win = parent.window() if parent is not None else None
+        return bool(_c(win, title, text, detail, ok_text=ok_text, danger=danger))
+    except Exception as e:
+        print(f"[PCL] ⚠ 确认框失败: {e}")
+        return False
 
 
 class BoolSwitch(QAbstractButton):
@@ -947,13 +977,13 @@ class PCLSettingsPanel(QWidget):
         folder = self._changelog_dir()
         newest = self._latest_log_file(folder)
         if not newest:
-            QMessageBox.information(self, "更新日志", f"更新日志文件夹为空：\n{folder}")
+            page_msg(self, "更新日志", f"更新日志文件夹为空：\n{folder}")
             return
         try:
             with open(newest, "r", encoding="utf-8") as f:
                 text = f.read()
         except Exception as e:
-            QMessageBox.warning(self, "读取失败", str(e))
+            page_msg(self, "读取失败", str(e))
             return
         dlg = QDialog(self)
         dlg.setWindowTitle(f"📜 更新日志 — {os.path.basename(newest)}")
@@ -983,13 +1013,13 @@ class PCLSettingsPanel(QWidget):
         folder = self._changelog_dir()
         newest = self._latest_log_file(folder)
         if not newest:
-            QMessageBox.information(self, "导出日志", f"更新日志文件夹为空：\n{folder}")
+            page_msg(self, "导出日志", f"更新日志文件夹为空：\n{folder}")
             return
         try:
             with open(newest, "r", encoding="utf-8") as f:
                 text = f.read()
         except Exception as e:
-            QMessageBox.warning(self, "读取失败", str(e))
+            page_msg(self, "读取失败", str(e))
             return
         path, _ = QFileDialog.getSaveFileName(self, "导出更新日志",
                                               os.path.join(folder, os.path.basename(newest)),
@@ -999,9 +1029,9 @@ class PCLSettingsPanel(QWidget):
         try:
             with open(path, "w", encoding="utf-8") as f:
                 f.write(text)
-            QMessageBox.information(self, "导出成功", f"已导出到：\n{path}")
+            page_msg(self, "导出成功", f"已导出到：\n{path}")
         except Exception as e:
-            QMessageBox.warning(self, "导出失败", str(e))
+            page_msg(self, "导出失败", str(e))
 
     def _open_changelog_dir(self):
         folder = self._changelog_dir()
@@ -1009,7 +1039,7 @@ class PCLSettingsPanel(QWidget):
             os.makedirs(folder, exist_ok=True)
             os.startfile(folder)  # noqa
         except Exception as e:
-            QMessageBox.warning(self, "打开失败", str(e))
+            page_msg(self, "打开失败", str(e))
 
 
 # ==================== 人脸管理面板 ====================
@@ -1585,9 +1615,11 @@ class PCLMemoryManager(QScrollArea):
             print(f"[PCL] 清除记忆失败: {e}")
 
     def _clear_pet_all(self):
-        from PyQt5.QtWidgets import QMessageBox
         pet = self._current_pet() or "当前角色"
-        if QMessageBox.question(self, "确认", f"确定清空「{pet}」的全部记忆吗？（不可恢复）") != QMessageBox.Yes:
+        if not page_confirm(self, "清空全部记忆",
+                            f"确定清空「{pet}」的全部记忆吗？",
+                            "聊天记录会从对应记忆文件里移除，无法恢复。",
+                            ok_text="清空", danger=True):
             return
         for rel, path in self._list_memory_files():
             self._clear_file(path, rel)
@@ -1633,9 +1665,10 @@ class PCLMemoryManager(QScrollArea):
         self._off_label.setText(f"上次退出时间：{last}\n已处理消息 ID 数：{cnt}")
 
     def _clear_processed_ids(self):
-        from PyQt5.QtWidgets import QMessageBox
         from tool.paths import data_path
-        if QMessageBox.question(self, "确认", "清空已处理消息 ID？（下次启动会重新补拉离线消息）") != QMessageBox.Yes:
+        if not page_confirm(self, "清空已处理消息 ID",
+                            "清空后，下次启动会重新补拉离线消息（旧消息可能被再处理一遍）。",
+                            ok_text="清空", danger=True):
             return
         try:
             pidf = data_path("data", "qq_processed_ids.json")
@@ -1909,9 +1942,8 @@ class PCLPetManager(QScrollArea):
             self._refresh()
         except Exception as e:
             import traceback
-            from PyQt5.QtWidgets import QMessageBox
             print(f"[PCL] ⚠ 打开桌宠设置失败: {e}\n{traceback.format_exc()[:500]}")
-            QMessageBox.warning(self, "桌宠设置", f"打开设置失败：{e}")
+            page_msg(self, "桌宠设置", f"打开设置失败：{e}")
 
     def _open_portrait_studio(self, pet_id, pet_name=""):
         """打开立绘工坊（按卡片角色编辑自己的立绘素材）"""
@@ -2031,8 +2063,7 @@ class PCLPetManager(QScrollArea):
             print(f"[PCL] 当前活动桌宠: {get_active_pet_id()}")
         else:
             try:
-                from PyQt5.QtWidgets import QMessageBox
-                QMessageBox.warning(self, "设为活动", "设置失败：角色不存在或配置不可写")
+                page_msg(self, "设为活动", "设置失败：角色不存在或配置不可写")
             except Exception:
                 pass
 
@@ -2060,7 +2091,7 @@ class PCLPetManager(QScrollArea):
             import traceback
             print(f"[PCL] ⚠ 打开桌宠向导失败: {e}\n{traceback.format_exc()[:500]}")
             # 兜底：仍然允许用最简方式创建
-        from PyQt5.QtWidgets import QInputDialog, QMessageBox
+        from PyQt5.QtWidgets import QInputDialog
         pet_id, ok = QInputDialog.getText(
             self, "新建桌宠", "请输入桌宠 ID（英文/数字，将作为文件夹名）：")
         if not ok or not pet_id.strip():
@@ -2069,12 +2100,12 @@ class PCLPetManager(QScrollArea):
         # 校验：仅英文数字下划线
         import re
         if not re.fullmatch(r"[A-Za-z0-9_\-]+", pet_id):
-            QMessageBox.warning(self, "无效 ID", "桌宠 ID 只能包含英文字母、数字、下划线或连字符。")
+            page_msg(self, "无效 ID", "桌宠 ID 只能包含英文字母、数字、下划线或连字符。")
             return
 
         from pets.pet_registry import PETS_DIR, get_pet_ids
         if pet_id in get_pet_ids():
-            QMessageBox.warning(self, "ID 已存在", f"桌宠 ID「{pet_id}」已存在。")
+            page_msg(self, "ID 已存在", f"桌宠 ID「{pet_id}」已存在。")
             return
 
         name, ok2 = QInputDialog.getText(self, "桌宠名称", "请输入显示名称（如：丛雨）：")
@@ -2089,7 +2120,7 @@ class PCLPetManager(QScrollArea):
             if os.path.isdir(tpl):
                 shutil.copytree(tpl, dst, dirs_exist_ok=True)
         except Exception as e:
-            QMessageBox.warning(self, "创建失败", f"创建目录失败: {e}")
+            page_msg(self, "创建失败", f"创建目录失败: {e}")
             return
 
         # 写入最小 pet.json
@@ -2142,21 +2173,18 @@ class PCLPetManager(QScrollArea):
         print(f"[PCL] 已创建新桌宠: {pet_id}")
 
     def _delete_pet(self, pet_id, name):
-        from PyQt5.QtWidgets import QMessageBox
         from pets.pet_registry import PETS_DIR, get_active_pet_id
         # 丛雨保护：默认桌宠不可删除（用户明确要求）
         if pet_id == "murasame":
-            QMessageBox.warning(self, "无法删除", "「丛雨」是默认桌宠，不允许删除。")
+            page_msg(self, "无法删除", "「丛雨」是默认桌宠，不允许删除。")
             return
         if pet_id == get_active_pet_id():
-            QMessageBox.warning(self, "无法删除", "不能删除当前活动的桌宠，请先切换到其他桌宠。")
+            page_msg(self, "无法删除", "不能删除当前活动的桌宠，请先切换到其他桌宠。")
             return
-        ret = QMessageBox.question(
-            self, "确认删除",
-            f"确定删除桌宠「{name}」({pet_id}) 吗？\n其目录（含人设/立绘/记忆）将被永久删除。",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
-        )
-        if ret != QMessageBox.Yes:
+        if not page_confirm(self, "确认删除",
+                            f"确定删除桌宠「{name}」({pet_id}) 吗？",
+                            "它的目录（人设 / 立绘 / 记忆）会被永久删除，无法恢复。",
+                            ok_text="删除", danger=True):
             return
         import shutil
         d = os.path.join(PETS_DIR, pet_id)
@@ -2164,7 +2192,7 @@ class PCLPetManager(QScrollArea):
             shutil.rmtree(d, ignore_errors=True)
             print(f"[PCL] 已删除桌宠: {pet_id}")
         except Exception as e:
-            QMessageBox.warning(self, "删除失败", f"删除失败: {e}")
+            page_msg(self, "删除失败", f"删除失败: {e}")
         # 从 pet_list.json 移除条目
         from pets.pet_registry import unregister_pet
         unregister_pet(pet_id)
