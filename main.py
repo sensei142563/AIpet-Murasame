@@ -221,7 +221,10 @@ if __name__ == "__main__":
 
     # ===== Live2D 初始化 =====
     live2d_widget = None
-    _LIVE2D_CONFIG_ENABLED = CONFIG.get("live2d_enabled", "true") == "true"
+    # 默认值必须是 "false"，并且要忽略大小写：文件顶部（_LIVE2D_AVAILABLE）、run.py、
+    # config.example.json、设置页面板全都是 false，这里写 "true" 会让"键缺失"时
+    # 桌面端以为该进 Live2D，而引擎其实根本没加载（显示与真实状态不一致）。
+    _LIVE2D_CONFIG_ENABLED = str(CONFIG.get("live2d_enabled", "false")).lower() == "true"
 
     # ===== Live2D 崩溃自学习 =====
     # 上次进 Live2D 留下的标记还在 → 说明那次进程被崩掉了（原生崩溃，抓不到异常）

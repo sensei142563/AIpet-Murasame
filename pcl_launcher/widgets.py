@@ -37,6 +37,7 @@ class BoolSwitch(QAbstractButton):
     """
 
     valueChanged = pyqtSignal(int)
+    self_labeled = True        # 状态自己画在开关上，外层设置名标签不追加 "：true"
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -75,6 +76,78 @@ class BoolSwitch(QAbstractButton):
         free = self.rect().adjusted(0, 0, -(knob + int(4 * S)), 0) if on \
             else self.rect().adjusted(knob + int(4 * S), 0, 0, 0)
         p.drawText(free, Qt.AlignCenter, "开" if on else "关")
+
+
+class ChoiceRow(QWidget):
+    """枚举项：一行并排的按钮，点哪个就是哪个 —— 替掉"用滑杆挑选项"。
+
+    为什么换：滑杆只有一根杆子，不读标签文字就看不出当前选的是哪一个（更看不出
+    一共有几个可选）；选项只有 2~4 个时，全部摆出来、点一下就选中，最快也最清楚。
+
+    和 BoolSwitch 一样，接口刻意做成 QSlider 的**子集**（value / setValue /
+    valueChanged），所以设置页的取 / 存 / 自动保存三处调用不用区分控件类型。
+    """
+
+    valueChanged = pyqtSignal(int)
+    self_labeled = True        # 选项名画在按钮上，外层设置名标签不追加 "：local"
+
+    def __init__(self, options, display=None, parent=None):
+        super().__init__(parent)
+        names = [str((display or {}).get(o, o)) for o in options]
+        self._value = 0
+        self._btns = []
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(int(6 * S))
+        for i, text in enumerate(names):
+            b = QPushButton(text)
+            b.setCheckable(True)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setMinimumWidth(int(46 * S))
+            b.clicked.connect(lambda _=False, idx=i: self.setValue(idx))
+            row.addWidget(b)
+            self._btns.append(b)
+        row.addStretch()
+        # 选中态就是"当前值"，不能被页面透明化压淡：颜色全部用 0–1 小数写
+        # （_make_transparent 只压实心色，小数形式原样保留），再打 keep_true_color 双保险。
+        _c3 = Color3
+        self.setProperty("keep_true_color", True)
+        self.setStyleSheet(f"""
+            QPushButton {{ background: rgba(255,255,255,0.06); color: {Gray2.name()};
+                border: 1px solid {Gray5.name()}; border-radius: {int(4*S)}px;
+                padding: {int(3*S)}px {int(10*S)}px; font-size: {int(13*S)}px; }}
+            QPushButton:hover {{ background: rgba(255,255,255,0.15); border-color: {_c3.name()}; }}
+            QPushButton:checked {{ background: rgba({_c3.red()},{_c3.green()},{_c3.blue()},0.88);
+                color: #ffffff; border-color: {_c3.name()}; font-weight: bold; }}
+        """)
+        self.setValue(0, emit=False)
+
+    # ── QSlider 兼容接口 ──
+    def value(self):
+        return self._value
+
+    def setValue(self, v, emit=True):
+        try:
+            v = int(v)
+        except Exception:
+            v = 0
+        v = max(0, min(v, len(self._btns) - 1))
+        changed = (v != self._value)
+        self._value = v
+        # 无条件同步：可勾选按钮自己会在点击时翻转，这里负责把它拨回正确状态
+        for i, b in enumerate(self._btns):
+            if b.isChecked() != (i == v):
+                b.setChecked(i == v)
+        if changed and emit:
+            self.valueChanged.emit(v)
+
+    def set_hint(self, text):
+        """提示语同时挂到整行和每个按钮上（悬停任意位置都能看到为什么）"""
+        if not text:
+            return
+        self.setToolTip(text)
+        for b in self._btns:
+            b.setToolTip(text)
 
 # ==================== 标题栏 ====================
 
@@ -165,7 +238,11 @@ class PCLSettingsPanel(QWidget):
 
         # ===== ② 对话模型与推理 =====
         self._section("对话模型与推理", "🤖")
-        self._add_slider("model_type", "对话模型", ["local", "deepseek", "qwen"], "qwen")
+        self._add_choice("model_type", "对话模型", ["local", "deepseek", "qwen"], "qwen",
+                         display={"local": "本地 Ollama", "deepseek": "DeepSeek", "qwen": "Qwen"},
+                         hint="日常短对话（桌宠气泡 / QQ / 微信）用哪家模型：\n"
+                              "本地 Ollama 不上云、不需要 API Key；\n"
+                              "DeepSeek / Qwen 走云端 API，要在上面填对应那把 Key。")
         self._add_model_combo(
             "short_model_name", "短文本模型名",
             ["qwen-plus", "qwen3.7-plus", "qwen3.7-flash", "qwen3.6-flash", "qwen3.5-flash",
@@ -173,7 +250,11 @@ class PCLSettingsPanel(QWidget):
             "qwen-plus",
             hint="可编辑：仅限 deepseek/qwen 两族模型名"
         )
-        self._add_slider("reasoning_level", "推理等级", ["off", "low", "high", "max"], "off")
+        self._add_choice("reasoning_level", "推理等级", ["off", "low", "high", "max"], "off",
+                         display={"off": "关", "low": "低", "high": "高", "max": "最高"},
+                         hint="思考档位越高越慢、越贵。只有带思考的模型认这个设置：\n"
+                              "DeepSeek 支持 低/高/最高 三档，Qwen3 系列只有 开/关。\n"
+                              "日常闲聊用「关」最快。")
         # 显卡加速：开=检测 NVIDIA/CUDA 并走 GPU；不是 N 卡或没装 CUDA 时 run.py 自动回退 CPU
         self._add_slider(
             "gpu_accel", "显卡加速（NVIDIA）", ["false", "true"], "true",
@@ -188,7 +269,9 @@ class PCLSettingsPanel(QWidget):
         self._add_slider("longtext_enabled", "长文本模式（含长语音）", ["false", "true"], "true",
                          hint="开启：长文本对话可用，并启动长语音（F5-TTS 中文）服务。\n"
                               "关闭：长文本对话关闭，长语音服务也不会启动（省显存）。")
-        self._add_slider("longtext_model", "长文本对话模型", ["qwen", "deepseek"], "deepseek")
+        self._add_choice("longtext_model", "长文本对话模型", ["qwen", "deepseek"], "deepseek",
+                         display={"qwen": "Qwen", "deepseek": "DeepSeek"},
+                         hint="长文本模式（写长文 / 长语音）用哪家模型 —— 用什么模型名就配哪家的 Key。")
         self._add_model_combo(
             "longtext_model_name", "长文本模型名",
             ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-chat",
@@ -211,7 +294,10 @@ class PCLSettingsPanel(QWidget):
                          hint="长语音（F5-TTS）是否用 NVIDIA 显卡合成。\n"
                               "开（默认）：检测到 CUDA 就用显卡，否则自动回退 CPU；\n"
                               "关：强制 CPU。")
-        self._add_slider("tts_type", "TTS 语音合成", ["local", "cloud"], "local")
+        self._add_choice("tts_type", "TTS 语音合成", ["local", "cloud"], "local",
+                         display={"local": "本地", "cloud": "云端"},
+                         hint="本地：用项目里的 GPT-SoVITS 整合包合成（离线、不花钱、吃显存）；\n"
+                              "云端：走在线语音接口（不需要整合包，需要联网）。")
         self._add_model_combo(
             "vision_model_name", "视觉识别模型名",
             ["qwen3-vl-plus", "qwen3-vl-flash", "deepseek-v4-flash-vision-exp",
@@ -230,7 +316,9 @@ class PCLSettingsPanel(QWidget):
         # 默认值必须和 config.example.json / run.py / main.py 一致（都是 "false"）：
         # 键缺失时面板若显示"开"，而 run.py 其实不会加载 Live2D → 开关显示不真实
         self._add_slider("live2d_enabled", "Live2D 模式", ["false", "true"], "false")
-        self._add_slider("portrait", "立绘类型", ["a", "b"], "b")
+        self._add_choice("portrait", "立绘类型", ["a", "b"], "b",
+                         display={"a": "立绘 A", "b": "立绘 B"},
+                         hint="默认显示哪一套立绘（a / b 由角色包提供，通常是两身不同衣服）。")
         # 立绘自动切换（a/b 两套之间的灵动切换）属于「Live2D 与立绘」这一区
         self._add_slider("portrait_auto_switch", "自动切换立绘类型（a / b 两套）",
                          ["false", "true"], "true",
@@ -586,31 +674,33 @@ class PCLSettingsPanel(QWidget):
         obj.wheelEvent = lambda e: e.ignore()
 
     def _add_slider(self, key, label, options, default, hint=None):
-        # 布尔项一律改用开关（见 _add_switch）：滑块表示 true/false 要拖一下才知道状态
+        """兼容老调用点：布尔项 → 开关，多选项 → 分段选择。
+
+        滑杆已经不再用于设置项：布尔项用滑杆看不出开/关，枚举项用滑杆看不出当前
+        选的是第几个、一共有几个可选。留着这个入口只是省得改二十多处调用点。
+        """
         if list(options) == ["false", "true"]:
             return self._add_switch(key, label, default, hint)
+        return self._add_choice(key, label, options, default, hint)
+
+    def _add_choice(self, key, label, options, default, hint=None, display=None):
+        """枚举项一行：设置名 + 一排按钮（点一下就选中，当前值一眼可见）。
+
+        display：值 → 人话（"qwen" → "Qwen"）；不传就直接显示原值。
+        """
         row = QHBoxLayout()
-        lbl = QLabel(f"{label}：{default}")
-        lbl.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(14*S)}px; min-width: 120px;")
+        lbl = QLabel(label)
+        lbl.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(14*S)}px; min-width: 160px;")
         row.addWidget(lbl)
-        slider = QSlider(Qt.Horizontal)
-        slider.setRange(0, len(options) - 1)
-        slider.setValue(options.index(default) if default in options else 0)
-        slider.setFixedWidth(int(140 * S))
-        slider.setStyleSheet(f"""
-            QSlider::groove:horizontal {{ height: 4px; background: {Gray5.name()}; border-radius: 2px; }}
-            QSlider::handle:horizontal {{ width: 12px; height: 12px; margin: -4px 0;
-                background: {Color3.name()}; border-radius: 6px; }}
-        """)
-        self._block_wheel(slider)
+        choose = ChoiceRow(options, display)
+        choose.setValue(options.index(default) if default in options else 0, emit=False)
         if hint:
-            slider.setToolTip(hint)
+            choose.set_hint(hint)
             lbl.setToolTip(hint)
-        slider.valueChanged.connect(lambda v: lbl.setText(f"{label}：{options[v]}"))
-        row.addWidget(slider)
+        row.addWidget(choose)
         row.addStretch()
         self._cur_layout.addLayout(row)
-        self._widgets[key] = (slider, options, lbl)
+        self._widgets[key] = (choose, list(options), lbl)
 
     def _add_switch(self, key, label, default, hint=None):
         """布尔项：一行「设置名 + 开关」，状态一眼可读。
@@ -759,8 +849,8 @@ class PCLSettingsPanel(QWidget):
             slider, options, lbl = entry
             idx = options.index(val) if val in options else 0
             slider.setValue(idx)
-            if isinstance(slider, BoolSwitch):
-                return          # 开关自己画「开/关」，标签上不再追加 "：true"
+            if getattr(slider, "self_labeled", False):
+                return          # 开关 / 分段选择自己显示当前值，标签上不再追加 "：xxx"
             lbl.setText(lbl.text().split("：")[0] + f"：{options[idx]}")
 
     def _get_text(self, key):

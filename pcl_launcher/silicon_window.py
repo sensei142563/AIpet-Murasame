@@ -1973,9 +1973,18 @@ def _make_transparent(root_widget, alpha: float = 0.35, recurse: bool = True):
                     c = QColor(col)
                 else:
                     parts = col[col.find("(") + 1:col.rfind(")")].split(",")
-                    nums = [int(float(x.strip())) for x in parts]
-                    if len(parts) == 4 and nums[3] <= 1:      # rgba 已带透明度 → 不动
+                    if len(parts) < 3:
                         return m.group(0)
+                    nums = [int(float(x.strip())) for x in parts]
+                    if len(parts) >= 4:
+                        # alpha 有两种合法写法：0–1 小数、0–255 整数（Qt 都吃）。
+                        # 早先只认小数写法，于是 rgba(...,120) 这种被判成"没带透明度"，
+                        # 又被压成页面透明度 —— 颜色白丢一层（配色色块变淡就是这个根因）。
+                        _raw_a = parts[3].strip()
+                        _is_frac = ("." in _raw_a) or nums[3] <= 1
+                        _a_now = nums[3] if _is_frac else nums[3] / 255.0
+                        if _a_now < 1.0:
+                            return m.group(0)                # 本来就半透明 → 不动
                     c = QColor(nums[0], nums[1], nums[2])
                 if not c.isValid():
                     return m.group(0)
