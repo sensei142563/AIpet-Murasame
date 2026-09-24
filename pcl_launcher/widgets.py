@@ -940,55 +940,21 @@ class PCLSettingsPanel(QWidget):
 
     # ---- 更新日志（查看 / 导出 / 打开目录）----
     def _changelog_dir(self) -> str:
-        return os.path.join(_app_base_dir(), "更新日志")
+        from . import changelog as _cl
+        return _cl.changelog_dir()
 
     def _latest_log_file(self, folder: str):
-        """返回文件夹中最新的 md/txt 日志路径；无则 None"""
-        try:
-            cands = [f for f in os.listdir(folder)
-                     if f.lower().endswith((".md", ".txt"))]
-        except Exception:
-            return None
-        if not cands:
-            return None
-        cands.sort(key=lambda f: os.path.getmtime(os.path.join(folder, f)), reverse=True)
-        return os.path.join(folder, cands[0])
+        """最新一篇日志的路径（交给 changelog 模块按**版本号**判断，无则 None）
+
+        ⚠ 以前这里按文件 mtime 取最新：同一批生成出来的日志 mtime 相同 → 谁"最新"看运气。
+        """
+        from . import changelog as _cl
+        return _cl.latest()
 
     def _view_changelog(self):
-        folder = self._changelog_dir()
-        newest = self._latest_log_file(folder)
-        if not newest:
-            page_msg(self, "更新日志", f"更新日志文件夹为空：\n{folder}")
-            return
-        try:
-            with open(newest, "r", encoding="utf-8") as f:
-                text = f.read()
-        except Exception as e:
-            page_msg(self, "读取失败", str(e))
-            return
-        dlg = QDialog(self)
-        dlg.setWindowTitle(f"📜 更新日志 — {os.path.basename(newest)}")
-        dlg.resize(int(780 * S), int(560 * S))
-        lay = QVBoxLayout(dlg)
-        lay.setContentsMargins(int(14 * S), int(12 * S), int(14 * S), int(12 * S))
-        lay.setSpacing(int(10 * S))
-        txt = QPlainTextEdit()
-        txt.setReadOnly(True)
-        txt.setPlainText(text)
-        txt.setStyleSheet(
-            f"QPlainTextEdit {{ background: #fbfbfb; color: #333333; border: 1px solid {Gray5.name()};"
-            f" border-radius: {int(6*S)}px; font-family: 'Microsoft YaHei'; font-size: {int(13*S)}px; }}")
-        lay.addWidget(txt)
-        btn_close = QPushButton("  关闭")
-        btn_close.setStyleSheet(f"""
-            QPushButton {{ background: {Color3.name()}; color: white; border: none;
-                padding: {int(7*S)}px {int(20*S)}px; font-size: {int(13*S)}px;
-                border-radius: {btn_radius()}px; font-family: 'Microsoft YaHei'; }}
-            QPushButton:hover {{ background: {Color4.name()}; }}
-        """)
-        btn_close.clicked.connect(dlg.accept)
-        lay.addWidget(btn_close, 0, Qt.AlignRight)
-        dlg.exec_()
+        """查看：用统一的主题化阅读窗口（可切版本），与首页快捷入口同一个实现"""
+        from . import changelog as _cl
+        _cl.show(self)
 
     def _export_changelog(self):
         folder = self._changelog_dir()

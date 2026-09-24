@@ -23,6 +23,16 @@ if base_dir not in sys.path:
 if os.getcwd().endswith('pcl_launcher'):
     os.chdir(os.path.dirname(os.getcwd()))
 
+# ⚠ 第二件事：确保用的是**项目自带解释器**（runtime\venv）——和 run.py 同一个道理：
+#   用系统 Python 跑这个入口会 ModuleNotFoundError: PyQt5（README 里让源码版用户敲的
+#   就是 `python run_launcher.py`，双击 .py 时更常见），而且缺 DLL 会直接崩。
+#   检测到不对就用 venv 重新拉起自己（本进程退出，AIPET_REEXEC 防循环；冻结版自动跳过）。
+try:
+    from tool.paths import ensure_project_python as _ensure_py
+    _ensure_py(__file__)
+except Exception as _e:
+    print(f"[AIpet] ⚠ 项目解释器检查不可用（继续用当前解释器）: {_e}")
+
 # 必须在导入 live2d 之前设置 DLL 路径（和 Live2d/live2d_ui.py 一样）
 import sys as _sys
 import os as _os

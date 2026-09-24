@@ -800,15 +800,17 @@ class HomePage(QWidget):
             self._msg("打开程序目录", "没能打开资源管理器。", f"{e}\n目录：{_app_base_dir()}")
 
     def open_changelog(self):
-        import glob
-        base = _app_base_dir()
-        files = sorted(glob.glob(os.path.join(base, "更新日志", "*")), reverse=True)
-        if not files:
-            self._msg("更新日志", "未找到更新日志文件。",
-                      "程序目录下的「更新日志」文件夹是空的 —— 打包/精简安装时可能没带上。")
-            return
+        """首页快捷入口「📜 更新日志」：用**主题化阅读窗口**打开（可切版本）。
+
+        ⚠ 以前这里是 `sorted(glob(...), reverse=True)[0]` + `os.startfile`：
+          ① 按文件名字典序取"最新" → `V1.8.0.md` 会排在 `V1.16.1.md` 前面，点开的是旧版本；
+          ② 把 .md 甩给系统默认程序，没装 markdown 阅读器时只会弹「打开方式」；
+          ③ 目录为空只会说「未找到更新日志文件」。
+        现在统一走 `pcl_launcher.changelog`（按版本号排序 + 主题窗口 + 目录空时回退读 README）。
+        """
         try:
-            os.startfile(files[0])           # noqa
+            from . import changelog as _cl
+            _cl.show(self)
         except Exception as e:
             self._msg("更新日志", "打开失败。", str(e))
 

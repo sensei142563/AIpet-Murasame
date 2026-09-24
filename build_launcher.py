@@ -229,6 +229,7 @@ if files is None:
         "安装时间同步守护【管理员】.bat", "修复系统时间同步【管理员】.bat",
         "biaoqingbao", "classes", "fgimages", "Live2d", "longtext",
         "pcl_launcher", "pets", "qq", "reference_voices", "tool", "场景素材",
+        "更新日志",   # 启动器「更新日志」读它（由 tool/gen_changelog.py 从 README 生成）
     ]
     files = []
     for item in top_items:
