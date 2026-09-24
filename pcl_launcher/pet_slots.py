@@ -41,7 +41,17 @@ def _avatar_path(pet_id: str, avatar: str) -> str:
         if avatar:
             p = os.path.join(PETS_DIR, pet_id, avatar)
             if os.path.exists(p):
-                return p
+                from PyQt5.QtGui import QPixmap
+                if not QPixmap(p).isNull():
+                    return p
+                print(f"[PCL] ⚠ 头像解码失败，用默认图标兜底: {p}")
+    except Exception:
+        pass
+    # 兜底图标：没写头像 / 文件缺失 / 解码失败都别让位置空着
+    try:
+        fb = os.path.join(os.path.dirname(os.path.abspath(__file__)), "resources", "icons", "avatar.png")
+        if os.path.exists(fb):
+            return fb
     except Exception:
         pass
     return ""

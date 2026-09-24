@@ -462,6 +462,112 @@ def stop_vision_service(shell):
         print(f"[NewUI]  关闭本地视觉服务失败: {e}")
 
 
+# ══════════ 模型余额 / 进程启动（合并保留：他版界面没有这些）══════════
+def _http_get_json(url: str, headers: dict, timeout: float = 8.0):
+    """GET 一个 JSON：先按系统代理，失败再直连（和桌宠那边的网络策略一致）。"""
+    import json as _json
+    import urllib.request as _ur
+    req = _ur.Request(url, headers=headers)
+    last = None
+    for use_proxy in (True, False):
+        try:
+            if use_proxy:
+                op = _ur.build_opener()
+            else:
+                op = _ur.build_opener(_ur.ProxyHandler({}))   # 直连
+            with op.open(req, timeout=timeout) as r:
+                return _json.loads(r.read().decode("utf-8", "ignore"))
+        except Exception as e:
+            last = e
+    raise last if last else RuntimeError("请求失败")
+
+
+def _balance_for(provider: str, key: str) -> str:
+    if provider == "local":
+        return "本地部署，无费用"
+    if provider == "deepseek":
+        return _deepseek_balance(key)
+    if provider == "qwen":
+        return _qwen_balance(key)
+    return "—"
+
+
+def _deepseek_balance(api_key: str) -> str:
+    """查 DeepSeek 余额 → '¥12.34'；查不到给一句能看懂的话。"""
+    if not api_key:
+        return "未填 API Key"
+    try:
+        d = _http_get_json("https://api.deepseek.com/user/balance",
+                           {"Authorization": "Bearer " + api_key, "Accept": "application/json"})
+        infos = d.get("balance_infos") or []
+        if infos:
+            it = infos[0]
+            sym = {"CNY": "¥", "USD": "$"}.get(str(it.get("currency") or "CNY").upper(), "")
+            return f"{sym}{it.get('total_balance')}"
+        if d.get("is_available") is False:
+            return "余额不足"
+        return "—"
+    except Exception as e:
+        print(f"[NewUI]  DeepSeek 余额查询失败: {type(e).__name__}: {e}")
+        return "查询失败（网络？）"
+
+
+def _qwen_balance(api_key: str) -> str:
+    """通义千问（阿里云 DashScope）没有公开的余额接口 → 说明一句，引导去控制台看。"""
+    return "阿里云无余额接口，控制台查看" if api_key else "未填 API Key"
+
+
+def _models_info() -> dict:
+    """总览页「模型状态」用：语言模型 / 视觉模型 各自的名字、来源、要不要查余额。
+
+    - 本地部署的（Ollama / 本地视觉模型）→ 只显示"本地部署"，不花钱
+    - 云端的 → 显示模型名 + 去服务商查余额
+    """
+    cfg = _vision_cfg()          # 就是读 config.json（下面这些键都在里面）
+    out = {}
+    # ── 语言模型（对话）──
+    mt = str(cfg.get("model_type") or "deepseek").strip().lower()
+    _lt = str(cfg.get("longtext_enabled", "true")).strip().lower() in ("true", "1", "yes", "on")
+    name = str((cfg.get("longtext_model_name") if _lt else cfg.get("short_model_name"))
+               or cfg.get("short_model_name") or cfg.get("longtext_model_name") or "未配置").strip()
+    key = str(((cfg.get("APIKEY") or {}).get(mt)) or "").strip()
+    if mt == "local":
+        out["lang"] = {"model": f"{name}（本地部署）", "balance": "本地部署，无费用", "provider": "local"}
+    else:
+        prov = {"deepseek": "DeepSeek", "qwen": "通义千问"}.get(mt, mt)
+        out["lang"] = {"model": f"{name}（{prov} 云端）", "balance": None,
+                       "provider": mt, "key": key}
+    # ── 视觉模型（屏幕/摄像头识别）──
+    if str(cfg.get("vision_source") or "local").strip().lower() == "local":
+        d = str(cfg.get("vision_local_model_dir") or "").strip()
+        base = os.path.basename(d.rstrip("\\/")) if d else ""
+        out["vision"] = {"model": f"{base or '本地视觉模型'}（本地部署）",
+                         "balance": "本地部署，无费用", "provider": "local"}
+    else:
+        vn = str(cfg.get("vision_model_name") or "未配置").strip()
+        vkey = str(((cfg.get("APIKEY") or {}).get("qwen")) or "").strip()
+        out["vision"] = {"model": f"{vn}（云端）", "balance": None,
+                         "provider": "qwen", "key": vkey}
+    return out
+
+
+def _quiet_mode() -> bool:
+    """纯净模式（设置 → 其他配置）：启动桌宠 / QQ / 微信时不弹终端窗口"""
+    try:
+        import json as _j
+        with open(os.path.join(_app_base_dir(), "config.json"), encoding="utf-8") as f:
+            return str(_j.load(f).get("quiet_mode", "false")).strip().lower() in ("true", "1", "yes", "on")
+    except Exception:
+        return False
+
+
+def _spawn_flags() -> int:
+    """子进程窗口标志：纯净模式 = CREATE_NO_WINDOW，否则开新控制台（方便看日志）"""
+    if os.name != "nt":
+        return 0
+    return getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if _quiet_mode()         else subprocess.CREATE_NEW_CONSOLE
+
+
 def _accent_btn_qss(accent: str, danger: bool = False) -> str:
     c1 = "#e03030" if danger else accent
     c2 = "#f06060" if danger else QColor(accent).lighter(125).name()
@@ -573,6 +679,7 @@ class HomePage(QWidget):
     _napcat_progress = pyqtSignal(str)             # 启动 NapCat 过程中的状态行文案
     _napcat_done = pyqtSignal(bool, str, str)      # (就绪?, 说明, 后续动作)
     _switch_done = pyqtSignal(str)                 # 换角色完成（角色显示名）
+    _models_probe_signal = pyqtSignal()             # 模型余额查询结果回到界面线程
 
     def __init__(self, shell, parent=None):
         super().__init__(parent)
@@ -620,7 +727,26 @@ class HomePage(QWidget):
         self.btn_wx.setStyleSheet(_ghost_btn_qss())
         self.btn_wx.setMinimumHeight(46)
         self.btn_wx.clicked.connect(self.start_wechat)
-        for b in (self.btn_pet, self.btn_qq, self.btn_wx):
+        # ── 预载服务（合并保留：他版界面里没有这两个按钮）──────────────────
+        # 预载语音服务：提前把 TTS 启动 + 预热好，之后再启动桌宠，第一句话不用等冷启动
+        self.btn_preload = QPushButton("  预载语音服务")
+        self.btn_preload.setStyleSheet(_ghost_btn_qss())
+        self.btn_preload.setMinimumHeight(46)
+        self.btn_preload.setToolTip(
+            "提前启动并预热语音服务（GPT-SoVITS）：\n"
+            "首次加载模型要 1~2 分钟，预热后桌宠开口几乎不用等。\n"
+            "预载完成后按钮显示「预载完成」。")
+        self.btn_preload.clicked.connect(self.preload_tts)
+        # 预载视觉服务：本地视觉模型加载 + 预热约 30 秒
+        self.btn_vpreload = QPushButton("  预载视觉服务")
+        self.btn_vpreload.setStyleSheet(_ghost_btn_qss())
+        self.btn_vpreload.setMinimumHeight(46)
+        self.btn_vpreload.setToolTip(
+            "提前启动本地视觉服务（屏幕/摄像头识别用的那个模型）：\n"
+            "加载 + 预热约 30 秒，预载后桌宠第一屏识别就不用等。\n"
+            "不预载也没关系：启动桌宠时会自动拉起。")
+        self.btn_vpreload.clicked.connect(self.preload_vision)
+        for b in (self.btn_pet, self.btn_qq, self.btn_wx, self.btn_preload, self.btn_vpreload):
             row.addWidget(b)
         row.addStretch()
         cl.addLayout(row)
@@ -707,6 +833,49 @@ class HomePage(QWidget):
         else:
             print("[NewUI] 未包含剧情模块 → 隐藏「剧情模式」入口")
         outer.addWidget(tools)
+
+        # ── 模型状态卡片：语言模型 / 视觉模型 各一行（模型名 + 来源 + 余额）──
+        models = Card()
+        ml = QVBoxLayout(models)
+        ml.setContentsMargins(18, 14, 18, 16)
+        ml.setSpacing(8)
+        ml.addWidget(silicon_ui.section_title("模型状态", accent))
+        self.model_rows = {}
+        for _k, _icon, _title, _hint in (
+                ("lang", "", "语言模型", "对话用的模型"),
+                ("vision", "", "视觉模型", "屏幕/摄像头识别用的模型")):
+            row = QHBoxLayout()
+            row.setSpacing(8)
+            tag = QLabel(f"{(_icon + ' ') if _icon else ''}{_title}")
+            tag.setStyleSheet(f"color: {Gray2.name()}; font-size: 12px;"
+                              f" font-family: '{silicon_ui.M.font}';")
+            tag.setFixedWidth(int(78 * S))
+            tag.setToolTip(_hint)
+            name_lbl = QLabel("检测中…")
+            name_lbl.setStyleSheet(f"color: {Color1.name()}; font-size: 13px;"
+                                   f" font-family: '{silicon_ui.M.font}';")
+            bal_lbl = QLabel("")
+            bal_lbl.setStyleSheet(f"color: {Gray2.name()}; font-size: 13px;"
+                                  f" font-family: '{silicon_ui.M.font}';")
+            bal_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            row.addWidget(tag)
+            row.addWidget(name_lbl, 1)
+            row.addWidget(bal_lbl)
+            ml.addLayout(row)
+            self.model_rows[_k] = (name_lbl, bal_lbl)
+        # 卡片位置放到最后（快捷工具下面）——见文件末尾的 addWidget
+        # 余额要联网查，不能跟着 6 秒的状态刷新跑 → 单独的定时器（60 秒一次，后台线程里查）
+        self._models_probe_signal.connect(self._apply_models)
+        try:
+            from PyQt5.QtCore import QTimer as _QT
+            self._models_timer = _QT(self)
+            self._models_timer.setInterval(60000)
+            self._models_timer.timeout.connect(self.refresh_models)
+            self._models_timer.start()
+            _QT.singleShot(1200, self.refresh_models)
+        except Exception:
+            pass
+
         outer.addStretch()
 
         self._probe_signal.connect(self._apply_status)
@@ -763,6 +932,209 @@ class HomePage(QWidget):
                 self._open_story()
         except Exception:
             self._open_story()
+
+    def refresh_models(self):
+        """后台线程查两个模型的余额（联网查询绝不能放界面线程）"""
+        if getattr(self, "_models_busy", False):
+            return
+        self._models_busy = True
+
+        def _work():
+            res = {}
+            try:
+                info = _models_info()
+                for k in ("lang", "vision"):
+                    it = info.get(k) or {}
+                    res[k] = (it.get("model") or "未配置",
+                              _balance_for(str(it.get("provider") or ""), str(it.get("key") or "")))
+            except Exception as e:
+                print(f"[NewUI]  模型状态查询失败: {e}")
+                res = {"lang": ("查询失败", "—"), "vision": ("查询失败", "—")}
+            self._models_result = res
+            try:
+                self._models_probe_signal.emit()
+            except Exception:
+                pass
+
+        import threading
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _apply_models(self):
+        self._models_busy = False
+        res = getattr(self, "_models_result", None) or {}
+        for k, widgets in (getattr(self, "model_rows", None) or {}).items():
+            name_lbl, bal_lbl = widgets
+            model, bal = res.get(k, ("未配置", "—"))
+            try:
+                name_lbl.setText(str(model))
+                bal_lbl.setText(str(bal))
+                # 余额少的标红提醒（本地部署/查询失败保持灰色）
+                warn = False
+                s = str(bal)
+                if s.startswith(("¥", "$")):
+                    try:
+                        warn = float(s[1:]) < 5.0
+                    except Exception:
+                        warn = False
+                bal_lbl.setStyleSheet(
+                    f"color: {'#e0603a' if warn else '#3d9e6a' if s and not warn and '无费用' in s else Gray2.name()};"
+                    f" font-size: 13px; font-family: '{silicon_ui.M.font}';")
+            except Exception as e:
+                print(f"[NewUI]  模型状态显示失败: {e}")
+
+    def preload_tts(self):
+        """预载语音服务：启动 + 预热，过程直接显示在按钮上。
+
+        线程只负责读子进程输出（纯数据），界面更新一律走主线程的 QTimer 轮询 ——
+        Qt 不允许在别的线程里动控件（跨线程 QTimer.singleShot 不会生效，按钮会一直卡在"预载中"）。
+        """
+        import threading
+        base = _app_base_dir()
+        py = _find_python(base)
+        script = os.path.join(base, "tool", "tts_service.py")
+        if not py or not os.path.exists(script):
+            QMessageBox.information(self, "预载语音服务", "未找到语音服务脚本（tool/tts_service.py）")
+            return
+        self.btn_preload.setEnabled(False)
+        self.btn_preload.setText("  预载中…")
+        self._preload_steps = []
+        try:
+            # 输出自己读（按钮上显示进度）→ 一律不弹控制台窗口
+            self.shell._tts_proc = subprocess.Popen(
+                [py, script, "preload"], cwd=base,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, encoding="utf-8", errors="replace",
+                creationflags=(subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0))
+        except Exception as e:
+            self._preload_done(False, str(e))
+            return
+
+        def _reader():
+            try:
+                for line in iter(self.shell._tts_proc.stdout.readline, ""):
+                    line = (line or "").strip()
+                    if line:
+                        self._preload_steps.append(line)      # 只放数据，不碰界面
+            except Exception:
+                pass
+
+        threading.Thread(target=_reader, daemon=True).start()
+
+        # 主线程轮询：更新按钮文字 / 结束时收尾
+        self._preload_timer = QTimer(self)
+        self._preload_timer.setInterval(500)
+
+        def _tick():
+            proc = getattr(self.shell, "_tts_proc", None)
+            if self._preload_steps:
+                msg = self._preload_steps[-1].replace("[预载]", "").strip()
+                if not self.btn_preload.text().endswith(msg[:14] + "…"):
+                    self.btn_preload.setText(f"  {msg[:14]}…")
+            if proc is None or proc.poll() is not None:
+                self._preload_timer.stop()
+                self._preload_done(proc is not None and proc.returncode == 0, "")
+
+        self._preload_timer.timeout.connect(_tick)
+        self._preload_timer.start()
+
+    def preload_vision(self):
+        """预载本地视觉服务：把服务起起来并等模型加载好（约 30 秒，进度显示在按钮上）。
+
+        预载只是"提前热身"：不点也会在启动桌宠时自动拉起。
+        """
+        import time as _t
+        cfg = _vision_cfg()
+        if str(cfg.get("vision_source") or "local").strip().lower() != "local":
+            QMessageBox.information(
+                self, "预载视觉服务",
+                "当前「识别来源」是云端 API，不需要本地视觉服务。\n\n"
+                "想用本地模型：设置 → 视觉模型 → 识别来源改成「本地视觉模型」。")
+            return
+        base = _app_base_dir()
+        if not os.path.isfile(os.path.join(base, "tool", "vision_service.py")):
+            QMessageBox.information(self, "预载视觉服务",
+                                    "未找到 tool/vision_service.py（安装包可能不完整）")
+            return
+        port = _vision_port(cfg)
+        self.btn_vpreload.setEnabled(False)
+        self.btn_vpreload.setText("  预载中…")
+        self._vpre_t0 = _t.time()
+        self._vpre_ready = False
+        if not _vision_alive(port):
+            try:
+                ensure_vision_service(self.shell)
+            except Exception as e:
+                print(f"[NewUI]  预载视觉服务失败: {e}")
+        # 主线程轮询状态（探测都是本机几毫秒的请求，不会卡界面）
+        self._vpre_timer = QTimer(self)
+        self._vpre_timer.setInterval(2000)
+
+        def _tick():
+            if not _vision_alive(port):
+                if _t.time() - self._vpre_t0 > 180:
+                    self._vpre_timer.stop()
+                    self._vpre_done(False)
+                return
+            h = self._vision_health(port)
+            if h.get("ok"):
+                self._vpre_ready = True
+                self._vpre_timer.stop()
+                self._vpre_done(True)
+            elif h.get("error"):
+                self._vpre_timer.stop()
+                self._vpre_done(False, str(h.get("error"))[:60])
+            else:
+                el = int(_t.time() - self._vpre_t0)
+                self.btn_vpreload.setText(f"  模型加载中… {el}s")
+
+        self._vpre_timer.timeout.connect(_tick)
+        self._vpre_timer.start()
+        _tick()
+
+    def _vision_health(self, port: int) -> dict:
+        """问一下本地视觉服务：起来了没 / 模型加载完了没（出错返回空字典）"""
+        try:
+            import json as _json
+            import urllib.request as _ur
+            op = _ur.build_opener(_ur.ProxyHandler({}))          # 本机请求别走代理
+            with op.open(f"http://127.0.0.1:{int(port)}/", timeout=1.5) as r:
+                return _json.loads(r.read().decode("utf-8", "ignore")) or {}
+        except Exception:
+            return {}
+
+    def _vpre_done(self, ok, err=""):
+        self.btn_vpreload.setEnabled(True)
+        if ok:
+            self.btn_vpreload.setText("  预载完成")
+            QTimer.singleShot(10000, lambda: self.btn_vpreload.setText("  预载视觉服务"))
+        else:
+            self.btn_vpreload.setText("  预载失败（可重试）")
+            QTimer.singleShot(12000, lambda: self.btn_vpreload.setText("  预载视觉服务"))
+            if err:
+                print(f"[NewUI]  视觉预载失败: {err}")
+        try:
+            self.refresh_status()
+        except Exception:
+            pass
+
+    # ── 工具 ──
+
+    def _preload_done(self, ok, err=""):
+        self.btn_preload.setEnabled(True)
+        if ok:
+            self.btn_preload.setText("  预载完成")
+            QTimer.singleShot(10000, lambda: self.btn_preload.setText("  预载语音服务"))
+        else:
+            self.btn_preload.setText("  预载失败（可重试）")
+            QTimer.singleShot(10000, lambda: self.btn_preload.setText("  预载语音服务"))
+            if err:
+                print(f"[NewUI]  语音预载失败: {err}")
+        try:
+            self.refresh_status()
+        except Exception:
+            pass
+
+    # ── 本地视觉服务预载 ──
 
     def refresh_status(self):
         """后台线程探测运行状态（绝不在 UI 线程做网络探测 → 不卡界面）"""
@@ -1013,7 +1385,7 @@ class HomePage(QWidget):
             print(f"[NewUI]  启动本地视觉服务失败（不影响桌宠）: {e}")
         try:
             self.shell._pet_proc = subprocess.Popen([py, os.path.join(base, "run.py")], cwd=base,
-                                                    creationflags=subprocess.CREATE_NEW_CONSOLE)
+                                                    creationflags=_spawn_flags())
             print("[NewUI] 已启动桌宠（run.py）")
             return True
         except Exception as e:

@@ -172,6 +172,7 @@ class ChoiceRow(QWidget):
 class PCLSettingsPanel(QWidget):
     size_changed = pyqtSignal(int, int)
     color_changed = pyqtSignal(str)
+    _vision_probe_signal = pyqtSignal()      # 本地视觉服务探测结果回到界面线程用
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -278,6 +279,33 @@ class PCLSettingsPanel(QWidget):
         #          "只影响本地模型与本地语音；云端对话/QQ/微信不受影响。")
 
         # ===== ③ 长文本输出 =====
+        # ===== 视觉模型（屏幕 / 摄像头识别）=====  ← 合并保留：本地视觉的配置与状态
+        self._section("视觉模型（屏幕 / 摄像头识别）", "👁")
+        self._add_choice("vision_source", "识别来源", ["local", "cloud"], "local",
+                         display={"local": "本地视觉模型（本机显卡）", "cloud": "云端 API"},
+                         hint="本地=用本机跑的视觉模型（不花钱、不联网，需要本地视觉服务在跑）；"
+                              "云端=走对话模型的 API。")
+        # 本地视觉服务在线/离线（跟着状态每 4 秒刷一次，探测在后台线程做）
+        self._vision_status = QLabel("   正在检测本地视觉服务…")
+        self._vision_status.setWordWrap(True)
+        self._vision_status.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(11*S)}px;"
+                                          f"padding: 2px 0 2px {int(6*S)}px;")
+        self._cur_layout.addWidget(self._vision_status)
+        self._vision_probe_signal.connect(self._apply_vision_status)
+        try:
+            from PyQt5.QtCore import QTimer as _QT
+            self._vision_timer = _QT(self)
+            self._vision_timer.setInterval(4000)
+            self._vision_timer.timeout.connect(self._refresh_vision_status)
+            self._vision_timer.start()
+            self._refresh_vision_status()
+        except Exception:
+            pass
+        self._add_text_input("vision_service_url", "本地视觉服务地址",
+                             "http://127.0.0.1:28460/describe")
+        self._add_text_input("vision_local_model_dir", "本地视觉模型目录",
+                             r"D:\下载\AI桌宠\vision\Qwen2-VL-2B-Instruct")
+
         self._section("长文本输出", "📝")
         # 长文本总开关同时门禁长语音服务（F5-TTS）—— 长语音不再单独设开关
         self._add_slider("longtext_enabled", "长文本模式（含长语音）", ["false", "true"], "true",
@@ -424,6 +452,10 @@ class PCLSettingsPanel(QWidget):
 
         # ===== 「其他」分类：更新日志（查看 / 导出 / 打开目录）=====
         self._open_box(("all", "other"))
+        self._section("启动与运行", "🚀")
+        self._add_switch("quiet_mode", "纯净模式", "false",
+                        hint="开：启动桌宠 / 语音服务时不再弹出黑色终端窗口，界面干净。\n"
+                             "关：保留终端窗口，排查问题能看到详细日志。")
         log_label = QLabel("  📜 更新日志")
         log_label.setFont(QFont("Microsoft YaHei", int(13 * S), QFont.Bold))
         log_label.setStyleSheet(f"color: {Color1.name()}; margin-top: {int(16*S)}px;")
@@ -557,6 +589,9 @@ class PCLSettingsPanel(QWidget):
                 if p.isdigit() and p not in masters:
                     masters.append(p)
             cfg["qq_master_ids"] = masters[:4]
+        elif key == "vision_service_url":
+            # 视觉服务地址在配置里是 local_api.vision（不是顶层同名键）
+            cfg.setdefault("local_api", {})["vision"] = str(value or "").strip()
         else:
             cfg[key] = value
 
@@ -820,6 +855,14 @@ class PCLSettingsPanel(QWidget):
             self._set_slider("screen_type", cfg.get("screen_type", "false"))
             self._set_slider("voice_trigger", cfg.get("voice_trigger", "false"))
             self._set_slider("live2d_enabled", cfg.get("live2d_enabled", "false"))
+            self._set_slider("quiet_mode", cfg.get("quiet_mode", "false"))
+            self._set_slider("vision_source", str(cfg.get("vision_source") or "local"))
+            self._set_if("vision_local_model_dir",
+                         cfg.get("vision_local_model_dir",
+                                 r"D:\下载\AI桌宠\vision\Qwen2-VL-2B-Instruct"))
+            self._set_if("vision_service_url",
+                         (cfg.get("local_api") or {}).get(
+                             "vision", "http://127.0.0.1:28460/describe"))
             self._set_slider("force_gpu_check", cfg.get("force_gpu_check", "false"))
             self._set_slider("longtext_enabled", cfg.get("longtext_enabled", "true"))
             self._set_slider("longtext_model", cfg.get("longtext_model", "deepseek"))
@@ -943,6 +986,65 @@ class PCLSettingsPanel(QWidget):
                     main_win.qq_btn.setText("  💬 启动 QQ AIpet")
         except Exception as e:
             print(f"[PCL] 关闭进程异常: {e}")
+
+    def _refresh_vision_status(self):
+        """后台线程探测（界面线程里连网络会卡界面），结果用信号送回界面线程"""
+        if getattr(self, "_vision_probing", False):
+            return
+        self._vision_probing = True
+
+        def _work():
+            state = "unknown"
+            try:
+                base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                if getattr(sys, "frozen", False):
+                    base = os.path.dirname(sys.executable)
+                if base not in sys.path:
+                    sys.path.insert(0, base)
+                from pcl_launcher.silicon_window import _vision_alive, _vision_cfg, _vision_port
+                cfg = _vision_cfg()
+                if str(cfg.get("vision_source") or "local").strip().lower() != "local":
+                    state = "cloud"
+                else:
+                    state = "online" if _vision_alive(_vision_port(cfg)) else "offline"
+            except Exception:
+                state = "unknown"
+            self._vision_state = state
+            try:
+                self._vision_probe_signal.emit()
+            except Exception:
+                pass
+
+        import threading
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _apply_vision_status(self):
+        self._vision_probing = False
+        state = getattr(self, "_vision_state", "unknown")
+        lbl = getattr(self, "_vision_status", None)
+        if lbl is None:
+            return
+        try:
+            if state == "cloud":
+                lbl.setText("  识别来源设为「云端 API」，本地视觉服务不需要启动。")
+                lbl.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(11*S)}px;"
+                                  f"padding: 2px 0 2px {int(6*S)}px;")
+            elif state == "online":
+                lbl.setText("  ● 本地视觉服务：在线（启动桌宠时会自动拉起；识别一屏约 30 秒）")
+                lbl.setStyleSheet(f"color: #3d9e6a; font-size: {int(11*S)}px;"
+                                  f"padding: 2px 0 2px {int(6*S)}px;")
+            elif state == "offline":
+                lbl.setText("  ○ 本地视觉服务：离线 —— 启动桌宠后会自动拉起；"
+                            "若一直离线，检查下面的「本地视觉模型目录/服务地址」是否正确"
+                            "（日志见 data/vision_service.log）")
+                lbl.setStyleSheet(f"color: #c96b3a; font-size: {int(11*S)}px;"
+                                  f"padding: 2px 0 2px {int(6*S)}px;")
+            else:
+                lbl.setText("  ？本地视觉服务：状态未知（点保存后重新检测）")
+                lbl.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(11*S)}px;"
+                                  f"padding: 2px 0 2px {int(6*S)}px;")
+        except Exception:
+            pass
 
     # ---- 更新日志（查看 / 导出 / 打开目录）----
     def _changelog_dir(self) -> str:
@@ -1788,6 +1890,19 @@ class PCLPetManager(QScrollArea):
             cand = os.path.join(PETS_DIR, p["id"], p["avatar"])
             if os.path.exists(cand):
                 avatar_path = cand
+        if avatar_path:
+            _pm = QPixmap(avatar_path)
+            if _pm.isNull():
+                # 文件在、但 Qt 解码不出来（例如打包环境缺 JPEG 插件时 .jpg 头像会这样）
+                # → 用默认头像兜底，别让卡片空一块（用户反馈「诺瓦的头像没了」）
+                print(f"[PCL] ⚠ 头像解码失败，用默认图标兜底: {avatar_path}")
+                avatar_path = ""
+        if not avatar_path:
+            # 兜底图标：角色包没写 avatar / 文件缺失 / 解码失败都走它
+            _fallback = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                     "resources", "icons", "avatar.png")
+            if os.path.exists(_fallback):
+                avatar_path = _fallback
         if avatar_path:
             av = QLabel()
             av.setFixedSize(int(40 * S), int(40 * S))

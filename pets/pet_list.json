@@ -8,18 +8,17 @@
       "avatar": "avatar.png"
     },
     {
-      "id": "noir",
-      "name": "诺瓦",
-      "display_name": "诺瓦",
-      "intro": "黑色系的 Live2D 角色",
-      "avatar": "诺瓦.jpg"
-    },
-    {
       "id": "natsume",
       "name": "夏目",
       "display_name": "四季夏目",
       "intro": "来自《星光咖啡馆与死神之蝶》的四季夏目",
       "avatar": "avatar.png"
+    },
+    {
+      "id": "noir",
+      "name": "诺瓦",
+      "display_name": "诺瓦",
+      "intro": "黑色系的 Live2D 角色",
       "avatar": "avatar.jpg"
     }
   ],
