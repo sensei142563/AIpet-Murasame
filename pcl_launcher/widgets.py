@@ -256,9 +256,10 @@ class PCLSettingsPanel(QWidget):
         self._add_model_combo(
             "short_model_name", "短文本模型名",
             ["qwen-plus", "qwen3.7-plus", "qwen3.7-flash", "qwen3.6-flash", "qwen3.5-flash",
-             "deepseek-v4-flash", "deepseek-v4-pro", "deepseek-chat"],
+             "deepseek-flash"],
             "qwen-plus",
-            hint="可编辑：仅限 deepseek/qwen 两族模型名"
+            hint="可编辑：仅限 deepseek/qwen 两族模型名\n"
+                 "（DeepSeek 现役只有一个 deepseek-flash，对话与看图同一个模型）"
         )
         self._add_choice("reasoning_level", "推理等级", ["off", "low", "high", "max"], "off",
                          display={"off": "关", "low": "低", "high": "高", "max": "最高"},
@@ -284,10 +285,11 @@ class PCLSettingsPanel(QWidget):
                          hint="长文本模式（写长文 / 长语音）用哪家模型 —— 用什么模型名就配哪家的 Key。")
         self._add_model_combo(
             "longtext_model_name", "长文本模型名",
-            ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-chat",
+            ["deepseek-flash",
              "qwen-plus", "qwen3.7-plus", "qwen3.7-flash", "qwen3.6-flash"],
-            "deepseek-v4-flash",
-            hint="可编辑：仅限 deepseek/qwen 两族模型名"
+            "deepseek-flash",
+            hint="可编辑：仅限 deepseek/qwen 两族模型名\n"
+                 "（旧的 deepseek-v4-flash / -v4-pro / deepseek-chat 都已下线）"
         )
 
         # ===== ④ 语音与视觉识别 =====
@@ -310,10 +312,11 @@ class PCLSettingsPanel(QWidget):
                               "云端：走在线语音接口（不需要整合包，需要联网）。")
         self._add_model_combo(
             "vision_model_name", "视觉识别模型名",
-            ["qwen3-vl-plus", "qwen3-vl-flash", "deepseek-v4-flash-vision-exp",
-             "qwen-vl-max", "qwen-vl-plus"],
-            "qwen3-vl-plus",
-            hint="可编辑：QQ识图/摄像头/微信识图统一使用"
+            ["deepseek-flash",
+             "qwen3-vl-plus", "qwen3-vl-flash", "qwen-vl-max", "qwen-vl-plus"],
+            "deepseek-flash",
+            hint="可编辑：QQ识图/摄像头/微信识图统一使用\n"
+                 "（DeepSeek 现在对话与看图是同一个模型；旧 deepseek-v4-flash-vision-exp 已下线）"
         )
         self._add_slider("screen_type", "屏幕识别", ["false", "true"], "false")
         self._add_slider("voice_trigger", "语音识别", ["false", "true"], "false")
@@ -814,8 +817,8 @@ class PCLSettingsPanel(QWidget):
             self._set_slider("live2d_enabled", cfg.get("live2d_enabled", "false"))
             self._set_slider("longtext_enabled", cfg.get("longtext_enabled", "true"))
             self._set_slider("longtext_model", cfg.get("longtext_model", "deepseek"))
-            self._set_if("longtext_model_name", cfg.get("longtext_model_name", "deepseek-v4-flash"))
-            self._set_if("vision_model_name", cfg.get("vision_model_name", "qwen3-vl-plus"))
+            self._set_if("longtext_model_name", cfg.get("longtext_model_name", "deepseek-flash"))
+            self._set_if("vision_model_name", cfg.get("vision_model_name", "deepseek-flash"))
             self._set_slider("reasoning_level", cfg.get("reasoning_level", "off"))
             self._set_if("qq_owner_id", cfg.get("qq_owner_id", ""))
             # 额外主人白名单：数组/字符串 → 逗号分隔文本
