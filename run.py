@@ -384,11 +384,11 @@ def setup_runtime_and_pytorch(config_path="config.json", cfg=None, hardware_type
         if cfg is None:
             with open(config_path, "r", encoding="utf-8") as f:
                 cfg = json.load(f)
-        model_type = cfg.get("model_type", "deepseek").lower()
+        model_type = cfg.get("model_type", "qwen").lower()
         log(f"读取配置: model_type = {model_type}")
     except Exception as e:
         log(f"无法解析 config.json: {e}")
-        log("默认进入 DeepSeek 云端模式。", "WARN")
+        log("默认进入 Qwen 云端模式。", "WARN")
         return "deepseek"
 
     # Step 2️⃣ 判断模式

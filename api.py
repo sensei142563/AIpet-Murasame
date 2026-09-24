@@ -476,7 +476,7 @@ async def longtext_chat(req: LongTextChatRequest):
 # ============== Entrypoint ==============
 if __name__ == "__main__":
     cfg = get_config("./config.json")
-    if cfg.get("model_type", "deepseek").lower() == "local":
+    if cfg.get("model_type", "qwen").lower() == "local":
         model, tokenizer = load_model_and_tokenizer()
     # 仅本机：PCL/桌宠都用 localhost 访问；绑 0.0.0.0 会把无鉴权 API 暴露到局域网。
     # 日志/断开噪音的处理统一在 tool/api_server.py（access_log=False + 忽略 10054）

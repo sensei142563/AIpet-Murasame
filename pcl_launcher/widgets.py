@@ -400,9 +400,9 @@ class PCLSettingsPanel(QWidget):
         # ===== ⑧ 桌宠显示与空闲行为 =====
         self._open_box(("all", "pet"))
         self._section("桌宠显示与空闲行为", "🖥")
-        self._add_spin("screen_interval", "屏幕截图间隔 (秒)", 60, 3600, 300)
+        self._add_spin("screen_interval", "屏幕截图间隔 (秒)", 60, 3600, 150)
         self._add_spin("screen_index", "桌宠显示屏幕编号", 0, 3, 0)
-        self._add_spin("idle_thinking_minutes", "空闲发呆阈值 (分钟)", 1, 60, 3)
+        self._add_spin("idle_thinking_minutes", "空闲发呆阈值 (分钟)", 1, 60, 6)
         self._add_spin("idle_away_minutes", "空闲离屏阈值 (分钟)", 2, 120, 10)
         self._add_double_spin("DEFAULT_PORTRAIT_SCREEN_RATIO", "立绘高度比例", 0.1, 1.0, 0.8, 0.05)
 

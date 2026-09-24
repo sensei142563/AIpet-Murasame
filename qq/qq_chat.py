@@ -306,15 +306,19 @@ def _build_messages(history):
 
 
 def _get_history_turns():
-    """读取 config 的 longtext_max_history_turns（默认 20），统一桌宠与 QQ 记忆轮数"""
+    """读取 config 的 longtext_max_history_turns（随包默认 12），统一桌宠与 QQ 记忆轮数
+
+    ⚠ 这里的默认值必须与 config.example.json 一致：以前写 20，而示例配置是 12 ——
+      键缺失（老配置 / 手改过）时 QQ 侧带回 20 轮、设置页却显示 12，两边对不上。
+    """
     import json as _json
     try:
         with open(os.path.join(BASE_DIR, "config.json"), "r", encoding="utf-8") as f:
             cfg = _json.load(f)
-        val = int(cfg.get("longtext_max_history_turns", 20))
+        val = int(cfg.get("longtext_max_history_turns", 12))
         return max(1, val)  # 至少 1 轮
     except Exception:
-        return 20
+        return 12
 
 
 def _load_session_history(session_key: str):

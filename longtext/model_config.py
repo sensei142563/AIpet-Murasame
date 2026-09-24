@@ -95,9 +95,13 @@ def build_reasoning_params(model_name: str, level: str = "off") -> dict:
 # ==================== 长文本对话 ====================
 
 def get_longtext_model_name():
-    """读取 config.json 的 longtext_model 字段，返回 "qwen" / "deepseek"（默认 qwen）"""
+    """读取 config.json 的 longtext_model 字段，返回 "qwen" / "deepseek"（默认 deepseek）
+
+    ⚠ 默认值必须与 config.example.json / 设置页面板一致（都是 deepseek）：
+      以前这里写 qwen，键缺失时长文本走 Qwen、而设置页显示 DeepSeek，两边对不上。
+    """
     cfg = _load_config()
-    val = str(cfg.get("longtext_model", "qwen")).strip().lower()
+    val = str(cfg.get("longtext_model", "deepseek")).strip().lower()
     if val not in FAMILY_DEFAULT_MODEL:
         print(f"[ModelConfig] ⚠ 未知的 longtext_model: {val}，回退到 qwen")
         return "qwen"
