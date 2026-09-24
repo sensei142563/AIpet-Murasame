@@ -181,15 +181,22 @@ python run_launcher.py
 
 ### 准备 NapCat
 
-> ⚠️ **版本已锁定：NapCat `v4.18.14` + QQ `9.9.22-40990`。请不要更新。**
-> 上游新版（以及超出支持表的 QQ 版本）实测不稳定，本项目只在这个组合上验证过。
+> ⚠️ **版本已锁定：NapCat `v4.18.28` + QQ `9.9.35-52892`。请不要更新**
+> （要换版本先看下面那段升级说明；上游新版没人验证过，本项目只在这个组合上验证过）。
 > 详细说明与锚文件见项目根目录 `NAPCAT_VERSION.txt`。
 > **尤其不要在 NapCat WebUI 里点「更新」**——那会把钉住的版本换成 latest。
 
-1. 下载 NapCat Releases 的 **`NapCat.Shell.Windows.OneKey.zip`**（**固定用这个 tag，不要用 latest**）：https://github.com/NapNeko/NapCatQQ/releases/tag/v4.18.14
+> 📌 **2026-09-24 说明**：QQ 自动升级到了 `9.9.35-52892`，而旧版 NapCat `4.18.14`
+> 的支持表只到 `9.9.32-50969` → 会报「PacketBackend 不支持当前QQ版本架构」（WS 能连，
+> 但消息处理不可用）。因此 NapCat 升到 `4.18.28`（支持表含 `9.9.35-52892`，官方口径是
+> QQ build 40768 及以上）。**建议同时关掉 QQ 的自动更新**，否则过几天又会被顶上去。
+
+1. 下载 NapCat Releases 的 **`NapCat.Shell.Windows.OneKey.zip`**（**固定用这个 tag，不要用 latest**）：https://github.com/NapNeko/NapCatQQ/releases/tag/v4.18.28
 2. 解压后放置到项目根目录 `NapCat.Shell.Windows.OneKey/`
 3. **下载同一 tag 下的 `NapCat.Shell.zip`**（运行时本体），解压后放入 `NapCat.Shell.Windows.OneKey/NapCat/`
-4. **下载 QQ Windows 版安装程序**（用 `9.9.22-40990`，或任何 **≤ 9.9.32-50969** 的版本；版本太高 NapCat 会报「不支持当前QQ版本架构」），放入 `NapCat.Shell.Windows.OneKey/`
+   （升级时**只替换内容不同的文件**，务必保留 `NapCat/config/`、`cache/`、`logs/`、`guild1.db`
+   —— 账号、onebot11 网络配置、WebUI 端口与 token 都在里面）
+4. **下载 QQ Windows 版安装程序**（用 `9.9.35-52892`，或任何 **≤ 9.9.35-52892** 且 build ≥ 40768 的版本；版本太高 NapCat 会报「不支持当前QQ版本架构」），放入 `NapCat.Shell.Windows.OneKey/`
 5. 运行 `NapCat.Shell.Windows.OneKey/bootmain/napcat.bat` 首次自动解压（若 404 则手动用 7z 解压 QQ 安装包到 `bootmain/`，QQ.exe 需在 `bootmain/QQ.exe`）
 6. 运行 **`NapCat.Shell.Windows.OneKey/start_napcat.bat`**（专用启动脚本，无需注册表）→ 弹出二维码 → 手机 QQ 扫码登录小号
 7. 确认控制台出现 `WebSocket服务: 127.0.0.1:3001 已启动`
@@ -206,8 +213,8 @@ python run_launcher.py
   就绪过程中状态栏会依次显示「已拉起 NapCat…」→「正在等待扫码登录…」→「NapCat 已就绪」。
   同一条工具栏上的「🔑 NapCat WebUI」也会先确保 NapCat 在跑，再打开带 token 的管理面板。
   > ⚠️ 为什么用 `launcher-user.bat`（注册表 QQ）而不是 `start_napcat.bat`：后者用的是随包的
-  > 绿色 QQ（9.9.33-51802），**超出**本项目锁定的 NapCat 4.18.14 的支持表上限（9.9.32-50969），
-  > 可能报「不支持当前QQ版本架构」。详见根目录 `NAPCAT_VERSION.txt`。
+  > 绿色 QQ（9.9.33-51802），和你自己装的 QQ 是两套环境；用注册表里那套能保证
+  > NapCat 打进的是你平时登录的那个 QQ。详见根目录 `NAPCAT_VERSION.txt`。
 - **方式三（命令行，源码调试用）**：
   ```bash
   python run_qq.py
