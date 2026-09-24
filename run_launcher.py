@@ -40,6 +40,58 @@ try:
 except Exception:
     pass
 
+# ── 界面日志落盘：启动器的全部输出同时写进 data/launcher_ui.log ──────────────
+# 为什么需要：启动器是 GUI（打包版连控制台都没有），它打印的排查信息一闪就没 →
+# 用户报"某个选项点了没反应"时，谁也看不到它到底走到哪一步了。这里包一层 Tee：
+# 控制台照常打印，同时按行追加到程序目录下的 data/launcher_ui.log（每次启动留一行头）。
+def _install_ui_log() -> None:
+    try:
+        _base = os.path.dirname(os.path.abspath(__file__))
+        if getattr(sys, "frozen", False):
+            _base = os.path.dirname(sys.executable)
+        _d = os.path.join(_base, "data")
+        os.makedirs(_d, exist_ok=True)
+        _p = os.path.join(_d, "launcher_ui.log")
+        _fobj = open(_p, "a", encoding="utf-8", errors="replace", buffering=1)
+        import time as _t
+        _fobj.write("\n===== %s 启动器启动（%s）=====\n"
+                    % (_t.strftime("%Y-%m-%d %H:%M:%S"),
+                       os.path.dirname(os.path.abspath(__file__))))
+
+        class _Tee:
+            def __init__(self, *streams):
+                self._streams = [s for s in streams if s is not None]
+
+            def write(self, s):
+                for st in self._streams:
+                    try:
+                        st.write(s)
+                    except Exception:
+                        pass
+                return len(s)
+
+            def flush(self):
+                for st in self._streams:
+                    try:
+                        st.flush()
+                    except Exception:
+                        pass
+
+            def isatty(self):
+                return False
+
+        sys.stdout = _Tee(sys.stdout, _fobj)
+        sys.stderr = _Tee(sys.stderr, _fobj)
+        print("[Launcher] 界面日志 → %s" % _p)
+    except Exception as _e:
+        print("[Launcher] 界面日志不可用（继续）: %s" % _e)
+
+
+try:
+    _install_ui_log()
+except Exception:
+    pass
+
 # 添加父目录到 sys.path，确保能导入 pcl_launcher
 base_dir = os.path.dirname(os.path.abspath(__file__))
 if base_dir not in sys.path:

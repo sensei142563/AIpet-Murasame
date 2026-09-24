@@ -1897,10 +1897,19 @@ class SiliconLauncher(QWidget):
         b_set.clicked.connect(lambda _=False: self._goto("settings"))
         self.nav_btns["settings"] = b_set
         lay.addWidget(b_set)
-        ver = QLabel("Silicon UI · 新版")
+        # 版本戳：把这份 silicon_window.py 的修改时间显示出来 ——
+        # 排查"我换了新 exe 怎么没变化"时，页面右下角这行就能证明跑的是哪一版
+        try:
+            import time as _tmv
+            _stamp = _tmv.strftime("%m-%d %H:%M", _tmv.localtime(os.path.getmtime(__file__)))
+        except Exception:
+            _stamp = "?"
+        ver = QLabel("Silicon UI · 新版 · " + _stamp)
         # ⚠ 以前用 Gray3：浅色主题下这条页脚压在侧栏的浅色面上只有 1.6:1（实测），
         #   基本看不见；换成主题的次级文字色（浅色主题 5.2:1 / 深色主题 9.9:1）。
         ver.setStyleSheet(f"color: {Gray2.name()}; font-size: 11px; padding: 2px 8px;")
+        ver.setToolTip("这是当前启动器代码的时间戳（排查旧进程用）：%s\n程序目录：%s"
+                       % (_stamp, _app_base_dir()))
         lay.addWidget(ver)
         self._nav_rail = rail
         self._nav_sep = sep
