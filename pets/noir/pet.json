@@ -111,5 +111,99 @@
   "camera_vision": true,
   "face_recognition": true,
   "qq": true
+ },
+ "touch": {
+  "enabled": true,
+  "areas_2d": {
+   "head": [
+    0.32,
+    0.02,
+    0.38,
+    0.18
+   ],
+   "custom_1": [
+    0.38,
+    0.28,
+    0.28,
+    0.2
+   ],
+   "chest": [
+    0.34,
+    0.55,
+    0.34,
+    0.18
+   ]
+  },
+  "areas_live2d": {
+   "head": [
+    0.32,
+    0.02,
+    0.38,
+    0.18
+   ],
+   "custom_1": [
+    0.38,
+    0.28,
+    0.28,
+    0.2
+   ],
+   "chest": [
+    0.34,
+    0.55,
+    0.34,
+    0.18
+   ]
+  },
+  "areas": {
+   "head": [
+    0.32,
+    0.02,
+    0.38,
+    0.18
+   ],
+   "custom_1": [
+    0.38,
+    0.28,
+    0.28,
+    0.2
+   ],
+   "chest": [
+    0.34,
+    0.55,
+    0.34,
+    0.18
+   ]
+  },
+  "disabled_2d": [
+   "belly",
+   "privates",
+   "thigh_l",
+   "thigh_r",
+   "shin_l",
+   "shin_r",
+   "foot_l",
+   "foot_r",
+   "arm_l",
+   "arm_r",
+   "hand_l",
+   "hand_r"
+  ],
+  "disabled_live2d": [
+   "belly",
+   "privates",
+   "thigh_l",
+   "thigh_r",
+   "shin_l",
+   "shin_r",
+   "foot_l",
+   "foot_r",
+   "arm_l",
+   "arm_r",
+   "hand_l",
+   "hand_r"
+  ],
+  "labels": {
+   "custom_1": "脸"
+  }
  }
 }

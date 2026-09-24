@@ -1498,6 +1498,12 @@ class Murasame(QLabel):
             except Exception:
                 cloths = []
             menu = QMenu(self)
+            # 输入对话：**不管这个角色有没有换装素材，右键都能进输入模式**。
+            # 原来只能"点下半身"进输入模式，而命中触摸区域时那一下会被触摸吃掉
+            # （用户报的"对话框不好点"）；没有换装素材的角色（例如诺瓦）右键菜单原本还是空的。
+            act_input = menu.addAction("💬 输入对话（打字）")
+            act_input.triggered.connect(self._trigger_input_mode)
+            menu.addSeparator()
             if cloths:
                 title = menu.addAction(f"👗 切换服装（{cur_set} 立绘 · 当前：{cur_name}）")
                 title.setEnabled(False)
