@@ -4,9 +4,11 @@ import threading
 # HF 模型缓存统一放到项目内（D 盘），不放 C 盘用户目录：
 # ① C 盘空间紧张；② C 盘清理工具会把用户目录里的模型当"缓存"删掉，
 #    曾导致 large-v3 约 3GB 权重被清空、语音识别失效（model.bin 无法打开）。
+# 目录名取清楚点：`models/stt`（语音识别），实际权重在 `models/stt/hub/` 下。
+#   兼容更早的 `models/hf`（老下载脚本用的名字）——见 _hf_cache_roots()。
 try:
     _BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    os.environ.setdefault("HF_HOME", os.path.join(_BASE, "models", "hf"))
+    os.environ.setdefault("HF_HOME", os.path.join(_BASE, "models", "stt"))
 except Exception:
     pass
 
@@ -20,9 +22,9 @@ stt_model = str(get_config("./config.json").get("stt_model", "large-v3"))
 # 另：只校验 repo 目录存在会命中"中断下载的半缓存"，一旦 offline 生效即永久锁死 → 必须
 # 确认存在 snapshots/ 与 refs/（快照树完整）才算"缓存可用"。
 def _hf_cache_roots():
-    """HF 缓存根候选目录（兼容 HF_HUB_CACHE / HF_HOME / HF_HOME/hub / 默认用户目录）。
+    """HF 缓存根候选目录（HF_HUB_CACHE / HF_HOME / HF_HOME/hub / 项目内老目录 / 用户目录）。
 
-    背景：本文件顶部把 HF_HOME 指到项目内 `models/hf`（避免 C 盘被清理），而
+    背景：本文件顶部把 HF_HOME 指到项目内 `models/stt`（避免 C 盘被清理），而
     huggingface_hub 的实际快照在 `$HF_HOME/hub`（新布局）或 `$HF_HOME`（旧布局），
     因此只查一个根会漏判 → 离线开关失效、每次启动仍联网探测。
     """
@@ -34,6 +36,10 @@ def _hf_cache_roots():
     if hf_home:
         roots.append(hf_home)
         roots.append(os.path.join(hf_home, "hub"))
+    # 项目内的历史位置（download_stt.py 早期版本写进 models/hf）——别让老装好的模型白放
+    if "_BASE" in globals():
+        roots.append(os.path.join(_BASE, "models", "hf"))
+        roots.append(os.path.join(_BASE, "models", "hf", "hub"))
     roots.append(os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "hub"))
     seen, out = set(), []
     for r in roots:

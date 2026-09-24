@@ -25,7 +25,8 @@ except Exception:
     pass
 
 # 与 tool/stt.py 保持一致：模型缓存放项目内（别放 C 盘用户目录，容易被清理工具删）
-os.environ.setdefault("HF_HOME", os.path.join(BASE, "models", "hf"))
+# 目录名取清楚点：models/stt（语音识别），实际权重在 models/stt/hub/ 下
+os.environ.setdefault("HF_HOME", os.path.join(BASE, "models", "stt"))
 MIRROR = "https://hf-mirror.com"
 
 
@@ -46,7 +47,8 @@ def main():
     from tool.config import get_config
     model = args.model or str(get_config("./config.json").get("stt_model", "large-v3"))
     repo = _repo_id(model)
-    cache = os.environ["HF_HOME"]
+    # 实际 HF hub 缓存目录（HF_HOME/hub 是新布局；tool/stt.py 两个都认）
+    cache = os.path.join(os.environ["HF_HOME"], "hub")
 
     from tool.stt import cache_state
     ok, where = cache_state(model)
@@ -62,7 +64,11 @@ def main():
 
     if not args.official:
         os.environ["HF_ENDPOINT"] = MIRROR
-        print("下载源    : %s（国内镜像；加 --official 可换官方源）" % MIRROR)
+        # ⚠ 镜像 + 新版 Xet 下载后端会跳转到需要鉴权的 CAS 服务器，
+        #   报 "HTTP status client error (401 Unauthorized)"（实测踩到过）。
+        #   关掉 Xet 走普通 CDN 就正常了。
+        os.environ["HF_HUB_DISABLE_XET"] = "1"
+        print("下载源    : %s（国内镜像，已关闭 Xet；加 --official 可换官方源）" % MIRROR)
     print("开始下载（large 系列约 3 GB，慢的话换 --model small）...")
     try:
         from huggingface_hub import snapshot_download
