@@ -2419,6 +2419,24 @@ class SiliconLauncher(QWidget):
                     pass
                 return
             self._bg_last_ts = now
+            # ── 改「启动器底色」→ 走与「切主题」同一条**全套换肤**路径 ────────────
+            # ⚠ 以前这里只刷新了背景画面 + 二级窗口：色板（Color1/Color6/Color8…）没重算、
+            #   全局 QSS 没重装、页面没重建 → 卡片、文字、输入框全都不跟着变，
+            #   非得重启启动器才生效（用户反馈"文字颜色和卡片 ui 还是没跟随背景底色"）。
+            if "ui_bg_color" in (values or {}):
+                try:
+                    from .colors import current_theme_id as _ctid_bg, base_bg_color as _bbc_bg
+                    self._bg_blur_skip = True
+                    try:                                   # 外壳自己那块底板也立刻换
+                        self._set_base_color(_bbc_bg())
+                    except Exception as _e0:
+                        print(f"[NewUI] ⚠ 外壳底板换色失败: {_e0}")
+                    self.apply_theme_live(_ctid_bg(), persist=False)   # 重算色板+重装 QSS+重建当前页
+                    self._schedule_blur_refresh(400)
+                    print("[NewUI] 启动器底色已实时生效（卡片 / 文字 / 二级窗口一起换）")
+                    return
+                except Exception as _e_bg:
+                    print(f"[NewUI] ⚠ 底色全套换肤失败（退回只刷背景）: {_e_bg}")
             # 二级窗口（立绘工坊/新建桌宠…）实时跟随启动器底色
             try:
                 if "ui_bg_color" in (values or {}):
