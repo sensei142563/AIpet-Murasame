@@ -366,6 +366,9 @@ class PCLPluginSettingsDialog(SiliconDialog):
             self._save()
         except Exception as e:
             print(f"[Plugins] 保存失败: {e}")
+            # 保存失败就别关窗口：得让用户知道没存上（以前只写控制台，窗口照关）
+            page_msg(self, "保存失败", "插件设置没能写入配置文件。", str(e))
+            return
         try:
             self.accept()
         except Exception:
@@ -657,12 +660,16 @@ class PCLPluginsPanel(QScrollArea):
         self.plugin_toggled.emit(str(meta.get("id", "")), bool(state))
 
     def _open_dir(self, meta):
+        d = meta.get("_dir")
+        if not d or not os.path.isdir(d):
+            page_msg(self, "打开插件目录", "这个插件没有目录（可能是内置功能，没有独立文件夹）。",
+                     str(d or ""))
+            return
         try:
-            d = meta.get("_dir")
-            if d and os.path.isdir(d):
-                os.startfile(d)  # noqa
+            os.startfile(d)  # noqa
         except Exception as e:
             print(f"[Plugins] 打开目录失败: {e}")
+            page_msg(self, "打开插件目录", "打开失败。", str(e))
 
     def _delete_plugin(self, meta):
         if bool(meta.get("builtin", True)):

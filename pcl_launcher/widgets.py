@@ -1592,6 +1592,8 @@ class PCLMemoryManager(QScrollArea):
             self._refresh()
         except Exception as e:
             print(f"[PCL] 清除记忆失败: {e}")
+            # 用户点了「清除」却什么都没发生 → 必须说出来（以前只写控制台）
+            page_msg(self, "清除失败", f"没能清除「{rel}」。", str(e))
 
     def _clear_pet_all(self):
         pet = self._current_pet() or "当前角色"
@@ -1609,6 +1611,10 @@ class PCLMemoryManager(QScrollArea):
         mdir = self._pet_memory_dir(pet) if pet else ""
         if not mdir or not os.path.isdir(mdir):
             print("[PCL] 无记忆可备份")
+            # 以前这里只写控制台 → 用户点「备份」完全没反应
+            page_msg(self, "没有可备份的记忆",
+                     f"「{pet or '当前角色'}」还没有记忆文件。",
+                     "先和桌宠聊几句，记忆文件生成后再备份。")
             return
         import zipfile
         dst = os.path.join(
@@ -1621,8 +1627,11 @@ class PCLMemoryManager(QScrollArea):
                         fp = os.path.join(root, f)
                         z.write(fp, os.path.relpath(fp, mdir))
             print(f"[PCL] 记忆已备份到: {dst}")
+            # 成功也要说一声（路径可选中复制）——否则用户不知道备份成功没有
+            page_msg(self, "备份完成", "记忆已备份到桌面：", dst)
         except Exception as e:
             print(f"[PCL] 备份失败: {e}")
+            page_msg(self, "备份失败", "没能写出备份文件。", f"{e}\n目标路径：{dst}")
 
     # ===== QQ 离线补拉状态 =====
     def _refresh_offline(self):

@@ -685,12 +685,16 @@ class PCLThemesPanel(QScrollArea):
 
     def _open_dir(self, meta):
         """打开主题所在目录（资源文件浏览器）"""
+        d = meta.get("_dir")
+        if not d or not os.path.isdir(d):
+            page_msg(self, "打开主题目录", "这个主题没有独立目录（官方内置主题就是程序自带的那份）。",
+                     str(d or ""))
+            return
         try:
-            d = meta.get("_dir")
-            if d and os.path.isdir(d):
-                os.startfile(d)  # noqa
+            os.startfile(d)  # noqa
         except Exception as e:
             print(f"[Themes] 打开主题目录失败: {e}")
+            page_msg(self, "打开主题目录", "打开失败。", str(e))
 
     def _duplicate(self, meta):
         """把官方主题复制一份到「我的主题」（id 加 _copy 后缀，builtin=False）"""

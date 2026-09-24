@@ -667,6 +667,8 @@ class HomePage(QWidget):
             os.startfile(_app_base_dir())    # noqa
         except Exception as e:
             print(f"[NewUI] 打开目录失败: {e}")
+            # 用户点了「打开程序目录」却什么都没发生 → 说清楚（以前只写控制台）
+            self._msg("打开程序目录", "没能打开资源管理器。", f"{e}\n目录：{_app_base_dir()}")
 
     def open_changelog(self):
         import glob
