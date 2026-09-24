@@ -69,8 +69,8 @@
   "live2d_window_height_ratio": 0.4
  },
  "interaction": {
-  "head_top": 0.0,
-  "head_bottom": 0.22,
+  "head_top": 0.18,
+  "head_bottom": 0.46,
   "talk_top": 0.45,
   "talk_bottom": 1.0,
   "edge_margin_x": 0.12,
@@ -136,22 +136,22 @@
   },
   "areas_live2d": {
    "head": [
-    0.32,
-    0.02,
-    0.38,
-    0.18
+    0.12,
+    0.18,
+    0.74,
+    0.28
    ],
    "custom_1": [
-    0.38,
-    0.28,
-    0.28,
-    0.2
+    0.3,
+    0.46,
+    0.35,
+    0.31
    ],
    "chest": [
-    0.34,
-    0.55,
-    0.34,
-    0.18
+    0.26,
+    0.77,
+    0.48,
+    0.22
    ]
   },
   "areas": {

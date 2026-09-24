@@ -187,6 +187,30 @@ def center_on_screen(win, screen_index: int = 0) -> None:
         print(f"[AIpet] ⚠ 居中失败: {e}")
 
 
+def apply_live2d_display_override(disp: dict, pet) -> dict:
+    """角色若在「立绘设置 → Live2D」里单独调过大小/位置，优先用那份（与 2D 独立）。
+
+    pet._pet_cfg 是桌宠读到的角色 pet.json。以前这里直接写 `pet._pet_cfg`，
+    而 Murasame 只有同名**局部变量** → 每次启动都打印
+    「⚠ 读取独立显示设置失败: 'Murasame' object has no attribute '_pet_cfg'」，
+    角色单独调的 scale/offset/窗口比例一直被静默忽略。现在取不到就安静跳过。
+    """
+    try:
+        _mc = (getattr(pet, "_pet_cfg", None) or {}).get("model") or {}
+        _dl = _mc.get("display_live2d") or {}
+        for _k, _dk in (("height_ratio", "window_height_ratio"),
+                        ("width_ratio", "window_ratio"),
+                        ("scale", "scale"),
+                        ("offset_x", "offset_x"), ("offset_y", "offset_y")):
+            if _dl.get(_k) is not None:
+                disp[_dk] = float(_dl[_k])
+        if _dl:
+            print(f"[Live2D] 使用角色独立显示设置: {_dl}")
+    except Exception as _e:
+        print(f"[Live2D] ⚠ 读取独立显示设置失败: {_e}")
+    return disp
+
+
 if __name__ == "__main__":
 
     # 设置全局 OpenGL 默认格式（启用 alpha 通道，支持透明背景）
@@ -314,19 +338,7 @@ if __name__ == "__main__":
             from pets.pet_registry import get_live2d_display, get_live2d_params
             disp = get_live2d_display()
             # 角色若在「立绘设置 → Live2D」里单独调过大小/位置，优先用那份（与 2D 独立）
-            try:
-                _mc = pet._pet_cfg.get("model") or {}
-                _dl = (_mc.get("display_live2d") or {})
-                for _k, _dk in (("height_ratio", "window_height_ratio"),
-                                ("width_ratio", "window_ratio"),
-                                ("scale", "scale"),
-                                ("offset_x", "offset_x"), ("offset_y", "offset_y")):
-                    if _dl.get(_k) is not None:
-                        disp[_dk] = float(_dl[_k])
-                if _dl:
-                    print(f"[Live2D] 使用角色独立显示设置: {_dl}")
-            except Exception as _e:
-                print(f"[Live2D] ⚠ 读取独立显示设置失败: {_e}")
+            disp = apply_live2d_display_override(disp, pet)
             params = get_live2d_params()
             print(f"[Live2D] 模型目录: {model_dir}")
             print(f"[Live2D] 模型文件存在: {bool(model_json) and os.path.exists(model_json)}")
@@ -735,6 +747,12 @@ if __name__ == "__main__":
                 print(f"[AIpet] ⚠ Live2D 触摸信号连接失败: {_e}")
         print("[AIpet] ✅ Live2D 身体触摸已接入（与 2D 同一套区域与反应）")
         live2d_widget.trigger_input_mode.connect(lambda: pet._trigger_input_mode())
+        # 右键菜单（Live2D 模式下 pet 窗口是隐藏的，右键事件只有模型控件收得到）：
+        # 转发给 pet 的同一个菜单 —— 输入对话 / 换装 / 立绘类型 都能用
+        def _on_l2d_context_menu(gx, gy):
+            from PyQt5.QtCore import QPoint
+            pet._show_outfit_menu(QPoint(int(gx), int(gy)))
+        live2d_widget.context_menu.connect(_on_l2d_context_menu)
         def _sync_move(dx, dy):
             pet.move(pet.x() + dx, pet.y() + dy)
         live2d_widget.trigger_drag_move.connect(_sync_move)

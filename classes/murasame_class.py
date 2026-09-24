@@ -137,6 +137,11 @@ class Murasame(QLabel):
         self.full_text = ""  # 打字机效果用到的整体字符串
         from pets.pet_registry import get_pet_config, get_fgimages_dir
         _pet_cfg = get_pet_config()
+        # ⚠ 存一份：main.py 建 Live2D 窗口时要读 pet.json 的「独立显示设置」
+        #   （model.display_live2d 里的 scale/offset/window 比例）。以前只有局部变量，
+        #   main.py 里 `pet._pet_cfg` 必然 AttributeError →
+        #   那条日志「⚠ 读取独立显示设置失败」就是在说这个，角色的独立调参一直被忽略。
+        self._pet_cfg = _pet_cfg or {}
         self.pet_name = _pet_cfg.get("name", "丛雨")  # 宠物名称（从角色包读取）
         self._pet_display_name = _pet_cfg.get("display_name", self.pet_name)
         # 立绘前缀：model.fgimages_prefix → portrait.prefix → 角色ID（绝不为空）
@@ -1848,6 +1853,13 @@ class Murasame(QLabel):
             self._touch_hit = area or ""
             self._touch_press = (x, y)
             self._touch_fired = False
+            # 在模型控件上留个记号：这次点击已经被「触摸区域」吃掉了 →
+            # 控件那边就别再按"摸头/点下半身"再处理一次（否则戳胸口会同时弹输入框）
+            try:
+                if wid is not None:
+                    wid._last_touch_hit = self._touch_hit
+            except Exception:
+                pass
             if area:
                 print(f"[桌宠] 👆 Live2D 触摸按下命中: {area}")
         except Exception as e:
