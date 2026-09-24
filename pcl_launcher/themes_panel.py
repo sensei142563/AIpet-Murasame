@@ -518,6 +518,26 @@ class PCLThemesPanel(QScrollArea):
                 """
                 hexv = str(hexv or "").strip()
                 print(f"[Themes] 选中文字颜色: {hexv or '跟随主题'} → 写入 {_config_path()}")
+                # 先做对比度体检：和底板太接近就直接不接受（省得界面变成"字看不见"）
+                if hexv:
+                    try:
+                        from .colors import base_bg_color as _bb2, contrast_ratio as _cr2
+                        _bg2 = _bb2()
+                        _r2 = float(_cr2(_QC2(hexv), _bg2))
+                        if _r2 < 2.5:
+                            print(f"[Themes] ⚠ 文字色 {hexv} 与底色 {_bg2.name()} 对比度仅 {_r2:.1f}:1 → 不予应用")
+                            try:
+                                self._text_hint.setText(
+                                    "⚠ 这个颜色与启动器底色（%s）对比度只有 %.1f:1，用了会看不清 —— "
+                                    "已忽略，请换反差更大的颜色（或先把底色改成浅色）。"
+                                    % (_bg2.name(), _r2))
+                                self._text_hint.setStyleSheet(
+                                    f"color: {Gray2.name()}; font-size: {int(11*S)}px;")
+                            except Exception:
+                                pass
+                            return
+                    except Exception as _e2:
+                        print(f"[Themes] 对比度体检跳过: {_e2}")
                 if hexv:
                     self._text_color = _QC2(hexv)
                 _paint_txt_btn()

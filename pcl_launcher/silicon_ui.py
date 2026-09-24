@@ -119,6 +119,23 @@ def shadow(widget: QWidget, blur=30, dy=8, alpha=110, color="#000000"):
 
 
 # ══════════════════════ 全局 QSS ══════════════════════
+def _surf(alpha: float, text_hex: str = "") -> str:
+    """面颜色（输入框/下拉框/列表/卡片底）：**跟着底板深浅走**。
+
+    ⚠ 以前这些地方清一色写死 `rgba(255,255,255,0.05~0.18)`：深色底上是淡淡的亮面（好看），
+      但浅色底（或用户把底色设成浅色）上就是"糊了一层白"——用户报的
+      "目录下面的卡片没跟随底色"就是这个。这里按当前文字色的明暗判断底板：
+      深底→白透明，浅底→黑透明。
+    """
+    try:
+        from .colors import Color1 as _c1
+        light_bg = _c1.lightness() < 140        # 文字是深色 → 底板是浅色
+    except Exception:
+        light_bg = False
+    a = max(0.0, min(1.0, float(alpha)))
+    return "rgba(0,0,0,%.3f)" % a if light_bg else "rgba(255,255,255,%.3f)" % a
+
+
 def silicon_qss(accent="#4c8dff", text="#e6eaf2", text_dim="#a9b2c6",
                 surface="#20263a", surface2="#1a1f2e", bg="#161a24",
                 border="#39405a", radius=None) -> str:
@@ -136,12 +153,12 @@ QToolTip {{
 /* ===== 滚动条（细长圆角，悬停加亮）===== */
 QScrollBar:vertical {{ background: transparent; width: 10px; margin: 2px; }}
 QScrollBar::handle:vertical {{
-    background: rgba(255,255,255,0.18); border-radius: 5px; min-height: 36px;
+    background: {_surf(0.18)}; border-radius: 5px; min-height: 36px;
 }}
 QScrollBar::handle:vertical:hover {{ background: {accent}; }}
 QScrollBar:horizontal {{ background: transparent; height: 10px; margin: 2px; }}
 QScrollBar::handle:horizontal {{
-    background: rgba(255,255,255,0.18); border-radius: 5px; min-width: 36px;
+    background: {_surf(0.18)}; border-radius: 5px; min-width: 36px;
 }}
 QScrollBar::handle:horizontal:hover {{ background: {accent}; }}
 QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; width: 0; }}
@@ -149,17 +166,17 @@ QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
 
 /* ===== 输入类 ===== */
 QLineEdit, QPlainTextEdit, QTextEdit, QSpinBox, QDoubleSpinBox {{
-    background: rgba(255,255,255,0.05); border: 1px solid {border};
+    background: {_surf(0.05)}; border: 1px solid {border};
     border-radius: {r}px; padding: 6px 10px; selection-background-color: {accent};
 }}
 QLineEdit:hover, QPlainTextEdit:hover, QTextEdit:hover,
 QSpinBox:hover, QDoubleSpinBox:hover {{ border-color: {accent}; }}
 QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus,
 QSpinBox:focus, QDoubleSpinBox:focus {{
-    border: 1px solid {accent}; background: rgba(255,255,255,0.08);
+    border: 1px solid {accent}; background: {_surf(0.08)};
 }}
 QComboBox {{
-    background: rgba(255,255,255,0.05); border: 1px solid {border};
+    background: {_surf(0.05)}; border: 1px solid {border};
     border-radius: {r}px; padding: 5px 10px; min-height: 22px;
 }}
 QComboBox:hover {{ border-color: {accent}; }}
@@ -177,17 +194,17 @@ QComboBox QAbstractItemView {{
 QCheckBox, QRadioButton {{ spacing: 8px; }}
 QCheckBox::indicator, QRadioButton::indicator {{ width: 16px; height: 16px; }}
 QCheckBox::indicator {{
-    border: 1px solid {border}; border-radius: 4px; background: rgba(255,255,255,0.06);
+    border: 1px solid {border}; border-radius: 4px; background: {_surf(0.06)};
 }}
 QCheckBox::indicator:hover {{ border-color: {accent}; }}
 QCheckBox::indicator:checked {{ background: {accent}; border: 1px solid {accent}; }}
 QRadioButton::indicator {{ border-radius: 8px; border: 1px solid {border};
-    background: rgba(255,255,255,0.06); }}
+    background: {_surf(0.06)}; }}
 QRadioButton::indicator:checked {{ background: {accent}; border: 4px solid {surface}; }}
 
 /* ===== 滑块（细轨道 + 强调色已选段 + 圆点手柄）===== */
 QSlider::groove:horizontal {{
-    height: 5px; background: rgba(255,255,255,0.14); border-radius: 3px;
+    height: 5px; background: {_surf(0.14)}; border-radius: 3px;
 }}
 QSlider::sub-page:horizontal {{ background: {accent}; border-radius: 3px; }}
 QSlider::handle:horizontal {{
@@ -206,17 +223,17 @@ QMenu::separator {{ height: 1px; background: {border}; margin: 5px 8px; }}
 
 /* ===== 列表 ===== */
 QListWidget, QListView, QTreeWidget {{
-    background: rgba(255,255,255,0.03); border: 1px solid {border};
+    background: {_surf(0.03)}; border: 1px solid {border};
     border-radius: {r}px; outline: none; padding: 4px;
 }}
 QListWidget::item {{ padding: 6px 8px; border-radius: 6px; }}
 QListWidget::item:selected {{ background: {accent}; color: white; }}
-QListWidget::item:hover {{ background: rgba(255,255,255,0.08); }}
+QListWidget::item:hover {{ background: {_surf(0.08)}; }}
 
 /* ===== 分组框（扁平标题 + 细描边）===== */
 QGroupBox {{
     border: 1px solid {border}; border-radius: {r + 2}px; margin-top: 14px;
-    padding: 12px 10px 8px 10px; background: rgba(255,255,255,0.03);
+    padding: 12px 10px 8px 10px; background: {_surf(0.03)};
 }}
 QGroupBox::title {{
     subcontrol-origin: margin; left: 12px; padding: 0 6px; color: {text_dim};
@@ -224,7 +241,7 @@ QGroupBox::title {{
 
 /* ===== 进度条 ===== */
 QProgressBar {{
-    background: rgba(255,255,255,0.10); border: none; border-radius: 6px;
+    background: {_surf(0.10)}; border: none; border-radius: 6px;
     height: 12px; text-align: center; color: {text};
 }}
 QProgressBar::chunk {{ background: {accent}; border-radius: 6px; }}
@@ -240,12 +257,12 @@ QTabBar::tab:hover {{ color: {text}; }}
 
 /* ===== 文件对话框等系统窗口里的按钮 ===== */
 QPushButton {{
-    background: rgba(255,255,255,0.07); border: 1px solid {border};
+    background: {_surf(0.07)}; border: 1px solid {border};
     border-radius: {r}px; padding: 7px 14px; color: {text};
 }}
-QPushButton:hover {{ background: rgba(255,255,255,0.13); border-color: {accent}; }}
-QPushButton:pressed {{ background: rgba(255,255,255,0.05); }}
-QPushButton:disabled {{ color: rgba(255,255,255,0.35); border-color: rgba(255,255,255,0.08); }}
+QPushButton:hover {{ background: {_surf(0.13)}; border-color: {accent}; }}
+QPushButton:pressed {{ background: {_surf(0.05)}; }}
+QPushButton:disabled {{ color: {_surf(0.35)}; border-color: {_surf(0.08)}; }}
 """
 
 

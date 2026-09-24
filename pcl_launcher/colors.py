@@ -223,6 +223,18 @@ def _apply_text_color(pal: dict, theme_id: str = "") -> dict:
         c = QColor(hexv)
         if not c.isValid():
             return pal
+        # ⚠ 选了与底板亮度接近的颜色 = 根本看不见（用户报过"改了文字色，结果总览页文字变黑"）。
+        #   这种一律忽略（继续用自动对比），并说明原因 —— 宁可"没变"，也不给一个看不见的界面。
+        try:
+            _bg = QColor(str(pal.get("Color8") or "#000000"))
+            if _bg.isValid():
+                _r = contrast_ratio(c, _bg)
+                if _r < 2.5:
+                    print(f"[Colors] ⚠ 自定义文字色 {c.name()} 与底板 {_bg.name()} 对比度只有 "
+                          f"{_r:.1f}:1 → 忽略（保持自动对比）")
+                    return pal
+        except Exception:
+            pass
         p2 = dict(pal)
         p2["Color1"] = c.name()
         p2["Color2"] = c.name()
