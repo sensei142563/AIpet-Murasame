@@ -69,15 +69,34 @@ def pet_portrait_cfg() -> dict:
         return {}
 
 
+def has_builtin_portrait() -> bool:
+    """当前角色**是否真的有 2D 图层素材**（pets/<角色>/fgimages/）。
+
+    内置那张服装/表情表（本文件的 CLOTHES / EMOTION_MAP、portrait_outfit 的两套表）
+    **只属于有 fgimages 的角色**（丛雨那套图层）。
+    以前写的是"没有 portrait 块就用内置表" → 纯 Live2D 角色（诺瓦 / 阿洛娜 / 日和）
+    也会列出**丛雨的衣服和表情**，点合成又必然失败 —— 用户看到的是
+    "别人家的衣服 + ❌ 合成失败"（2026-09-24 用探针实测到）。
+    """
+    try:
+        from pets.pet_registry import get_fgimages_dir
+        return bool(get_fgimages_dir())
+    except Exception:
+        return False
+
+
 def clothes_for(set_name=None):
     """某套的服装选项 → [(显示名, 身体层 id, 发型层 id)]
 
     新角色（pet.json 有 portrait 块）：直接用角色自己的服装表；
-    老角色：走内置表（行为不变）。"""
+    有 fgimages 的老角色：走内置表（行为不变）；
+    **没有 2D 素材的角色：返回空**（别把丛雨的衣服借给别人）。"""
     pt = pet_portrait_cfg()
     if pt:      # 新角色：以角色配置为准（没有服装就是空，不回退到内置表）
         return [(str(n), int((c or {}).get("cloth") or 0), int((c or {}).get("hair") or 0))
                 for n, c in (pt.get("clothes") or {}).items()]
+    if not has_builtin_portrait():
+        return []
     from tool.portrait_outfit import clothes_of
     pretty = {"制服": "制服（校服）", "睡衣": "寝間着（睡衣）",
               "私服": "私服（便服）", "刀服": "刀服（和装）"}
@@ -90,6 +109,8 @@ def decors_for(set_name=None):
     if pt:
         return [(str(n), int(i)) for n, i in (pt.get("decors") or {}).items()
                 if str(i).strip().isdigit()]
+    if not has_builtin_portrait():
+        return []
     from tool.portrait_outfit import decors_of
     return [((n + "（頬）") if n == "脸红" else n, i) for n, i in decors_of(set_name)]
 
@@ -267,6 +288,9 @@ def expression_choices(set_name=None):
                 out.append((str(cn), lid))
         if out:
             return out
+    # 没有 2D 图层素材的角色（纯 Live2D）：不该借丛雨的表情表
+    if not has_builtin_portrait():
+        return []
     try:
         from tool.portrait_outfit import translate_layers
         for cn, (lid, _d) in EMOTION_MAP.items():

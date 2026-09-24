@@ -617,7 +617,9 @@ class PortraitStudio(SiliconDialog):
             self.set_combo.blockSignals(False)
             self._apply_set_options(act)
             self._apply_mode_ui()
-            if not self._clothes and self._mode != "single":
+            # 只有"本该有 2D 图层却读不到选项"才算异常；没有素材的角色由 _apply_mode_ui 说明原因
+            if (not self._clothes and self._mode != "single"
+                    and bool((data or {}).get("has_fgimages"))):
                 self.tip_lbl.setText("⚠ 未读取到立绘选项（runtime venv 或素材缺失？）")
             self._refresh_preview()
         except Exception as e:
@@ -656,18 +658,23 @@ class PortraitStudio(SiliconDialog):
             self.exp_combo.blockSignals(False)
 
         # 显隐：立绘相关 / Live2D 相关
+        # ⚠ 没有 2D 图层素材（fgimages）的角色（诺瓦 / 阿洛娜 / 日和）不该出现任何换装控件 ——
+        #   以前只看 mode=="layers" 就显示，于是会把**丛雨的衣服/表情**列出来，点合成必然失败。
+        has_fg = bool(d.get("has_fgimages"))
         try:
-            self.gb_display.setVisible(has_l2d and bool(d.get("has_fgimages")))   # 两种素材都有才给切换
+            self.gb_display.setVisible(has_l2d and has_fg)   # 两种素材都有才给切换
             self.btn_def_emo.setVisible(mode == "single" and not is_l2d)
+            _layers_ok = (mode == "layers") and has_fg and not is_l2d
+            _single_ok = (mode == "single") and has_fg and not is_l2d
             for w in (self.set_combo.parentWidget(), self.cloth_combo.parentWidget(),
                       self.gb3):
-                w.setVisible(mode == "layers" and not is_l2d)
-            self.exp_combo.parentWidget().setVisible(not is_l2d)
-            self.scene_combo.parentWidget().setVisible(not is_l2d)
+                w.setVisible(_layers_ok)
+            self.exp_combo.parentWidget().setVisible(_layers_ok or _single_ok)
+            self.scene_combo.parentWidget().setVisible(_layers_ok or _single_ok)
             # 单图模式下「随机换装」没意义（没有服装/装饰可随机）
             for _b in self.findChildren(QPushButton):
                 if _b.text().startswith("🎲"):
-                    _b.setVisible(mode == "layers" and not is_l2d)
+                    _b.setVisible(_layers_ok)
         except Exception as e:
             print(f"[PortraitStudio] ⚠ 界面自适应失败: {e}")
 
@@ -698,11 +705,25 @@ class PortraitStudio(SiliconDialog):
             self.tip_lbl.setText(f"「{pname}」的立绘是「每个表情一张整图」（共 {n} 张）：\n"
                                  "选表情即可预览；点「把当前表情设为默认」决定桌宠平时的样子。"
                                  + _no_l2d_hint)
+            self.status_lbl.setText("")
+            self._show_static_preview()
+        elif not has_fg:
+            # 没有 2D 图层素材：说清楚"为什么没有换装项"，别再摆一堆别人的衣服
+            self.tip_lbl.setText(
+                f"「{pname}」没有 2D 图层素材（pets/{pet.get('id') or '角色'}/fgimages），"
+                "所以没有换装 / 表情 / 装饰项。\n"
+                + ("它用 Live2D 模型显示：点下面按钮在新窗口里看实时预览。"
+                   if has_l2d else
+                   "它现在只有文字（也不带 Live2D 模型）；想加立绘："
+                   "「设置 → 立绘素材」放图层，或「设置 → Live2D 模型」选一个 *.model3.json。"))
+            self.status_lbl.setText("ℹ 这个角色没有 2D 立绘素材，无法合成预览")
             self._show_static_preview()
         else:
             self.tip_lbl.setText(f"「{pname}」是多图层立绘：\n"
                                  "服装与装饰各自保存，保存后 QQ 立绘与桌宠都用这一套。"
                                  + _no_l2d_hint)
+            # 切到 2D 时把上一模式的状态文字清掉（否则还挂着"点打开 Live2D 预览窗口"）
+            self.status_lbl.setText("")
             self._show_static_preview()
 
     def _show_static_preview(self):
@@ -939,7 +960,19 @@ class PortraitStudio(SiliconDialog):
         if self._busy:
             self._pending = True
             return
-        # 环境自检：缺 runtime venv / 脚本时直接说清楚（否则只会看到含糊的“合成失败”）
+        # 没有 2D 图层素材就**别去合成**：以前是先失败一次再解释，用户看到的是
+        # "❌ 合成失败 —— 请查看 tmp/portrait_studio.log"（其实根本没素材可合成）
+        if getattr(self, "_mode", "layers") != "single":
+            try:
+                from pets.pet_registry import get_fgimages_dir
+                _pid = getattr(self, "_pet_id", None)
+                if _pid and not get_fgimages_dir(_pid):
+                    self.status_lbl.setText("ℹ 这个角色没有 2D 立绘素材，无法合成预览")
+                    self.preview_lbl.setText("暂无 2D 立绘素材")
+                    return
+            except Exception:
+                pass
+        # 环境自检：缺 runtime venv / 脚本时直接说清楚（否则只会看到含糊的"合成失败"）
         if not self._cli_ready():
             return
         if self._mode == "single":
