@@ -263,6 +263,55 @@ def base_bg_color() -> QColor:
         return c
 
 
+# ══════════════════ 可读性工具（救「深色 UI 里写死的浅色字」）══════════════════
+# 老界面是深色底 + 写死的浅色字（#e8e8f0 标题 / #9a9aa8 提示 / #888 说明 / #8fd18f 状态）。
+# 主题系统支持浅色主题（经典 / 千恋万花）后，这些浅字压在浅底上就看不清了
+# （用户报的「立绘工坊以及其连带的东西好多都出现了看不清字的阴间配色」）。
+# 这里不写死替换色，而是**按当前主题底板算对比度**，浅底自动压暗、深底自动提亮，
+# 用户自选「启动器底色」(ui_bg_color) 时也跟着对。
+def rel_luminance(c) -> float:
+    """WCAG 相对亮度"""
+    def _f(v):
+        v = v / 255.0
+        return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+    return 0.2126 * _f(c.red()) + 0.7152 * _f(c.green()) + 0.0722 * _f(c.blue())
+
+
+def contrast_ratio(a, b) -> float:
+    """两色对比度（WCAG，1.0~21.0；正文建议 ≥ 4.5）"""
+    la, lb = rel_luminance(a), rel_luminance(b)
+    hi, lo = max(la, lb), min(la, lb)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def readable_on(color, bg=None, target: float = 4.5):
+    """把 color 沿明暗调到在当前主题底板上达到 target 对比度。
+
+    bg 默认取「窗口底板色」base_bg_color()。已经够清楚就原样返回（不改变设计色）。
+    """
+    c = QColor(color)
+    b = QColor(bg) if bg is not None else base_bg_color()
+    if contrast_ratio(c, b) >= target:
+        return c
+    dark_bg = rel_luminance(b) < 0.5
+    out = QColor(c)
+    for _ in range(40):
+        out = out.lighter(112) if dark_bg else out.darker(112)
+        if contrast_ratio(out, b) >= target:
+            return out
+    return QColor("#ffffff") if dark_bg else QColor("#000000")
+
+
+def ok_text():
+    """成功 / 已生效的状态字（跟着主题自动压暗或提亮）"""
+    return readable_on(GreenDark)
+
+
+def warn_text():
+    """警告 / 失败的状态字"""
+    return readable_on(RedDark)
+
+
 # ===== 6 套强调色（accent）=====
 THEME_COLORS = {
     "blue": {

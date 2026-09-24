@@ -32,6 +32,9 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QFont, QPainter, QColor, QPixmap, QPen, QBrush, QPainterPath
 
 from .colors import _app_base_dir  # noqa: F401  （打包时确保该模块被收集）
+# 说明文字/状态字一律取主题色：写死的 #888 / #9a9aa8 / #8fd18f / #e07a90 / #7fc48f
+# 都是深色 UI 时代的值，浅色主题（经典 / 千恋万花）上就是"浅字压浅底"看不清。
+from .colors import Gray2, ok_text, warn_text  # noqa: F401
 
 S = 1.0
 EMOTION_PRESET = ["平静", "高兴", "害羞", "生气", "惊讶", "着急"]
@@ -851,7 +854,7 @@ class _LayerTuneDialog(QDialog):
         root.addWidget(tip)
 
         self.lbl_applied = QLabel("")
-        self.lbl_applied.setStyleSheet("color:#7fc48f;font-size:12px;")
+        self.lbl_applied.setStyleSheet(f"color:{ok_text().name()};font-size:12px;")
         self.lbl_applied.setWordWrap(True)
         self.preview = QLabel("（点「刷新预览」看效果）")
         self.preview.setMinimumHeight(220)
@@ -1104,7 +1107,7 @@ class PCLPetWizard(SiliconDialog):
         # 底部按钮
         bar = QHBoxLayout()
         self.hint = QLabel("")
-        self.hint.setStyleSheet("color:#e07a90;font-size:12px;")
+        self.hint.setStyleSheet(f"color:{warn_text().name()};font-size:12px;")
         bar.addWidget(self.hint, 1)
         self.btn_prev = QPushButton("上一步")
         self.btn_prev.clicked.connect(lambda: self._goto(self.stack.currentIndex() - 1))
@@ -1202,7 +1205,7 @@ class PCLPetWizard(SiliconDialog):
         lay.addLayout(grid)
         tip = QLabel("提示：ID 创建后不建议修改（它是角色包文件夹名）。\n"
                      "名称会用在对话里（AI 会知道「我叫这个名字」）。")
-        tip.setStyleSheet("color:#888;font-size:12px;")
+        tip.setStyleSheet(f"color:{Gray2.name()};font-size:12px;")
         lay.addWidget(tip)
         lay.addStretch()
         return w
@@ -1252,7 +1255,7 @@ class PCLPetWizard(SiliconDialog):
                      "· 进阶方式：需要图层素材 + 图层索引 txt（和丛雨角色包同格式），"
                      "可以换衣服、换发型、叠装饰。\n"
                      "· 两种方式互不影响，之后在本向导「设置」里随时可以改。")
-        tip.setStyleSheet("color:#888;font-size:12px;")
+        tip.setStyleSheet(f"color:{Gray2.name()};font-size:12px;")
         lay.addWidget(tip)
 
 
@@ -1306,7 +1309,7 @@ class PCLPetWizard(SiliconDialog):
         r2.addWidget(b_read)
         ll.addLayout(r2)
         self.lbl_layers = QLabel("（选择文件夹后点「读取图层」，下面就能下拉选择每个部位用哪张图层）")
-        self.lbl_layers.setStyleSheet("color:#888;font-size:12px;")
+        self.lbl_layers.setStyleSheet(f"color:{Gray2.name()};font-size:12px;")
         ll.addWidget(self.lbl_layers)
 
         g = QGridLayout()
@@ -1448,7 +1451,7 @@ class PCLPetWizard(SiliconDialog):
         self.cmb_preview_set_here.currentIndexChanged.connect(self._on_preview_set_here)
         _gsh.addWidget(self.cmb_preview_set_here)
         _ghint = QLabel("没有两套素材的角色不会出现这个选项，也不会有 a/b 切换。")
-        _ghint.setStyleSheet("color:#888;font-size:11px;")
+        _ghint.setStyleSheet(f"color:{Gray2.name()};font-size:11px;")
         _gsh.addWidget(_ghint)
         lay.addWidget(self.gb_sets_here)
 
@@ -1534,7 +1537,7 @@ class PCLPetWizard(SiliconDialog):
         tip = QLabel("· 选中的模型会连同同目录/子目录的贴图、动作、表情一起复制进角色包 live2d/；\n"
                      "· 桌宠运行时「长按 Shift 2 秒」可在 2D 立绘与 Live2D 之间切换；\n"
                      "· 需要安装 live2d-py 与 PyOpenGL 依赖（启动器首次启动会提示）。")
-        tip.setStyleSheet("color:#888;font-size:12px;")
+        tip.setStyleSheet(f"color:{Gray2.name()};font-size:12px;")
         lay.addWidget(tip)
         lay.addStretch()
         return w
@@ -1569,7 +1572,7 @@ class PCLPetWizard(SiliconDialog):
         lay.addLayout(top)
 
         self.lbl_disp_tip = QLabel("")
-        self.lbl_disp_tip.setStyleSheet("color:#888;font-size:12px;")
+        self.lbl_disp_tip.setStyleSheet(f"color:{Gray2.name()};font-size:12px;")
         self.lbl_disp_tip.setWordWrap(True)
         lay.addWidget(self.lbl_disp_tip)
 
@@ -1672,7 +1675,7 @@ class PCLPetWizard(SiliconDialog):
                 pass
         llv.addWidget(gb)
         self.lbl_lv_info = QLabel("")
-        self.lbl_lv_info.setStyleSheet("color:#888;font-size:12px;")
+        self.lbl_lv_info.setStyleSheet(f"color:{Gray2.name()};font-size:12px;")
         self.lbl_lv_info.setWordWrap(True)
         llv.addWidget(self.lbl_lv_info)
         self.btn_l2d_win = QPushButton("🎭 打开 Live2D 实时预览窗口")
@@ -1702,7 +1705,7 @@ class PCLPetWizard(SiliconDialog):
         self.sld_box_h = QSlider(Qt.Horizontal); self.sld_box_h.setRange(8, 70)
         self.sld_font = QSlider(Qt.Horizontal); self.sld_font.setRange(50, 250)
         self.lbl_font_px = QLabel("")
-        self.lbl_font_px.setStyleSheet("color:#888;font-size:11px;")
+        self.lbl_font_px.setStyleSheet(f"color:{Gray2.name()};font-size:11px;")
         for lab, wid in (("对话框宽度", self.sld_box_w), ("对话框高度", self.sld_box_h),
                          ("字号", self.sld_font)):
             rr = QHBoxLayout()
@@ -2320,7 +2323,7 @@ class PCLPetWizard(SiliconDialog):
         tip = QLabel("· 开启后，鼠标点到身上对应区域并拖动（抚摸）或轻点，桌宠都会回应；\n"
                      "· 九个部位的范围可以自由调整大小与位置：点下面按钮打开编辑器，\n"
                      "  在立绘上直接拖框（Live2D 角色会把框画在实时预览窗口上面，边看边调）。")
-        tip.setStyleSheet("color:#888;font-size:12px;")
+        tip.setStyleSheet(f"color:{Gray2.name()};font-size:12px;")
         tip.setWordWrap(True)
         lay.addWidget(tip)
 
@@ -2339,14 +2342,14 @@ class PCLPetWizard(SiliconDialog):
             _names = "头、胸口、小腹、下体、大腿、小腿、脚、胳膊、手掌"
         row = QLabel(_names)
         row.setWordWrap(True)
-        row.setStyleSheet("color:#9a9aa8;font-size:12px;")
+        row.setStyleSheet(f"color:{Gray2.name()};font-size:12px;")
         gv.addWidget(row)
         btn = QPushButton("🎯 打开「触摸区域调节」界面（拖动框调整位置/大小）")
         btn.setMinimumHeight(38)
         btn.clicked.connect(self._open_touch_editor)
         gv.addWidget(btn)
         self.lbl_touch_state = QLabel("")
-        self.lbl_touch_state.setStyleSheet("color:#8fd18f;font-size:12px;")
+        self.lbl_touch_state.setStyleSheet(f"color:{ok_text().name()};font-size:12px;")
         self.lbl_touch_state.setWordWrap(True)
         gv.addWidget(self.lbl_touch_state)
         lay.addWidget(gb)
@@ -2447,7 +2450,7 @@ class PCLPetWizard(SiliconDialog):
 
         tip = QLabel("说明：短语音合成的是【日语】（推理时用日语参考音频，情绪按台词语气切换）；\n"
                      "长语音合成的是【中文】（长文本模式整段朗读）。两者都可以不配，随时在设置里改。")
-        tip.setStyleSheet("color:#888;font-size:12px;")
+        tip.setStyleSheet(f"color:{Gray2.name()};font-size:12px;")
         lay.addWidget(tip)
         lay.addStretch()
         return w
@@ -2521,7 +2524,7 @@ class PCLPetWizard(SiliconDialog):
         lay.addWidget(self.lbl_summary)
         tip = QLabel("创建后：桌宠卡片会出现这个角色 → 点「⭐ 设为活动」→ 启动桌宠即可。\n"
                      "之后想改任何一项，点卡片上的「⚙ 设置」重新进入本向导。")
-        tip.setStyleSheet("color:#888;font-size:12px;")
+        tip.setStyleSheet(f"color:{Gray2.name()};font-size:12px;")
         lay.addWidget(tip)
         lay.addStretch()
         return w

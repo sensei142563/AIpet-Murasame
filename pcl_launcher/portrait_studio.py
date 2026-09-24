@@ -22,6 +22,10 @@ from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBo
                              QCheckBox, QPushButton, QGroupBox, QWidget,
                              QStackedLayout)
 
+# 文字颜色一律取主题色（不能写死 #e8e8f0 / #9a9aa8：那是深色 UI 的老值，
+# 浅色主题下 = 浅字压浅底，用户报的"立绘工坊看不清字"就是这个）。
+from .colors import Color1, Gray2, ok_text
+
 
 def _studio_log(msg: str):
     """把工坊的合成/加载情况写进 tmp/portrait_studio.log（用户可直接查看）"""
@@ -323,11 +327,11 @@ class PortraitStudio(SiliconDialog):
         right.setSpacing(10)
 
         title = QLabel("立绘工坊")
-        title.setStyleSheet("font-size:19px; font-weight:bold; color:#e8e8f0;")
+        title.setStyleSheet(f"font-size:19px; font-weight:bold; color:{Color1.name()};")
         right.addWidget(title)
         self.tip_lbl = QLabel("a / b 是两套独立立绘素材，服装与装饰各自保存；\n"
                               "保存后 QQ 立绘与桌宠都用这一套。")
-        self.tip_lbl.setStyleSheet("color:#9a9aa8; font-size:12px;")
+        self.tip_lbl.setStyleSheet(f"color:{Gray2.name()}; font-size:12px;")
         self.tip_lbl.setWordWrap(True)
         right.addWidget(self.tip_lbl)
 
@@ -379,7 +383,7 @@ class PortraitStudio(SiliconDialog):
         right.addStretch(1)
 
         self.status_lbl = QLabel("")
-        self.status_lbl.setStyleSheet("color:#8fd18f; font-size:12px;")
+        self.status_lbl.setStyleSheet(f"color:{ok_text().name()}; font-size:12px;")
         self.status_lbl.setWordWrap(True)
         right.addWidget(self.status_lbl)
 

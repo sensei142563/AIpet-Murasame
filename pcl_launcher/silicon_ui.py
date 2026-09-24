@@ -121,7 +121,7 @@ def shadow(widget: QWidget, blur=30, dy=8, alpha=110, color="#000000"):
 # ══════════════════════ 全局 QSS ══════════════════════
 def silicon_qss(accent="#4c8dff", text="#e6eaf2", text_dim="#a9b2c6",
                 surface="#20263a", surface2="#1a1f2e", bg="#161a24",
-                border="#39405a", radius=None) -> str:
+                border="#39405a", radius=None, disabled="#98a2b8") -> str:
     """现代 QSS：只覆盖“Qt 默认皮肤”那部分控件（业务自带内联样式的优先）"""
     r = int(radius if radius is not None else M.radius_ctrl)
     f = M.font
@@ -257,7 +257,9 @@ QPushButton {{
 }}
 QPushButton:hover {{ background: rgba(255,255,255,0.13); border-color: {accent}; }}
 QPushButton:pressed {{ background: rgba(255,255,255,0.05); }}
-QPushButton:disabled {{ color: rgba(255,255,255,0.35); border-color: rgba(255,255,255,0.08); }}
+/* ⚠ 禁用态不能用写死的 rgba(255,255,255,0.35)：那是深色主题的色，浅色主题上等于
+   "浅底 + 更浅的字" → 禁用的按钮直接看不见（跟着主题走才两种主题都对）。 */
+QPushButton:disabled {{ color: {disabled}; border-color: {border}; }}
 """
 
 
@@ -485,7 +487,8 @@ def install(app: QApplication = None, accent="#4c8dff"):
                 accent=accent,
                 text=_C.Color1.name(), text_dim=_C.Gray2.name(),
                 surface=_C.Color6.name(), surface2=_C.Color7.name(),
-                bg=_C.Color8.name(), border=_C.Color5.name()))
+                bg=_C.Color8.name(), border=_C.Color5.name(),
+                disabled=_C.Gray3.name()))
         except Exception as _e:
             print(f"[SiliconUI] ⚠ 主题 QSS 失败，回退深色默认值: {_e}")
             app.setStyleSheet(silicon_qss(accent=accent))

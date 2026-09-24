@@ -27,6 +27,8 @@ from tool.touch_areas import (AREAS, AREA_KEYS, defaults as touch_defaults,  # n
                               LABELS as LABELS_DEFAULT)
 # 统一的主题输入框（替掉 QInputDialog.getText）
 from .silicon_dialog import ask_text      # noqa: E402
+# 文字色取主题（写死的 #e8e8f0 / #9a9aa8 是深色 UI 老值，浅色主题下看不清）
+from .colors import Color1, Gray2, ok_text   # noqa: E402
 
 HANDLE = 9            # 边缘/角命中半径（像素）
 MIN_NORM = 0.02       # 最小归一化宽高（防止拖没了）
@@ -497,12 +499,12 @@ class TouchAreaEditor(QWidget):
         right = QVBoxLayout()
         right.setSpacing(8)
         title = QLabel("触摸区域调节")
-        title.setStyleSheet("font-size:17px;font-weight:bold;color:#e8e8f0;")
+        title.setStyleSheet(f"font-size:17px;font-weight:bold;color:{Color1.name()};")
         right.addWidget(title)
         tip = QLabel("· 左键拖动 = 移动区域；拖框边/角 = 缩放\n"
                      "· 被摸到时桌宠会像「摸头」那样回应（轻点 / 按住抚摸两种）\n"
                      "· Live2D 角色：框会画在实时预览窗口的上面，边看模型边调")
-        tip.setStyleSheet("color:#9a9aa8;font-size:12px;")
+        tip.setStyleSheet(f"color:{Gray2.name()};font-size:12px;")
         tip.setWordWrap(True)
         right.addWidget(tip)
 
@@ -527,7 +529,7 @@ class TouchAreaEditor(QWidget):
         row_add.addWidget(self.btn_dis_area)
         gv.addLayout(row_add)
         self.lbl_area_hint = QLabel("默认 14 个部位不能删（可改位置/大小）；自定义部位可删")
-        self.lbl_area_hint.setStyleSheet("color:#9a9aa8;font-size:11px;")
+        self.lbl_area_hint.setStyleSheet(f"color:{Gray2.name()};font-size:11px;")
         self.lbl_area_hint.setWordWrap(True)
         gv.addWidget(self.lbl_area_hint)
         right.addWidget(gb)
@@ -568,7 +570,7 @@ class TouchAreaEditor(QWidget):
         right.addWidget(gb3)
 
         self.status = QLabel("")
-        self.status.setStyleSheet("color:#8fd18f;font-size:12px;")
+        self.status.setStyleSheet(f"color:{ok_text().name()};font-size:12px;")
         self.status.setWordWrap(True)
         right.addWidget(self.status)
 

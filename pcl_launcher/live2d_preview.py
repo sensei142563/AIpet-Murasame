@@ -583,6 +583,21 @@ class Live2DPreviewWidget(QOpenGLWidget):
 
 
 # ══════════════════ 独立 Live2D 预览窗口（不透明 → GL 能正常渲染）══════════════════
+# 底部工具条按钮样式：画布恒为深色（见 __init__ 的 QColor(30,30,38)），
+# 所以按钮也必须恒为「浅字深底」，不能跟着主题走（浅色主题的深字会糊在深画布上）。
+_BAR_BTN_QSS = """
+QPushButton {
+    background: rgba(255, 255, 255, 0.10); color: #eef1f7;
+    border: 1px solid rgba(255, 255, 255, 0.24); border-radius: 8px;
+    padding: 6px 12px; font-size: 13px;
+}
+QPushButton:hover { background: rgba(255, 255, 255, 0.18);
+    border-color: rgba(255, 255, 255, 0.42); }
+QPushButton:pressed { background: rgba(255, 255, 255, 0.06); }
+QPushButton:disabled { color: rgba(255, 255, 255, 0.40); }
+"""
+
+
 class Live2DPreviewWindow(QWidget):
     """独立的 Live2D 实时预览窗口。
 
@@ -634,6 +649,12 @@ class Live2DPreviewWindow(QWidget):
         self.btn_reload.clicked.connect(lambda: self.view.load_model(self._model_json) if self._model_json else None)
         self.btn_fit = QPushButton("🎯 适合窗口")
         self.btn_fit.clicked.connect(self._fit)
+        for _b in (self.btn_reload, self.btn_fit):
+            # ⚠ 画布是**写死的深色**（QColor(30,30,38)），而全局 QSS 给按钮的文字色是
+            #   「当前主题的主文字色」——经典/千恋万花是**深色**字，压在深色画布上就成了
+            #   深底 + 深字（用户报的"预览窗口左下角的字对比度低"，只剩 emoji 看得见）。
+            #   这个窗口永远是深底，所以这里把底和字一起钉死，与主题无关。
+            _b.setStyleSheet(_BAR_BTN_QSS)
         bar.addWidget(self.btn_reload)
         bar.addWidget(self.btn_fit)
         bar.addStretch()
