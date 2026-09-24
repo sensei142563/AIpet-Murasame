@@ -1906,7 +1906,7 @@ class PCLPetWizard(SiliconDialog):
             if not mj:
                 self.hint.setText("⚠ 该角色没有可用的 Live2D 模型文件")
                 return
-            w = open_live2d_window(mj, None)
+            w = open_live2d_window(mj, None, pet_id=self.pet_id or None)
             self.hint.setText("🎭 已在新窗口打开 Live2D 实时预览" if w else "⚠ 打开失败（看日志）")
         except Exception as e:
             self.hint.setText(f"⚠ 打开失败：{e}")

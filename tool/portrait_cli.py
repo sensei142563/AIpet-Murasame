@@ -45,11 +45,12 @@ def cmd_list():
     from pets.pet_registry import (get_active_pet_id, get_pet_config, get_fgimages_dir,
                                    get_fgimages_prefix, get_portrait_mode,
                                    get_portrait_cfg, get_live2d_model_json,
-                                   get_live2d_dir)
+                                   get_live2d_dir, has_fgimages)
     pid = get_active_pet_id()
     cfg = get_pet_config(pid) or {}
     model = cfg.get("model") or {}
-    has_fg = bool(get_fgimages_dir(pid))
+    # ⚠ 按**内容**判断有没有 2D 素材（只看目录会把空目录当有素材 → 工坊去借丛雨的素材合成）
+    has_fg = has_fgimages(pid)
     l2d_json = get_live2d_model_json(pid) or ""
     out = {
         "sets": list(SETS),

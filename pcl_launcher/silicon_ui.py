@@ -305,6 +305,51 @@ def section_title(text: str, accent="#4c8dff") -> QLabel:
 _installed = False
 
 
+def theme_palette(accent=None):
+    """**跟随当前主题**的调色板（浅色主题就是浅色，深色主题就是深色）。
+
+    为什么要它：`install()` 以前无论什么主题都装 `dark_palette()`（固定 #161a24 + 浅字）。
+    但经典 / 千恋万花是**浅色**主题（Color1 是深色文字、Color6/8 是浅底板）——于是
+    凡是"按调色板画底"的部件（QScrollArea 视口、列表/树、分组框、弹出容器、原生对话框…）
+    都会画成深底，而文字用主题的深色 → **深底 + 深字，看不清**。
+    用户报的"记忆页切角色看不清字""立绘工坊连带的东西一片阴间配色"都是这一类。
+    现在直接拿主题自己的颜色来装调色板，浅/深主题各自正确（颜色由 colors.py 按主题派生）。
+    """
+    from PyQt5.QtGui import QPalette
+    try:
+        from . import colors as C
+        c1, c5, c6, c7, c8 = (C.Color1, C.Color5, C.Color6, C.Color7, C.Color8)
+        g2, g3 = C.Gray2, C.Gray3
+        acc = QColor(accent or C.accent_hex())
+    except Exception:
+        return dark_palette(accent or "#4c8dff")
+    # 高亮上的文字：按强调色的明暗自动选黑/白，避免"浅色强调色 + 白字"看不清
+    hl_text = QColor("#ffffff") if acc.lightness() < 165 else QColor("#1b1b1b")
+    p = QPalette()
+    p.setColor(QPalette.Window, c8)
+    p.setColor(QPalette.WindowText, c1)
+    p.setColor(QPalette.Base, c7)
+    p.setColor(QPalette.AlternateBase, c6)
+    p.setColor(QPalette.Text, c1)
+    p.setColor(QPalette.Button, c6)
+    p.setColor(QPalette.ButtonText, c1)
+    p.setColor(QPalette.BrightText, QColor("#ffffff"))
+    p.setColor(QPalette.ToolTipBase, c6)
+    p.setColor(QPalette.ToolTipText, c1)
+    p.setColor(QPalette.Highlight, acc)
+    p.setColor(QPalette.HighlightedText, hl_text)
+    p.setColor(QPalette.Link, acc)
+    p.setColor(QPalette.Mid, c5)
+    p.setColor(QPalette.Disabled, QPalette.Text, g3)
+    p.setColor(QPalette.Disabled, QPalette.ButtonText, g3)
+    p.setColor(QPalette.Disabled, QPalette.WindowText, g3)
+    try:
+        p.setColor(QPalette.PlaceholderText, g2)
+    except Exception:
+        pass
+    return p
+
+
 def dark_palette(accent="#4c8dff"):
     """深色调色板：只设 QSS 是不够的 —— QScrollArea 视口、自动填充背景的控件
     会用「调色板 Window 色」自绘，不换调色板就会在深色界面里露出白块。"""
@@ -427,7 +472,13 @@ def install(app: QApplication = None, accent="#4c8dff"):
         if app is None:
             return False
         app.setStyle("Fusion")                 # Fusion 才能完整套用调色板
-        app.setPalette(dark_palette(accent))
+        # 调色板必须**跟着主题**（浅色主题要浅色调色板），否则按调色板画底的部件会
+        # 深底 + 深字（用户报的"阴间配色"就是这么来的）——见 theme_palette() 说明。
+        try:
+            app.setPalette(theme_palette(accent))
+        except Exception as _pe:
+            print(f"[SiliconUI] ⚠ 主题调色板失败，回退深色: {_pe}")
+            app.setPalette(dark_palette(accent))
         try:
             from . import colors as _C
             app.setStyleSheet(silicon_qss(

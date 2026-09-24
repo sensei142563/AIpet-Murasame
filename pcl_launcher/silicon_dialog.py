@@ -64,7 +64,7 @@ class SiliconDialog(QDialog):
     之后照常往 self.content（QVBoxLayout）里塞内容即可。
     """
 
-    def __init__(self, title: str, parent=None, width=760, height=560):
+    def __init__(self, title: str, parent=None, width=760, height=560, opaque=False):
         super().__init__(parent)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
         # 底板色 = 启动器底板色（用户自选则用它，否则跟随当前主题）
@@ -80,7 +80,21 @@ class SiliconDialog(QDialog):
         #   顺带修掉"绿色版二级窗口不跟随底色"。
         # 不用透明窗口：二级窗口要保证内容清晰（透明窗口在部分环境下会整体发虚/看着透明）
         # 透明窗口 + 圆角底板：四角外保持透明（亚克力可选，圆角始终保留）
-        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        #
+        # opaque=True：给**内含 QOpenGLWidget 的窗口**用（目前只有 Live2D 调试器）。
+        # 半透明顶层窗口里嵌 GL 子控件，在部分 Windows 显卡驱动上会整块闪白/闪黑
+        # （用户报"该显示的地方黑白屏闪"）。opaque 模式下窗口不透明，四角改为填底板色。
+        self._opaque = bool(opaque)
+        self.setAttribute(Qt.WA_TranslucentBackground, not self._opaque)
+        if self._opaque:
+            try:
+                from PyQt5.QtGui import QPalette
+                self.setAutoFillBackground(True)
+                _p = self.palette()
+                _p.setColor(QPalette.Window, self._base)
+                self.setPalette(_p)
+            except Exception:
+                pass
         try:
             from PyQt5.QtGui import QPalette
             self._apply_palette()

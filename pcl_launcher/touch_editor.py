@@ -1067,7 +1067,7 @@ class TouchAreaEditor(QWidget):
                     pass
                 self._load_2d_preview()
                 return
-            win = open_live2d_window(mj, None)
+            win = open_live2d_window(mj, None, pet_id=getattr(self, "pet_id", None))
             if win is None:
                 self.status.setText("⚠ 打开 Live2D 预览失败（看 tmp/live2d_window.log）")
                 return

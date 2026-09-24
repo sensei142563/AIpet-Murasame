@@ -26,7 +26,7 @@ from PyQt5.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QGridLayout,
                             QLabel, QPushButton, QComboBox, QSlider, QScrollArea,
                             QLineEdit, QOpenGLWidget, QSizePolicy, QPlainTextEdit)
 
-from .colors import Color1, Gray2, Gray3, Color3, GreenDark
+from .colors import Color1, Color5, Color7, Gray2, Gray3, Color3, GreenDark
 from .silicon_dialog import SiliconDialog, page_msg
 from .silicon_ui import M
 
@@ -508,7 +508,7 @@ class Live2DDebuggerDialog(SiliconDialog):
                 self.pets.append((pid, str(cfg.get("display_name") or cfg.get("name") or pid)))
         want = pet_id or ""
         title = "Live2D 动作 / 表情调试器"
-        super().__init__(title, parent, width=1180, height=760)
+        super().__init__(title, parent, width=1180, height=760, opaque=True)
 
         self.canvas = None
         self._store = None
@@ -581,7 +581,7 @@ class Live2DDebuggerDialog(SiliconDialog):
         # ── 打标签 ──
         pl.addWidget(_cap("给选中的那个打标签"))
         self.sel_lbl = QLabel("（先点上面任意一个表情或动作）")
-        self.sel_lbl.setStyleSheet(f"color: {Gray3.name()}; font-size: {int(11 * 1.0)}px;")
+        self.sel_lbl.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(11 * 1.0)}px;")
         self.sel_lbl.setWordWrap(True)
         pl.addWidget(self.sel_lbl)
         row1 = QHBoxLayout()
@@ -652,7 +652,7 @@ class Live2DDebuggerDialog(SiliconDialog):
 
         self.status_lbl = QLabel("")
         self.status_lbl.setWordWrap(True)
-        self.status_lbl.setStyleSheet(f"color: {Gray3.name()}; font-size: {int(11 * 1.0)}px;")
+        self.status_lbl.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(11 * 1.0)}px;")
         lay.addWidget(self.status_lbl)
 
         # 初始角色
@@ -704,7 +704,7 @@ class Live2DDebuggerDialog(SiliconDialog):
             b.setMinimumHeight(30)
             row.addWidget(b)
         self.tl_lbl = QLabel("")
-        self.tl_lbl.setStyleSheet(f"color: {Gray3.name()}; font-size: {int(11 * 1.0)}px;")
+        self.tl_lbl.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(11 * 1.0)}px;")
         row.addWidget(self.tl_lbl, 1)
         tl.addLayout(row)
 
@@ -720,9 +720,13 @@ class Live2DDebuggerDialog(SiliconDialog):
         self.moving_view.setMaximumHeight(96)
         self.moving_view.setPlaceholderText(
             "录完这段动作后，这里列出它真正在动的参数（名字 + 变化范围）")
+        # ⚠ 别写死"黑底 + 深灰字"：浅色主题（经典 / 千恋万花）下那是"黑框里深灰字"，
+        #   看不清（用户报的阴间配色）。改成用主题的输入框底色半透明 + 主题正文色。
+        _c7 = Color7
         self.moving_view.setStyleSheet(
-            f"QPlainTextEdit {{ background: rgba(0,0,0,0.22); color: {Gray2.name()};"
-            f" border: 1px solid rgba(255,255,255,0.16); border-radius: 6px;"
+            f"QPlainTextEdit {{ background: rgba({_c7.red()},{_c7.green()},{_c7.blue()},150);"
+            f" color: {Color1.name()};"
+            f" border: 1px solid {Color5.name()}; border-radius: 6px;"
             f" font-size: {int(11 * 1.0)}px; }}")
         tl.addWidget(self.moving_view)
         self._timeline_reset()

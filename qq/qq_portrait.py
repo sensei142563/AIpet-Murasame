@@ -79,8 +79,10 @@ def has_builtin_portrait() -> bool:
     "别人家的衣服 + ❌ 合成失败"（2026-09-24 用探针实测到）。
     """
     try:
-        from pets.pet_registry import get_fgimages_dir
-        return bool(get_fgimages_dir())
+        # ⚠ 必须按**内容**判断：诺瓦那边有个**空**的 fgimages 目录，
+        #   旧写法（只看目录在不在）会以为它有 2D 素材 → 又去借丛雨的衣服/表情。
+        from pets.pet_registry import has_fgimages
+        return bool(has_fgimages())
     except Exception:
         return False
 

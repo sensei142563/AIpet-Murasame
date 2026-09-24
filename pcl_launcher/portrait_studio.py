@@ -821,7 +821,7 @@ class PortraitStudio(SiliconDialog):
             if not mj:
                 self.status_lbl.setText("⚠ 该角色没有可用的 Live2D 模型文件")
                 return
-            w = open_live2d_window(mj, None)
+            w = open_live2d_window(mj, None, pet_id=getattr(self, "_pet_id", None))
             self.status_lbl.setText("🎭 已在新窗口打开 Live2D 实时预览（可拖动模型 / 缩放窗口）"
                                     if w else "⚠ 打开 Live2D 预览窗口失败（看日志）")
         except Exception as e:
@@ -989,10 +989,14 @@ class PortraitStudio(SiliconDialog):
         # "❌ 合成失败 —— 请查看 tmp/portrait_studio.log"（其实根本没素材可合成）
         if getattr(self, "_mode", "layers") != "single":
             try:
-                from pets.pet_registry import get_fgimages_dir
+                from pets.pet_registry import has_fgimages
                 _pid = getattr(self, "_pet_id", None)
-                if _pid and not get_fgimages_dir(_pid):
+                # ⚠ 用 has_fgimages（按内容）而不是"目录在不在"：诺瓦那边有个空目录，
+                #   旧判断以为有素材 → 去借丛雨的素材合成 → 工坊里显示丛雨的立绘（用户报的）。
+                if _pid and not has_fgimages(_pid):
                     self.status_lbl.setText("ℹ 这个角色没有 2D 立绘素材，无法合成预览")
+                    self.preview_lbl.setPixmap(QPixmap())      # 清掉上一个角色的残留
+                    self._last_pixmap = None
                     self.preview_lbl.setText("暂无 2D 立绘素材")
                     return
             except Exception:

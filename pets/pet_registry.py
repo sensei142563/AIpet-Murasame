@@ -512,6 +512,28 @@ def get_portrait_default_layers(pet_id: str = None) -> list:
     return [next(iter(emo.values()))]
 
 
+def has_fgimages(pet_id: str = None) -> bool:
+    """这个角色**真的有 2D 立绘素材**吗（按内容判断，不是只看目录在不在）。
+
+    ⚠ 踩过的坑：`get_fgimages_dir()` 只查 `os.path.isdir`，而 `pets/noir/fgimages/`
+      是个**空目录**（向导/测试都可能顺手建出来）→ 所有"有没有 2D 素材"的判断都以为诺瓦
+      有 2D 素材 → 立绘工坊去合成，合成时又借用了丛雨的内置服装/表情表 →
+      **诺瓦的工坊里显示的是丛雨的立绘**（用户报的"2D 应该显示没有才对"）。
+    所以这里要求目录里至少有一个真实文件（索引 txt 或图片）。
+    """
+    d = get_fgimages_dir(pet_id)
+    if not d or not os.path.isdir(d):
+        return False
+    try:
+        for name in os.listdir(d):
+            p = os.path.join(d, name)
+            if os.path.isfile(p) and not name.startswith("."):
+                return True
+    except Exception:
+        return False
+    return False
+
+
 def get_live2d_dir(pet_id: str = None) -> str:
     """返回 Live2D 模型目录（含 DLL），不存在返回空串。"""
     cfg = get_pet_config(pet_id)

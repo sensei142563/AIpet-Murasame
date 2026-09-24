@@ -460,6 +460,24 @@ class Live2DPreviewWidget(QOpenGLWidget):
         """换模型（与 reload_model 同一条稳健路径）"""
         return self.reload_model(path)
 
+    def set_display(self, scale=None, offset_x=None, offset_y=None):
+        """热改缩放/位移（换角色时用：同一个 GL 上下文里换模型 + 换显示参数）。"""
+        try:
+            if scale is not None:
+                self._model_scale = float(scale)
+            if offset_x is not None:
+                self._offset_x = float(offset_x)
+            if offset_y is not None:
+                self._offset_y = float(offset_y)
+            if self.model is not None:
+                self.model.SetScale(self._model_scale)
+                self.model.SetOffset(self._offset_x, self._offset_y)
+            self.update()
+            return True
+        except Exception as e:
+            _l2d_log(f"set_display 失败: {e}")
+            return False
+
     def paintGL(self):
         try:
             from OpenGL.GL import glClearColor, glClear, GL_COLOR_BUFFER_BIT, GL_DEPTH_BUFFER_BIT
@@ -572,7 +590,7 @@ class Live2DPreviewWindow(QWidget):
     旧版启动器的预览之所以正常，就是因为它在一个普通窗口里。这里同样用不透明窗口。
     """
 
-    def __init__(self, model_json: str = "", parent=None):
+    def __init__(self, model_json: str = "", parent=None, pet_id: str = None):
         # 置顶 + Tool 窗口：不被其它模态对话框锁住，也不会被启动器盖住
         super().__init__(parent, Qt.Tool | Qt.WindowStaysOnTopHint | Qt.WindowTitleHint
                          | Qt.WindowCloseButtonHint)
@@ -587,11 +605,28 @@ class Live2DPreviewWindow(QWidget):
             self.setPalette(pal)
         except Exception:
             pass
-        self.resize(560, 760)
+        # ⚠ 画布比例与缩放必须**跟角色走**：以前固定 560x760（竖长）且 model_scale 用默认 1.0，
+        #   于是方形半身模型（诺瓦 window_ratio=1.0 / scale=1.53）在竖长画布里被裁掉一截
+        #   （用户报"诺瓦显示不完全，毕竟这是个正方形画布"）。
+        disp = {}
+        try:
+            from pets.pet_registry import get_live2d_display
+            disp = get_live2d_display(pet_id) or {}
+        except Exception as _e:
+            print(f"[Live2DPreview] ⚠ 读取角色显示参数失败（用默认比例）: {_e}")
+        ratio = float(disp.get("window_ratio") or 0.67)
+        ratio = min(max(ratio, 0.3), 2.0)
+        _h = 760
+        _w = int(_h * ratio)
+        self.resize(_w, _h)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
-        self.view = Live2DPreviewWidget(model_json or None, self)
-        self.view.setMinimumSize(320, 420)
+        self.view = Live2DPreviewWidget(
+            model_json or None, self,
+            model_scale=float(disp.get("scale") or 1.0),
+            offset_x=float(disp.get("offset_x") or 0.0),
+            offset_y=float(disp.get("offset_y") or 0.0))
+        self.view.setMinimumSize(max(240, int(420 * ratio)), 420)
         lay.addWidget(self.view, 1)
         bar = QHBoxLayout()
         bar.setContentsMargins(8, 4, 8, 8)
@@ -607,6 +642,28 @@ class Live2DPreviewWindow(QWidget):
         self.show()
         self.raise_()
         self.activateWindow()
+
+    def apply_pet(self, pet_id: str = None):
+        """按角色的显示参数重设画布比例 + 缩放/位移（换角色时必须调）。
+
+        ⚠ 预览窗口是**复用**的（同一个 GL 上下文，见 open_live2d_window），
+          不复用就画不出来；但复用时光换模型不够 —— 画布比例还是上一个角色的，
+          方形半身模型（诺瓦）就会被裁（用户报"诺瓦显示不完全"）。
+        """
+        try:
+            from pets.pet_registry import get_live2d_display
+            disp = get_live2d_display(pet_id) or {}
+            ratio = min(max(float(disp.get("window_ratio") or 0.67), 0.3), 2.0)
+            h = max(420, self.height() or 760)
+            self.resize(int(h * ratio), h)
+            self.view.setMinimumSize(max(240, int(420 * ratio)), 420)
+            self.view.set_display(disp.get("scale"), disp.get("offset_x"), disp.get("offset_y"))
+            _l2d_log("按角色调整画布：pet=%s ratio=%.2f scale=%s"
+                     % (pet_id, ratio, disp.get("scale")))
+            return True
+        except Exception as e:
+            _l2d_log(f"apply_pet 失败: {e}")
+            return False
 
     def _fit(self):
         try:
@@ -631,8 +688,11 @@ class Live2DPreviewWindow(QWidget):
 _WINDOWS = []
 
 
-def open_live2d_window(model_json: str = "", parent=None) -> "Live2DPreviewWindow":
-    """打开（或复用）Live2D 实时预览窗口；失败返回 None。"""
+def open_live2d_window(model_json: str = "", parent=None, pet_id: str = None) -> "Live2DPreviewWindow":
+    """打开（或复用）Live2D 实时预览窗口；失败返回 None。
+
+    `pet_id`：按这个角色的显示参数调整画布比例与缩放（方形半身模型不会被裁）。
+    """
     try:
         from PyQt5.QtWidgets import QApplication
         app = QApplication.instance()
@@ -644,14 +704,15 @@ def open_live2d_window(model_json: str = "", parent=None) -> "Live2DPreviewWindo
                 if w is not None:
                     if model_json and os.path.exists(model_json):
                         w.set_model(model_json)      # 同一上下文里换模型（安全）
+                    w.apply_pet(pet_id)              # 同一上下文里换显示参数（比例/缩放）
                     w.show()
                     w.raise_()
                     w.activateWindow()
-                    _l2d_log(f"复用预览窗口（同一 GL 上下文）：{model_json}")
+                    _l2d_log(f"复用预览窗口（同一 GL 上下文）：{model_json} pet={pet_id}")
                     return w
             except Exception as _e:
                 _l2d_log(f"复用失败，改为新建：{_e}")
-        win = Live2DPreviewWindow(model_json, parent)
+        win = Live2DPreviewWindow(model_json, parent, pet_id=pet_id)
         _WINDOWS.append(win)
         _l2d_log(f"已打开实时预览窗口：{model_json}")
         print(f"[Live2DWindow] 已打开实时预览窗口（不透明）：{os.path.basename(model_json or '')}")
