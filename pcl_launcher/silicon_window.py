@@ -2385,6 +2385,9 @@ def launch() -> int:
     from PyQt5.QtWidgets import QApplication
     from . import silicon_ui as _sui
     from .colors import current_theme_id
+    # ⚠ 必须在 QApplication 之前：让三个 Live2D 画布（工坊内嵌 / 实时预览窗口 / 调试器）
+    #   共享 GL 上下文，否则第 2、3 个画布画不出模型（= 用户报的"崩坏 / 频闪"）。
+    _sui.enable_shared_gl_contexts()
     app = QApplication.instance() or QApplication(sys.argv)
 
     # 全局异常兜底：未捕获异常只记日志并跳过，不让启动器整进程消失

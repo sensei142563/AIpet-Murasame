@@ -51,6 +51,10 @@ def main():
     args = parser.parse_args()
     pet = args.pet or get_active_pet_id()
 
+    # ⚠ 必须在 QApplication 之前：调试器 + 实时预览窗口会在同一进程里各建一个
+    #   Live2D 画布，不共享 GL 上下文的话后建的那个画不出模型（"崩坏 / 频闪"）。
+    from pcl_launcher import silicon_ui as _sui_pre
+    _sui_pre.enable_shared_gl_contexts()
     app = QApplication(sys.argv)
     from pcl_launcher import silicon_ui
     silicon_ui.install(app)
