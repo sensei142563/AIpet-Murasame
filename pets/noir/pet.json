@@ -1,324 +1,324 @@
 {
- "id": "noir",
- "name": "诺瓦",
- "display_name": "诺瓦",
- "intro": "黑色系的 Live2D 角色",
- "avatar": "avatar.jpg",
- "prompt": {
-  "short": "prompt.txt",
-  "long": "longtext_prompt.txt"
- },
- "translate_rules": "你是一个翻译助手，负责将用户输入的中文翻译成日文。要求：翻译自然、口语化、符合可爱少女说话习惯，不要古日语风格，不要添加任何说明，不需要注音。给你提供的格式是[\"句子1\", \"句子2\", \"句子3\", .....]，必须严格按照原格式，输出一个json列表，逐句翻译，只输出纯JSON文本。",
- "model": {
-  "default": "live2d",
-  "has_live2d": true,
-  "has_fgimages": false,
-  "fgimages_prefix": "",
-  "fgimages_sets": [
-   "a"
-  ],
-  "live2d_dir": "live2d/",
-  "live2d_window_ratio": 1.0,
-  "live2d_scale": 1.53,
-  "live2d_offset_x": 0.0,
-  "live2d_offset_y": 0.0,
-  "live2d_font_scale": 0.6,
-  "emotions": {
-   "高兴": [
-    "eyeclose.exp3.json"
-   ],
-   "可爱": [
-    "eyeclose.exp3.json"
-   ],
-   "害羞": [
-    "eyeclose.exp3.json"
-   ],
-   "惊讶": [
-    "quanquan.exp3.json"
-   ],
-   "好奇": [
-    "quanquan.exp3.json"
-   ],
-   "懵圈": [
-    "quanquan.exp3.json"
-   ],
-   "疑惑": [
-    "quanquan.exp3.json"
-   ],
-   "生气": [
-    "quanquan.exp3.json"
-   ],
-   "着急": [
-    "quanquan.exp3.json"
-   ],
-   "伤心": [
-    "tears.exp3.json"
-   ],
-   "难过": [
-    "tears.exp3.json"
-   ],
-   "委屈": [
-    "tears.exp3.json"
-   ],
-   "认真": [],
-   "平静": [],
-   "白": [
-    "white.exp3.json"
-   ]
+  "id": "noir",
+  "name": "诺瓦",
+  "display_name": "诺瓦",
+  "intro": "黑色系的 Live2D 角色",
+  "avatar": "avatar.png",
+  "prompt": {
+    "short": "prompt.txt",
+    "long": "longtext_prompt.txt"
   },
-  "motions": {},
-  "default_expression": "",
-  "live2d_window_height_ratio": 0.4,
-  "display_2d": {
-   "height_ratio": 0.55,
-   "scale": 1.0,
-   "offset_x": 0,
-   "offset_y": 0
+  "translate_rules": "你是一个翻译助手，负责将用户输入的中文翻译成日文。要求：翻译自然、口语化、符合可爱少女说话习惯，不要古日语风格，不要添加任何说明，不需要注音。给你提供的格式是[\"句子1\", \"句子2\", \"句子3\", .....]，必须严格按照原格式，输出一个json列表，逐句翻译，只输出纯JSON文本。",
+  "model": {
+    "default": "live2d",
+    "has_live2d": true,
+    "has_fgimages": false,
+    "fgimages_prefix": "",
+    "fgimages_sets": [
+      "a"
+    ],
+    "live2d_dir": "live2d/",
+    "live2d_window_ratio": 1.0,
+    "live2d_scale": 1.53,
+    "live2d_offset_x": 0.0,
+    "live2d_offset_y": 0.0,
+    "live2d_font_scale": 0.6,
+    "emotions": {
+      "高兴": [
+        "eyeclose.exp3.json"
+      ],
+      "可爱": [
+        "eyeclose.exp3.json"
+      ],
+      "害羞": [
+        "eyeclose.exp3.json"
+      ],
+      "惊讶": [
+        "quanquan.exp3.json"
+      ],
+      "好奇": [
+        "quanquan.exp3.json"
+      ],
+      "懵圈": [
+        "quanquan.exp3.json"
+      ],
+      "疑惑": [
+        "quanquan.exp3.json"
+      ],
+      "生气": [
+        "quanquan.exp3.json"
+      ],
+      "着急": [
+        "quanquan.exp3.json"
+      ],
+      "伤心": [
+        "tears.exp3.json"
+      ],
+      "难过": [
+        "tears.exp3.json"
+      ],
+      "委屈": [
+        "tears.exp3.json"
+      ],
+      "认真": [],
+      "平静": [],
+      "白": [
+        "white.exp3.json"
+      ]
+    },
+    "motions": {},
+    "default_expression": "",
+    "live2d_window_height_ratio": 0.4,
+    "display_2d": {
+      "height_ratio": 0.55,
+      "scale": 1.0,
+      "offset_x": 0,
+      "offset_y": 0
+    },
+    "display_live2d": {
+      "height_ratio": 0.4,
+      "width_ratio": 1.0,
+      "scale": 1.0,
+      "offset_x": 0,
+      "offset_y": 0
+    },
+    "sets_available": [
+      "a"
+    ],
+    "set_labels": {
+      "a": "侧面立绘",
+      "b": "正面立绘"
+    }
   },
-  "display_live2d": {
-   "height_ratio": 0.4,
-   "width_ratio": 1.0,
-   "scale": 1.0,
-   "offset_x": 0,
-   "offset_y": 0
+  "interaction": {
+    "head_top": 0.18,
+    "head_bottom": 0.46,
+    "talk_top": 0.45,
+    "talk_bottom": 1.0,
+    "edge_margin_x": 0.12,
+    "text_area": "bottom",
+    "text_offset_x": -40,
+    "text_offset_y": -100,
+    "text_box_2d": [
+      0.06,
+      0.05,
+      0.88,
+      0.38
+    ],
+    "text_font_scale_2d": 1.0,
+    "text_box_live2d": [
+      0.1,
+      0.55,
+      0.8,
+      0.38
+    ],
+    "text_font_scale_live2d": 1.0,
+    "text_box": [
+      0.06,
+      0.05,
+      0.88,
+      0.38
+    ],
+    "text_font_scale": 1.0
   },
-  "sets_available": [
-   "a"
-  ],
-  "set_labels": {
-   "a": "侧面立绘",
-   "b": "正面立绘"
+  "languages": {
+    "primary": "ja",
+    "secondary": "zh",
+    "dialog_language": "zh"
+  },
+  "voices": {
+    "short_emotions": [
+      "害羞",
+      "平静",
+      "惊讶",
+      "生气",
+      "着急",
+      "高兴"
+    ],
+    "short_ref_dir": "voices/short/",
+    "long_ref_audio": "voices/long/ch0242.wav",
+    "long_ref_text": "老师，您喜欢这样的半熟蛋呢？还是太阳蛋，或者说玉子烧？"
+  },
+  "sticker": {
+    "dir": "biaoqingbao/"
+  },
+  "memory": {
+    "isolated": true,
+    "dir": "memory/"
+  },
+  "capabilities": {
+    "chat": true,
+    "screen_vision": true,
+    "camera_vision": true,
+    "face_recognition": true,
+    "qq": true,
+    "short_tts": true,
+    "long_tts": true
+  },
+  "touch": {
+    "enabled": true,
+    "areas_2d": {
+      "head": [
+        0.32,
+        0.02,
+        0.38,
+        0.18
+      ],
+      "custom_1": [
+        0.38,
+        0.28,
+        0.28,
+        0.2
+      ],
+      "chest": [
+        0.34,
+        0.55,
+        0.34,
+        0.18
+      ]
+    },
+    "areas_live2d": {
+      "head": [
+        0.62,
+        0.309,
+        0.38,
+        0.18
+      ],
+      "chest": [
+        0.6591,
+        0.7313,
+        0.34,
+        0.18
+      ],
+      "belly": [
+        0.34,
+        0.3,
+        0.32,
+        0.08
+      ],
+      "privates": [
+        0.37,
+        0.39,
+        0.26,
+        0.07
+      ],
+      "thigh_l": [
+        0.34,
+        0.47,
+        0.15,
+        0.11
+      ],
+      "thigh_r": [
+        0.51,
+        0.47,
+        0.15,
+        0.11
+      ],
+      "shin_l": [
+        0.35,
+        0.6,
+        0.14,
+        0.12
+      ],
+      "shin_r": [
+        0.51,
+        0.6,
+        0.14,
+        0.12
+      ],
+      "foot_l": [
+        0.35,
+        0.74,
+        0.14,
+        0.1
+      ],
+      "foot_r": [
+        0.51,
+        0.74,
+        0.14,
+        0.1
+      ],
+      "arm_l": [
+        0.1189,
+        0.22,
+        0.15,
+        0.28
+      ],
+      "arm_r": [
+        0.73,
+        0.22,
+        0.15,
+        0.28
+      ],
+      "hand_l": [
+        0.12,
+        0.52,
+        0.15,
+        0.12
+      ],
+      "hand_r": [
+        0.73,
+        0.52,
+        0.15,
+        0.12
+      ],
+      "custom_1": [
+        0.6859,
+        0.4953,
+        0.28,
+        0.2
+      ]
+    },
+    "areas": {
+      "head": [
+        0.32,
+        0.02,
+        0.38,
+        0.18
+      ],
+      "custom_1": [
+        0.38,
+        0.28,
+        0.28,
+        0.2
+      ],
+      "chest": [
+        0.34,
+        0.55,
+        0.34,
+        0.18
+      ]
+    },
+    "disabled_2d": [
+      "belly",
+      "privates",
+      "thigh_l",
+      "thigh_r",
+      "shin_l",
+      "shin_r",
+      "foot_l",
+      "foot_r",
+      "arm_l",
+      "arm_r",
+      "hand_l",
+      "hand_r"
+    ],
+    "disabled_live2d": [
+      "arm_l",
+      "arm_r",
+      "belly",
+      "foot_l",
+      "foot_r",
+      "hand_l",
+      "hand_r",
+      "privates",
+      "shin_l",
+      "shin_r",
+      "thigh_l",
+      "thigh_r"
+    ],
+    "labels": {
+      "custom_1": "脸"
+    }
   }
- },
- "interaction": {
-  "head_top": 0.18,
-  "head_bottom": 0.46,
-  "talk_top": 0.45,
-  "talk_bottom": 1.0,
-  "edge_margin_x": 0.12,
-  "text_area": "bottom",
-  "text_offset_x": -40,
-  "text_offset_y": -100,
-  "text_box_2d": [
-   0.06,
-   0.05,
-   0.88,
-   0.38
-  ],
-  "text_font_scale_2d": 1.0,
-  "text_box_live2d": [
-   0.1,
-   0.55,
-   0.8,
-   0.38
-  ],
-  "text_font_scale_live2d": 1.0,
-  "text_box": [
-   0.06,
-   0.05,
-   0.88,
-   0.38
-  ],
-  "text_font_scale": 1.0
- },
- "languages": {
-  "primary": "ja",
-  "secondary": "zh",
-  "dialog_language": "zh"
- },
- "voices": {
-  "short_emotions": [
-   "害羞",
-   "平静",
-   "惊讶",
-   "生气",
-   "着急",
-   "高兴"
-  ],
-  "short_ref_dir": "voices/short/",
-  "long_ref_audio": "voices/long/ch0242.wav",
-  "long_ref_text": "老师，您喜欢这样的半熟蛋呢？还是太阳蛋，或者说玉子烧？"
- },
- "sticker": {
-  "dir": "biaoqingbao/"
- },
- "memory": {
-  "isolated": true,
-  "dir": "memory/"
- },
- "capabilities": {
-  "chat": true,
-  "screen_vision": true,
-  "camera_vision": true,
-  "face_recognition": true,
-  "qq": true,
-  "short_tts": true,
-  "long_tts": true
- },
- "touch": {
-  "enabled": true,
-  "areas_2d": {
-   "head": [
-    0.32,
-    0.02,
-    0.38,
-    0.18
-   ],
-   "custom_1": [
-    0.38,
-    0.28,
-    0.28,
-    0.2
-   ],
-   "chest": [
-    0.34,
-    0.55,
-    0.34,
-    0.18
-   ]
-  },
-  "areas_live2d": {
-   "head": [
-    0.62,
-    0.309,
-    0.38,
-    0.18
-   ],
-   "chest": [
-    0.6591,
-    0.7313,
-    0.34,
-    0.18
-   ],
-   "belly": [
-    0.34,
-    0.3,
-    0.32,
-    0.08
-   ],
-   "privates": [
-    0.37,
-    0.39,
-    0.26,
-    0.07
-   ],
-   "thigh_l": [
-    0.34,
-    0.47,
-    0.15,
-    0.11
-   ],
-   "thigh_r": [
-    0.51,
-    0.47,
-    0.15,
-    0.11
-   ],
-   "shin_l": [
-    0.35,
-    0.6,
-    0.14,
-    0.12
-   ],
-   "shin_r": [
-    0.51,
-    0.6,
-    0.14,
-    0.12
-   ],
-   "foot_l": [
-    0.35,
-    0.74,
-    0.14,
-    0.1
-   ],
-   "foot_r": [
-    0.51,
-    0.74,
-    0.14,
-    0.1
-   ],
-   "arm_l": [
-    0.1189,
-    0.22,
-    0.15,
-    0.28
-   ],
-   "arm_r": [
-    0.73,
-    0.22,
-    0.15,
-    0.28
-   ],
-   "hand_l": [
-    0.12,
-    0.52,
-    0.15,
-    0.12
-   ],
-   "hand_r": [
-    0.73,
-    0.52,
-    0.15,
-    0.12
-   ],
-   "custom_1": [
-    0.6859,
-    0.4953,
-    0.28,
-    0.2
-   ]
-  },
-  "areas": {
-   "head": [
-    0.32,
-    0.02,
-    0.38,
-    0.18
-   ],
-   "custom_1": [
-    0.38,
-    0.28,
-    0.28,
-    0.2
-   ],
-   "chest": [
-    0.34,
-    0.55,
-    0.34,
-    0.18
-   ]
-  },
-  "disabled_2d": [
-   "belly",
-   "privates",
-   "thigh_l",
-   "thigh_r",
-   "shin_l",
-   "shin_r",
-   "foot_l",
-   "foot_r",
-   "arm_l",
-   "arm_r",
-   "hand_l",
-   "hand_r"
-  ],
-  "disabled_live2d": [
-   "arm_l",
-   "arm_r",
-   "belly",
-   "foot_l",
-   "foot_r",
-   "hand_l",
-   "hand_r",
-   "privates",
-   "shin_l",
-   "shin_r",
-   "thigh_l",
-   "thigh_r"
-  ],
-  "labels": {
-   "custom_1": "脸"
-  }
- }
 }
