@@ -267,12 +267,15 @@ class PCLSettingsPanel(QWidget):
                               "DeepSeek 支持 低/高/最高 三档，Qwen3 系列只有 开/关。\n"
                               "日常闲聊用「关」最快。")
         # 显卡加速：开=检测 NVIDIA/CUDA 并走 GPU；不是 N 卡或没装 CUDA 时 run.py 自动回退 CPU
-        self._add_slider(
-            "gpu_accel", "显卡加速（NVIDIA）", ["false", "true"], "true",
-            hint="开（默认）：检测 NVIDIA 显卡与 CUDA，本地模型/本地语音用 GPU 加速；\n"
-                 "不是 N 卡或驱动没有 CUDA 会自动回退 CPU。\n"
-                 "关：直接用 CPU，跳过显卡检测（启动略快）。\n"
-                 "只影响本地模型与本地语音；云端对话/QQ/微信不受影响。")
+        # ⚠ 合并说明（我们这条线）：运行时 runtime\venv 装的是 CPU 版 torch，run.py 也固定走
+        #   CPU 模式（hardware_type 硬编码 "cpu"）→ 这个开关在我们这里开/关一个样。
+        #   按「界面上显示的必须真实」的原则先不摆出来，等补上 GPU 运行时再接回。
+        # self._add_slider(
+        #     "gpu_accel", "显卡加速（NVIDIA）", ["false", "true"], "true",
+        #     hint="开（默认）：检测 NVIDIA 显卡与 CUDA，本地模型/本地语音用 GPU 加速；\n"
+        #          "不是 N 卡或驱动没有 CUDA 会自动回退 CPU。\n"
+        #          "关：直接用 CPU，跳过显卡检测（启动略快）。\n"
+        #          "只影响本地模型与本地语音；云端对话/QQ/微信不受影响。")
 
         # ===== ③ 长文本输出 =====
         self._section("长文本输出", "📝")
@@ -298,14 +301,16 @@ class PCLSettingsPanel(QWidget):
         self._add_slider("voice_synthesis_enable", "启用短语音（日语）",
                          ["false", "true"], "true",
                          hint="开启时每条回复都会合成语音（较慢）；关闭后只显示文字，回复明显更快")
-        self._add_slider("short_tts_gpu", "短语音 GPU 加速", ["false", "true"], "true",
-                         hint="短语音（GPT-SoVITS）是否用 NVIDIA 显卡合成。\n"
-                              "开（默认）：用显卡；整合包没装 CUDA 时会自动回退 CPU。\n"
-                              "关：强制 CPU（更稳，但合成明显更慢）。")
-        self._add_slider("longtts_gpu", "长语音 GPU 加速", ["false", "true"], "true",
-                         hint="长语音（F5-TTS）是否用 NVIDIA 显卡合成。\n"
-                              "开（默认）：检测到 CUDA 就用显卡，否则自动回退 CPU；\n"
-                              "关：强制 CPU。")
+        # ⚠ 合并说明（同「显卡加速」）：我们这条线的语音服务固定走 CPU（运行时是 CPU 版 torch），
+        #   这两个 GPU 开关摆出来就是空转 → 先隐藏，等补上 GPU 运行时再接回。
+        # self._add_slider("short_tts_gpu", "短语音 GPU 加速", ["false", "true"], "true",
+        #                  hint="短语音（GPT-SoVITS）是否用 NVIDIA 显卡合成。\n"
+        #                       "开（默认）：用显卡；整合包没装 CUDA 时会自动回退 CPU。\n"
+        #                       "关：强制 CPU（更稳，但合成明显更慢）。")
+        # self._add_slider("longtts_gpu", "长语音 GPU 加速", ["false", "true"], "true",
+        #                  hint="长语音（F5-TTS）是否用 NVIDIA 显卡合成。\n"
+        #                       "开（默认）：检测到 CUDA 就用显卡，否则自动回退 CPU；\n"
+        #                       "关：强制 CPU。")
         self._add_choice("tts_type", "TTS 语音合成", ["local", "cloud"], "local",
                          display={"local": "本地", "cloud": "云端"},
                          hint="本地：用项目里的 GPT-SoVITS 整合包合成（离线、不花钱、吃显存）；\n"
