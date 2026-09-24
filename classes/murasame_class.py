@@ -16,6 +16,7 @@ from PyQt5.QtWidgets import QLabel
 
 from classes.Worker_class import ScreenWorker
 from classes.Worker_class import qwen3_lora_Worker, cloud_API_Worker, CameraWorker
+from classes.Worker_class import extract_emotion_tag
 
 
 def play_voice_wav(path: str) -> None:
@@ -691,11 +692,11 @@ class Murasame(QLabel):
                 return
 
             # Live2D 模式：提取情绪标签联动表情/动作（阶段 E）
+            # 标签两种括号都认：人设里写的是全角【白】，模型也可能吐半角 [白]
             if self._live2d_mode and self._live2d_widget:
-                import re as _re
-                _em = _re.findall(r'\[(.+?)\]', clause.strip())
-                if _em:
-                    self._live2d_set_emotion(_em[-1], hold=True)
+                _tag = extract_emotion_tag(clause)
+                if _tag:
+                    self._live2d_set_emotion(_tag, hold=True)
 
             # 第一句立即显示（不等音频）
             if not self._first_clause_shown:
@@ -1322,9 +1323,7 @@ class Murasame(QLabel):
                 # Live2D 模式：不更换立绘，改用 Live2D 表情 + 动作
                 # 情绪来源：①句内【情绪】括号标签；②qwen-emotion 的逐句情绪列表
                 # 句起：切表情 + 起动作并保持（动作播完自动重播直到句末）
-                import re
-                emotion_match = re.findall(r'\[(.+?)\]', sentence.strip())
-                emotion = emotion_match[-1] if emotion_match else None
+                emotion = extract_emotion_tag(sentence) or None
                 if not emotion:
                     el = getattr(self, "_last_emotion_list", []) or []
                     if index < len(el):

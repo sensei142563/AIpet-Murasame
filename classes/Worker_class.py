@@ -1,4 +1,5 @@
 import json
+import re
 import tempfile
 import time
 import os
@@ -12,6 +13,22 @@ from tool.config import as_bool, get_config
 from tool.chat import qwen3_lora, ollama_qwen3_sentence, ollama_qwen3_portrait, gpt_sovits_tts, ollama_qwen3_emotion, ollama_qwen3_translate
 
 portrait_type = get_config("./config.json")['portrait']
+
+# 句内情绪标签（只覆盖「显示用情绪」= 表情/动作，语音不受影响）。
+# ⚠ 人设里写的标签是**全角**【白】（见 pets/noir/prompt.txt、longtext_prompt.txt），
+#   而模型有时会输出半角 [白] —— 两种都要认。以前这里只匹配半角，
+#   于是「诺瓦白形态」这条唯一由人设驱动的表情路径**从来没触发过**（v1.12.1 起就写错）。
+#   限定 1~6 字且不跨括号，避免把【一大段动作描写】当成情绪词。
+EMOTION_TAG_RE = re.compile(r'[\[【]([^\[\]【】]{1,6})[\]】]')
+
+
+def extract_emotion_tag(text) -> str:
+    """取句内最后一个情绪标签（【白】/ [白] 都认）；没有则返回空串。"""
+    try:
+        m = EMOTION_TAG_RE.findall(str(text or ""))
+    except Exception:
+        return ""
+    return m[-1] if m else ""
 
 
 def _voice_synthesis_enabled() -> bool:
@@ -196,11 +213,10 @@ class qwen3_lora_Worker(QThread):
 
         # 句内【情绪】标签（如【白】）→ 只覆盖「显示用情绪」（表情/动作），
         # TTS 已按原始情绪合成，语音不受影响。
-        import re as _re
         for i, t in enumerate(reply_raw):
-            m = _re.findall(r'\[(.+?)\]', str(t))
-            if m and i < len(emotion_list):
-                emotion_list[i] = m[-1]
+            tag = extract_emotion_tag(t)
+            if tag and i < len(emotion_list):
+                emotion_list[i] = tag
 
         self.finished.emit(reply, portrait_list, history, portrait_history, voices, emotion_list)  # 发回主线程
 
@@ -292,11 +308,10 @@ class cloud_API_Worker(QThread):
 
         # 句内【情绪】标签（如【白】）→ 只覆盖「显示用情绪」（表情/动作），
         # TTS 已按原始情绪合成，语音不受影响。
-        import re as _re
         for i, t in enumerate(reply_list_raw):
-            m = _re.findall(r'\[(.+?)\]', str(t))
-            if m and i < len(emotion_list):
-                emotion_list[i] = m[-1]
+            tag = extract_emotion_tag(t)
+            if tag and i < len(emotion_list):
+                emotion_list[i] = tag
 
         self.finished.emit(reply_list, portrait_list, history, portrait_history, voices, emotion_list)
 
