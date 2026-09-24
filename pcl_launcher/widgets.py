@@ -521,9 +521,10 @@ class PCLSettingsPanel(QWidget):
         self._add_model_combo(
             "short_model_name", "短回复模型名",
             ["qwen-plus", "qwen3.7-plus", "qwen3.7-flash", "qwen3.6-flash", "qwen3.5-flash",
-             "deepseek-v4-flash", "deepseek-v4-pro", "deepseek-chat"],
+             "deepseek-flash"],
             "qwen-plus",
-            hint="可编辑：仅限 deepseek/qwen 两族模型名"
+            hint="可编辑：仅限 deepseek/qwen 两族模型名\n"
+                 "（DeepSeek 现役只有一个 deepseek-flash，对话与看图同一个模型）"
         )
         self._add_slider("reasoning_level", "推理等级", ["off", "low", "high", "max"], "off")
         self._add_slider("force_gpu_check", "强制 GPU 检查", ["false", "true"], "false")
@@ -562,10 +563,11 @@ class PCLSettingsPanel(QWidget):
         self._add_slider("longtext_model", "长回复对话模型", ["qwen", "deepseek"], "deepseek")
         self._add_model_combo(
             "longtext_model_name", "长回复模型名",
-            ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-chat",
+            ["deepseek-flash",
              "qwen-plus", "qwen3.7-plus", "qwen3.7-flash", "qwen3.6-flash"],
-            "deepseek-v4-flash",
-            hint="可编辑：仅限 deepseek/qwen 两族模型名"
+            "deepseek-flash",
+            hint="可编辑：仅限 deepseek/qwen 两族模型名\n"
+                 "（旧的 deepseek-v4-flash / -v4-pro / deepseek-chat 都已下线）"
         )
 
         # ===== ④ 语音与视觉识别 =====
@@ -576,8 +578,8 @@ class PCLSettingsPanel(QWidget):
         self._add_slider("tts_type", "TTS 语音合成", ["local", "cloud"], "local")
         self._add_model_combo(
             "vision_model_name", "视觉识别模型名",
-            ["qwen3-vl-plus", "qwen3-vl-flash", "deepseek-v4-flash-vision-exp",
-             "qwen-vl-max", "qwen-vl-plus"],
+            ["deepseek-flash",
+             "qwen3-vl-plus", "qwen3-vl-flash", "qwen-vl-max", "qwen-vl-plus"],
             "qwen3-vl-plus",
             hint="可编辑：QQ识图/摄像头/微信识图统一使用"
         )
@@ -962,11 +964,11 @@ class PCLSettingsPanel(QWidget):
             self._set_slider("portrait", cfg.get("portrait", "b"))
             self._set_slider("screen_type", cfg.get("screen_type", "false"))
             self._set_slider("voice_trigger", cfg.get("voice_trigger", "false"))
-            self._set_slider("live2d_enabled", cfg.get("live2d_enabled", "true"))
+            self._set_slider("live2d_enabled", cfg.get("live2d_enabled", "false"))
             self._set_slider("force_gpu_check", cfg.get("force_gpu_check", "false"))
             self._set_slider("longtext_enabled", cfg.get("longtext_enabled", "true"))
             self._set_slider("longtext_model", cfg.get("longtext_model", "deepseek"))
-            self._set_if("longtext_model_name", cfg.get("longtext_model_name", "deepseek-v4-flash"))
+            self._set_if("longtext_model_name", cfg.get("longtext_model_name", "deepseek-flash"))
             self._set_if("vision_model_name", cfg.get("vision_model_name", "qwen3-vl-plus"))
             self._set_slider("reasoning_level", cfg.get("reasoning_level", "off"))
             self._set_if("qq_owner_id", cfg.get("qq_owner_id", ""))

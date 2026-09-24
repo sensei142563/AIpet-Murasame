@@ -9,15 +9,18 @@
 由 config.json 控制：
 - "model_type"            短文本对话族（"local" / "deepseek" / "qwen"）
 - "longtext_model"        长文本对话族（"qwen" / "deepseek"）
-- "short_model_name"      短文本模型名（族默认：qwen-plus / deepseek-v4-flash）
-- "longtext_model_name"   长文本模型名（族默认：deepseek-v4-flash / qwen-plus）
-- "vision_model_name"     视觉模型名（默认 qwen3-vl-plus）
+- "short_model_name"      短文本模型名（族默认：qwen-plus / deepseek-flash）
+- "longtext_model_name"   长文本模型名（族默认：deepseek-flash / qwen-plus）
+- "vision_model_name"     视觉模型名（与对话同一个 deepseek-flash）
 - "reasoning_level"       推理等级（off / low / high / max，默认 off）
 
-注意：deepseek-chat / deepseek-reasoner 已于 2026-07-24 停用，
-官方现只提供 deepseek-v4-flash / deepseek-v4-pro / deepseek-v4-flash-vision-exp。
-URL 路由按模型名前缀决定（deepseek* → deepseek，其余 → dashscope），
-不依赖族字段，避免"族选 qwen 但模型名填 deepseek-v4-flash"打到错误网关。
+注意（2026-09-24 更新）：DeepSeek 官方模型名又变了一轮 ——
+  deepseek-chat / deepseek-reasoner     已于 2026-07-24 停用
+  deepseek-v4-flash / -v4-pro / -v4-flash-vision-exp  也已下线
+现在**只有一个 deepseek-flash**，而且**对话与看图是同一个模型**（不再有单独的 vision-exp）。
+旧名字留着会让 API 直接 404，所以设置页的候选列表、示例配置、README 都一起换了。
+URL 路由仍按模型名前缀决定（deepseek* → deepseek，其余 → dashscope），
+不依赖族字段，避免"族选 qwen 但模型名填 deepseek-flash"打到错误网关。
 """
 
 import os
@@ -29,13 +32,19 @@ CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 URL_QWEN = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
 URL_DEEPSEEK = "https://api.deepseek.com/chat/completions"
 
-# 模型族 → 默认模型名（deepseek 族已迁移到 V4 Flash）
+# 现役 DeepSeek 模型名（对话 + 看图同一个）。改版时只改这一处：
+# 旧名 deepseek-v4-flash / deepseek-v4-pro / deepseek-v4-flash-vision-exp 已下线。
+MODEL_DEEPSEEK_FLASH = "deepseek-flash"
+
+# 模型族 → 默认模型名
 FAMILY_DEFAULT_MODEL = {
-    "deepseek": "deepseek-v4-flash",
+    "deepseek": MODEL_DEEPSEEK_FLASH,
     "qwen": "qwen-plus",
 }
 
-DEFAULT_VISION_MODEL = "qwen3-vl-plus"
+# 视觉默认也用它（用户 2026-09-24：对话和看图都换 DeepSeekFlash）；
+# 想用 Qwen 看图在设置页把「视觉识别模型名」改成 qwen3-vl-plus 即可。
+DEFAULT_VISION_MODEL = MODEL_DEEPSEEK_FLASH
 
 # 推理等级白名单（DeepSeek: off/low/high/max；Qwen: off=关思考，任意开档=开思考）
 REASONING_LEVELS = ("off", "low", "high", "max")
@@ -64,12 +73,6 @@ def get_reasoning_level() -> str:
     cfg = _load_config()
     val = str(cfg.get("reasoning_level", "off")).strip().lower()
     return val if val in REASONING_LEVELS else "off"
-
-
-def supports_thinking(model_name: str) -> bool:
-    """该模型名是否支持思考模式开关/强度控制"""
-    name = str(model_name or "").strip().lower()
-    return name.startswith("deepseek") or name.startswith("qwen3")
 
 
 def build_reasoning_params(model_name: str, level: str = "off") -> dict:
@@ -101,9 +104,13 @@ def build_reasoning_params(model_name: str, level: str = "off") -> dict:
 # ==================== 长文本对话 ====================
 
 def get_longtext_model_name():
-    """读取 config.json 的 longtext_model 字段，返回 "qwen" / "deepseek"（默认 qwen）"""
+    """读取 config.json 的 longtext_model 字段，返回 "qwen" / "deepseek"（默认 deepseek）
+
+    ⚠ 默认值必须与 config.example.json / 设置页面板一致（都是 deepseek）：
+      以前这里写 qwen，键缺失时长文本走 Qwen、而设置页显示 DeepSeek，两边对不上。
+    """
     cfg = _load_config()
-    val = str(cfg.get("longtext_model", "qwen")).strip().lower()
+    val = str(cfg.get("longtext_model", "deepseek")).strip().lower()
     if val not in FAMILY_DEFAULT_MODEL:
         print(f"[ModelConfig] ⚠ 未知的 longtext_model: {val}，回退到 qwen")
         return "qwen"

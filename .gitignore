@@ -69,3 +69,13 @@ qq/qq_adult.py
 # 用户自己「复制为我的」的主题（含个人壁纸/背景视频，别进仓库）
 pcl_launcher/themes/*_copy/
 pcl_launcher/themes/*/assets/bg_custom.*
+
+# ----- 合并朋友 1.17.2：隐私 / 本地自用素材 / 编辑器残留 -----
+pcl_launcher/themes/senrenbanka_copy/assets/bg_custom.mp4
+.ssh/
+.idea/
+.vscode/
+.mimosa/
+.zcode/
+_import_tmp/
+.DS_Store
