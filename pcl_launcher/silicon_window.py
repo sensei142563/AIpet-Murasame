@@ -378,7 +378,9 @@ class HomePage(QWidget):
         cl.setContentsMargins(18, 16, 18, 16)
         cl.setSpacing(12)
         row = QHBoxLayout()
-        self.btn_pet = QPushButton("  启动 AIpet 桌宠")
+        # 按钮上直接写出"要启动哪一只"（活动角色在「桌宠」页切换）
+        _tag0 = f"（{self._active_pet_name()}）" if self._active_pet_name() else ""
+        self.btn_pet = QPushButton(f"  启动 AIpet 桌宠{_tag0}")
         self.btn_pet.setStyleSheet(_accent_btn_qss(accent))
         self.btn_pet.setMinimumHeight(46)
         self.btn_pet.clicked.connect(self.toggle_pet)
@@ -502,10 +504,15 @@ class HomePage(QWidget):
         try:
             alive, tts_ok = getattr(self, "_probe_result", (False, False))
             self._probe_busy = False
-            self.chip_pet.set_text("桌宠：运行中" if alive else "桌宠：未运行", alive)
+            # 桌宠名字带上：用户问过"怎么启动诺瓦？"——总览页得说清现在启的是哪一只
+            # （活动角色在「桌宠」页用「⭐ 设为活动」切换；换角色后这里 6 秒内自动跟上）
+            name = self._active_pet_name()
+            tag = f"（{name}）" if name else ""
+            self.chip_pet.set_text(f"桌宠{tag}：运行中" if alive else f"桌宠{tag}：未运行", alive)
             # 「正在关闭/启动中」期间不要被状态刷新覆盖文案
             if self.btn_pet.isEnabled():
-                self.btn_pet.setText("  ⏹ 关闭桌宠" if alive else "  启动 AIpet 桌宠")
+                self.btn_pet.setText(f"  ⏹ 关闭桌宠{tag}" if alive
+                                     else f"  启动 AIpet 桌宠{tag}")
             accent = THEME_COLORS.get(str(ACCENT_ID), {}).get("title_start", "#2f6fd0")
             self.btn_pet.setStyleSheet(_accent_btn_qss(accent, danger=alive))
             try:
@@ -519,6 +526,16 @@ class HomePage(QWidget):
             self.chip_tts.set_text("语音服务：在线" if tts_ok else "语音服务：未启动", tts_ok)
         except Exception as e:
             print(f"[NewUI] ⚠ 状态更新失败: {e}")
+
+    @staticmethod
+    def _active_pet_name() -> str:
+        """当前活动桌宠的显示名（拿不到就返回空串，界面照常显示）"""
+        try:
+            from pets.pet_registry import get_active_pet_id, get_pet_config
+            cfg = get_pet_config(get_active_pet_id()) or {}
+            return str(cfg.get("display_name") or cfg.get("name") or "").strip()
+        except Exception:
+            return ""
 
     # ── 启动/关闭 ──
     # ── 启动/关闭：进行中按钮置灰 + 文案，防止连点 ──

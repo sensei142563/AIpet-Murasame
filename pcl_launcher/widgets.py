@@ -2045,7 +2045,23 @@ class PCLPetManager(QScrollArea):
                 print(f"[PCL] ⚠ 设为活动后透明化失败: {_e}")
             try:
                 from .widgets import show_save_toast as _toast
-                _toast(self, f"已把「{pet_id}」设为活动桌宠（重启桌宠后生效）")
+                # 用显示名（「诺瓦」）而不是 id（noir），并说清下一步怎么启动它 ——
+                # 用户问过"怎么启动诺瓦？"，以前只提示"已设为活动"，没说去哪儿启动
+                _name = pet_id
+                try:
+                    from pets.pet_registry import get_pet_config
+                    _name = (get_pet_config(pet_id) or {}).get("display_name") or pet_id
+                except Exception:
+                    pass
+                _running = False
+                try:
+                    from .silicon_window import _pet_api_alive
+                    _running = bool(_pet_api_alive())
+                except Exception:
+                    pass
+                _tail = ("桌宠正在运行：关掉再启动就会换成它" if _running
+                         else "回「总览」点「启动 AIpet 桌宠」即可")
+                _toast(self, f"已把「{_name}」设为活动桌宠 —— {_tail}")
             except Exception:
                 pass
             print(f"[PCL] 当前活动桌宠: {get_active_pet_id()}")
