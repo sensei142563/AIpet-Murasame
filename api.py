@@ -387,12 +387,6 @@ def set_long_text_mode_active(active: bool):
         _feature_status["longtext"] = "on" if active else "off"
 
 
-def is_long_text_mode_active() -> bool:
-    """PCL / QQ 接口查询长文本模式状态"""
-    with _control_lock:
-        return _long_text_mode_active
-
-
 def check_voice_start() -> bool:
     """由 main.py 轮询，检测是否应该开始录音"""
     global _voice_start_flag
@@ -505,6 +499,9 @@ async def longtext_chat(req: LongTextChatRequest):
 # ============== Entrypoint ==============
 if __name__ == "__main__":
     cfg = get_config("./config.json")
-    if cfg.get("model_type", "deepseek").lower() == "local":
+    if cfg.get("model_type", "qwen").lower() == "local":
         model, tokenizer = load_model_and_tokenizer()
-    uvicorn.run(app, host="127.0.0.1", port=28565)  # 仅本机：PCL/桌宠都用 localhost 访问；绑 0.0.0.0 会暴露无鉴权 API 到局域网
+    # 仅本机：PCL/桌宠都用 localhost 访问；绑 0.0.0.0 会把无鉴权 API 暴露到局域网。
+    # 日志/断开噪音的处理统一在 tool/api_server.py（access_log=False + 忽略 10054）
+    from tool.api_server import run_blocking
+    run_blocking(app, "127.0.0.1", 28565)

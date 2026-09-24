@@ -45,6 +45,15 @@ echo [4/5] 安装 CPU 版 PyTorch（云端对话也必需）...
 if errorlevel 1 goto :install_fail
 echo        PyTorch 安装完成
 
+rem ---------- 4.5 修 MSVC 运行时冲突（桌宠"卡退"的根因）----------
+rem PyQt5-Qt5 5.15.2 的 Qt5\bin 自带一套 14.26（VS2017）的 msvcp140/vcruntime140…，
+rem 而 torch ≥2.x 的 c10.dll 需要更新的运行时：先 import PyQt5 再 import torch 时，
+rem c10.dll 初始化失败（WinError 1114 / 0xC0000005，事件日志里崩在 MSVCP140.dll）。
+rem 桌宠正好是"Qt + torch 同进程" → 必崩、且没有 traceback。
+rem 修法：把那几个**旧于系统**的文件改名让位（只动比系统旧的，幂等、可回滚）。
+echo [4.5/5] 检查 MSVC 运行时冲突（PyQt5 自带旧版会让 torch 起不来）...
+"%VENV_PYTHON%" -c "from tool.msvc_runtime import fix_if_needed as f; f(log=lambda m: print('        ' + m))"
+
 rem ---------- 5. 生成 config.json ----------
 if exist "config.json" (
     echo [5/5] config.json 已存在，跳过

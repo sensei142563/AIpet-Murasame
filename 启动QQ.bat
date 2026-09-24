@@ -13,7 +13,7 @@ if exist "%VENV_PYTHON%" (
 )
 
 echo 使用 Python: %PYTHON_CMD%
-echo 提示：请确保 NapCat 已启动（首次使用请先运行 start_napcat.bat 扫码登录）
+echo 提示：用启动器（AIpet-Murasame.exe）点「启动 QQ AIpet」会自动拉起 NapCat 并等扫码；直接跑这个 bat 时首次仍需先运行 start_napcat.bat 扫码登录
 "%PYTHON_CMD%" run_qq.py
 if errorlevel 1 (
     echo.

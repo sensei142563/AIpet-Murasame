@@ -221,6 +221,132 @@ def set_active_pet_id(pet_id: str) -> bool:
     return True
 
 
+# ══════════════ 三个「当前使用」槽位（桌宠 / QQ / 微信） ══════════════
+# 用户 2026-09-24 的界面要求："取消这个所谓的活动"，改成「当前使用」三个槽：
+#   桌宠 / QQAIPet聊天 / 微信chatbot聊天 —— 把「我的桌宠」里的胶囊拖进槽里就换上。
+# 落盘仍是 config.json：桌宠槽 = 老键 active_pet（兼容一切老代码/老配置），
+# QQ / 微信槽各用一个新键；**没单独设过 → 回落到桌宠槽**，所以老配置行为完全不变。
+SLOTS = ("pet", "qq", "wechat")
+SLOT_LABELS = {"pet": "桌宠", "qq": "QQAIPet聊天", "wechat": "微信chatbot聊天"}
+_SLOT_KEYS = {"pet": "active_pet", "qq": "qq_active_pet", "wechat": "wechat_active_pet"}
+
+
+def slot_key(slot: str) -> str:
+    """槽位 → config.json 里的键名（未知槽位按桌宠处理）"""
+    return _SLOT_KEYS.get(str(slot or "pet"), _SLOT_KEYS["pet"])
+
+
+def get_slot_raw(slot: str = "pet") -> str:
+    """该槽**显式**指定的角色 ID（没设过 = 空串；用于界面区分"已指定/跟随桌宠"）"""
+    cfg = _load_json(os.path.join(BASE_DIR, "config.json"), {})
+    pid = str(cfg.get(slot_key(slot)) or "").strip()
+    return pid if pid in get_pet_ids() else ""
+
+
+def get_slot_pet_id(slot: str = "pet") -> str:
+    """该槽**生效**的角色 ID。
+
+    - 桌宠槽：显式值 → 老键 active_pet → 注册表默认（与 get_active_pet_id 一致）
+    - QQ / 微信槽：显式值 → 回落到桌宠槽（没拖过就是"跟桌宠一样"）
+    """
+    slot = str(slot or "pet")
+    raw = get_slot_raw(slot)
+    if raw:
+        return raw
+    return get_active_pet_id()
+
+
+def set_slot_pet_id(slot: str, pet_id: str) -> bool:
+    """把某个槽指到某个角色（写 config.json）。桌宠槽就是老键 active_pet。"""
+    if pet_id not in get_pet_ids():
+        return False
+    cfg = _load_json(os.path.join(BASE_DIR, "config.json"), {})
+    cfg[slot_key(slot)] = pet_id
+    _save_json(os.path.join(BASE_DIR, "config.json"), cfg)
+    return True
+
+
+def clear_slot_pet_id(slot: str) -> bool:
+    """清空某个槽（从槽里拖出去 = 取消指定）。
+
+    桌宠槽清空 → 回到注册表默认角色；QQ / 微信槽清空 → 跟随桌宠槽。
+    """
+    cfg = _load_json(os.path.join(BASE_DIR, "config.json"), {})
+    key = slot_key(slot)
+    if key not in cfg:
+        return True
+    cfg.pop(key, None)
+    _save_json(os.path.join(BASE_DIR, "config.json"), cfg)
+    return True
+
+
+# ── Live2D 表情/动作候选词（给 AI 自己选：与 2D 立绘"给一份图层列表让 AI 选"同一个思路）──
+def get_live2d_choice_words(pet_id: str = None) -> list:
+    """角色 Live2D 可选的心情/动作词。
+
+    来源：pet.json 的 `model.emotions`（表情）+ `model.motions`（动作）的**键**，
+    按"表情优先、动作补充"去重排序 —— 这就是交给 AI 的候选列表。
+    """
+    disp = get_live2d_display(pet_id)
+    words = []
+    for k in (disp.get("emotions") or {}):
+        if str(k).strip() and str(k) not in words:
+            words.append(str(k))
+    for k in (disp.get("motions") or {}):
+        if str(k).strip() and str(k) not in words:
+            words.append(str(k))
+    return words
+
+
+def get_live2d_prompts(pet_id: str = None) -> dict:
+    """角色自定义的 Live2D 提示词（可选文件 `live2d_prompts.json`）。
+
+    结构：{"prompt_template": "...{words}...{example}...", "extra_words": [...]}
+    没有这个文件时返回 {}（由 tool/chat.py 用内置模板 + get_live2d_choice_words 兜底）。
+    """
+    pet_id = pet_id or get_active_pet_id()
+    path = os.path.join(PETS_DIR, pet_id, "live2d_prompts.json")
+    data = _load_json(path, None)
+    if not isinstance(data, dict):
+        return {}
+    extra = data.get("extra_words")
+    if extra is not None and not isinstance(extra, list):
+        data.pop("extra_words", None)
+    return data
+
+
+def get_slot_map() -> dict:
+    """给界面用：每个槽的 {slot, label, raw, effective, is_default}"""
+    out = {}
+    for s in SLOTS:
+        raw = get_slot_raw(s)
+        eff = get_slot_pet_id(s)
+        out[s] = {"slot": s, "label": SLOT_LABELS[s], "raw": raw,
+                  "effective": eff, "is_default": not raw}
+    return out
+
+
+# ── 聊天频道（每个进程一个，由入口 run_qq.py / run_wechat.py / main.py 设定）──
+# 桌宠进程 = "pet"（默认，行为与以前完全一致）；QQ 桥 = "qq"；微信桥 = "wechat"。
+# 这样 QQ / 微信可以各用不同的角色，而桌宠自己的对话仍然只认「桌宠」槽。
+_CHAT_CHANNEL = "pet"
+
+
+def set_chat_channel(channel: str) -> None:
+    """声明"本进程在替哪个频道说话"（在入口文件里调一次；默认 pet = 桌宠自己）"""
+    global _CHAT_CHANNEL
+    _CHAT_CHANNEL = str(channel or "pet")
+
+
+def get_chat_channel() -> str:
+    return _CHAT_CHANNEL
+
+
+def get_chat_pet_id() -> str:
+    """本进程当前该用的角色：按频道取槽位（没单独设过就回落到桌宠槽）"""
+    return get_slot_pet_id(_CHAT_CHANNEL)
+
+
 def get_pet_config(pet_id: str = None) -> dict:
     """返回指定桌宠（或当前活动）的完整 pet.json 配置。"""
     pet_id = pet_id or get_active_pet_id()
@@ -384,6 +510,28 @@ def get_portrait_default_layers(pet_id: str = None) -> list:
     if want in emo:
         return [emo[want]]
     return [next(iter(emo.values()))]
+
+
+def has_fgimages(pet_id: str = None) -> bool:
+    """这个角色**真的有 2D 立绘素材**吗（按内容判断，不是只看目录在不在）。
+
+    ⚠ 踩过的坑：`get_fgimages_dir()` 只查 `os.path.isdir`，而 `pets/noir/fgimages/`
+      是个**空目录**（向导/测试都可能顺手建出来）→ 所有"有没有 2D 素材"的判断都以为诺瓦
+      有 2D 素材 → 立绘工坊去合成，合成时又借用了丛雨的内置服装/表情表 →
+      **诺瓦的工坊里显示的是丛雨的立绘**（用户报的"2D 应该显示没有才对"）。
+    所以这里要求目录里至少有一个真实文件（索引 txt 或图片）。
+    """
+    d = get_fgimages_dir(pet_id)
+    if not d or not os.path.isdir(d):
+        return False
+    try:
+        for name in os.listdir(d):
+            p = os.path.join(d, name)
+            if os.path.isfile(p) and not name.startswith("."):
+                return True
+    except Exception:
+        return False
+    return False
 
 
 def get_live2d_dir(pet_id: str = None) -> str:
@@ -682,6 +830,16 @@ def detect_capabilities(pet_id: str = None) -> dict:
     # has_fgimages
     fg_dir = os.path.join(pet_dir, "fgimages")
     caps["has_fgimages"] = os.path.isdir(fg_dir) and len(os.listdir(fg_dir)) > 0
+
+    # has_touch / touch_on：触摸互动是**逐角色做出来的**（和 has_live2d 一样按角色数据判定）
+    # 没配过区域 = 没有这个能力 → 运行时不开（照旧：摸头 / 点下半身开输入框）
+    try:
+        from tool.touch_areas import has_areas as _has_areas, touch_enabled as _touch_on
+        caps["has_touch"] = bool(_has_areas(pet_id))
+        caps["touch_on"] = bool(_touch_on(pet_id))
+    except Exception:
+        caps["has_touch"] = False
+        caps["touch_on"] = False
 
     return caps
 
