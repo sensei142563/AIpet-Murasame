@@ -766,7 +766,7 @@ class PortraitStudio(SiliconDialog):
         return bool(self._l2d_probe)
 
     def _ensure_l2d_open_btn(self, model_json: str = ""):
-        """在右侧放一个「打开 Live2D 实时预览窗口」按钮（不透明窗口里渲染，一定能显示）"""
+        """在右侧放两个按钮：打开 Live2D 实时预览窗口 / 动作·表情调试器（可打标签）"""
         try:
             if getattr(self, "btn_l2d_open", None) is None:
                 self.btn_l2d_open = QPushButton("🎭 打开 Live2D 实时预览窗口")
@@ -779,9 +779,34 @@ class PortraitStudio(SiliconDialog):
                 else:
                     self.btn_l2d_open.setParent(self)
                     self.btn_l2d_open.show()
+            if getattr(self, "btn_l2d_debug", None) is None:
+                # 调试器：逐个播/切模型的每个表情与动作，并给它们打标签
+                self.btn_l2d_debug = QPushButton("🔍 动作 / 表情调试器（打标签）")
+                self.btn_l2d_debug.setMinimumHeight(34)
+                self.btn_l2d_debug.setToolTip("逐个查看每个 *.exp3.json / *.motion3.json 是什么效果，"
+                                              "给它起名字，再照着配 pet.json")
+                self.btn_l2d_debug.clicked.connect(self._open_l2d_debugger)
+                _col = getattr(self, "_right_col", None)
+                if _col is not None:
+                    _col.insertWidget(max(0, _col.count() - 1), self.btn_l2d_debug)
+                else:
+                    self.btn_l2d_debug.setParent(self)
+                    self.btn_l2d_debug.show()
             self._btn_model_json = model_json
         except Exception as e:
             print(f"[PortraitStudio] ⚠ Live2D 按钮挂载失败: {e}")
+
+    def _open_l2d_debugger(self):
+        """打开 Live2D 动作/表情调试器（主题一致，可打标签）"""
+        try:
+            from .live2d_debugger import open_debugger
+            pid = getattr(self, "_pet_id", None)
+            w = open_debugger(pid, self.window())
+            self.status_lbl.setText(
+                "🔍 已打开 Live2D 调试器：点表情/动作看效果，填「标签」并保存 → 复制对照表"
+                if w else "⚠ 打开调试器失败（看日志）")
+        except Exception as e:
+            self.status_lbl.setText(f"⚠ 打开调试器失败：{e}")
 
     def _current_l2d_model(self) -> str:
         try:
