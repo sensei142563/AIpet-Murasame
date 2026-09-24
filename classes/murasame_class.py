@@ -4926,8 +4926,28 @@ class Murasame(QLabel):
 
         # 5. Attach to the QLabel and request a repaint
         self.setPixmap(pixmap)
+        # ★ 对话框留位：立绘只占"气泡之外"的那块，所以要
+        #   ① 按气泡在上/在下，把立绘顶到另一侧（对齐）；
+        #   ② 窗口高度把预留的那块**加回来** —— 否则 resize 到图片高度后，
+        #      气泡又按窗口比例盖住同一片区域，等于没留。
+        _rsv = 0
+        _side = ""
+        try:
+            _rsv = int(getattr(self, "_text_reserve", 0) or 0)
+            _side = str(getattr(self, "_text_box_side", "") or "")
+            if _rsv and _side == "top":
+                self.setAlignment(Qt.AlignHCenter | Qt.AlignBottom)
+            elif _rsv and _side == "bottom":
+                self.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
+            else:
+                self.setAlignment(Qt.AlignCenter)
+        except Exception as _e:
+            print(f"[桌宠] ⚠ 立绘对齐设置失败: {_e}")
         self._ensure_window_fits_pixmap(pixmap)      # 图比窗口宽就先放大窗口，别裁图
-        self.resize(pixmap.size())
+        try:
+            self.resize(pixmap.width(), pixmap.height() + _rsv)
+        except Exception:
+            self.resize(pixmap.size())
         self.update()
         # 立绘就绪（main.py 等这个标记再显示窗口：服装没加载出来之前不露脸）
         self._portrait_ready = True
@@ -5055,6 +5075,29 @@ class Murasame(QLabel):
 
         if pixmap.height() >= 240:
             target_height = max(240, target_height)
+
+        # ★ 给对话框（气泡）留位置：气泡按窗口比例占掉一块（夏目/丛雨都是**顶部** 38%），
+        #   立绘又按整个窗口高度缩放 → 她的头和上半身正好压在气泡底下（用户反馈
+        #   "立绘显示不完全，像是被遮挡"）。这里把立绘缩到"气泡之外"的高度，
+        #   并在 update_portrait 里把它对齐到气泡的另一侧，头就露出来了。
+        self._text_reserve = 0
+        self._text_box_side = ""
+        try:
+            _b2 = getattr(self, "_text_box_2d", None)
+            if _b2 and len(_b2) >= 4:
+                _by, _bh = float(_b2[1]), float(_b2[3])
+                if _bh > 0.05:
+                    self._text_box_side = "top" if _by < 0.5 else "bottom"
+                    _frac = max(0.0, min(0.6, _bh))
+                    _reserve = int(round(target_height * _frac))
+                    _new_h = max(140, target_height - _reserve)
+                    if _new_h < target_height:
+                        print(f"[桌宠] 对话框占顶部/底部 {_frac*100:.0f}% → 立绘高度 "
+                              f"{target_height} → {_new_h}px（避免被气泡遮住）")
+                        self._text_reserve = _reserve
+                        target_height = _new_h
+        except Exception as _e:
+            print(f"[桌宠] ⚠ 对话框留位失败（按原尺寸显示）: {_e}")
 
         # 计算文本缩放
         scale_factor = target_height / max(1, pixmap.height())

@@ -24,7 +24,7 @@ from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBo
 
 # 文字颜色一律取主题色（不能写死 #e8e8f0 / #9a9aa8：那是深色 UI 的老值，
 # 浅色主题下 = 浅字压浅底，用户报的"立绘工坊看不清字"就是这个）。
-from .colors import Color1, Gray2, ok_text
+from .colors import Color1, Color4, Color6, Color7, Color8, Gray2, ok_text  # 底色/面色跟随启动器底色
 
 
 def _studio_log(msg: str):
@@ -314,7 +314,7 @@ class PortraitStudio(SiliconDialog):
         self.preview_lbl.setAlignment(Qt.AlignCenter)
         self.preview_lbl.setMinimumSize(920, 517)
         self.preview_lbl.setStyleSheet(
-            "background:#23232e; border-radius:10px; color:#9a9aa8; font-size:15px;")
+            f"background:{Color7.name()}; border-radius:10px; color:{Gray2.name()}; font-size:15px;")
         self.preview_box = QWidget()
         self._preview_stack = QStackedLayout(self.preview_box)
         self._preview_stack.setContentsMargins(0, 0, 0, 0)
@@ -392,8 +392,8 @@ class PortraitStudio(SiliconDialog):
             b.setCursor(Qt.PointingHandCursor)
             b.setMinimumHeight(38)
             b.setStyleSheet(style or (
-                "QPushButton{background:#3a3a4a;color:#eee;border-radius:8px;font-size:13px;}"
-                "QPushButton:hover{background:#4a4a5e;}"))
+                f"QPushButton{{background:{Color6.name()};color:{Color1.name()};border-radius:8px;font-size:13px;}}"
+                f"QPushButton:hover{{background:{Color4.name()};}}"))
             b.clicked.connect(slot)
             return b
 
@@ -899,7 +899,7 @@ class PortraitStudio(SiliconDialog):
             #   窗口所以正常）。预览 Live2D 时临时关掉窗口透明，退出预览再恢复。
             try:
                 self.setAttribute(Qt.WA_TranslucentBackground, False)
-                self.setStyleSheet("QDialog{background:#1e1e26;}")
+                self.setStyleSheet("QDialog{background:%s;}" % Color8.name())
                 print("[PortraitStudio] 已切换为不透明窗口以渲染 Live2D")
             except Exception as _e:
                 print(f"[PortraitStudio] ⚠ 关闭窗口透明失败: {_e}")

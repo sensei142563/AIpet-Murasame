@@ -34,7 +34,7 @@ from PyQt5.QtGui import QFont, QPainter, QColor, QPixmap, QPen, QBrush, QPainter
 from .colors import _app_base_dir  # noqa: F401  （打包时确保该模块被收集）
 # 说明文字/状态字一律取主题色：写死的 #888 / #9a9aa8 / #8fd18f / #e07a90 / #7fc48f
 # 都是深色 UI 时代的值，浅色主题（经典 / 千恋万花）上就是"浅字压浅底"看不清。
-from .colors import Gray2, ok_text, warn_text  # noqa: F401
+from .colors import Color1, Color7, Gray2, ok_text, warn_text  # noqa: F401  （底色跟随启动器底色）
 
 S = 1.0
 EMOTION_PRESET = ["平静", "高兴", "害羞", "生气", "惊讶", "着急"]
@@ -859,7 +859,7 @@ class _LayerTuneDialog(QDialog):
         self.preview = QLabel("（点「刷新预览」看效果）")
         self.preview.setMinimumHeight(220)
         self.preview.setAlignment(Qt.AlignCenter)
-        self.preview.setStyleSheet("background:#23232e;color:#9a9aa8;border-radius:8px;")
+        self.preview.setStyleSheet(f"background:{Color7.name()};color:{Gray2.name()};border-radius:8px;")
         root.addWidget(self.preview, 1)
 
         form = QGridLayout()

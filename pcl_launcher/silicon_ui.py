@@ -323,10 +323,25 @@ def install(app: QApplication = None, accent="#4c8dff"):
             return False
         app.setStyle("Fusion")                 # Fusion 才能完整套用调色板
         app.setPalette(dark_palette(accent))
-        app.setStyleSheet(silicon_qss(accent=accent))
+        # ⚠ 全局 QSS 的文字色必须**取当前色板**，不能用 silicon_qss 里写死的默认值
+        #   （#e6eaf2 / #a9b2c6）：样式表优先级高于调色板，写死就等于「主题与自定义
+        #   文字色永远被盖住」—— 用户报的"文字颜色没生效"根因就是这个。
+        try:
+            from . import colors as _C
+            app.setStyleSheet(silicon_qss(
+                accent=accent,
+                text=_C.Color1.name(),
+                text_dim=_C.Gray2.name(),
+                surface=_C.Color6.name(),
+                surface2=_C.Color7.name(),
+                bg=_C.Color8.name(),
+                border=_C.Color5.name()))
+        except Exception as _e:
+            print(f"[SiliconUI] ⚠ 取色板文字色失败（用默认）: {_e}")
+            app.setStyleSheet(silicon_qss(accent=accent))
         app.setFont(QFont(M.font, M.font_size))
         _installed = True
-        print("[SiliconUI] 新界面样式已加载（亚克力 / 圆角 / 深色调色板 / 强调色）")
+        print("[SiliconUI] 新界面样式已加载（亚克力 / 圆角 / 调色板 / 强调色 / 文字色跟随色板）")
         return True
     except Exception as e:
         print(f"[SiliconUI] 样式安装失败: {e}")
