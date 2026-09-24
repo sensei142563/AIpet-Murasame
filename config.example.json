@@ -74,6 +74,6 @@
   "weather_city": "",
   "weather_enable": "true",
   "portrait_auto_switch": "true",
-  "ui_acrylic": "false",
+  "ui_acrylic": "true",
   "ui_bg_color": ""
 }
