@@ -225,6 +225,9 @@ def generate_fgimage(target, embeddings_layers, pet_id: str = None):
     # ===== 兜底（一）：所有图层都缺 → 单图模式退回角色默认表情整图 =====
     # ⚠ 必须放在「所有图层均缺失就返回空画布」之前：single 模式（每个表情一张整图）
     #   的角色，AI 很容易返回别的角色（丛雨）的图层 ID → 全缺 → 桌宠就变成空白/1x1 窗。
+    # ===== 兜底（一）：所有图层都缺 → 单图模式退回角色默认表情整图 =====
+    # ⚠ 必须放在「所有图层均缺失就返回空画布」之前：single 模式（每个表情一张整图）
+    #   的角色，AI 很容易返回别的角色（丛雨）的图层 ID → 全缺 → 桌宠就变成空白/1x1 窗。
     if not valid_layers:
         try:
             from pets.pet_registry import get_portrait_default_layers
@@ -248,6 +251,8 @@ def generate_fgimage(target, embeddings_layers, pet_id: str = None):
         except Exception:
             continue
     all_positions = [p for p in (_pos_by_id.get(str(n)) for n in valid_layers) if p]
+    all_positions = [(int(x[2]), int(x[3]), int(x[4]), int(x[5]))
+                     for name in valid_layers for x in infos if x[9] == str(name)]
 
     # ===== 兜底（一·五）：图层里没有「表情」→ 补上该角色默认表情 =====
     # （AI 有时只返回服装/头发，结果就是「只有衣服没有脸」）
@@ -279,6 +284,33 @@ def generate_fgimage(target, embeddings_layers, pet_id: str = None):
                         _dflt = EMOTION_MAP.get("平静", (1292, None))[0] if _emo_ids else None
                     except Exception:
                         _dflt = None
+                if _dflt and os.path.exists(os.path.join(fg_dir, f"{target}_{_dflt}.png")):
+                    print(f"[generate] ℹ 图层里没有表情 → 补默认表情 {_dflt}")
+                    valid_layers.append(_dflt)
+                    all_positions += [(int(x[2]), int(x[3]), int(x[4]), int(x[5]))
+                                      for x in infos if len(x) > 9 and x[9] == str(_dflt)]
+        except Exception as _e:
+            print(f"[generate] ⚠ 补表情失败: {_e}")
+
+    # ===== 兜底（二）：图层 ID 在索引文件里找不到 → 同样退回默认表情整图 =====
+    # ===== 兜底（一·五）：图层里没有「表情」→ 补上该角色默认表情 =====
+    # （AI 有时只返回服装/头发，结果就是「只有衣服没有脸」）
+    try:
+        _is2d = str(get_pet_config(pet_id).get("portrait", {}).get("mode") or "layers") == "layers"
+    except Exception:
+        _is2d = False
+    if _is2d:
+        try:
+            _has_expr = any(_category_of(l, str(target)[-1:] or "a", pet_id) == "expr"
+                            for l in valid_layers)
+            if not _has_expr:
+                _emo_ids = set()
+                try:
+                    from qq.qq_portrait import EMOTION_MAP
+                    _emo_ids = {v[0] for v in EMOTION_MAP.values() if v}
+                except Exception:
+                    pass
+                _dflt = EMOTION_MAP.get("平静", (1292, None))[0] if _emo_ids else None
                 if _dflt and os.path.exists(os.path.join(fg_dir, f"{target}_{_dflt}.png")):
                     print(f"[generate] ℹ 图层里没有表情 → 补默认表情 {_dflt}")
                     valid_layers.append(_dflt)
@@ -339,6 +371,41 @@ def generate_fgimage(target, embeddings_layers, pet_id: str = None):
         all_positions = [q for q in (_pos_by_id.get(str(n)) for n in valid_layers) if q]
     except Exception as _e:
         print(f"[generate] ⚠ 图层排序跳过: {_e}")
+        try:
+            from pets.pet_registry import get_portrait_default_layers
+            _dflt = [ly for ly in get_portrait_default_layers(pet_id)
+                     if os.path.exists(os.path.join(fg_dir, f"{target}_{ly}.png"))]
+        except Exception:
+            _dflt = []
+        if _dflt:
+            print(f"[generate] ℹ 图层 {valid_layers} 不在本角色索引中 → 改用默认表情图 {_dflt}")
+            valid_layers = _dflt
+            all_positions = [(int(x[2]), int(x[3]), int(x[4]), int(x[5]))
+                             for name in valid_layers for x in infos if x[9] == str(name)]
+        if not all_positions:
+            print(f"[generate] ⚠ 图层 ID {valid_layers} 在 {target}.txt 中未匹配到，返回空画布")
+            return np.zeros((1, 1, 4), dtype=np.uint8)
+
+    def _pos_rows(rows):
+        out = []
+        for x in rows:
+            if len(x) <= 9:
+                continue
+            try:
+                out.append((int(x[2]), int(x[3]), int(x[4]), int(x[5])))
+            except (ValueError, IndexError):
+                continue
+        return out
+
+    # 基准图层（用于求画布原点偏移）：
+    # - 丛雨索引里是固定的行区间（57:65 / 47:51）
+    # - 其它角色包（新建的「每个表情一张图」）索引没有那么长 → 用索引里全部行兜底，
+    #   否则 min() 空序列会直接 ValueError（新建角色启动不显示的第二个原因）
+    all_base = _pos_rows(infos[57:65] if target == "ムラサメa" else infos[47:51])
+    if not all_base:
+        all_base = _pos_rows(infos)
+    base_x = min(p[0] for p in all_base) if all_base else 0
+    base_y = min(p[1] for p in all_base) if all_base else 0
 
     all_positions = [(pos[0] - base_x, pos[1] - base_y, pos[2], pos[3])
                      for pos in all_positions]

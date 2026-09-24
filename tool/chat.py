@@ -9,7 +9,7 @@ import requests
 
 from tool.config import get_config
 from tool.time_utils import build_time_context
-from pets.pet_registry import get_short_emotion_dirs, get_short_voices_dir, get_short_emotions
+from pets.pet_registry import get_chat_pet_id, get_short_emotion_dirs, get_short_voices_dir, get_short_emotions
 
 # 合成逻辑/参数一变就把它加一：旧缓存自动作废。
 # （曾经踩过：改了发音语言但缓存键没带语言 → 旧的中文-按日文念的音频继续被复用，
@@ -258,6 +258,12 @@ def qwen3_lora(history, user_input, role):
             _send = f"[{time_ctx}]{user_input}"
         history.append({"role": role, "content": _send})
         messages.append({"role": role, "content": _send + _remind})
+        if wx_note:
+            user_input = f"[{time_ctx}]\n{wx_note}\n{user_input}"
+        else:
+            user_input = f"[{time_ctx}]{user_input}"
+        history.append({"role": role, "content": user_input})
+        messages.append({"role": role, "content": user_input})
     else:
         messages.append({"role": role, "content": user_input + _remind})
     print(f"[{now_time()}] [qwen3-lora] Prompt:{messages}")
@@ -309,7 +315,57 @@ def _pp_text(value):
         return str(value)
 
 
-def ollama_qwen3_portrait(sentence: str, history: list, type):
+def build_live2d_prompt(pet_id: str = None) -> str:
+    """构造「Live2D 表情/动作由 AI 自己选」的提示词（两个模型族共用）。
+
+    用户 2026-09-24 拍板：Live2D 也要像 2D 立绘那样，把**可选列表交给 AI** 让它自己挑。
+    可选词 = 角色 pet.json 的 `model.emotions`（表情）+ `model.motions`（动作）的键；
+    角色可用 `live2d_prompts.json` 覆盖模板（{"prompt_template": ..., "extra_words": [...]}）。
+    角色一个词都没有 → 返回空串（调用方走原来的 2D 图层提示）。
+    """
+    from pets.pet_registry import (get_live2d_choice_words, get_live2d_prompts,
+                                   get_pet_config, get_chat_pet_id)
+    pid = pet_id or get_chat_pet_id()
+    cfg = get_pet_config(pid) or {}
+    name = cfg.get("display_name") or cfg.get("name") or pid
+    try:
+        custom = get_live2d_prompts(pid) or {}
+    except Exception:
+        custom = {}
+    words = list(get_live2d_choice_words(pid))
+    for w in (custom.get("extra_words") or []):
+        if str(w).strip() and str(w) not in words:
+            words.append(str(w))
+    if not words:
+        return ""
+    words_txt = "，".join(words)
+    example = '["%s", "%s"]' % (words[0], words[1] if len(words) > 1 else words[0])
+    template = str(custom.get("prompt_template") or "").strip()
+    if template:
+        return (template.replace("{words}", words_txt)
+                        .replace("{name}", name)
+                        .replace("{example}", example))
+    return (
+        f"你是「{name}」的 Live2D 表情/动作选择助手。用户会给你她要说的一串句子，"
+        f"你要为**每一个句子**挑一个最贴合的心情词（表情，会连带触发对应的动作）。\n"
+        f"可选的词**只有**：{words_txt}。\n"
+        f"要求：分句数 = 词数，顺序一一对应；每个词都必须从上面的列表里选，绝不自己编词；"
+        f"不要重复用同一个词，除非两句确实同一种心情。\n"
+        f"直接返回纯 JSON 列表，不要任何解释：{example}"
+    )
+
+
+def ollama_qwen3_portrait(sentence: str, history: list, type, live2d: bool = False):
+    # ===== Live2D 模式：把可选表情/动作列表交给 AI 自己选（用户 2026-09-24 拍板）=====
+    if live2d:
+        l2d_prompt = build_live2d_prompt()
+        if l2d_prompt:
+            # Live2D 这条路不需要"衣服连贯"那套历史提炼（没有服装 ID）
+            prompt = {"model": "qwen3:14b",
+                      "prompt": f"{l2d_prompt}\n{build_time_context()} 句子：{sentence}",
+                      "stream": False}
+            reply = ollama_post("ollama-qwen3-live2d", prompt)
+            return reply, history
     # ===== 从角色包读取立绘映射（无则回退通用提示）=====
     from pets.pet_registry import get_portrait_prompts
     portrait_cfg = get_portrait_prompts()
@@ -418,11 +474,11 @@ def ollama_qwen3_translate(sentence: str):
     from pets.pet_registry import get_pet_config, get_active_pet_id
     identity = ""
     try:
-        identity = ((get_pet_config() or {}).get("translate_rules") or "").strip()
+        identity = ((get_pet_config(get_chat_pet_id()) or {}).get("translate_rules") or "").strip()
     except Exception:
         identity = ""
     if not identity:
-        if get_active_pet_id() == "murasame":
+        if get_chat_pet_id() == "murasame":
             identity = '你是一个翻译助手，负责将用户输入的中文翻译成日文。要求：要将中文的“本座”翻译为“吾輩（わがはい）”；将“主人翻译为“ご主人（ごしゅじん）”；将“丛雨”翻译为“ムラサメ”；“小雨”则是丛雨的昵称，翻译为“ムラサメちゃん”。且日文要有强烈的古日语风格。你只需要返回翻译即可，不需要对其中的日文汉字进行注音。给你提供的格式是["句子1", "句子2"]这样，必须按照原格式输出，逐句翻译。'
         else:
             identity = '你是一个翻译助手，负责将用户输入的中文翻译成日文。要求：翻译自然、口语化、符合可爱少女说话习惯，不要古日语风格，不要添加任何说明，不需要注音。给你提供的格式是["句子1", "句子2"]这样，必须按照原格式输出，逐句翻译，只输出纯JSON文本。'
@@ -437,7 +493,7 @@ def ollama_qwen3_emotion(history: list):
     # 只列出包含 asr.txt 的情感目录（过滤 long_chinese 等非情感参考）
     emotion_dirs = get_short_emotion_dirs()
     from pets.pet_registry import get_pet_config
-    pet_cfg = get_pet_config()
+    pet_cfg = get_pet_config(get_chat_pet_id())
     pet_name = pet_cfg.get("name", "丛雨")
     vcfg = pet_cfg.get("voices", {}) or {}
     labels = '，'.join(emotion_dirs) if emotion_dirs else '平静'
@@ -778,8 +834,24 @@ def _gpt_sovits_service_ready(timeout: float = 1.0) -> bool:
         if _t == "local":
             return _port_open("127.0.0.1", 9880)
         # cloud / 代理模式：代理端口通即可
+
+        def _port_open(host: str, port: int) -> bool:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(timeout)
+                return s.connect_ex((host, port)) == 0
+
         u = urlparse(gpt_sovits_tts_url)
         return _port_open(u.hostname or "127.0.0.1", u.port or 9880)
+        if not _port_open(u.hostname or "127.0.0.1", u.port or 9880):
+            return False
+        # local 模式：本体端口也要通（cloud 模式在本机没有 9880，跳过该检查）
+        try:
+            from tool.config import get_config as _gc
+            if str(_gc("./config.json").get("tts_type") or "local").lower() == "local":
+                return _port_open("127.0.0.1", 9880)
+        except Exception:
+            pass
+        return True
     except Exception:
         return False
 
@@ -956,6 +1028,8 @@ def gpt_sovits_tts(sentence: str, emotion: str, aux_ref_audio_paths: list = None
     # 情感目录从角色语音包动态解析
     from pets.pet_registry import get_pet_config
     pet_cfg = get_pet_config()
+    from pets.pet_registry import get_pet_config
+    pet_cfg = get_pet_config(get_chat_pet_id())
     voices_dir = get_short_voices_dir()
     emotion_dirs = get_short_emotion_dirs()
     # 情感不在可用列表中 → 回退到「平静」（若存在）或第一个可用情感
@@ -990,6 +1064,18 @@ def gpt_sovits_tts(sentence: str, emotion: str, aux_ref_audio_paths: list = None
             emotion = "平静"
         elif emotion_dirs:
             emotion = emotion_dirs[0]
+        # 情绪标签拿不到/不合法时的兜底：按人设选「默认情绪」（活泼角色=高兴），
+        # 而不是一律回落到「平静」——那正是"语音听着冷淡、没起伏"的根因
+        _default = str((pet_cfg.get("voices", {}) or {}).get("default_emotion") or "").strip()
+        if _default and _default in emotion_dirs:
+            emotion = _default
+        elif "高兴" in emotion_dirs:
+            emotion = "高兴"
+        elif "平静" in emotion_dirs:
+            emotion = "平静"
+        else:
+            emotion = emotion_dirs[0]
+        print(f"[gpt-sovits-tts] ℹ️ 情绪标签不可用 → 按人设使用「{emotion}」参考音频")
 
     emotion_path = os.path.join(voices_dir, emotion)
     if not os.path.isdir(emotion_path):
@@ -1027,6 +1113,17 @@ def gpt_sovits_tts(sentence: str, emotion: str, aux_ref_audio_paths: list = None
     with open(os.path.join(emotion_path, "asr.txt"), "r", encoding="utf-8") as f:
         ref = f.read().strip()
 
+    # 语速按情绪微调（活泼人设：高兴/着急说得快一点更有元气；害羞稍慢）
+    # 角色包 pet.json 的 voices.emotion_speed 可覆盖默认值
+    _SPEED_DEFAULT = {"高兴": 1.08, "着急": 1.10, "惊讶": 1.06,
+                      "生气": 1.05, "害羞": 0.96, "平静": 1.0}
+    try:
+        _speed_map = dict(_SPEED_DEFAULT)
+        _speed_map.update({str(k): float(v) for k, v in
+                           ((pet_cfg.get("voices", {}) or {}).get("emotion_speed") or {}).items()})
+    except Exception:
+        _speed_map = _SPEED_DEFAULT
+    _speed = float(_speed_map.get(emotion, 1.0))
     # 语速按情绪微调（活泼人设：高兴/着急说得快一点更有元气；害羞稍慢）
     # 角色包 pet.json 的 voices.emotion_speed 可覆盖默认值
     _SPEED_DEFAULT = {"高兴": 1.08, "着急": 1.10, "惊讶": 1.06,

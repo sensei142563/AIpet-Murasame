@@ -19,6 +19,55 @@ from PyQt5.QtWidgets import QLabel
 
 from classes.Worker_class import ScreenWorker
 from classes.Worker_class import qwen3_lora_Worker, cloud_API_Worker, CameraWorker
+from classes.Worker_class import extract_emotion_tag
+
+
+def play_voice_wav(path: str) -> None:
+    """播放短句 wav：优先 winsound（Windows 原生 MME，绕开 Qt 多媒体），失败回退 QSound。
+
+    背景（N 卡真机调试）：QtMultimedia(QSound) 在部分机器取不到默认输出设备，
+    直接崩溃或 "using null output device" 无声。winsound 走系统 MME 更稳，零额外依赖。
+    """
+    try:
+        import winsound
+        winsound.PlaySound(
+            str(path),
+            winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_NODEFAULT,
+        )
+        return
+    except Exception:
+        pass
+    try:
+        _qs = _qsound()
+        if _qs is not None:
+            _qs.play(str(path))
+    except Exception:
+        pass
+
+
+def _qsound():
+    """QSound 延迟导入：模块顶部不 import QtMultimedia（避免拖慢/报错），
+    仅当 winsound 不可用时才加载做兜底。"""
+    try:
+        from PyQt5.QtMultimedia import QSound
+        return QSound
+    except Exception:
+        return None
+
+
+def stop_voice_wav() -> None:
+    """停止当前短句 wav 播放（winsound 与 QSound 双保险）"""
+    try:
+        import winsound
+        winsound.PlaySound(None, winsound.SND_PURGE)
+    except Exception:
+        pass
+    try:
+        _qs = _qsound()
+        if _qs is not None:
+            _qs.stop()
+    except Exception:
+        pass
 from tool.config import get_config
 from tool.chat import (ollama_qwen25vl, describe_image,
                        vision_fast_size, vision_fast_tokens)
@@ -43,9 +92,9 @@ def wrap_text(s, width=10):
 CONFIG = get_config("./config.json")
 portrait_type = CONFIG["portrait"]
 model_type = CONFIG["model_type"]
-screen_type = CONFIG.get("screen_type", "true")
+screen_type = CONFIG.get("screen_type", "false")     # 默认值与 config.example.json / 设置页一致
 camera_type = CONFIG.get("camera_enabled", "false")
-camera_interval = CONFIG.get("camera_interval", 300)
+camera_interval = CONFIG.get("camera_interval", 100)  # 同上：示例配置是 100 秒
 DEFAULT_PORTRAIT_SCREEN_RATIO = CONFIG["DEFAULT_PORTRAIT_SCREEN_RATIO"]
 IDLE_THINKING_MINUTES = CONFIG.get("idle_thinking_minutes")
 IDLE_AWAY_MINUTES = CONFIG.get("idle_away_minutes")
@@ -229,6 +278,11 @@ class Murasame(QLabel):
         self.full_text = ""  # 打字机效果用到的整体字符串
         from pets.pet_registry import get_pet_config, get_fgimages_dir
         _pet_cfg = get_pet_config()
+        # ⚠ 存一份：main.py 建 Live2D 窗口时要读 pet.json 的「独立显示设置」
+        #   （model.display_live2d 里的 scale/offset/window 比例）。以前只有局部变量，
+        #   main.py 里 `pet._pet_cfg` 必然 AttributeError →
+        #   那条日志「⚠ 读取独立显示设置失败」就是在说这个，角色的独立调参一直被忽略。
+        self._pet_cfg = _pet_cfg or {}
         self.pet_name = _pet_cfg.get("name", "丛雨")  # 宠物名称（从角色包读取）
         self._pet_display_name = _pet_cfg.get("display_name", self.pet_name)
         # 立绘前缀：model.fgimages_prefix → portrait.prefix → 角色ID（绝不为空）
@@ -341,11 +395,12 @@ class Murasame(QLabel):
             self._touch_areas = self._touch_sets[self._touch_mode_key()]
             self._touch_enabled = touch_enabled(_pid)
         except Exception as _e:
-            print(f"[桌宠] ⚠ 读取触摸区域失败（用默认）: {_e}")
+            print(f"[桌宠] ⚠ 读取触摸区域失败（本次不启用触摸）: {_e}")
             self._touch_sets = {"2d": {}, "live2d": {}}
             self._touch_disabled = {"2d": set(), "live2d": set()}
             self._touch_areas = {}
-            self._touch_enabled = True
+            # 读不到就当"这个角色没做过触摸"：不开（照旧用 摸头 / 点下半身开输入框）
+            self._touch_enabled = False
         self._touch_hit = ""          # 本次按下命中的区域
         self._touch_press = None      # 按下坐标（用来区分轻点 / 抚摸）
         self._touch_fired = False     # 本次按下是否已经触发过（每次按压只触发一次反应）
@@ -893,11 +948,11 @@ class Murasame(QLabel):
                 return
 
             # Live2D 模式：提取情绪标签联动表情/动作（阶段 E）
+            # 标签两种括号都认：人设里写的是全角【白】，模型也可能吐半角 [白]
             if self._live2d_mode and self._live2d_widget:
-                import re as _re
-                _em = _re.findall(r'\[(.+?)\]', clause.strip())
-                if _em:
-                    self._live2d_set_emotion(_em[-1], hold=True)
+                _tag = extract_emotion_tag(clause)
+                if _tag:
+                    self._live2d_set_emotion(_tag, hold=True)
 
             # 第一句立即显示（不等音频）
             if not self._first_clause_shown:
@@ -2034,6 +2089,50 @@ class Murasame(QLabel):
             )
             self.start_thread(prompt, role="system", t=True)
 
+    def _parse_ai_emotions(self, portrait_list):
+        """把 Live2D 模式下"立绘"那一步的返回值解析成逐句表情词。
+
+        - 只有**发请求时是 Live2D 模式**（`_reply_live2d`）才解析：2D 模式下这个列表是
+          图层 ID，硬当成表情词会乱套。
+        - 只保留在该角色词表里的词（AI 偶尔会自造词/夹带解释），其余位置留空 → 走兜底。
+        """
+        if not getattr(self, "_reply_live2d", False) or not portrait_list:
+            return []
+        try:
+            from pets.pet_registry import get_live2d_choice_words
+            words = set(get_live2d_choice_words())
+            if not words:
+                return []
+            out = []
+            for x in portrait_list:
+                s = str(x).strip()
+                out.append(s if s in words else "")
+            return out
+        except Exception as e:
+            print(f"[Live2D] ⚠ 解析 AI 表情选择失败: {e}")
+            return []
+
+    def _resolve_display_emotion(self, sentence, index):
+        """Live2D 这一句该用哪个表情词（按优先级挑）。
+
+        ① 句内【情绪】标签（人设写死的特例，如诺瓦的【白】）
+        ② AI 自己选的表情词（`_live2d_ai_emotions`：只在 Live2D 模式生成，见 start_thread）
+        ③ 语音情绪列表 `_last_emotion_list`（给 TTS 选音色的那份，顺带兜底显示）
+
+        返回空串 = 这一句没有可用的情绪（`_live2d_set_emotion("")` 收尾回默认表情）。
+        单独拆出来是为了能直接测优先级（不依赖整个 on_reply 流程）。
+        """
+        tag = extract_emotion_tag(sentence) or ""
+        if tag:
+            return tag
+        ai = getattr(self, "_live2d_ai_emotions", None) or []
+        if index < len(ai) and str(ai[index] or "").strip():
+            return str(ai[index]).strip()
+        voice = getattr(self, "_last_emotion_list", None) or []
+        if index < len(voice) and str(voice[index] or "").strip():
+            return str(voice[index]).strip()
+        return ""
+
     # qwen3 线程的槽函数
     def _live2d_set_emotion(self, name, hold=False):
         """Live2D 表情/动作联动：name 非空 = 切表情+起动作并保持；
@@ -2062,6 +2161,11 @@ class Murasame(QLabel):
         self._save_history()
         # 逐句情绪标签（qwen-emotion 输出）——Live2D 表情/动作联动的数据源
         self._last_emotion_list = emotion_list or []
+        # Live2D 模式下立绘那一步返回的是 "AI 每句挑的表情词"：只有**发请求时就是
+        # Live2D 模式**的这一轮才当表情词用（2D 模式下同一返回值是图层 ID）。
+        self._live2d_ai_emotions = self._parse_ai_emotions(portrait_list)
+        if self._live2d_ai_emotions:
+            print("[Live2D] AI 选的表情：%s" % self._live2d_ai_emotions)
         # 每轮回复重新开始情绪追踪（保证第一句总能触发动作）
         self._live2d_emotion_name = None
 
@@ -2298,15 +2402,13 @@ class Murasame(QLabel):
 
             if self._live2d_mode:
                 # Live2D 模式：不更换立绘，改用 Live2D 表情 + 动作
-                # 情绪来源：①句内【情绪】括号标签；②qwen-emotion 的逐句情绪列表
-                # 句起：切表情 + 起动作并保持（动作播完自动重播直到句末）
-                import re
-                emotion_match = re.findall(r'\[(.+?)\]', sentence.strip())
-                emotion = emotion_match[-1] if emotion_match else None
-                if not emotion:
-                    el = getattr(self, "_last_emotion_list", []) or []
-                    if index < len(el):
-                        emotion = el[index]
+                # 情绪来源（按优先级）：
+                #   ① 句内【情绪】括号标签（人设里写死的特例，如诺瓦的【白】）
+                #   ② **AI 自己选的表情词** —— Live2D 模式下立绘那一步换成了
+                #      "把 model.emotions / model.motions 的词表交给 AI，每句选一个"
+                #      （用户 2026-09-24 拍板：像 2D 立绘那样给列表让 AI 自己选）
+                #   ③ 语音情绪列表兜底（它是给 TTS 选音色的，顺带当显示兜底）
+                emotion = self._resolve_display_emotion(sentence, index)
                 if emotion:
                     self._live2d_set_emotion(emotion, hold=True)
                 else:
@@ -2387,6 +2489,9 @@ class Murasame(QLabel):
                 QTimer.singleShot(400, lambda: self.start_thread(_t2, _r2))
         except Exception as _e:
             print(f"[桌宠] ⚠ 处理排队消息失败: {_e}")
+
+        # 说话/回复时的灵动效果：按概率在两套立绘之间切换（透明渐变过渡）
+        self._maybe_crossfade_set()
 
         # 说话/回复时的灵动效果：按概率在两套立绘之间切换（透明渐变过渡）
         self._maybe_crossfade_set()
@@ -2705,15 +2810,19 @@ class Murasame(QLabel):
         #   以前 AI 读的是 config.json 里的套，和实际渲染的套不一致时会跨套换算，
         #   表情/装饰被丢掉 → 立绘看起来"没有表情"（用户反馈）。
         _ptype = str(getattr(self, "_display_set", "") or "") or None
+        # Live2D 模式：这一轮的"立绘"这一步改成让 AI 从表情/动作列表里自己选
+        # （合并自 1.17.2；记**发请求时**的模式 —— 回复回来时模式可能已被切走）
+        _l2d_now = bool(self._live2d_mode and self._live2d_widget)
+        self._reply_live2d = _l2d_now
         if model_type == "local":
             self.worker = qwen3_lora_Worker(
                 self.history, self.portrait_history, text, role, t=t,
-                portrait_type=_ptype, no_act=bool(no_act),
+                portrait_type=_ptype, no_act=bool(no_act), live2d=_l2d_now,
             )
         else:
             self.worker = cloud_API_Worker(
                 self.history, self.portrait_history, text, role, t=t,
-                portrait_type=_ptype, no_act=bool(no_act),
+                portrait_type=_ptype, no_act=bool(no_act), live2d=_l2d_now,
             )
 
         self.worker.finished.connect(self.on_reply)
@@ -5073,6 +5182,52 @@ class Murasame(QLabel):
         except Exception as _e:
             print(f"[桌宠] ⚠ 稳定画布计算失败（不影响显示）: {_e}")
         return out
+
+    def _display_cfg_2d(self) -> dict:
+        """2D 立绘的显示设置（pet.json model.display_2d；兼容旧的 display.* 键）。
+
+        与 Live2D 的显示设置**完全独立**，互不影响：大小 / 位置各存一份。"""
+        out = {}
+        try:
+            m = (self._pet_cfg.get("model") or {})
+            for src in (m.get("display_2d") or {}, m.get("display") or {}):
+                for k in ("height_ratio", "scale", "offset_x", "offset_y"):
+                    if src.get(k) is not None and k not in out:
+                        out[k] = src.get(k)
+            if out.get("height_ratio") is None:
+                hr = (m.get("display") or {}).get("portrait_height_ratio")
+                if hr is not None:
+                    out["height_ratio"] = hr
+        except Exception:
+            pass
+        return out
+
+    def _resolve_pet_font(self) -> str:
+        """加载项目自带「思源黑体Bold.otf」并返回真实字体族名。
+
+        ⚠ 以前只是把字体文件名当 family 传给 QFont，从没真正加载字体文件 →
+        Qt 落到系统兜底字体，小字号下笔画发虚、边缘发糊。"""
+        cached = getattr(self, "_font_family_ok", None)
+        if cached:
+            return cached
+        fam = self._font_family
+        try:
+            from PyQt5.QtGui import QFontDatabase
+            here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            for p in (os.path.join(os.getcwd(), "思源黑体Bold.otf"),
+                      os.path.join(here, "思源黑体Bold.otf")):
+                if os.path.isfile(p):
+                    fid = QFontDatabase.addApplicationFont(p)
+                    if fid >= 0:
+                        fams = QFontDatabase.applicationFontFamilies(fid)
+                        if fams:
+                            fam = fams[0]
+                            print(f"[桌宠] 已加载字体: {os.path.basename(p)} → {fam}")
+                            break
+        except Exception as e:
+            print(f"[桌宠] ⚠ 字体加载失败（用系统字体）: {e}")
+        self._font_family_ok = fam
+        return fam
 
     def _display_cfg_2d(self) -> dict:
         """2D 立绘的显示设置（pet.json model.display_2d；兼容旧的 display.* 键）。

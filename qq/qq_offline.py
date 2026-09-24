@@ -15,6 +15,7 @@ C. 首次运行只补最近若干条：防把历史记录全刷一遍
 """
 
 import os
+from pets.pet_registry import get_chat_pet_id
 import json
 import time
 import uuid
@@ -39,8 +40,8 @@ FRIEND_PULL_BUDGET = 30
 def _pet_name() -> str:
     """当前角色显示名（日志用；以前写死「丛雨」，排查时容易误以为整个 QQ 模块都是丛雨）"""
     try:
-        from pets.pet_registry import get_active_pet_id, get_pet_config
-        pid = get_active_pet_id()
+        from pets.pet_registry import get_chat_pet_id, get_pet_config
+        pid = get_chat_pet_id()
         cfg = get_pet_config(pid) or {}
         return str(cfg.get("display_name") or cfg.get("name") or pid or "角色")
     except Exception:
@@ -105,18 +106,18 @@ def _load_processed_ids():
         return []
 
 
-def _save_processed_ids(ordered_ids):
-    """保存已处理的消息 ID（有序，保留尾部最新 PROCESSED_IDS_MAX 条）"""
-    with _IDS_LOCK:
-        try:
-            tail = ordered_ids[-PROCESSED_IDS_MAX:]
-            os.makedirs(os.path.dirname(PROCESSED_IDS_FILE), exist_ok=True)
-            tmp = PROCESSED_IDS_FILE + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump({"ids": tail}, f, ensure_ascii=False, indent=2)
-            os.replace(tmp, PROCESSED_IDS_FILE)  # 原子写
-        except Exception as e:
-            print(f"[QQOffline] ⚠ 保存已处理 ID 失败: {e}")
+def _write_processed_ids(ordered_ids):
+    """把已处理 ID 列表落盘（保留尾部最新 PROCESSED_IDS_MAX 条；原子写）。
+
+    调用方必须已持有 _IDS_LOCK —— _IDS_LOCK 是普通 Lock（不可重入），
+    这里再加锁会直接死锁，所以本函数只负责写盘。
+    """
+    tail = ordered_ids[-PROCESSED_IDS_MAX:]
+    os.makedirs(os.path.dirname(PROCESSED_IDS_FILE), exist_ok=True)
+    tmp = PROCESSED_IDS_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({"ids": tail}, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, PROCESSED_IDS_FILE)  # 原子写
 
 
 def _append_processed_ids(new_ids) -> bool:
@@ -150,12 +151,7 @@ def _append_processed_ids(new_ids) -> bool:
                     existing.add(s)
                     added = True
             if added:
-                tail = ordered[-PROCESSED_IDS_MAX:]
-                os.makedirs(os.path.dirname(PROCESSED_IDS_FILE), exist_ok=True)
-                tmp = PROCESSED_IDS_FILE + ".tmp"
-                with open(tmp, "w", encoding="utf-8") as f:
-                    json.dump({"ids": tail}, f, ensure_ascii=False, indent=2)
-                os.replace(tmp, PROCESSED_IDS_FILE)
+                _write_processed_ids(ordered)
             return True
         except Exception as e:
             print(f"[QQOffline] ⚠ 追加已处理 ID 失败: {e}")
@@ -393,15 +389,17 @@ def fetch_offline_messages(ws, owner_id, last_exit_time, self_id=None, private_f
     - 已处理过的 message_id 会跳过（防重复回复）
     - 首次运行（last_exit_time=None）只补大号且仅保留最近 FIRST_RUN_MAX 条（防刷屏）
 
-    返回: (msgs, stray_events, seen_ids)  msg 按时间升序
+    返回: (msgs, stray_events, seen_ids, stats)  msg 按时间升序；
+          stats 记录本次拉取情况（sessions / ok / fail），供调用方给出确定结论
     """
     if not ws or not owner_id:
-        return [], [], set()
+        return [], [], set(), {"sessions": 0, "ok": 0, "fail": 0}
 
     prev_processed = set(_load_processed_ids())  # list → set，供 O(1) 归属/去重查询
     processed_this_run = set()
     msgs = []
     stray_events = []
+    stats = {"sessions": 0, "ok": 0, "fail": 0}   # 会话数 / 拉成功 / 拉失败
 
     # ===== 离线窗口 =====
     # 基线（上次启动时间）向前放宽 24 小时：
@@ -438,16 +436,19 @@ def fetch_offline_messages(ws, owner_id, last_exit_time, self_id=None, private_f
     # ===== 1. 大号历史（主人不是好友时跳过）=====
     owner_is_friend = (not friend_ids) or (str(owner_id) in friend_ids)
     if owner_is_friend:
+        stats["sessions"] += 1
         data, stray = _request_and_wait(ws, "get_friend_msg_history",
                                        {"user_id": int(owner_id), "count": 50}, label="history")
         stray_events.extend(stray)
         if data is not None:
+            stats["ok"] += 1
             messages = _normalize_messages(data)
             print(f"[QQOffline] 🔎 大号历史 {len(messages)} 条")
             _process_history(messages, owner_id, self_id, window_start,
                              prev_processed, processed_this_run, msgs, default_sender=owner_id,
                              ws=ws, stray_out=stray_events, private_filter=private_filter)
         else:
+            stats["fail"] += 1
             print("[QQOffline] ⚠ 未等到 get_friend_msg_history 响应（NapCat 给出的原因见上一行）")
     else:
         print(f"[QQOffline] ℹ 主人号 {owner_id} 不在 bot 的好友列表里 → 跳过拉取它的历史"
@@ -474,12 +475,15 @@ def fetch_offline_messages(ws, owner_id, last_exit_time, self_id=None, private_f
         # 拉取条数：好友会话常被 bot 自己的长回复占满（一条回复可能切成 10+ 条历史），
         # count=20 会把好友离线期间的消息挤出拉取窗口 → 好友消息永远补不回来。
         # 提高到 50（NapCat 上限内），且只保留离线窗口内的，多拉不影响。
+        stats["sessions"] += 1
         data3, stray3 = _request_and_wait(ws, "get_friend_msg_history",
                                           {"user_id": int(peer), "count": 50}, timeout=2, label="history_f")
         stray_events.extend(stray3)
         if data3 is None:
+            stats["fail"] += 1
             print(f"[QQOffline] ⚠ 好友 {peer} 历史拉取超时，跳过")
             continue
+        stats["ok"] += 1
         messages3 = _normalize_messages(data3)
         print(f"[QQOffline] 🔎 好友 {peer} 历史 {len(messages3)} 条")
         _process_history(messages3, owner_id, self_id, window_start,
@@ -503,7 +507,26 @@ def fetch_offline_messages(ws, owner_id, last_exit_time, self_id=None, private_f
 
     # 返回本次历史里见过的 message_id（bridge 补处理实时事件时据此去重，
     # 防止同一消息既走离线回复又被实时补处理导致重复回复）
-    return msgs, stray_events, processed_this_run
+    return msgs, stray_events, processed_this_run, stats
+
+
+def offline_report(n_msgs: int, stats: dict) -> str:
+    """离线补拉结束后的结论（一句话说清"到底补到没有、为什么没有"）。
+
+    ⚠ 以前只有一句「无离线消息（或 get_friend_msg_history 不可用）」——用户既不知道
+      是真的没消息，还是接口不可用（两种情况处理方式完全不同）。现在按拉取统计分开说。
+    """
+    if n_msgs:
+        return f"🔄 发现 {n_msgs} 条离线消息，逐条补回复..."
+    sessions = int((stats or {}).get("sessions", 0))
+    ok = int((stats or {}).get("ok", 0))
+    fail = int((stats or {}).get("fail", 0))
+    if sessions == 0:
+        return "📭 没有可查的会话（好友列表为空，或 NapCat 不支持 get_friend_list）"
+    if ok == 0 and fail:
+        return (f"⚠ 拉不到历史：{fail} 次 get_friend_msg_history 全部失败"
+                f"（NapCat 未支持该 API 或响应超时）→ 本次没有补拉")
+    return f"📭 没有需要补的离线消息（查了 {sessions} 个会话，历史接口正常）"
 
 
 def _extract_msg_text(message):
@@ -563,15 +586,12 @@ def fetch_before_loop(ws, owner_id, scheduler, self_id=None, private_filter=None
 
     seen_ids = set()
     try:
-        offline, history_stray, seen_ids = fetch_offline_messages(
+        offline, history_stray, seen_ids, stats = fetch_offline_messages(
             ws, owner_id, last, self_id=self_id, private_filter=private_filter)
         stray_events.extend(history_stray)
-        if offline:
-            print(f"[QQOffline] 🔄 发现 {len(offline)} 条离线消息，逐条补回复...")
-            for msg in offline:
-                scheduler.enqueue(msg)
-        else:
-            print(f"[QQOffline] 📭 无离线消息（或 get_friend_msg_history 不可用）")
+        print(f"[QQOffline] {offline_report(len(offline), stats)}")
+        for msg in offline:
+            scheduler.enqueue(msg)
     except Exception as e:
         print(f"[QQOffline] ⚠ 离线补拉异常（不影响主连接）: {e}")
     # 返回 (拉取期间收到的实时事件, 历史里见过的 message_id) 由 bridge 补处理/去重

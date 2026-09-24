@@ -3,18 +3,20 @@
  "name": "诺瓦",
  "display_name": "诺瓦",
  "intro": "黑色系的 Live2D 角色",
- "avatar": "诺瓦.jpg",
+ "avatar": "avatar.jpg",
  "prompt": {
   "short": "prompt.txt",
   "long": "longtext_prompt.txt"
  },
- "translate_rules": "你是一个翻译助手，负责将用户输入的中文翻译成日文。要求：翻译自然、口语化、符合可爱少女说话习惯，不要古日语风格，不要添加任何说明，给你提供的格式是[\"句子1\", \"句子2\", \"句子3\", .....]，必须严格按照原格式，输出一个json列表，逐句翻译，只输出纯JSON文本。 ★ 人名、专有名词、容易读错的词请写成「汉字（假名读音）」的形式，例如：主人（ごしゅじん）、咖啡（コーヒー）。",
+ "translate_rules": "你是一个翻译助手，负责将用户输入的中文翻译成日文。要求：翻译自然、口语化、符合可爱少女说话习惯，不要古日语风格，不要添加任何说明，不需要注音。给你提供的格式是[\"句子1\", \"句子2\", \"句子3\", .....]，必须严格按照原格式，输出一个json列表，逐句翻译，只输出纯JSON文本。",
  "model": {
-  "default": "2d",
+  "default": "live2d",
   "has_live2d": true,
   "has_fgimages": false,
   "fgimages_prefix": "",
-  "fgimages_sets": [],
+  "fgimages_sets": [
+   "a"
+  ],
   "live2d_dir": "live2d/",
   "live2d_window_ratio": 1.0,
   "live2d_scale": 1.53,
@@ -66,17 +68,58 @@
   },
   "motions": {},
   "default_expression": "",
-  "live2d_window_height_ratio": 0.4
+  "live2d_window_height_ratio": 0.4,
+  "display_2d": {
+   "height_ratio": 0.55,
+   "scale": 1.0,
+   "offset_x": 0,
+   "offset_y": 0
+  },
+  "display_live2d": {
+   "height_ratio": 0.4,
+   "width_ratio": 1.0,
+   "scale": 1.0,
+   "offset_x": 0,
+   "offset_y": 0
+  },
+  "sets_available": [
+   "a"
+  ],
+  "set_labels": {
+   "a": "侧面立绘",
+   "b": "正面立绘"
+  }
  },
  "interaction": {
-  "head_top": 0.0,
-  "head_bottom": 0.22,
+  "head_top": 0.18,
+  "head_bottom": 0.46,
   "talk_top": 0.45,
   "talk_bottom": 1.0,
   "edge_margin_x": 0.12,
   "text_area": "bottom",
   "text_offset_x": -40,
-  "text_offset_y": -100
+  "text_offset_y": -100,
+  "text_box_2d": [
+   0.06,
+   0.05,
+   0.88,
+   0.38
+  ],
+  "text_font_scale_2d": 1.0,
+  "text_box_live2d": [
+   0.1,
+   0.55,
+   0.8,
+   0.38
+  ],
+  "text_font_scale_live2d": 1.0,
+  "text_box": [
+   0.06,
+   0.05,
+   0.88,
+   0.38
+  ],
+  "text_font_scale": 1.0
  },
  "languages": {
   "primary": "ja",
@@ -85,12 +128,12 @@
  },
  "voices": {
   "short_emotions": [
-   "高兴",
    "害羞",
-   "惊讶",
    "平静",
+   "惊讶",
    "生气",
-   "着急"
+   "着急",
+   "高兴"
   ],
   "short_ref_dir": "voices/short/",
   "long_ref_audio": "voices/long/ch0242.wav",
@@ -105,11 +148,177 @@
  },
  "capabilities": {
   "chat": true,
-  "short_tts": false,
-  "long_tts": false,
   "screen_vision": true,
   "camera_vision": true,
   "face_recognition": true,
-  "qq": true
+  "qq": true,
+  "short_tts": true,
+  "long_tts": true
+ },
+ "touch": {
+  "enabled": true,
+  "areas_2d": {
+   "head": [
+    0.32,
+    0.02,
+    0.38,
+    0.18
+   ],
+   "custom_1": [
+    0.38,
+    0.28,
+    0.28,
+    0.2
+   ],
+   "chest": [
+    0.34,
+    0.55,
+    0.34,
+    0.18
+   ]
+  },
+  "areas_live2d": {
+   "head": [
+    0.62,
+    0.309,
+    0.38,
+    0.18
+   ],
+   "chest": [
+    0.6591,
+    0.7313,
+    0.34,
+    0.18
+   ],
+   "belly": [
+    0.34,
+    0.3,
+    0.32,
+    0.08
+   ],
+   "privates": [
+    0.37,
+    0.39,
+    0.26,
+    0.07
+   ],
+   "thigh_l": [
+    0.34,
+    0.47,
+    0.15,
+    0.11
+   ],
+   "thigh_r": [
+    0.51,
+    0.47,
+    0.15,
+    0.11
+   ],
+   "shin_l": [
+    0.35,
+    0.6,
+    0.14,
+    0.12
+   ],
+   "shin_r": [
+    0.51,
+    0.6,
+    0.14,
+    0.12
+   ],
+   "foot_l": [
+    0.35,
+    0.74,
+    0.14,
+    0.1
+   ],
+   "foot_r": [
+    0.51,
+    0.74,
+    0.14,
+    0.1
+   ],
+   "arm_l": [
+    0.1189,
+    0.22,
+    0.15,
+    0.28
+   ],
+   "arm_r": [
+    0.73,
+    0.22,
+    0.15,
+    0.28
+   ],
+   "hand_l": [
+    0.12,
+    0.52,
+    0.15,
+    0.12
+   ],
+   "hand_r": [
+    0.73,
+    0.52,
+    0.15,
+    0.12
+   ],
+   "custom_1": [
+    0.6859,
+    0.4953,
+    0.28,
+    0.2
+   ]
+  },
+  "areas": {
+   "head": [
+    0.32,
+    0.02,
+    0.38,
+    0.18
+   ],
+   "custom_1": [
+    0.38,
+    0.28,
+    0.28,
+    0.2
+   ],
+   "chest": [
+    0.34,
+    0.55,
+    0.34,
+    0.18
+   ]
+  },
+  "disabled_2d": [
+   "belly",
+   "privates",
+   "thigh_l",
+   "thigh_r",
+   "shin_l",
+   "shin_r",
+   "foot_l",
+   "foot_r",
+   "arm_l",
+   "arm_r",
+   "hand_l",
+   "hand_r"
+  ],
+  "disabled_live2d": [
+   "arm_l",
+   "arm_r",
+   "belly",
+   "foot_l",
+   "foot_r",
+   "hand_l",
+   "hand_r",
+   "privates",
+   "shin_l",
+   "shin_r",
+   "thigh_l",
+   "thigh_r"
+  ],
+  "labels": {
+   "custom_1": "脸"
+  }
  }
 }

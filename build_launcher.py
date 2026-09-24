@@ -16,6 +16,8 @@
 import subprocess
 import sys
 import os
+import json
+import re
 import shutil
 
 # 强制 stdout 使用 UTF-8（避免在管道/GBK 控制台下打印 emoji(✅) 时报 UnicodeEncodeError）
@@ -293,12 +295,16 @@ if files is None:
     top_items = [
         "api.py", "build_launcher.py", "config.example.json", "download.py",
         "icon.ico", "icon.png", "install.bat", "LICENSE", "main.py",
-        "prompt.txt", "README.md", "requirements.txt", "restart_longtext.bat",
+        "prompt.txt", "README.md", "requirements.txt", "重启长语音服务.bat",
         "run.py", "run_launcher.py", "run_qq.py",
-        "思源黑体Bold.otf", "启动QQ.bat", "启动桌宠.bat",
+        "思源黑体Bold.otf", "启动QQ.bat", "启动桌宠.bat", "启动微信.bat",
+        "time_sync_guard.py", "time_sync_guard_runner.bat",
+        "安装时间同步守护【管理员】.bat", "修复系统时间同步【管理员】.bat",
         "biaoqingbao", "classes", "fgimages", "Live2d", "longtext",
         "pcl_launcher", "pets", "qq", "reference_voices", "tool", "场景素材",
         "story", "剧情素材",
+        "pcl_launcher", "pets", "qq", "reference_voices", "tool", "场景素材",
+        "更新日志",   # 启动器「更新日志」读它（由 tool/gen_changelog.py 从 README 生成）
     ]
     files = []
     for item in top_items:
@@ -523,8 +529,34 @@ print("  [目录] data/ face_shibie/ 已创建")
 # guild1.db 等是作者本机的登录数据，绝不能进分发包 → 复制时全部排除，
 # 用户拿到的是「全新」NapCat，首次扫码登录后自行配置（与官方一键包一致）。
 napcat_src = os.path.join(os.getcwd(), "NapCat.Shell.Windows.OneKey")
-napcat_dst = os.path.join(out_dir, "NapCat.Shell.Windows.OneKey")
+napcat_dst = os.path.join(out_dir, "NapCat.Shell.Windows.OneKey")   # ← 加版本核对时漏过这行
+
+
+def _napcat_version_check(src: str):
+    """打包前核对 NapCat 版本是否还是锁定值（NapCat 自带更新器，容易被动升级）。
+
+    逻辑统一在 tool/napcat_version.py 里（启动 QQ 时 run_qq 用的是同一份，
+    免得"打包会提醒、直接启动不说"）。
+    只警告不中止：万一用户确实要用别的版本，也不该卡住打包；
+    但必须**大声**说出来，否则"悄悄换版本分发出去"没人会发现。
+    """
+    try:
+        from tool.napcat_version import check as _check
+        findings = _check(os.getcwd(), src)
+    except Exception as e:
+        print(f"  [版本] ⚠ 版本核对失败: {e}")
+        return
+    for f in findings:
+        if f.get("level") == "warn":
+            print("  [版本] " + "!" * 56)
+            print(f"  [版本] ⚠⚠ {f.get('msg', '')}")
+            print("  [版本] " + "!" * 56)
+        else:
+            print(f"  [版本] {f.get('msg', '')}")
+
+
 if os.path.exists(napcat_src) and not os.path.exists(napcat_dst):
+    _napcat_version_check(napcat_src)      # 复制前先核对锁定版本（详见该函数说明）
     print("  [复制] NapCat.Shell.Windows.OneKey/ ...")
     shutil.copytree(
         napcat_src, napcat_dst,

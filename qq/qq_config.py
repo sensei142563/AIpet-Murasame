@@ -105,14 +105,8 @@ def discover_ws_token(ws_url: str = "") -> str:
         if not _is_local_url(ws_url):
             return ""
         port = _ws_port_of(ws_url)
-        nc = os.path.join(BASE_DIR, "NapCat.Shell.Windows.OneKey", "NapCat", "config")
-        if not os.path.isdir(nc):
-            # 兼容个别安装（config 放在 OneKey 根或上层）
-            for alt in (os.path.join(BASE_DIR, "NapCat.Shell.Windows.OneKey", "config"),
-                        os.path.join(BASE_DIR, "NapCat", "config")):
-                if os.path.isdir(alt):
-                    nc = alt
-                    break
+        # 目录定位复用 _napcat_config_dir()（原来这段是内联重复的，两处维护容易走偏）
+        nc = _napcat_config_dir()
         if not os.path.isdir(nc):
             return ""
         best = ""
@@ -146,6 +140,70 @@ def discover_ws_token(ws_url: str = "") -> str:
     except Exception as e:
         print(f"[QQConfig] ⚠ 自动读取 NapCat token 失败: {e}")
         return ""
+
+
+def _napcat_config_dir() -> str:
+    """定位 NapCat 自己的 config 目录（兼容几种安装布局）。找不到返回空串。"""
+    cands = [os.path.join(BASE_DIR, "NapCat.Shell.Windows.OneKey", "NapCat", "config"),
+             os.path.join(BASE_DIR, "NapCat.Shell.Windows.OneKey", "config"),
+             os.path.join(BASE_DIR, "NapCat", "config")]
+    for c in cands:
+        if os.path.isdir(c):
+            return c
+    return ""
+
+
+def discover_webui_url() -> dict:
+    """从 NapCat 自己的 webui.json 读出 WebUI 地址（本机安装才有）。
+
+    为什么需要：启动器原来把 `http://127.0.0.1:6099` **硬编码**在按钮里，还提示
+    「Token 见 config.json」——但 config.json 里根本没有 WebUI token（它在
+    NapCat/config/webui.json 里），端口也是 NapCat 那边可改的。用户点了只会打开一个
+    登录页、不知道 token 去哪找；NapCat 没启动时更是一个死链接。
+
+    NapCat 期望的形式是 `http://127.0.0.1:<port>/webui?token=<token>`
+    （根路径 / 会 301 到 /webui；除 /auth/login 外都要求 token）。
+
+    返回 {"url": 打开用的地址, "port": 端口, "token": token(有则非空), "source": 来源}
+    """
+    port, token, source = 6099, "", "默认值"
+    try:
+        nc = _napcat_config_dir()
+        if nc:
+            p = os.path.join(nc, "webui.json")
+            if os.path.isfile(p):
+                with open(p, "r", encoding="utf-8") as f:
+                    d = json.load(f)
+                try:
+                    _p = int(d.get("port") or 0)
+                    if _p > 0:
+                        port = _p
+                except Exception:
+                    pass
+                token = str(d.get("token", "") or "").strip()
+                if d.get("disableWebUI") is True:
+                    source = "webui.json（⚠ 已禁用 WebUI）"
+                else:
+                    source = "webui.json"
+            # 退一步：用 config.json 里配的 NapCat HTTP 地址（历史上把它当 WebUI 口用过）
+            if source == "默认值":
+                _http = str(_load_config().get("qq_napcat_http", "") or "").strip()
+                if _http and _is_local_url(_http):
+                    try:
+                        from urllib.parse import urlparse
+                        u = urlparse(_http)
+                        if u.port:
+                            port = int(u.port)
+                            source = "config.json qq_napcat_http"
+                    except Exception:
+                        pass
+    except Exception as e:
+        print(f"[QQConfig] ⚠ 读取 NapCat WebUI 配置失败: {e}")
+    url = "http://127.0.0.1:%d/webui" % port
+    if token:
+        from urllib.parse import quote
+        url += "?token=" + quote(token, safe="")
+    return {"url": url, "port": port, "token": token, "source": source}
 
 
 def get_qq_token(ws_url: str = "") -> str:

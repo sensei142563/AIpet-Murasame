@@ -252,6 +252,13 @@ def _cleanup_tmp_images():
 
 
 def main():
+    # 声明本进程替「微信」频道说话 → 取角色时走微信槽位（没单独设过就回落到桌宠槽）。
+    # 有了它，微信与 QQ 才能各用不同角色（用户新界面「当前使用」的三个槽）。
+    try:
+        from pets.pet_registry import set_chat_channel
+        set_chat_channel("wechat")
+    except Exception as _e:
+        print(f"[WeChatBot] ⚠ 声明聊天频道失败（按桌宠角色继续）: {_e}")
     cfg = get_config("./config.json")
     if str(cfg.get("wechat_enabled", "false")).lower() != "true":
         print("[WeChatBot] wechat_enabled=false，微信桌宠未启用。可在 config.json 中开启。")
@@ -274,7 +281,7 @@ def main():
 
     bridge = WeChatBridge(
         owner_id=str(cfg.get("wechat_owner_id", "") or "").strip(),
-        bot_agent=str(cfg.get("wechat_bot_agent", "") or "AIpet/1.15").strip(),
+        bot_agent=str(cfg.get("wechat_bot_agent", "") or "AIpet/1.17.2").strip(),
         send_voice=send_voice,
     )
     print("[WeChatBot] 提示：对方发来第一条消息后，日志会显示 from_user_id（xxx@im.wechat），"

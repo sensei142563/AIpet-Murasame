@@ -84,6 +84,16 @@ class EmotionManager:
         """应用单个 exp3 预设（按文件名；model3.json 未登记表情时用 LoadExtraExpression 运行时注册）"""
         exp_path = os.path.join(self.exp_dir, fname)
         if not os.path.exists(exp_path):
+            # ⚠ 别静默跳过：配了却找不到文件（例如角色没有 exp 目录、或映射写的是别人的文件名）
+            #   以前这里直接 return，表情"永远不生效"却一点提示都没有（用户报"Live2D 换不了表情"）。
+            #   只对同一个文件名报一次，避免每句刷屏。
+            _warned = getattr(self, "_exp_missing_warned", None)
+            if _warned is None:
+                _warned = self._exp_missing_warned = set()
+            if fname not in _warned:
+                _warned.add(fname)
+                print(f"[Live2D] ⚠ 表情文件不存在：{exp_path}"
+                      f"（这个表情不会生效，检查 pet.json 的 model.emotions 或角色是否缺 exp 目录）")
             return
         try:
             self.model.LoadExtraExpression(fname, exp_path)
@@ -142,6 +152,9 @@ class Live2DWidget(QOpenGLWidget):
     touch_moved = pyqtSignal(int, int)                # 左键拖动 → (x, y)
     touch_released = pyqtSignal(int, int)             # 左键松开 → (x, y)
     interacted = pyqtSignal()                         # 任何鼠标交互（重排文字层 z 序用）
+    # 右键：Live2D 模式下 pet 窗口是隐藏的，右键菜单得由模型控件转发出去
+    # （以前 Live2D 模式完全没有右键功能：换装 / 输入对话 都点不出来）
+    context_menu = pyqtSignal(int, int)               # 右键 → 全局坐标 (gx, gy)
 
     def __init__(self, parent=None, model_dir=None, model_json=None,
                  window_ratio=0.67, model_scale=1.0, offset_x=0.0, offset_y=0.0,
@@ -193,6 +206,7 @@ class Live2DWidget(QOpenGLWidget):
         self._motion_playing = False
         self._motion_hold = False        # 句子播放期间保持动作（播完定格姿态，直到收尾）
         self._motion_key = None          # 当前情绪动作 (组, 序号)
+        self._last_touch_hit = ""        # 桌宠刚判定的触摸区域（非空 = 这次点击已被触摸吃掉）
         self._emotion_motions = {}   # 动作文件名 -> ("emotion", 组内序号)
         # 定格姿态：动作播完句内保持时，快照姿态参数持续施加（前倾就保持前倾），
         # 收尾时按权重衰减释放回默认姿态。
@@ -598,25 +612,40 @@ class Live2DWidget(QOpenGLWidget):
         if event.button() == Qt.LeftButton:
             x, y = event.x(), event.y()
             self.setCursor(Qt.ArrowCursor)
+            # 先交给桌宠判「触摸区域」。桌宠命中时会在本控件上留一个记号
+            # （_last_touch_hit），这时就**不再**走下面的摸头/点下半身逻辑 ——
+            # 否则戳胸口会同时"触发胸口反应"又"弹出输入框"（半身模型尤其明显）。
+            self._last_touch_hit = ""
             try:
                 self.touch_pressed.emit(x, y)        # 身体触摸（区域由桌宠判定）
             except Exception:
                 pass
 
-            if self._in_zone(y, self.head_top, self.head_bottom) and self._in_x_range(x):
-                # 头部区域 → 摸头
-                self._touch_head = True
-                self._head_press_x = x
-                self.setCursor(Qt.OpenHandCursor)
-            elif self._in_zone(y, self.talk_top, self.talk_bottom) and self._in_x_range(x):
-                # 下半身区域 → 对话
-                self.trigger_input_mode.emit()
+            if not getattr(self, "_last_touch_hit", ""):
+                if self._in_zone(y, self.head_top, self.head_bottom) and self._in_x_range(x):
+                    # 头部区域 → 摸头
+                    self._touch_head = True
+                    self._head_press_x = x
+                    self.setCursor(Qt.OpenHandCursor)
+                elif self._in_zone(y, self.talk_top, self.talk_bottom) and self._in_x_range(x):
+                    # 下半身区域 → 对话
+                    self.trigger_input_mode.emit()
+                else:
+                    self._touch_head = False
+                    self._head_press_x = None
             else:
+                # 已经由「触摸区域」处理过 → 只保留拖动=抚摸
                 self._touch_head = False
                 self._head_press_x = None
         elif event.button() == Qt.MiddleButton:
             self._mouse_drag_offset = event.pos()
             self.setCursor(Qt.SizeAllCursor)
+        elif event.button() == Qt.RightButton:
+            # 右键 → 转给桌宠弹菜单（输入对话 / 换装 / 立绘类型）
+            try:
+                self.context_menu.emit(event.globalX(), event.globalY())
+            except Exception as e:
+                print(f"[Live2D] ⚠ 右键菜单转发失败: {e}")
 
     def mouseMoveEvent(self, event):
         self.interacted.emit()

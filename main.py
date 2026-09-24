@@ -1,3 +1,11 @@
+
+try:  # 控制台被重定向（管道/日志）时 Windows 会用 GBK 编码 stdout，
+    # 打印 emoji 会 UnicodeEncodeError 直接打断进程 → 统一降级成替换字符
+    import sys as _sys
+    _sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    _sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 import os
 import sys
 import site
@@ -20,6 +28,16 @@ if os.path.exists(torch_path):
 #   现在做成容错：加载不了也照常启动，只提示本地模型/本地语音不可用。
 TORCH_OK = False
 torch = None
+try:
+    import torch          # ← 仍需在这里（本地模式要求在任何第三方库之前导入）
+    TORCH_OK = True
+    print("Torch loaded OK:", torch.__version__)
+except Exception as _torch_err:
+    print(f"[AIpet] ⚠ PyTorch 不可用（{_torch_err}）→ 云端模式可正常使用；"
+          f"本地模型 / 本地语音相关功能将不可用")
+
+# ===== Qt 平台插件路径修复（中文/非 ASCII 安装路径）=====
+# 必须放在 QApplication 构造之前；放 torch import 之后（避免 PyQt5 DLL 先于 torch 加载）
 try:
     import torch          # ← 仍需在这里（本地模式要求在任何第三方库之前导入）
     TORCH_OK = True
@@ -179,6 +197,30 @@ def center_on_screen(win, screen_index: int = 0) -> None:
         print(f"[AIpet] ⚠ 居中失败: {e}")
 
 
+def apply_live2d_display_override(disp: dict, pet) -> dict:
+    """角色若在「立绘设置 → Live2D」里单独调过大小/位置，优先用那份（与 2D 独立）。
+
+    pet._pet_cfg 是桌宠读到的角色 pet.json。以前这里直接写 `pet._pet_cfg`，
+    而 Murasame 只有同名**局部变量** → 每次启动都打印
+    「⚠ 读取独立显示设置失败: 'Murasame' object has no attribute '_pet_cfg'」，
+    角色单独调的 scale/offset/窗口比例一直被静默忽略。现在取不到就安静跳过。
+    """
+    try:
+        _mc = (getattr(pet, "_pet_cfg", None) or {}).get("model") or {}
+        _dl = _mc.get("display_live2d") or {}
+        for _k, _dk in (("height_ratio", "window_height_ratio"),
+                        ("width_ratio", "window_ratio"),
+                        ("scale", "scale"),
+                        ("offset_x", "offset_x"), ("offset_y", "offset_y")):
+            if _dl.get(_k) is not None:
+                disp[_dk] = float(_dl[_k])
+        if _dl:
+            print(f"[Live2D] 使用角色独立显示设置: {_dl}")
+    except Exception as _e:
+        print(f"[Live2D] ⚠ 读取独立显示设置失败: {_e}")
+    return disp
+
+
 if __name__ == "__main__":
 
     # 设置全局 OpenGL 默认格式（启用 alpha 通道，支持透明背景）
@@ -190,9 +232,12 @@ if __name__ == "__main__":
 
     # 后台启动本地 API 服务（FastAPI + Uvicorn）
     def _run_api_server():
-        config = uvicorn.Config(api_app, host="127.0.0.1", port=28565, log_level="info")
-        server = uvicorn.Server(config)
-        server.run()
+        # 细节都收在 tool/api_server.py 里：
+        #   · access_log=False —— 启动器每 300ms 探一次 /control，否则日志刷屏
+        #   · 自建事件循环 + 忽略 ConnectionResetError —— uvicorn 0.37 在 Windows 上
+        #     强制用 Proactor，光靠 set_event_loop_policy 已经压不住 10054 的 traceback
+        from tool.api_server import run_blocking
+        run_blocking(api_app, "127.0.0.1", 28565)
 
     api_thread = threading.Thread(
         target=_run_api_server,
@@ -304,7 +349,10 @@ if __name__ == "__main__":
 
     # ===== Live2D 初始化 =====
     live2d_widget = None
-    _LIVE2D_CONFIG_ENABLED = CONFIG.get("live2d_enabled", "true") == "true"
+    # 默认值必须是 "false"，并且要忽略大小写：文件顶部（_LIVE2D_AVAILABLE）、run.py、
+    # config.example.json、设置页面板全都是 false，这里写 "true" 会让"键缺失"时
+    # 桌面端以为该进 Live2D，而引擎其实根本没加载（显示与真实状态不一致）。
+    _LIVE2D_CONFIG_ENABLED = str(CONFIG.get("live2d_enabled", "false")).lower() == "true"
 
     # ===== Live2D 崩溃自学习 =====
     # 上次进 Live2D 留下的标记还在 → 说明那次进程被崩掉了（原生崩溃，抓不到异常）
@@ -394,19 +442,7 @@ if __name__ == "__main__":
             from pets.pet_registry import get_live2d_display, get_live2d_params
             disp = get_live2d_display()
             # 角色若在「立绘设置 → Live2D」里单独调过大小/位置，优先用那份（与 2D 独立）
-            try:
-                _mc = pet._pet_cfg.get("model") or {}
-                _dl = (_mc.get("display_live2d") or {})
-                for _k, _dk in (("height_ratio", "window_height_ratio"),
-                                ("width_ratio", "window_ratio"),
-                                ("scale", "scale"),
-                                ("offset_x", "offset_x"), ("offset_y", "offset_y")):
-                    if _dl.get(_k) is not None:
-                        disp[_dk] = float(_dl[_k])
-                if _dl:
-                    print(f"[Live2D] 使用角色独立显示设置: {_dl}")
-            except Exception as _e:
-                print(f"[Live2D] ⚠ 读取独立显示设置失败: {_e}")
+            disp = apply_live2d_display_override(disp, pet)
             params = get_live2d_params()
             print(f"[Live2D] 模型目录: {model_dir}")
             print(f"[Live2D] 模型文件存在: {bool(model_json) and os.path.exists(model_json)}")
@@ -819,6 +855,12 @@ if __name__ == "__main__":
                 print(f"[AIpet] ⚠ Live2D 触摸信号连接失败: {_e}")
         print("[AIpet] ✅ Live2D 身体触摸已接入（与 2D 同一套区域与反应）")
         live2d_widget.trigger_input_mode.connect(lambda: pet._trigger_input_mode())
+        # 右键菜单（Live2D 模式下 pet 窗口是隐藏的，右键事件只有模型控件收得到）：
+        # 转发给 pet 的同一个菜单 —— 输入对话 / 换装 / 立绘类型 都能用
+        def _on_l2d_context_menu(gx, gy):
+            from PyQt5.QtCore import QPoint
+            pet._show_outfit_menu(QPoint(int(gx), int(gy)))
+        live2d_widget.context_menu.connect(_on_l2d_context_menu)
         def _sync_move(dx, dy):
             pet.move(pet.x() + dx, pet.y() + dy)
         live2d_widget.trigger_drag_move.connect(_sync_move)

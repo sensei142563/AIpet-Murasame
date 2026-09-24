@@ -37,7 +37,7 @@ CHANNEL_VERSION = "2.4.6"
 # uint32: major<<16 | minor<<8 | patch → 2.4.6 = 0x00020406 = 132102
 ILINK_APP_CLIENT_VERSION = str((2 << 16) | (4 << 8) | 6)
 FIXED_BASE_URL = "https://ilinkai.weixin.qq.com"
-DEFAULT_BOT_AGENT = "AIpet/1.15"
+DEFAULT_BOT_AGENT = "AIpet/1.17.2"
 
 # 消息项类型（官方 types.js）
 ITEM_TEXT = 1
@@ -110,14 +110,6 @@ def save_credentials(data):
     _save_json(CRED_FILE, data)
 
 
-def clear_credentials():
-    try:
-        if os.path.exists(CRED_FILE):
-            os.remove(CRED_FILE)
-    except Exception:
-        pass
-
-
 def load_sync_buf():
     try:
         with open(SYNC_BUF_FILE, "r", encoding="utf-8") as f:
@@ -146,10 +138,6 @@ def save_ctx_token(user_id, token):
     d = load_ctx_tokens()
     d[user_id] = token
     _save_json(CTX_TOKENS_FILE, d)
-
-
-def get_ctx_token(user_id):
-    return load_ctx_tokens().get(user_id, "")
 
 
 def _base_info(bot_agent=DEFAULT_BOT_AGENT):

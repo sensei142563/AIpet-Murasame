@@ -1,4 +1,5 @@
 import json
+import re
 import tempfile
 import threading
 import time
@@ -9,10 +10,49 @@ from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtGui import QGuiApplication
 
 from tool.cloud_API_chat import cloud_portrait, cloud_translate, cloud_talk, cloud_emotion
-from tool.config import get_config
+from tool.config import as_bool, get_config
 from tool.chat import qwen3_lora, ollama_qwen3_sentence, ollama_qwen3_portrait, gpt_sovits_tts, ollama_qwen3_emotion, ollama_qwen3_translate, strip_self_dialogue
 
 portrait_type = get_config("./config.json")['portrait']
+
+# 句内情绪标签（只覆盖「显示用情绪」= 表情/动作，语音不受影响）。
+# ⚠ 人设里写的标签是**全角**【白】（见 pets/noir/prompt.txt、longtext_prompt.txt），
+#   而模型有时会输出半角 [白] —— 两种都要认。以前这里只匹配半角，
+#   于是「诺瓦白形态」这条唯一由人设驱动的表情路径**从来没触发过**（v1.12.1 起就写错）。
+#   限定 1~6 字且不跨括号，避免把【一大段动作描写】当成情绪词。
+EMOTION_TAG_RE = re.compile(r'[\[【]([^\[\]【】]{1,6})[\]】]')
+
+
+def extract_emotion_tag(text) -> str:
+    """取句内最后一个情绪标签（【白】/ [白] 都认）；没有则返回空串。"""
+    try:
+        m = EMOTION_TAG_RE.findall(str(text or ""))
+    except Exception:
+        return ""
+    return m[-1] if m else ""
+
+
+def _voice_synthesis_enabled() -> bool:
+    """短语音合成开关（启动器 → 设置 → 语音合成与识别）。
+
+    两个 Worker（本地模型 / 云端模型）共用这一份判断 —— 之前两处各写一遍，
+    其中一处写成 bool(config值)，而配置里存的是字符串 "false"，
+    bool("false") == True → 关掉语音也照样合成，还因为 TTS 慢而拖住整轮回复。
+    每次都重新读配置，所以设置里改完立即生效。
+    """
+    try:
+        return as_bool(get_config("./config.json").get("voice_synthesis_enable"), True)
+    except Exception:
+        return True
+
+
+def current_portrait_type():
+    """运行时读取立绘体系（桌宠右键换装会把 config 切到 a 套；
+    若仍用启动时的快照常量，AI 会继续按 b 套选层导致与 a 套渲染不匹配）"""
+    try:
+        return str(get_config("./config.json").get("portrait") or portrait_type or "a")
+    except Exception:
+        return portrait_type
 
 
 def current_portrait_type():
@@ -380,13 +420,14 @@ class qwen3_lora_Worker(QThread):
     status = pyqtSignal(str)      # 临时状态（"正在操作电脑……"）→ 对话框显示
 
     def __init__(self, history, portrait_history, user_input, role="user", t = False,
-                 portrait_type=None, no_act=False):
+                 portrait_type=None, no_act=False, live2d: bool = False):
         super().__init__()
         # no_act=True：这一轮只是寒暄/开机问候/系统提示，**不许动手**
         # （实测 bug：开机问候那一轮她多写了一句【键鼠】移动 → 被当成"要操控电脑"，
         #  动作被自主开关拦下，但任务循环照样开起来、任务描述还是问候语全文 →
         #  她把问候当"任务汇报"说，收尾消息又把对话队列堵住）
         self.no_act = bool(no_act)
+        self.live2d = bool(live2d)
         # 当前画面上显示的那一套立绘（a/b）——AI 必须按同一套选层，
         # 否则渲染时要跨套换算，表情/装饰会被丢掉（用户反馈"立绘没有表情"）
         self.portrait_type = portrait_type
@@ -395,6 +436,8 @@ class qwen3_lora_Worker(QThread):
         self.user_input = user_input
         self.role = role
         self.t = t
+        # Live2D 模式：立绘那一步换成"把可选表情/动作列表交给 AI 自己选"（用户 2026-09-24 拍板）
+        self.live2d = bool(live2d)
         self.force_stop = False
 
     def stop_all(self):
@@ -467,7 +510,7 @@ class qwen3_lora_Worker(QThread):
         reply = ollama_qwen3_sentence(reply)  # 句子分割
         if self.force_stop: print("[ollama-qwn3] 已中断生成。");return
         history[-1]["content"] = reply
-        portrait_list, portrait_history = ollama_qwen3_portrait(reply, self.portrait_history, (getattr(self, "portrait_type", None) or current_portrait_type()))  # 立绘
+        portrait_list, portrait_history = ollama_qwen3_portrait(reply, self.portrait_history, current_portrait_type(), live2d=self.live2d)  # 立绘
         if self.force_stop: print("[ollama-qwn3] 已中断生成。");return
         emotion_list = ollama_qwen3_emotion(history)  # 情感
         if self.force_stop: print("[ollama-qwn3] 已中断生成。");return
@@ -491,11 +534,7 @@ class qwen3_lora_Worker(QThread):
 
         # 并发执行所有TTS任务（索引定位结果，杜绝空句导致的错位）
         # 语音合成开关（启动器 设置→桌宠 可关）：关闭时跳过全部 TTS（合成较慢、会拖慢回复）
-        _voice_on = True
-        try:
-            _voice_on = bool(get_config("./config.json").get("voice_synthesis_enable", True))
-        except Exception:
-            _voice_on = True
+        _voice_on = _voice_synthesis_enabled()
         voices = [None] * len(translate)
         if not _voice_on:
             print("[tts] 语音合成已关闭（可在启动器 设置→桌宠 中开启），跳过 TTS")
@@ -516,11 +555,10 @@ class qwen3_lora_Worker(QThread):
 
         # 句内【情绪】标签（如【白】）→ 只覆盖「显示用情绪」（表情/动作），
         # TTS 已按原始情绪合成，语音不受影响。
-        import re as _re
         for i, t in enumerate(reply_raw):
-            m = _re.findall(r'\[(.+?)\]', str(t))
-            if m and i < len(emotion_list):
-                emotion_list[i] = m[-1]
+            tag = extract_emotion_tag(t)
+            if tag and i < len(emotion_list):
+                emotion_list[i] = tag
 
         self.finished.emit(reply, portrait_list, history, portrait_history, voices, emotion_list)  # 发回主线程
 
@@ -529,13 +567,14 @@ class cloud_API_Worker(QThread):
     status = pyqtSignal(str)      # 临时状态（"正在操作电脑……"）→ 对话框显示
 
     def __init__(self, history, portrait_history, user_input, role="user", t = False,
-                 portrait_type=None, no_act=False):
+                 portrait_type=None, no_act=False, live2d: bool = False):
         super().__init__()
         # no_act=True：这一轮只是寒暄/开机问候/系统提示，**不许动手**
         # （实测 bug：开机问候那一轮她多写了一句【键鼠】移动 → 被当成"要操控电脑"，
         #  动作被自主开关拦下，但任务循环照样开起来、任务描述还是问候语全文 →
         #  她把问候当"任务汇报"说，收尾消息又把对话队列堵住）
         self.no_act = bool(no_act)
+        self.live2d = bool(live2d)
         # 当前画面上显示的那一套立绘（a/b）——AI 必须按同一套选层，
         # 否则渲染时要跨套换算，表情/装饰会被丢掉（用户反馈"立绘没有表情"）
         self.portrait_type = portrait_type
@@ -545,6 +584,8 @@ class cloud_API_Worker(QThread):
         self.role = role
         self.force_stop = False
         self.t = t
+        # Live2D 模式：立绘那一步换成"把可选表情/动作列表交给 AI 自己选"（用户 2026-09-24 拍板）
+        self.live2d = bool(live2d)
 
     def stop_all(self):
         """外部调用，用于请求线程中断"""
@@ -640,7 +681,7 @@ class cloud_API_Worker(QThread):
 
         with ThreadPoolExecutor(max_workers=5) as executor:  # 增加线程数
             # 提交所有任务（下游拿到切好的句子列表，保证对齐）
-            future_portrait = executor.submit(cloud_portrait, reply_json, self.portrait_history, (getattr(self, "portrait_type", None) or current_portrait_type()))
+            future_portrait = executor.submit(cloud_portrait, reply_json, self.portrait_history, current_portrait_type(), self.live2d)
             future_translate = executor.submit(cloud_translate, reply_json)
             future_emotion = executor.submit(cloud_emotion, history)
 
@@ -663,18 +704,8 @@ class cloud_API_Worker(QThread):
             reply_list, translate_list, emotion_list, portrait_list)
 
         voices = [None] * len(translate_list)
-        # ⚠ 修复：设置里那个开关存的是**字符串** "false"（滑条写的就是 "true"/"false"），
-        #   而 bool("false") == True → 关了语音也照样合成，还会因为 TTS 服务慢而卡住整轮回复。
-        #   这里按字符串语义解析（false/0/off/no 都算关），并且每次都重新读配置（改完立即生效）。
-        _voice_on = True
-        try:
-            _v = get_config("./config.json").get("voice_synthesis_enable", True)
-            if isinstance(_v, str):
-                _voice_on = _v.strip().lower() in ("true", "1", "on", "yes", "开", "开启")
-            else:
-                _voice_on = bool(_v)
-        except Exception:
-            _voice_on = True
+        # 短语音开关（字符串语义解析见 _voice_synthesis_enabled，每次都重读配置）
+        _voice_on = _voice_synthesis_enabled()
         if not _voice_on:
             print("[tts] 语音合成已关闭（设置里可开启）→ 本轮不合成语音，直接出文字")
         else:
@@ -694,11 +725,10 @@ class cloud_API_Worker(QThread):
 
         # 句内【情绪】标签（如【白】）→ 只覆盖「显示用情绪」（表情/动作），
         # TTS 已按原始情绪合成，语音不受影响。
-        import re as _re
         for i, t in enumerate(reply_list_raw):
-            m = _re.findall(r'\[(.+?)\]', str(t))
-            if m and i < len(emotion_list):
-                emotion_list[i] = m[-1]
+            tag = extract_emotion_tag(t)
+            if tag and i < len(emotion_list):
+                emotion_list[i] = tag
 
         self.finished.emit(reply_list, portrait_list, history, portrait_history, voices, emotion_list)
 

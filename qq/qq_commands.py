@@ -8,6 +8,7 @@ QQ 特殊指令处理 — 当前支持 /clear（清空会话记忆，仅主人�
 """
 
 import os
+from pets.pet_registry import get_chat_pet_id
 import json
 import time
 
@@ -17,8 +18,8 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 def _pet_display_name() -> str:
     """当前角色显示名（用于指令回复，替代硬编码「丛雨」）"""
     try:
-        from pets.pet_registry import get_active_pet_id, get_pet_config
-        pid = get_active_pet_id()
+        from pets.pet_registry import get_chat_pet_id, get_pet_config
+        pid = get_chat_pet_id()
         cfg = get_pet_config(pid) or {}
         return str(cfg.get("display_name") or cfg.get("name") or pid or "角色")
     except Exception:
