@@ -875,6 +875,9 @@ class HomePage(QWidget):
             _QT.singleShot(1200, self.refresh_models)
         except Exception:
             pass
+        # ⚠ 必须真的把它加进布局 —— 旧版这句在文件末尾，合并时只搬了"创建卡片"那段，
+        #   结果卡片建了却没挂上去 → 主页看不到（用户反馈"主页还是没有显示"）
+        outer.addWidget(models)
 
         outer.addStretch()
 
