@@ -228,6 +228,61 @@ def generate_fgimage(target, embeddings_layers, pet_id: str = None):
     # ===== 兜底（一）：所有图层都缺 → 单图模式退回角色默认表情整图 =====
     # ⚠ 必须放在「所有图层均缺失就返回空画布」之前：single 模式（每个表情一张整图）
     #   的角色，AI 很容易返回别的角色（丛雨）的图层 ID → 全缺 → 桌宠就变成空白/1x1 窗。
+    # ===== 兜底（零）：图层号属于**另一套**立绘 → 按名字搬过来 =====
+    #   现场：夏目在 a 套，装扮却是 b 套的图层号（4132/4125）→ a 套没有这些 png →
+    #   合成 1×1 空画布 → 立绘"显示不全/看不见"。这里先把它们搬到当前套再合成。
+    if not valid_layers:
+        try:
+            from tool.portrait_outfit import carry_layers
+            _other = "b" if str(target).endswith("a") else ("a" if str(target).endswith("b") else "")
+            if _other:
+                _moved = carry_layers(_other, str(target)[-1:], list(embeddings_layers or []),
+                                      pet_id, save=False) or []
+                _moved = [m for m in _moved
+                          if os.path.exists(os.path.join(fg_dir, f"{target}_{m}.png"))]
+                if _moved:
+                    print(f"[generate] 🔁 图层 {embeddings_layers} 属于『{_other} 套』→ "
+                          f"按名字搬到『{str(target)[-1:]} 套』：{_moved}")
+                    valid_layers = _moved
+        except Exception as _e:
+            print(f"[generate] ⚠ 跨套搬运失败: {_e}")
+
+    # ===== 兜底（零·二）：还不行就用「当前套的第一件衣服 + 该套默认表情」=====
+    if not valid_layers:
+        try:
+            from tool.portrait_outfit import clothes_of
+            _set = str(target)[-1:]
+            _cands = []
+            for _n, _c, _h in (clothes_of(_set, pet_id) or []):
+                for _v in (_c, _h):
+                    try:
+                        _v = int(_v or 0)
+                    except Exception:
+                        continue
+                    if _v and os.path.exists(os.path.join(fg_dir, f"{target}_{_v}.png")):
+                        _cands.append(_v)
+            # 再补一个本套的表情层（让立绘有脸）
+            try:
+                from pets.pet_registry import get_pet_config as _gpc
+                _pt = ((_gpc(pet_id) or {}).get("portrait") or {})
+                _blk = ((_pt.get("sets") or {}).get(_set) or {}) if isinstance(_pt.get("sets"), dict) else _pt
+                for _v in (_blk.get("emotions") or {}).values():
+                    try:
+                        _v = int(_v)
+                    except Exception:
+                        continue
+                    if os.path.exists(os.path.join(fg_dir, f"{target}_{_v}.png")):
+                        _cands.append(_v)
+                        break
+            except Exception:
+                pass
+            _cands = list(dict.fromkeys(_cands))[:3]
+            if _cands:
+                print(f"[generate] ℹ 图层全不可用 → 改用『{_set} 套』的默认组合 {_cands}")
+                valid_layers = _cands
+        except Exception as _e:
+            print(f"[generate] ⚠ 默认组合兜底失败: {_e}")
+
     if not valid_layers:
         try:
             from pets.pet_registry import get_portrait_default_layers

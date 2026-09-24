@@ -892,6 +892,36 @@ class HomePage(QWidget):
         self._timer.timeout.connect(self.refresh_status)
         self._timer.start(6000)
 
+        # ── 启动器一起来就自动预热语音服务（合并保留的功能）────────────────
+        # 首次加载 GPT-SoVITS 模型要 1~2 分钟；提前热好，桌宠开口第一句几乎不用等。
+        # 和点「预载语音服务」走同一条路（preload_tts），只是不用手动点；
+        # 云端语音 / 关掉短语音时不预热（判断见 _auto_preload_tts）。
+        try:
+            from PyQt5.QtCore import QTimer as _QT_pre
+            _QT_pre.singleShot(2500, self._auto_preload_tts)
+        except Exception as _e:
+            print(f"[NewUI] ⚠ 自动预热未排上: {_e}")
+
+    def _auto_preload_tts(self):
+        """启动器启动后自动预热本地语音服务（只用本地 TTS 且开着短语音时才做）。"""
+        try:
+            if getattr(self.shell, "_tts_proc", None) is not None:
+                print("[NewUI] 语音服务已在预载/运行 → 跳过自动预热")
+                return
+            from tool.config import get_config
+            cfg = get_config("./config.json") or {}
+            if str(cfg.get("tts_type") or "local").strip().lower() != "local":
+                print("[NewUI] 语音走云端 → 跳过自动预热")
+                return
+            if str(cfg.get("voice_synthesis_enable", "true")).strip().lower() in (
+                    "false", "0", "no", "off", "关"):
+                print("[NewUI] 短语音已关闭 → 跳过自动预热")
+                return
+            print("[NewUI] 启动器自动预热语音服务（首次加载模型约 1~2 分钟）…")
+            self.preload_tts()
+        except Exception as e:
+            print(f"[NewUI] ⚠ 自动预热跳过: {e}")
+
     # ── 状态 ──
 
     def _open_story(self, hash_q: str = ""):
