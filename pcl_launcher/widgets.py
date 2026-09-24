@@ -2394,52 +2394,26 @@ def outline_btn_qss(fg=None, pad_v: int = 8, pad_h: int = 16, font_size: int = 1
 
 
 class PCLPromptEditor(QWidget):
-    """提示词编辑器：查看 / 编辑各角色的短文本与长文本人设。
-
-    视觉与「设置」「记忆」两页对齐：30px 页边距、卡片分组、区块标题带强调色竖条，
-    主操作只留一个（保存），次要操作用描边按钮；每个编辑区右上角常显
-    「文件名 · 字数 · 已保存 / 未保存」—— 不用点开文件就知道在改什么、改没改动。
-    """
-
-    #: (kind, 区块标题, 什么时候用, 文件名)
-    _SECTIONS = (
-        ("short", "短文本人设", "桌面短句模式（气泡里那几句话）", "prompt.txt"),
-        ("long", "长文本人设", "长文本模式 / QQ 聊天", "longtext_prompt.txt"),
-    )
+    """提示词编辑器：查看/编辑各角色短文本与长文本人设"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        # 结构：固定头部（标题 / 说明 / 角色）+ 可滚动中段（两个编辑卡片）+ 固定底部（保存按钮）。
-        # 为什么中段要单独滚动：两个文本框以前直接把「保存」挤出可视区（窗口 780 高时按钮
-        # 正好压在底边），主操作必须在任何时候都看得见。
-        root = QVBoxLayout(self)
-        root.setContentsMargins(int(30 * S), int(24 * S), int(30 * S), int(16 * S))
-        root.setSpacing(int(12 * S))
-
-        self._scroll = QScrollArea()
-        self._scroll.setWidgetResizable(True)
-        self._scroll.setFrameShape(QScrollArea.NoFrame)
-        self._scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
-        body = QWidget()
-        layout = QVBoxLayout(body)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(int(14 * S))
-        self._scroll.setWidget(body)
-        self._layout = layout
+        layout = QVBoxLayout(self)
+        # 提示词页：左右贴边与顶部目录条同宽
+        layout.setContentsMargins(0, int(16 * S), 0, int(16 * S))
+        layout.setSpacing(int(12 * S))
 
         title = QLabel("  📝 提示词编辑器")
         title.setFont(QFont("Microsoft YaHei", int(16 * S), QFont.Bold))
         title.setStyleSheet(f"color: {Color1.name()};")
-        root.addWidget(title)
-        desc = QLabel("编辑各角色的人设：短文本 = 桌面短句模式；长文本 = 长文本模式与 QQ 聊天。"
-                      "改完点「保存」，下次对话生效。")
+        layout.addWidget(title)
+        desc = QLabel("编辑各角色的人设提示词。短文本=桌面短句模式；长文本=长文本模式与 QQ 聊天。保存后下次对话生效。")
         desc.setWordWrap(True)
         desc.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(12*S)}px;")
-        root.addWidget(desc)
+        layout.addWidget(desc)
 
-        # ===== 角色选择（写法与「记忆」页一致）=====
-        row_pet = QHBoxLayout()
-        lbl_pet = QLabel("角色：")
+        row = QHBoxLayout()
+        lbl_pet = QLabel("角色:")
         lbl_pet.setStyleSheet(f"color: {Color1.name()}; font-size: {int(13*S)}px;")
         self.combo = QComboBox()
         self.combo.setMinimumWidth(int(180 * S))
@@ -2449,138 +2423,75 @@ class PCLPromptEditor(QWidget):
                 self.combo.addItem(p.get("display_name") or p.get("name", "?"), p["id"])
         except Exception:
             pass
-        row_pet.addWidget(lbl_pet)
-        row_pet.addWidget(self.combo)
-        row_pet.addStretch()
-        root.addLayout(row_pet)
+        self.combo.currentIndexChanged.connect(self._load)
+        row.addWidget(lbl_pet)
+        row.addWidget(self.combo)
+        row.addStretch()
+        layout.addLayout(row)
 
-        # 头部都排完了，中段滚动区这时插进来（布局顺序 = 添加顺序）
-        root.addWidget(self._scroll, 1)
+        lbl_short = QLabel("短文本提示词 (prompt.txt)")
+        lbl_short.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(12*S)}px;")
+        layout.addWidget(lbl_short)
+        self.edit_short = QTextEdit()
+        layout.addWidget(self.edit_short, 1)
 
-        # ===== 两个编辑区：各自一张卡片，标题 / 说明 / 状态都在卡片头 =====
-        self._edits = {}
-        self._states = {}
-        self._dirty = set()
-        self._loading_text = False
-        for kind, name, when, fname in self._SECTIONS:
-            card = QFrame()
-            card.setObjectName("promptCard")
-            card.setStyleSheet(card_qss())
-            cv = QVBoxLayout(card)
-            cv.setContentsMargins(int(14*S), int(12*S), int(14*S), int(14*S))
-            cv.setSpacing(int(8*S))
+        lbl_long = QLabel("长文本提示词 (longtext_prompt.txt)")
+        lbl_long.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(12*S)}px;")
+        layout.addWidget(lbl_long)
+        self.edit_long = QTextEdit()
+        layout.addWidget(self.edit_long, 1)
 
-            head = QHBoxLayout()
-            head.addWidget(section_title(name))
-            when_lbl = QLabel(when)
-            when_lbl.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(11*S)}px;")
-            head.addWidget(when_lbl)
-            head.addStretch()
-            state = QLabel("")
-            state.setStyleSheet(f"color: {Gray3.name()}; font-size: {int(11*S)}px;")
-            head.addWidget(state)
-            cv.addLayout(head)
-
-            edit = QTextEdit()
-            edit.setMinimumHeight(int(110 * S))     # 够读几行；窗口再小就滚动，别把卡片压没
-            edit.setPlaceholderText(f"{name}还没写内容（保存后写入 {fname}）")
-            edit.textChanged.connect(lambda k=kind: self._mark_dirty(k))
-            cv.addWidget(edit, 1)
-            layout.addWidget(card, 1)
-
-            self._edits[kind] = edit
-            self._states[kind] = (state, fname)
-
-        # 旧属性名保留（页面外可能有人引用）
-        self.edit_short = self._edits["short"]
-        self.edit_long = self._edits["long"]
-
-        # ===== 底部操作（固定，不随内容滚动）：一个主按钮 + 一个次要按钮 + 状态文字 =====
         btn_row = QHBoxLayout()
-        self.btn_save = QPushButton(" 💾 保存")
-        self.btn_save.setCursor(Qt.PointingHandCursor)
-        self.btn_save.setStyleSheet(primary_btn_qss())
-        self.btn_save.clicked.connect(self._save)
-        self.btn_reload = QPushButton(" 🔄 重新加载")
-        self.btn_reload.setCursor(Qt.PointingHandCursor)
-        self.btn_reload.setStyleSheet(outline_btn_qss())
-        self.btn_reload.clicked.connect(self._load)
+        btn_save = QPushButton(" 💾 保存")
+        btn_reload = QPushButton(" 🔄 重新加载")
+        for b in (btn_save, btn_reload):
+            b.setStyleSheet(f"""
+                QPushButton {{ background: {Color3.name()}; color: white; border: none;
+                    padding: {int(8*S)}px {int(16*S)}px; font-size: {int(13*S)}px;
+                    border-radius: {btn_radius()}px; font-family: 'Microsoft YaHei'; }}
+                QPushButton:hover {{ background: {Color4.name()}; }}
+            """)
+        btn_save.clicked.connect(self._save)
+        btn_reload.clicked.connect(self._load)
         self.lbl_status = QLabel("")
-        self.lbl_status.setStyleSheet(f"color: {Gray3.name()}; font-size: {int(11*S)}px;")
-        btn_row.addWidget(self.btn_save)
-        btn_row.addWidget(self.btn_reload)
+        self.lbl_status.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(12*S)}px;")
+        btn_row.addWidget(btn_save)
+        btn_row.addWidget(btn_reload)
         btn_row.addWidget(self.lbl_status)
         btn_row.addStretch()
-        root.addLayout(btn_row)
+        layout.addLayout(btn_row)
 
-        # 编辑区全部建好后再接信号：中途即使有信号进来也不会打到半成品控件上
-        self.combo.currentIndexChanged.connect(self._load)
         self._load()
 
     def _current_pet_id(self):
         return self.combo.currentData()
 
-    def _mark_dirty(self, kind):
-        """文本框有改动 → 标记未保存（只是显示状态，不改保存时机）"""
-        if self._loading_text or not hasattr(self, "_states"):
-            return
-        self._dirty.add(kind)
-        self._sync_state()
-
-    def _sync_state(self):
-        """卡片头右侧的「文件名 · 字数 · 状态」+ 保存按钮可用性"""
-        for kind, (lbl, fname) in self._states.items():
-            n = len(self._edits[kind].toPlainText())
-            if kind in self._dirty:
-                lbl.setText(f"{fname} · {n} 字 · 未保存")
-                lbl.setStyleSheet(f"color: {Color3.name()}; font-size: {int(11*S)}px; font-weight: bold;")
-            else:
-                lbl.setText(f"{fname} · {n} 字 · 已保存")
-                lbl.setStyleSheet(f"color: {Gray3.name()}; font-size: {int(11*S)}px;")
-        try:
-            # 没有任何改动时主按钮置灰：一眼看出"现在没什么可保存的"
-            self.btn_save.setEnabled(bool(self._dirty))
-        except Exception:
-            pass
-
-    def _load(self, *_ignored):
+    def _load(self):
         try:
             from pets.pet_registry import get_prompt_path
             pid = self._current_pet_id()
             if not pid:
                 return
-            self._loading_text = True
-            try:
-                for kind, _name, _when, _fname in self._SECTIONS:
-                    p = get_prompt_path(kind, pid)
-                    text = ""
-                    if os.path.exists(p):
-                        with open(p, "r", encoding="utf-8") as f:
-                            text = f.read()
-                    self._edits[kind].setPlainText(text)
-            finally:
-                self._loading_text = False
-            self._dirty.clear()
-            self._sync_state()
-            self.lbl_status.setText(f"已加载 {pid} 的人设")
+            for edit, kind in ((self.edit_short, "short"), (self.edit_long, "long")):
+                p = get_prompt_path(kind, pid)
+                text = ""
+                if os.path.exists(p):
+                    with open(p, "r", encoding="utf-8") as f:
+                        text = f.read()
+                edit.setPlainText(text)
+            self.lbl_status.setText(f"已加载 {pid}")
         except Exception as e:
             self.lbl_status.setText(f"加载失败: {e}")
 
     def _save(self):
         try:
-            import time as _t
             from pets.pet_registry import get_prompt_path
             pid = self._current_pet_id()
-            if not pid:
-                self.lbl_status.setText("没有选中角色")
-                return
-            for kind, _name, _when, _fname in self._SECTIONS:
+            for edit, kind in ((self.edit_short, "short"), (self.edit_long, "long")):
                 p = get_prompt_path(kind, pid)
                 with open(p, "w", encoding="utf-8") as f:
-                    f.write(self._edits[kind].toPlainText())
-            self._dirty.clear()
-            self._sync_state()
-            self.lbl_status.setText(f"✅ 已保存 {pid} 的人设 · {_t.strftime('%H:%M:%S')}")
+                    f.write(edit.toPlainText())
+            self.lbl_status.setText("✅ 已保存")
         except Exception as e:
             self.lbl_status.setText(f"保存失败: {e}")
 
