@@ -805,6 +805,18 @@ class HomePage(QWidget):
             self._msg("微信 AIpet", "未找到微信模块（run_wechat.py）。",
                       "微信桥接随程序包一起提供；如果你是精简安装，请把 wechat 目录补回来。")
             return
+        # ⚠ 微信通道没开时**别去拉进程**：run_wechat.py 会在第一行打印
+        #   "wechat_enabled=false，微信桌宠未启用" 然后立刻退出 → 控制台一闪就没，
+        #   用户会以为"崩溃了"（实测反馈）。这里改成主题提示，并说清去哪儿开。
+        try:
+            from tool.config import as_bool as _as_bool, get_config as _get_cfg
+            if not _as_bool(_get_cfg(os.path.join(base, "config.json")).get("wechat_enabled"), False):
+                self._msg("微信 AIpet", "微信通道还没启用。",
+                          "去「设置 → 微信」打开「启用微信 ClawBot（iLink）」再点这个按钮。\n"
+                          f"（当前 config.json 里 wechat_enabled = false：{os.path.join(base, 'config.json')}）")
+                return
+        except Exception as e:
+            print(f"[NewUI] ⚠ 读取微信开关失败（继续尝试启动）: {e}")
         self._busy_btn(self.btn_wx, "⏳ 正在启动微信…", 12000)
         try:
             self.shell._wx_proc = subprocess.Popen([py, os.path.join(base, "run_wechat.py")], cwd=base,
@@ -2509,6 +2521,14 @@ def launch() -> int:
     from PyQt5.QtWidgets import QApplication
     from . import silicon_ui as _sui
     from .colors import current_theme_id
+    # 首次运行生成空白 config.json（README 承诺过、代码里却一直没人做）：
+    # 绿色版故意不带 config.json（隐私），但不生成的话，微信/QQ 入口读配置会
+    # FileNotFoundError 秒退（用户实测"点启动微信秒卡退"）。只缺才建，绝不覆盖。
+    try:
+        from tool.config import ensure_config as _ensure_cfg
+        _ensure_cfg(os.path.join(_app_base_dir(), "config.json"))
+    except Exception as _e:
+        print(f"[NewUI] ⚠ 生成 config.json 失败（继续）: {_e}")
     # ⚠ 必须在 QApplication 之前：让三个 Live2D 画布（工坊内嵌 / 实时预览窗口 / 调试器）
     #   共享 GL 上下文，否则第 2、3 个画布画不出模型（= 用户报的"崩坏 / 频闪"）。
     _sui.enable_shared_gl_contexts()

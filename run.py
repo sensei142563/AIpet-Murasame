@@ -202,6 +202,24 @@ def install_requirements():
     # Step 1️⃣ 快速检查 requirements 内的关键依赖是否已存在（避免每次启动都跑 pip）
     # 注意：torch 与 f5_tts 不在此检查——torch 由 setup_runtime_and_pytorch 管理，
     #       f5_tts 是可选语音库，由 start_f5tts_api 单独引导。
+    #
+    # ⚠ 必须在**第一次 import PyQt5 之前**修掉 MSVC 运行时冲突：
+    #   PyQt5-Qt5 5.15.2 的 Qt5\bin 自带一套 14.26（VS2017）的 msvcp140/vcruntime140…，
+    #   而 torch ≥2.x 的 c10.dll 需要更新的运行时。下面的 import PyQt5.QtCore 会先把
+    #   旧运行时加载进进程 → 稍后 import torch 时 c10.dll 初始化失败
+    #   （WinError 1114 / 0xC0000005，事件日志里是 MSVCP140.dll 里崩）。
+    #   桌宠"启动到 CUDA 检测就卡退、无 traceback"就是这个（用户 2026-09-24 实测）。
+    try:
+        from tool.msvc_runtime import fix_if_needed as _fix_msvc
+        _fix_msvc(log=lambda m: log(m, "INFO"))
+    except Exception as _e:
+        log(f"MSVC 运行时自检不可用（继续）: {_e}", "WARN")
+    # 首次运行生成空白 config.json（绿色版不带；微信/QQ 入口没它会秒退）
+    try:
+        from tool.config import ensure_config as _ensure_cfg
+        _ensure_cfg("./config.json")
+    except Exception as _e:
+        log(f"生成 config.json 失败（继续）: {_e}", "WARN")
     try:
         import cv2
         import numpy
