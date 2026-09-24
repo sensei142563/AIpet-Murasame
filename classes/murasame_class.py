@@ -3804,8 +3804,10 @@ class Murasame(QLabel):
             w = max(old.width(), new_pm.width(), 1)
             h = max(old.height(), new_pm.height(), 1)
             canvas = QSize(w, h)
-            old = self._pad_pixmap(old, canvas)
-            new_pm = self._pad_pixmap(new_pm, canvas)
+            # 水平居中补齐（与 _scale_portrait_pixmap 的稳定画布同一套算法）：
+            # 左对齐补透明边会让过渡中的人物突然向左跳一截
+            old = self._pad_pixmap(old, canvas, center_x=True)
+            new_pm = self._pad_pixmap(new_pm, canvas, center_x=True)
             try:
                 self.resize(canvas)
             except Exception:
@@ -3840,6 +3842,11 @@ class Murasame(QLabel):
                 fin = st.get("pm_in")
                 self._fade_state = None
                 if fin is not None and not fin.isNull():
+                    try:
+                        _w = max(int(fin.width()), int(self.width() or 0))
+                        fin = self._pad_pixmap(fin, QSize(_w, int(fin.height())), center_x=True)
+                    except Exception:
+                        pass
                     self.setPixmap(fin)
                     self.update()
                 print("[桌宠] ⚠ 立绘渐变超时 → 强制收尾（防止半透明卡住）")
@@ -3858,6 +3865,13 @@ class Murasame(QLabel):
                 fin = st.get("pm_in")
                 self._fade_state = None
                 if fin is not None and not fin.isNull():
+                    # 收尾这一帧也要补到窗口宽度并居中，否则立绘会贴在窗口左边，
+                    # 直到下一次 update_portrait 才回正（过渡后"人物突然偏左"的老毛病）
+                    try:
+                        _w = max(int(fin.width()), int(self.width() or 0))
+                        fin = self._pad_pixmap(fin, QSize(_w, int(fin.height())), center_x=True)
+                    except Exception:
+                        pass
                     self.setPixmap(fin)
                     self._ensure_window_fits_pixmap(fin)
                     self.resize(fin.size())

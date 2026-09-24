@@ -391,39 +391,11 @@ def generate_fgimage(target, embeddings_layers, pet_id: str = None):
             print(f"[generate] ⚠ 图层 ID {valid_layers} 在 {target}.txt 中未匹配到，返回空画布")
             return np.zeros((1, 1, 4), dtype=np.uint8)
 
-    def _pos_rows(rows):
-        out = []
-        for x in rows:
-            if len(x) <= 9:
-                continue
-            try:
-                out.append((int(x[2]), int(x[3]), int(x[4]), int(x[5])))
-            except (ValueError, IndexError):
-                continue
-        return out
-
-    # 画布原点偏移：一律用「这些图层的左上角」当锚点。
-    # ⚠ 原来这里写死了丛雨索引的行号（57:65 / 47:51）→ 别的角色（如茉子）索引行数、
-    #   排列都不同，取到的是无关图层的坐标，整个画面被平移 → 人物左上角（头/肩）
-    #   被裁到画布外，表现就是「立绘显示不全」。改成按所选图层求锚点后，
-    #   任何角色都不会被裁，也不需要按角色维护行号。
-    all_base = _pos_rows(infos[57:65] if target == "ムラサメa" else [])
-    if all_base:
-        _bx = [min(p[0] for p in all_base)]
-        _by = [min(p[1] for p in all_base)]
-        # 丛雨索引里基准行给出的原点是"人物站立位置"，与所选图层取较小者，保证不裁
-        base_x = min([_bx[0]] + [p[0] for p in all_positions])
-        base_y = min([_by[0]] + [p[1] for p in all_positions])
-    else:
-        base_x = min((p[0] for p in all_positions), default=0)
-        base_y = min((p[1] for p in all_positions), default=0)
-
     # ★ 绘制顺序：服装 → 阴影装饰 → 表情 → 其它装饰 → 前发
     try:
         from tool.portrait_outfit import order_for_draw
         _nm = {str(x[9]): x[1] for x in infos if len(x) > 9}
         valid_layers = order_for_draw(valid_layers, names=_nm)
-        all_positions = [q for q in (_pos_by_id.get(str(n)) for n in valid_layers) if q]
     except Exception as _e:
         print(f"[generate] ⚠ 图层排序跳过: {_e}")
         try:
@@ -440,6 +412,18 @@ def generate_fgimage(target, embeddings_layers, pet_id: str = None):
         if not all_positions:
             print(f"[generate] ⚠ 图层 ID {valid_layers} 在 {target}.txt 中未匹配到，返回空画布")
             return np.zeros((1, 1, 4), dtype=np.uint8)
+
+    # ★ 图层和坐标必须一一对应：索引里查不到的图层一律丢掉。
+    #   一旦两者错位，身体图就会被贴到表情的坐标上 → 画出来只剩一小块（"显示不全"）。
+    _paired = [(n, _pos_by_id[str(n)]) for n in valid_layers if str(n) in _pos_by_id]
+    if len(_paired) != len(valid_layers):
+        _lost = [n for n in valid_layers if str(n) not in _pos_by_id]
+        print(f"[generate] ⚠ 图层 {_lost} 不在 {target}.txt 索引里 → 跳过（避免贴错位置）")
+    if not _paired:
+        print(f"[generate] ⚠ 图层 {valid_layers} 在 {target}.txt 中未匹配到，返回空画布")
+        return np.zeros((1, 1, 4), dtype=np.uint8)
+    valid_layers = [p[0] for p in _paired]
+    all_positions = [p[1] for p in _paired]
 
     def _pos_rows(rows):
         out = []
@@ -461,6 +445,14 @@ def generate_fgimage(target, embeddings_layers, pet_id: str = None):
         all_base = _pos_rows(infos)
     base_x = min(p[0] for p in all_base) if all_base else 0
     base_y = min(p[1] for p in all_base) if all_base else 0
+    # ★ 画布原点必须比「所有要画的图层」更靠左上，否则图层偏移成了负数 → 被当成溢出裁掉。
+    #   infos[57:65] / infos[47:51] 是丛雨索引的行号残留：夏目（别的角色）索引里这几行
+    #   的 x/y 比身体图层大，于是人物被切掉一大块（实测 1.17.2：b 套便服左边裁 365/1016px、
+    #   上边 282px；a 套 453/1156px、197px）—— 这正是用户反复反馈的「立绘只显示了一半」。
+    #   基准行只用来兜底，绝不能反超所选图层。
+    if all_positions:
+        base_x = min([base_x] + [p[0] for p in all_positions])
+        base_y = min([base_y] + [p[1] for p in all_positions])
 
     all_positions = [(pos[0] - base_x, pos[1] - base_y, pos[2], pos[3])
                      for pos in all_positions]
@@ -491,8 +483,16 @@ def generate_fgimage(target, embeddings_layers, pet_id: str = None):
             x_offset = pos[0] + _dx
             y_offset = pos[1] + _dy
             h, w = image.shape[:2]
-            # 微调/留白后可能超出画布 → 裁掉溢出部分（否则广播报错）
+            # 图比画布大（索引里宽高写小了、或微调放大过）→ 画布就地长大，绝不裁人物
             _ch, _cw = canvas.shape[0], canvas.shape[1]
+            if (x_offset >= 0 and y_offset >= 0
+                    and (x_offset + w > _cw or y_offset + h > _ch)):
+                _nw, _nh = max(_cw, x_offset + w), max(_ch, y_offset + h)
+                _big = np.zeros((_nh, _nw, 4), dtype=np.uint8)
+                _big[:_ch, :_cw] = canvas
+                canvas = _big
+                _ch, _cw = _nh, _nw
+            # 微调/留白后可能超出画布 → 裁掉溢出部分（否则广播报错）
             if x_offset < 0 or y_offset < 0 or x_offset + w > _cw or y_offset + h > _ch:
                 _x0, _y0 = max(0, x_offset), max(0, y_offset)
                 _x1, _y1 = min(_cw, x_offset + w), min(_ch, y_offset + h)
