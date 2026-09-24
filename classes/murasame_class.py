@@ -5063,35 +5063,38 @@ class Murasame(QLabel):
             target_height = max(240, target_height)
 
         # ★ 给对话框（气泡）留位置，但**不缩小立绘**：气泡按窗口比例占掉一块
-        #   （夏目/丛雨都是顶部 38%），立绘又按整窗高度缩放 → 头和上半身压在气泡底下
-        #   （用户反馈"显示不完全、像被遮挡"，缩小立绘又会被嫌"桌宠变小了"）。
-        #   做法：把**窗口加高** —— 立绘保持原尺寸、整体下移，上方空出来的那块正好是
-        #   气泡的位置（视觉小说的标准排法）。只有屏幕高度放不下时才退化为"缩小立绘"。
+        #   （夏目/丛雨都是顶部：上边距 5% + 高 38% = 实际到 43%），立绘又按整窗高度缩放
+        #   → 头和上半身压在气泡底下（用户反馈"显示不完全、像被遮挡"；缩小立绘又会被嫌
+        #   "桌宠变小了"）。做法：把**窗口加高** —— 立绘保持原尺寸、整体下移，上方空出来
+        #   的那块正好是气泡的位置（视觉小说的标准排法）。屏幕实在放不下才缩立绘。
         self._text_reserve = 0
         self._text_box_side = ""
         try:
             _b2 = getattr(self, "_text_box_2d", None)
             if _b2 and len(_b2) >= 4:
                 _by, _bh = float(_b2[1]), float(_b2[3])
-                _frac = max(0.0, min(0.55, _bh))
-                if _frac > 0.05:
-                    _side = "top" if _by < 0.5 else "bottom"
+                # ⚠ 气泡实际占的是「上边距 + 高度」：只留高度的话，她的头顶仍会被压住
+                #   （实测残留 48px 重叠 → 用户说"疑似被遮挡"）。
+                _side0 = "top" if _by < 0.5 else "bottom"
+                _res_frac = (_by + _bh) if _side0 == "top" else (1.0 - _by)
+                _res_frac = max(0.0, min(0.7, _res_frac))
+                if _res_frac > 0.05:
+                    _side = _side0
                     self._text_box_side = _side
-                    # 让 立绘高 : 窗口高 = (1-frac) : 1 → 气泡正好占掉上面/下面那 frac
-                    _rsv = int(round(target_height * _frac / max(0.05, 1.0 - _frac)))
-                    _room = int(available_height * 0.98) if available_height else 0
-                    if _room and (target_height + _rsv) > _room:
-                        # 屏幕放不下 → 只能缩立绘（原行为），并把缩掉的那块当作留白
-                        _shrink = max(140, int(round(target_height * (1.0 - _frac))))
-                        self._text_reserve = max(0, target_height - _shrink)
-                        print(f"[桌宠] 屏幕高度不够：立绘 {target_height} → {_shrink}px，"
-                              f"上方留 {self._text_reserve}px 给气泡")
-                        target_height = _shrink
+                    _room = int(available_height) if available_height else 0
+                    _want_h = int(round(target_height / max(0.05, 1.0 - _res_frac)))
+                    _H = min(_room, _want_h) if _room else _want_h
+                    _new_h = max(140, int(round(_H * (1.0 - _res_frac))))
+                    self._text_reserve = max(0, _H - _new_h)
+                    if _new_h < target_height:
+                        print(f"[桌宠] 屏幕高度 {_room}px 不够放下 {_want_h}px 的窗口 → "
+                              f"立绘 {target_height} → {_new_h}px，"
+                              f"{('上方' if _side == 'top' else '下方')}留 {self._text_reserve}px 给气泡")
                     else:
-                        self._text_reserve = _rsv
                         print(f"[桌宠] 气泡占{('顶部' if _side == 'top' else '底部')} "
-                              f"{_frac*100:.0f}% → 窗口加高 {_rsv}px"
-                              f"（立绘 {target_height}px 尺寸不变，整体避开气泡）")
+                              f"{_res_frac*100:.0f}%（含边距）→ 窗口 {_H}px"
+                              f"（立绘 {_new_h}px，尺寸不变）")
+                    target_height = _new_h
         except Exception as _e:
             print(f"[桌宠] ⚠ 对话框留位失败（按原尺寸显示）: {_e}")
 

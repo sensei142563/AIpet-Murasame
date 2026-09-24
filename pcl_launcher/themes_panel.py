@@ -514,10 +514,19 @@ class PCLThemesPanel(QScrollArea):
             def _save_text_color(hexv):
                 """写 ui_text_color（同时写主题的 text_color）→ 立即应用，不用重启。
 
-                ⚠ 写完**回读**再显示，避免"以为写了其实没写"（用户报过"选了没反应"）。
+                ⚠ 写完**回读**再显示，避免"以为写了其实没写"（用户报过"选了没反应"）；
+                  并且显示"改前 → 改后"：深色底上"白字"与自动派生的浅字几乎一样，
+                  不写清楚就会被当成"没生效"。
                 """
                 hexv = str(hexv or "").strip()
-                print(f"[Themes] 选中文字颜色: {hexv or '跟随主题'} → 写入 {_config_path()}")
+                # 记录"改之前实际用的文字色"，用于对照显示
+                _old_txt = "?"
+                try:
+                    from . import colors as _C0
+                    _old_txt = _C0.Color1.name()
+                except Exception:
+                    pass
+                print(f"[Themes] 选中文字颜色: {hexv or '跟随主题'}（当前生效 {_old_txt}）→ 写入 {_config_path()}")
                 # 先做对比度体检：和底板太接近就直接不接受（省得界面变成"字看不见"）
                 if hexv:
                     try:
@@ -591,18 +600,30 @@ class PCLThemesPanel(QScrollArea):
                 except Exception:
                     _warn = ""
                 try:
-                    _before = getattr(self, "_text_color_applied", "")
                     try:
                         from . import colors as _C3
                         _after_now = _C3.Color1.name()
                     except Exception:
                         _after_now = "?"
-                    self._text_color_applied = _after_now
+                    # 色差很小时的说明：深色底上"白字"与自动派生的浅字几乎一样，
+                    # 不点明就会被当成"没生效"（用户就是这么误判的）。
+                    _same_note = ""
+                    try:
+                        from PyQt5.QtGui import QColor as _QC4
+                        _ca, _cb = _QC4(str(_old_txt)), _QC4(str(_after_now))
+                        if _ca.isValid() and _cb.isValid():
+                            _d = (abs(_ca.red() - _cb.red()) + abs(_ca.green() - _cb.green())
+                                  + abs(_ca.blue() - _cb.blue()))
+                            if _d <= 24:
+                                _same_note = ("\n（和原来几乎一样，只差 %d/765 —— 想看出变化请挑"
+                                              "反差更大的颜色）" % _d)
+                    except Exception:
+                        pass
                     if real == hexv:
                         self._text_hint.setText(
-                            "已写入 %s：文字颜色 %s → 现用 %s%s"
+                            "已写入 %s：文字颜色 %s → 现用 %s%s%s"
                             % ("+".join(where) or "config.json",
-                               _before or "（主题自带）", _after_now, _warn))
+                               _old_txt or "（主题自带）", _after_now, _warn, _same_note))
                     else:
                         self._text_hint.setText(
                             "⚠ 写入后回读不一致（config 里是 %r，期望 %r）—— 可能被别的进程覆写"
