@@ -9,7 +9,7 @@ import os
 from PyQt5.QtCore import Qt, QPropertyAnimation, QEasingCurve, QPoint, QTimer
 from PyQt5.QtGui import QColor, QPainter, QPainterPath, QPixmap
 from PyQt5.QtWidgets import (QWidget, QDialog, QLabel, QPushButton, QVBoxLayout,
-                             QHBoxLayout, QGraphicsOpacityEffect, QFrame)
+                             QHBoxLayout, QGraphicsOpacityEffect, QFrame, QLineEdit)
 
 from .colors import (Color1, Color5, Color8, Gray1, Gray2, RedDark,   # noqa: F401
                      ACCENT_ID, THEME_COLORS)
@@ -419,6 +419,85 @@ def page_confirm(parent, title, text, detail="", ok_text="确定", danger=False)
     except Exception as e:
         print(f"[SiliconUI] ⚠ page_confirm 失败: {e}")
         return False
+
+
+class InputDialog(SiliconDialog):
+    """主题一致的输入框（替掉 QInputDialog.getText）。
+
+    为什么不用 QInputDialog：它按平台风格自绘 —— 白底方框 + 系统按钮，跟启动器的
+    深色/主题化界面完全两套；标题栏和字号也不受主题控制。这里用同一个圆角外壳，
+    底下放一个主题输入框，回车 = 确定（和 QInputDialog 的习惯一致）。
+    """
+
+    def __init__(self, parent, title, label, text="", placeholder="", ok_text="确定",
+                 cancel_text="取消", width=470):
+        super().__init__(title, parent, width=width, height=190)
+        self.setModal(True)
+        m = int(M.font_size)
+        lay = self.content
+        if label:
+            lb = QLabel(label)
+            lb.setWordWrap(True)
+            lb.setStyleSheet(f"color: {Color1.name()}; font-size: {m + 1}px;")
+            lay.addWidget(lb)
+        self.edit = QLineEdit()
+        self.edit.setText(str(text or ""))
+        if placeholder:
+            self.edit.setPlaceholderText(placeholder)
+        self.edit.setMinimumHeight(34)
+        self.edit.setStyleSheet(
+            f"QLineEdit {{ background: rgba(255,255,255,0.06); color: {Color1.name()};"
+            f" border: 1px solid {Gray2.name()}; border-radius: 8px;"
+            f" padding: 4px 10px; font-size: {m + 1}px; }}"
+            f"QLineEdit:focus {{ border: 1px solid {accent_hex()};"
+            f" background: rgba(255,255,255,0.10); }}")
+        self.edit.returnPressed.connect(self.accept)     # 回车 = 确定
+        lay.addWidget(self.edit)
+        lay.addStretch()
+        row = QHBoxLayout()
+        row.addStretch()
+        bc = QPushButton(cancel_text)
+        bc.setCursor(Qt.PointingHandCursor)
+        bc.setMinimumHeight(32)
+        bc.setStyleSheet(_dialog_btn_qss(Gray1, outline=True))
+        bc.clicked.connect(self.reject)
+        row.addWidget(bc)
+        b = QPushButton(ok_text)
+        b.setCursor(Qt.PointingHandCursor)
+        b.setMinimumHeight(32)
+        b.setStyleSheet(_dialog_btn_qss())
+        b.clicked.connect(self.accept)
+        row.addWidget(b)
+        lay.addLayout(row)
+        try:
+            self.adjustSize()
+            self.resize(max(int(width), self.width()), max(190, min(320, self.height() + 10)))
+        except Exception:
+            pass
+
+    def value(self) -> str:
+        """输入框里的文本（已去掉首尾空白）"""
+        try:
+            return self.edit.text().strip()
+        except Exception:
+            return ""
+
+
+def ask_text(parent, title, label, text="", placeholder="", ok_text="确定"):
+    """主题一致的文本输入（替掉 QInputDialog.getText）：返回 (文本, 是否确定)。
+
+    契约与 QInputDialog.getText 完全一致（返回二元组，取消时 ok=False、文本为空串），
+    所以调用点只换名字就行。任何异常都回退系统输入框，绝不把流程卡死。
+    """
+    try:
+        d = InputDialog(parent, title, label, text, placeholder, ok_text)
+        if d.exec_() == QDialog.Accepted:
+            return d.value(), True
+        return "", False
+    except Exception as e:
+        print(f"[SiliconUI] ⚠ 输入框失败，回退系统弹窗: {e}")
+        from PyQt5.QtWidgets import QInputDialog
+        return QInputDialog.getText(parent, title, label, text=text)
 
 
 class _DlgBack(QWidget):

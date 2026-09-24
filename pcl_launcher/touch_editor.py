@@ -25,6 +25,8 @@ from tool.touch_areas import (AREAS, AREA_KEYS, defaults as touch_defaults,  # n
                               save_pet_areas, norm_rect,
                               add_pet_area, remove_pet_area, custom_keys, get_disabled,
                               LABELS as LABELS_DEFAULT)
+# 统一的主题输入框（替掉 QInputDialog.getText）
+from .silicon_dialog import ask_text      # noqa: E402
 
 HANDLE = 9            # 边缘/角命中半径（像素）
 MIN_NORM = 0.02       # 最小归一化宽高（防止拖没了）
@@ -387,8 +389,7 @@ class TouchControlPanel(QFrame):
 
     def _add(self):
         try:
-            from PyQt5.QtWidgets import QInputDialog
-            name, okk = QInputDialog.getText(self, "添加部位", "部位名字（尾巴 / 耳朵 / 角…）：")
+            name, okk = ask_text(self, "添加部位", "部位名字", placeholder="例如：尾巴 / 耳朵 / 角")
             if not okk or not str(name).strip():
                 return
             key = add_pet_area(self.pet_id, str(name).strip())
@@ -619,9 +620,8 @@ class TouchAreaEditor(QWidget):
     def _add_area(self):
         """添加一个自定义部位（例如：尾巴、耳朵、角、翅膀…）"""
         try:
-            from PyQt5.QtWidgets import QInputDialog
             from tool.touch_areas import add_pet_area
-            name, okk = QInputDialog.getText(self, "添加部位", "部位名字（例如：尾巴 / 耳朵 / 角）：")
+            name, okk = ask_text(self, "添加部位", "部位名字", placeholder="例如：尾巴 / 耳朵 / 角")
             if not okk or not str(name).strip():
                 return
             key = add_pet_area(self.pet_id, str(name).strip())

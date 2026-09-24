@@ -15,7 +15,7 @@ import zipfile
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (
     QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QScrollArea,
-    QFrame, QFileDialog, QDialog, QInputDialog
+    QFrame, QFileDialog, QDialog
 )
 from PyQt5.QtGui import QFont
 
@@ -23,7 +23,7 @@ from .colors import *
 from .colors import _list_themes  # 下划线名不随 * 导出，需显式导入
 
 
-from .silicon_dialog import SiliconDialog, page_msg, page_confirm  # noqa: E402
+from .silicon_dialog import SiliconDialog, page_msg, page_confirm, ask_text  # noqa: E402
 
 
 class PCLThemeBgDialog(SiliconDialog):
@@ -661,8 +661,8 @@ class PCLThemesPanel(QScrollArea):
 
     def _rename(self, meta):
         """主题重命名（官方/我的均可；仅改显示名 name，主题目录 id 不变）"""
-        new_name, ok = QInputDialog.getText(
-            self, "重命名主题", "输入新的主题名称：", text=meta["name"])
+        new_name, ok = ask_text(self, "重命名主题", "输入新的主题名称", text=meta["name"],
+                                placeholder="最多 40 字")
         if not ok:
             return
         new_name = (new_name or "").strip()

@@ -30,7 +30,7 @@ S = 1.0
 # 为什么不用 QMessageBox（用户反馈"弹窗看不清字"）：它按平台风格自绘，正文颜色/字号
 # 不受启动器主题控制 → 深色主题下发灰；里面的 emoji 在部分机器上会渲染成方块。
 # 崩溃类（带 traceback 的 critical）保持原生：那种场合要的是原始信息，不是好看。
-from .silicon_dialog import page_msg, page_confirm      # noqa: E402,F401
+from .silicon_dialog import page_msg, page_confirm, ask_text      # noqa: E402,F401
 
 
 class BoolSwitch(QAbstractButton):
@@ -1158,11 +1158,11 @@ class PCLFaceManager(QScrollArea):
             self._others_layout.addLayout(row)
 
     def _add_master_face(self):
-        from PyQt5.QtWidgets import QFileDialog, QInputDialog
+        from PyQt5.QtWidgets import QFileDialog
         path, _ = QFileDialog.getOpenFileName(self, "选择主人照片", "", "图片 (*.jpg *.jpeg *.png)")
         if not path:
             return
-        desc, ok = QInputDialog.getText(self, "照片描述", "请输入这张照片的描述（可不填）：")
+        desc, ok = ask_text(self, "照片描述", "这张照片的描述（可不填）", placeholder="例如：主人在书房")
         if not ok:
             desc = ""
         from tool.face_recognition import add_master_face
@@ -1171,11 +1171,12 @@ class PCLFaceManager(QScrollArea):
         self._refresh()
 
     def _add_other_face(self):
-        from PyQt5.QtWidgets import QFileDialog, QInputDialog
-        name, ok = QInputDialog.getText(self, "输入姓名", "请输入这个人的姓名：")
+        from PyQt5.QtWidgets import QFileDialog
+        name, ok = ask_text(self, "输入姓名", "这个人的姓名", placeholder="例如：小王")
         if not ok or not name.strip():
             return
-        relation, ok2 = QInputDialog.getText(self, "与主人的关系", "请输入这个人和主人的关系（如：朋友、同事、家人）：")
+        relation, ok2 = ask_text(self, "与主人的关系", "这个人和主人的关系",
+                                 placeholder="例如：朋友 / 同事 / 家人")
         if not ok2:
             relation = ""
         path, _ = QFileDialog.getOpenFileName(self, f"选择 {name} 的照片", "", "图片 (*.jpg *.jpeg *.png)")
@@ -2069,9 +2070,8 @@ class PCLPetManager(QScrollArea):
             import traceback
             print(f"[PCL] ⚠ 打开桌宠向导失败: {e}\n{traceback.format_exc()[:500]}")
             # 兜底：仍然允许用最简方式创建
-        from PyQt5.QtWidgets import QInputDialog
-        pet_id, ok = QInputDialog.getText(
-            self, "新建桌宠", "请输入桌宠 ID（英文/数字，将作为文件夹名）：")
+        pet_id, ok = ask_text(self, "新建桌宠（简易）", "桌宠 ID（英文 / 数字，将作为文件夹名）",
+                              placeholder="例如：mypet")
         if not ok or not pet_id.strip():
             return
         pet_id = pet_id.strip()
@@ -2086,7 +2086,7 @@ class PCLPetManager(QScrollArea):
             page_msg(self, "ID 已存在", f"桌宠 ID「{pet_id}」已存在。")
             return
 
-        name, ok2 = QInputDialog.getText(self, "桌宠名称", "请输入显示名称（如：丛雨）：")
+        name, ok2 = ask_text(self, "桌宠名称", "显示名称", placeholder="例如：丛雨")
         name = name.strip() or pet_id
 
         # 若存在模板目录则复制，否则新建空目录

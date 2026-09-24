@@ -27,7 +27,7 @@ from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QComboBox,
     QCheckBox, QFileDialog, QMessageBox, QStackedWidget, QListWidget, QListWidgetItem,
     QPlainTextEdit, QGroupBox, QRadioButton, QButtonGroup, QScrollArea, QWidget,
-    QGridLayout, QInputDialog, QSizePolicy, QSlider, QSpinBox
+    QGridLayout, QSizePolicy, QSlider, QSpinBox
 )
 from PyQt5.QtGui import QFont, QPainter, QColor, QPixmap, QPen, QBrush, QPainterPath
 
