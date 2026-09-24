@@ -31,19 +31,17 @@ def _app_base_dir() -> str:
 
 
 def _read_base_color() -> str:
-    """二级窗口的底板色：**优先跟当前主题自己的底色**。
+    """二级窗口的底板色：**跟随「启动器底色」**（与卡片/页面同一套配色）。
 
-    ⚠ 用户把「启动器底色」设成纯黑（config.ui_bg_color=#000000）时，整界面会被派生成
-      "黑底浅字"；浅色主题（经典 / 樱华 / 千恋万花）的二级窗口就跟着变纯黑一块，
-      看着像"什么都没显示"（用户反馈"主题背景调节窗口又变成全黑色了"）。
-      二级窗口按主题原始底色来，才跟主题一致、内容也清楚。
+    ⚠ 曾为修"浅色主题下二级窗口黑成一块"改成优先用主题原始底色 —— 但底色是用户
+      主动设成纯黑（ui_bg_color=#000000）的，二级窗口跟着变米白反而与卡片、页面
+      不一致（用户反馈"设置桌宠/立绘工坊的窗口全变白了，应该跟卡片一样跟随启动器
+      底色"）。所以回到 base_bg_color()：
+        · 设了 ui_bg_color → 用它（深浅与卡片一致）
+        · 没设（空）       → 用主题自带底色（此时整套界面就是主题配色）
+      "看不到内容"那个老问题已由 fade_in 走 windowOpacity + 1.5 秒特效兜底 +
+      内容用基类 content 布局 解决，与底板深浅无关。
     """
-    try:
-        theme_bg, _fg = theme_plate_colors()
-        if theme_bg:
-            return theme_bg
-    except Exception:
-        pass
     try:
         from .colors import base_bg_color
         return base_bg_color().name()

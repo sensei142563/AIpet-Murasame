@@ -498,31 +498,86 @@ class PCLThemesPanel(QScrollArea):
                 return done
 
             def _save_text_color(hexv):
-                """写 ui_text_color → 立即应用（重算色板 + 重建当前页），不用重启"""
-                print(f"[Themes] 选中文字颜色: {hexv or '跟随主题'} → 写入 config.json")
+                """写 ui_text_color（同时写主题的 text_color）→ 立即应用，不用重启。
+
+                ⚠ 写完**回读**再显示，避免"以为写了其实没写"（用户报过"选了没反应"）。
+                """
+                hexv = str(hexv or "").strip()
+                print(f"[Themes] 选中文字颜色: {hexv or '跟随主题'} → 写入 {_config_path()}")
                 if hexv:
                     self._text_color = _QC2(hexv)
                 _paint_txt_btn()
+                where = []
                 try:
                     cc = _load_config() or {}
-                    cc["ui_text_color"] = str(hexv or "")
+                    cc["ui_text_color"] = hexv
                     _save_config(cc)
-                    self._text_hint.setText("已写入 config.json：" + (hexv or "跟随主题"))
-                    self._text_hint.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(11*S)}px;")
+                    where.append("config.json")
                 except Exception as _e:
-                    print(f"[Themes] ⚠ 文字颜色写盘失败: {_e}")
-                    try:
-                        self._text_hint.setText("写盘失败：" + str(_e))
-                    except Exception:
-                        pass
-                ok = _apply_everywhere(hexv)
+                    print(f"[Themes] ⚠ 写 config.json 失败: {_e}")
+                # 同时写进当前主题的 theme.json（text_color）：主题自带的文字色也支持它，
+                # 这样即使 config 那份被别的进程覆写，主题里那份还在。
                 try:
-                    self._text_hint.setText(
-                        ("已应用：文字颜色 %s（立即生效）" % (hexv or "跟随主题")) if hexv
-                        else "已切回「跟随主题」自带的文字配色")
+                    import json as _json2
+                    from .colors import current_theme_id as _ctid2, _current_theme_dir as _ctdir
+                    _tp = os.path.join(_ctdir(), "theme.json")
+                    if os.path.isfile(_tp):
+                        with open(_tp, encoding="utf-8") as _f:
+                            _d = _json2.load(_f) or {}
+                        if hexv:
+                            _d["text_color"] = hexv
+                        else:
+                            _d.pop("text_color", None)
+                        with open(_tp, "w", encoding="utf-8", newline="\n") as _f:
+                            _json2.dump(_d, _f, ensure_ascii=False, indent=2)
+                        where.append("theme.json")
+                except Exception as _e:
+                    print(f"[Themes] ⚠ 写 theme.json 失败: {_e}")
+                # 回读校验：把真实写入的值显示出来（"状态必须真实"）
+                real = ""
+                try:
+                    real = str((_load_config() or {}).get("ui_text_color") or "")
+                except Exception:
+                    real = "?"
+                ok = _apply_everywhere(hexv)
+                # 顺带提醒对比度 + 显示"改前 → 改后"：底色是纯黑/纯白时选了相近的颜色，
+                # 或者选的色跟主题原本的文字色很接近（如米白主题下的"黑字" vs 深褐），
+                # 变化会很微妙 —— 用户就容易以为"没生效"（这次就是这样被误判的）。
+                _warn = ""
+                try:
+                    from .colors import base_bg_color as _bb, contrast_ratio as _cr
+                    _bg_now = _bb().name()
+                    if hexv:
+                        _ratio = float(_cr(_QC2(hexv), _bb()))
+                        if _ratio < 3.0:
+                            _warn += ("\n⚠ 这个颜色在启动器底色（%s）上对比度只有 %.1f:1，"
+                                      "会看不清" % (_bg_now, _ratio))
+                        else:
+                            _warn += "\n（启动器底色 %s，对比度 %.1f:1，可读）" % (_bg_now, _ratio)
+                except Exception:
+                    _warn = ""
+                try:
+                    _before = getattr(self, "_text_color_applied", "")
+                    try:
+                        from . import colors as _C3
+                        _after_now = _C3.Color1.name()
+                    except Exception:
+                        _after_now = "?"
+                    self._text_color_applied = _after_now
+                    if real == hexv:
+                        self._text_hint.setText(
+                            "已写入 %s：文字颜色 %s → 现用 %s%s"
+                            % ("+".join(where) or "config.json",
+                               _before or "（主题自带）", _after_now, _warn))
+                    else:
+                        self._text_hint.setText(
+                            "⚠ 写入后回读不一致（config 里是 %r，期望 %r）—— 可能被别的进程覆写"
+                            % (real, hexv) + _warn)
+                    self._text_hint.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(11*S)}px;")
                 except Exception:
                     pass
-                print(f"[Themes] 文字颜色 → {hexv or '自动'}（应用路径：{'外壳' if ok else '直接重算色板'}）")
+                print(f"[Themes] 文字颜色 → {hexv or '自动'}｜写入 {where}｜回读={real!r}｜"
+                      f"应用路径={'外壳' if ok else '直接重算色板'}")
 
             def _pick_text_color():
                 # ⚠ 取色对话框必须挂在**顶层窗口**上：挂在页面控件上时，无边框 + 半透明
