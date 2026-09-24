@@ -943,7 +943,7 @@ class _LayerTuneDialog(QDialog):
                 tbl = self._collect_table()
                 txt = "；".join(f"{dict(self.CATS).get(k, k)}({v[0]},{v[1]},{int(v[2]*100)}%)"
                                 for k, v in tbl.items())
-                self.lbl_applied.setText(("✅ 已应用微调：" + txt) if txt else "（当前全部为 0 / 100%）")
+                self.lbl_applied.setText(("已应用微调：" + txt) if txt else "（当前全部为 0 / 100%）")
             except Exception:
                 pass
             pix = self._preview_getter()

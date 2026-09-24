@@ -620,7 +620,7 @@ class PCLSettingsPanel(QWidget):
             os.replace(tmp, p)
             self._pending.clear()
             import time as _t
-            self._status_lbl.setText("已自动保存 ✓ " + _t.strftime("%H:%M:%S"))
+            self._status_lbl.setText("已自动保存" + _t.strftime("%H:%M:%S"))
             return True
         except Exception as e:
             print(f"[PCL] 自动保存失败: {e}")

@@ -757,7 +757,7 @@ class Live2DDebuggerDialog(SiliconDialog):
         self.tl_slider.setValue(0)
         self.tl_slider.blockSignals(False)
         self.tl_slider.setEnabled(False)
-        self.tl_lbl.setText("🔴 正在录「%s」…跟着它播完（几秒）" % fname)
+        self.tl_lbl.setText("正在录「%s」…跟着它播完（几秒）" % fname)
         if not self.canvas.start_record(fname):
             self._rec_name = ""
             self.tl_lbl.setText("没能开始录制：看下面状态栏的原因")
@@ -768,7 +768,7 @@ class Live2DDebuggerDialog(SiliconDialog):
         self.tl_slider.setRange(0, max(0, n - 1))
         self.tl_slider.setValue(max(0, n - 1))
         self.tl_slider.blockSignals(False)
-        self.tl_lbl.setText("🔴 录制中… 已 %d 帧" % n)
+        self.tl_lbl.setText("录制中… 已 %d 帧" % n)
 
     def _on_recorded(self, fname, n, moving):
         self._rec_name = fname
@@ -779,7 +779,7 @@ class Live2DDebuggerDialog(SiliconDialog):
                 self.canvas.hold_index(n - 1)   # 值本来就在末帧时补一次
             self.tl_lbl.setText("已录「%s」共 %d 帧 · 已定格在末帧，拖进度条看中间" % (fname, n))
         else:
-            self.tl_lbl.setText("⚠ 「%s」没采到帧（动作太短或没播起来）" % fname)
+            self.tl_lbl.setText("「%s」没采到帧（动作太短或没播起来）" % fname)
         if moving:
             lines = ["%s   %.2f → %.2f" % (pid, lo, hi) for pid, lo, hi in moving]
             self.moving_view.setPlainText("这段动作在动的参数（%d 个）：\n%s"
@@ -930,7 +930,7 @@ class Live2DDebuggerDialog(SiliconDialog):
             return
         self._store.set(fname, kind, self.ed_label.text().strip(), self.ed_note.text().strip())
         p = self._store.save()
-        self.status_lbl.setText("✅ 已保存标签：%s → %s（%s）"
+        self.status_lbl.setText("已保存标签：%s → %s（%s）"
                                 % (fname, self.ed_label.text().strip() or "(未填)",
                                    os.path.relpath(p, _base_dir()).replace("\\", "/")))
         # 保存后把按钮名字后面带上标签，一眼能对上
@@ -948,7 +948,7 @@ class Live2DDebuggerDialog(SiliconDialog):
             QApplication.clipboard().setText(text)
             self.status_lbl.setText("对照表已复制到剪贴板（可直接贴给我）")
         except Exception as e:
-            self.status_lbl.setText("⚠ 复制失败：%s" % e)
+            self.status_lbl.setText("复制失败：%s" % e)
 
     def _on_export_table(self):
         if not self._store:
@@ -959,7 +959,7 @@ class Live2DDebuggerDialog(SiliconDialog):
             os.makedirs(os.path.dirname(out), exist_ok=True)
             with open(out, "w", encoding="utf-8") as f:
                 f.write(text + "\n")
-            self.status_lbl.setText("📄 已导出：%s" % os.path.relpath(out, _base_dir()).replace("\\", "/"))
+            self.status_lbl.setText("已导出：%s" % os.path.relpath(out, _base_dir()).replace("\\", "/"))
         except Exception as e:
             page_msg(self, "导出失败", "写对照表失败。", str(e))
 

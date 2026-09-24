@@ -400,9 +400,9 @@ class TouchControlPanel(QFrame):
                 return
             self.overlay.areas[key] = list(touch_defaults().get("chest"))
             self._rebuild(key)
-            self.status.setText("➕ 已加「" + str(name).strip() + "」，拖到身上再保存")
+            self.status.setText("已加「" + str(name).strip() + "」，拖到身上再保存")
         except Exception as e:
-            self.status.setText("❌ " + str(e))
+            self.status.setText("" + str(e))
 
     def _del(self):
         key = self.cmb_area.currentData()
@@ -610,7 +610,7 @@ class TouchAreaEditor(QWidget):
                 if k in (self._active().areas if hasattr(self, "overlay") else {}) or k in labs:
                     self.cmb_area.addItem((""if k in _dis else "") + labs.get(k, k), k)
             for k in custom_keys(self.pet_id):
-                self.cmb_area.addItem("⭐ " + labs.get(k, k), k)
+                self.cmb_area.addItem("" + labs.get(k, k), k)
             i = self.cmb_area.findData(keep) if keep else -1
             self.cmb_area.setCurrentIndex(i if i >= 0 else 0)
             self.cmb_area.blockSignals(False)

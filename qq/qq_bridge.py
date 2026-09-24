@@ -1474,7 +1474,7 @@ class QQBotBridge:
                 _th.Timer(90.0, self._del_wav, args=(wav,)).start()
             except Exception:
                 pass
-            self._send_music_text("🎵 已为你点播《" + title[:60] + "》", ctx)
+            self._send_music_text("已为你点播《" + title[:60] + "》", ctx)
 
         except Exception as e:
             print(f"[QQBridge] ⚠ 点歌失败: {e}")

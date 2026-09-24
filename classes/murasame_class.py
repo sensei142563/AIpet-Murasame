@@ -4788,7 +4788,7 @@ class Murasame(QLabel):
                     _p2.setPen(QColor(255, 232, 140, 240))
                     _n = len(str(getattr(self, "input_buffer", "") or "") +
                              str(getattr(self, "preedit_text", "") or ""))
-                    _hint = "✎ 正在输入…（回车发送 · Esc 取消）" + (f"  已输入 {_n} 字" if _n else "")
+                    _hint = "正在输入…（回车发送 · Esc 取消）" + (f"  已输入 {_n} 字" if _n else "")
                     _hr = QRect(_r.left(), _r.bottom() - int(_r.height() * 0.24),
                                 _r.width(), int(_r.height() * 0.24))
                     _p2.drawText(_hr, Qt.AlignHCenter | Qt.AlignBottom, _hint)

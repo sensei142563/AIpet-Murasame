@@ -571,7 +571,7 @@ def _pos_of(s: str):
             return x, y
     a = _anchor_xy(s)
     if a:
-        _log_line("⚠ 指令里没有坐标，按方位词估了个位置 (%d,%d)：%s" % (a[0], a[1], str(s).strip()[:40]))
+        _log_line("指令里没有坐标，按方位词估了个位置 (%d,%d)：%s" % (a[0], a[1], str(s).strip()[:40]))
     return a
 
 

@@ -260,7 +260,7 @@ def handle(text, msg_ctx=None):
         if not item:
             return "视频保存失败", []
         acts.append({"type": "video_file", "file": path, "extra": None})
-        return "🎬 已找到 " + (who_txt or uname) + " 的视频「" + item["name"] + "」，正在发给你～", acts
+        return "已找到" + (who_txt or uname) + " 的视频「" + item["name"] + "」，正在发给你～", acts
 
     # ── 搜视频并直接下载发送 ──
     m = re.search(r"(?:搜视频|搜索视频|找视频)\s*[:：]?\s*(.+)", t)
@@ -289,7 +289,7 @@ def handle(text, msg_ctx=None):
         if not item:
             return "视频保存失败", []
         acts.append({"type": "video_file", "file": path, "extra": None})
-        return "🎬 已找到并下载视频「" + item["name"] + "」，正在发给你～", acts
+        return "已找到并下载视频「" + item["name"] + "」，正在发给你～", acts
 
     # ── 发送收藏 ──
     m = re.search(r"(?:发图|发图片|发照片)\s*[:：]?\s*(.+)", t)
@@ -322,13 +322,13 @@ def handle(text, msg_ctx=None):
         vf = item.get("file") or ""
         if vf and os.path.exists(vf):
             acts.append({"type": "video_file", "file": vf, "extra": None})
-            return "🎬 视频「" + item["name"] + "」正在发送～", acts
-        extra = "🎬 " + (item.get("title") or item["name"]) + chr(10) + item["url"]
+            return "视频「" + item["name"] + "」正在发送～", acts
+        extra = "" + (item.get("title") or item["name"]) + chr(10) + item["url"]
         cover = item.get("cover") or ""
         if cover and os.path.exists(cover):
             acts.append({"type": "video", "file": cover, "extra": extra})
-            return "🎬 视频「" + item["name"] + "」封面+链接来啦～", acts
-        return "🎬 " + extra, acts
+            return "视频「" + item["name"] + "」封面+链接来啦～", acts
+        return "" + extra, acts
 
     # ── 删除收藏 ──
     m = re.search(r"(?:删图|删除图片)\s*[:：]?\s*(.+)", t)
@@ -356,7 +356,7 @@ def handle(text, msg_ctx=None):
                 return "点歌功能已被停用（可在启动器「插件」页开启）", []
         except Exception:
             pass
-        return ("🎵 正在为你搜索《" + kw[:30] + "》并点歌，请稍等～"),             [{"type": "music", "keyword": kw, "extra": None}]
+        return ("正在为你搜索《" + kw[:30] + "》并点歌，请稍等～"),             [{"type": "music", "keyword": kw, "extra": None}]
 
     # ── 查看收藏 ──
     if _has_any(t, ("图列表", "图片列表", "表情列表", "视频列表", "我的收藏", "收藏列表")):
