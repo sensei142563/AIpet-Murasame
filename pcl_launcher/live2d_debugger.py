@@ -970,7 +970,28 @@ class Live2DDebuggerDialog(SiliconDialog):
 
 
 def open_debugger(pet_id=None, parent=None):
-    """打开调试器（失败时给出主题一致的提示，绝不静默）"""
+    """打开调试器（失败时给出主题一致的提示，绝不静默）
+
+    ⚠ 打开前先关掉「Live2D 实时预览窗口」：Cubism 的原生引擎是**全局单例**、glInit 绑在
+      当前 GL 上下文上（见 live2d_preview 里的说明）。调试器的画布是一个新的 QOpenGLWidget
+      = 新的上下文，两个 Live2D 画面同时在就会互相抢引擎 → 交替画不出来 = **屏闪**
+      （用户报的"还是屏闪"）。所以同一时刻只保留一个 Live2D 画面。
+    """
+    try:
+        from . import live2d_preview as _lp
+        for _w in list(getattr(_lp, "_WINDOWS", []) or []):
+            try:
+                if _w is not None and _w.isVisible():
+                    _w.close()
+                    print("[L2DDebug] 已关闭实时预览窗口（两个 GL 上下文会互相抢 Live2D 引擎）")
+            except Exception:
+                pass
+        try:
+            _lp._WINDOWS.clear()
+        except Exception:
+            pass
+    except Exception as _e:
+        print(f"[L2DDebug] ⚠ 关闭预览窗口失败（可能仍会屏闪）: {_e}")
     try:
         dlg = Live2DDebuggerDialog(pet_id=pet_id, parent=parent)
         dlg.setModal(False)
