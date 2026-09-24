@@ -16,7 +16,16 @@
   python tool/pack/build_installer.py --payload  # 只生成 payload.zip
   python tool/pack/build_installer.py --assemble # 只做第 4 步（复用已有 exe/payload）
 """
+
+try:  # 控制台被重定向（管道/日志）时 Windows 会用 GBK 编码 stdout，
+    # 打印 emoji 会 UnicodeEncodeError 直接打断进程 → 统一降级成替换字符
+    import sys as _sys
+    _sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    _sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -29,11 +38,18 @@ DIST_APP = os.path.join(BASE, "dist", "AIpet-Murasame")
 PAYLOAD_ZIP = os.path.join(BUILD, "payload.zip")
 INSTALLER_EXE_SRC = os.path.join(BUILD, "installer", "AIpet-Installer.exe")
 OUT_EXE = os.path.join(BASE, "AIpet-Murasame-安装包.exe")
-BASE_PY = r"C:\Users\Administrator\AppData\Local\Programs\Python\Python310"
+BASE_PY = os.environ.get("AIPET_BASE_PY") or sys.base_prefix   # 构建用基础 Python（可用环境变量覆盖）
 
 # 不进入安装包的目录/文件（个人数据、密钥、开发用）
+# ⚠ data / face_shibie 必须在这里：绿色版目录（dist/AIpet-Murasame/）是可运行的，
+#   一旦在原地跑过一次，它就会在 exe 旁写 data/wechat_credentials.json（微信登录凭据）、
+#   data/history.json（聊天历史）、data/qq_memory/、face_shibie/（主人照片）……
+#   而本打包脚本的源就是 dist/ —— 不排除就会把这些**装进分发给别人的安装包**。
+#   （build_launcher.py 只复制 git 追踪文件，所以 data/ 不会自己长出来；
+#     但"跑过一次绿色版"就会长出来，不能指望这一点。）
 SKIP_DIRS = {
     ".git", ".venv", "tmp", "build", "dist", "GPT-SoVITS",
+    "data", "face_shibie", "logs",          # ← 个人数据/隐私，见上方注释
     "tool/pack", "tool/pack/build", "tool/pack/__pycache__",
 }
 SKIP_FILES = {"config.json", "AIpet-Murasame.spec", "AIpetDbgCon.spec",
@@ -51,9 +67,13 @@ def _log(m):
 
 def _should_skip(rel: str, is_dir=False) -> bool:
     rel = rel.replace("\\", "/")
+    # 调用方一般在"被遍历目录的根"下传相对路径（如 data/x.json）；但载荷里的最终
+    # 路径带 app/ 前缀（app/data/x.json）。两种都认，免得换个遍历根就漏。
+    cands = [rel, rel[4:]] if rel.startswith("app/") else [rel]
     for d in SKIP_DIRS:
-        if rel == d or rel.startswith(d + "/"):
-            return True
+        for c in cands:
+            if c == d or c.startswith(d + "/"):
+                return True
     if is_dir:
         return False
     base = os.path.basename(rel)
@@ -76,6 +96,41 @@ def _iter_files(root: str, prefix: str, skip_pycache_keep: bool = False):
             if _should_skip(rel):
                 continue
             yield os.path.join(dp, fn), f"{prefix}/{rel}".replace("//", "/")
+
+
+def _audit_payload(items: list) -> None:
+    """装包前自检：载荷里**绝不能**出现个人数据/凭据（漏一个就是隐私事故）。
+
+    为什么不用"看 SKIP_DIRS 对不对"来保证：那种保证只在有人记得改它时成立。
+    这里直接只看结果——收集到的 payload 路径里有没有可疑东西，有就中止构建。
+
+    ⚠ 规则必须**精确**，宁可少报也不能乱中止构建：
+      第一版写成 `.*credential.*` 通配，结果第三方库的正常源码
+      `runtime/venv/Lib/site-packages/huggingface_hub/utils/_git_credential.py`
+      就被判成"凭据"、整个打包被中止（实测踩到）。这种检查器比没有更糟——
+      会被人直接注释掉。
+      所以：只在**应用根这一层**按文件名判（config.json / *.pid / qr*.png），
+      目录规则也只认顶层的 data/ face_shibie/ logs/；site-packages、
+      python/Lib、NapCat 里的同名文件一律不管。
+    """
+    danger_dir = re.compile(r"^(app/)?(data|face_shibie|logs)/", re.I)
+    danger_top = re.compile(
+        r"^(app/)?(config\.json|wechat_credentials\.json|[^/]*\.pid|qr[^/]*\.png)$", re.I)
+    bad = []
+    for _src, rel in items:
+        r = rel.replace("\\", "/")
+        if danger_dir.match(r) or danger_top.match(r):
+            bad.append(r)
+    if bad:
+        _log("")
+        _log("✗ 载荷里出现了个人数据/凭据，已中止构建（不会生成安装包）：")
+        for r in sorted(set(bad))[:30]:
+            _log(f"    {r}")
+        if len(set(bad)) > 30:
+            _log(f"    ... 另有 {len(set(bad)) - 30} 个")
+        _log("  → 请删除 dist/AIpet-Murasame 下的这些文件（那是本机运行留下的），")
+        _log("    或把对应目录补进本文件的 SKIP_DIRS。")
+        raise SystemExit(1)
 
 
 def collect_payload() -> list:
@@ -125,6 +180,24 @@ def collect_payload() -> list:
         n3 = len(items)
         items += list(_iter_files(scene, "app/场景素材"))
         _log(f"  [app/场景素材] {len(items) - n3} 个文件")
+
+    # ── 5) 去重
+    # ⚠ 实测踩到：绿色版目录里**已经**带了 场景素材/（build_launcher 会复制进去），
+    #   第 4 步又按 BASE/场景素材 加了一遍 → zip 里出现重复条目
+    #   （UserWarning: Duplicate name: 'app/场景素材/巷口.JPG'）。重复条目会让
+    #   zip 变大、解压时后写覆盖先写（内容一致时无害，不一致时静默丢文件）。
+    seen, uniq, dups = set(), [], 0
+    for src, rel in items:
+        key = rel.replace("\\", "/")
+        if key in seen:
+            dups += 1
+            continue
+        seen.add(key)
+        uniq.append((src, rel))
+    if dups:
+        _log(f"  [去重] 丢掉 {dups} 个重复条目（同一路径被收集了两次）")
+    items = uniq
+    _audit_payload(items)          # 隐私自检（有问题直接中止，别生成安装包）
     return items
 
 

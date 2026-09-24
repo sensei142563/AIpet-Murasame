@@ -12,7 +12,7 @@ from PyQt5.QtGui import QImage, QPixmap, QSurfaceFormat, QColor, QPainter
 from PyQt5.QtWidgets import (QOpenGLWidget, QWidget, QVBoxLayout, QHBoxLayout,
                                QPushButton)
 
-#  从旧版主窗口抽出来时漏了 colors 里的常量（PREVIEW_BG 等）→ initializeGL 抛 NameError
+# ⚠ 从旧版主窗口抽出来时漏了 colors 里的常量（PREVIEW_BG 等）→ initializeGL 抛 NameError
 #   → 预览一直是空白/透明（这就是「Live2D 显示不出来」的真正原因）
 from .colors import *            # noqa: F401,F403
 from .colors import background_info, PREVIEW_BG   # noqa: F401
@@ -352,7 +352,7 @@ class Live2DPreviewWidget(QOpenGLWidget):
     def _rebuild_model_in_ctx(self):
         """在**当前（控件的）GL 上下文里**创建模型 + 渲染器。
 
-         为什么必须这样：Cubism 的 `LAppModel.LoadModelJson()` 会 `CreateRenderer()`，
+        ⚠ 为什么必须这样：Cubism 的 `LAppModel.LoadModelJson()` 会 `CreateRenderer()`，
         即把贴图/遮罩等 GL 资源建到「调用时的当前上下文」里。
         旧写法在普通槽函数里直接 LoadModelJson（那时当前上下文不是控件的上下文）→
         资源建错地方 → 第二次打开画面异常（看着像被拉伸/错乱）。
@@ -396,7 +396,7 @@ class Live2DPreviewWidget(QOpenGLWidget):
                 glBlendFunc, glClearColor, glClear, GL_COLOR_BUFFER_BIT
             )
             import live2d.v3 as l2d
-            #  Cubism 的 init/glInit 一个进程只能做一次：第二次开窗口再调就会报错/崩溃
+            # ⚠ Cubism 的 init/glInit 一个进程只能做一次：第二次开窗口再调就会报错/崩溃
             #   （这就是「预览第一次正常、第二次出错」的根因）
             if not _L2D_INITED:
                 try:
@@ -427,7 +427,7 @@ class Live2DPreviewWidget(QOpenGLWidget):
     def reload_model(self, path: str):
         """按「全新加载」的方式重建模型（用于复用窗口时切换模型）。
 
-         两个关键点（缺一个都会导致「第二次打开和第一次不一样」）：
+        ⚠ 两个关键点（缺一个都会导致「第二次打开和第一次不一样」）：
         1) 模型必须建在控件自己的 GL 上下文里 → `makeCurrent()` 包住创建过程；
         2) 视口/时间/变换全部重置 → 与第一次打开的画面完全一致。
         """
@@ -460,10 +460,28 @@ class Live2DPreviewWidget(QOpenGLWidget):
         """换模型（与 reload_model 同一条稳健路径）"""
         return self.reload_model(path)
 
+    def set_display(self, scale=None, offset_x=None, offset_y=None):
+        """热改缩放/位移（换角色时用：同一个 GL 上下文里换模型 + 换显示参数）。"""
+        try:
+            if scale is not None:
+                self._model_scale = float(scale)
+            if offset_x is not None:
+                self._offset_x = float(offset_x)
+            if offset_y is not None:
+                self._offset_y = float(offset_y)
+            if self.model is not None:
+                self.model.SetScale(self._model_scale)
+                self.model.SetOffset(self._offset_x, self._offset_y)
+            self.update()
+            return True
+        except Exception as e:
+            _l2d_log(f"set_display 失败: {e}")
+            return False
+
     def paintGL(self):
         try:
             from OpenGL.GL import glClearColor, glClear, GL_COLOR_BUFFER_BIT, GL_DEPTH_BUFFER_BIT
-            #  预览必须“不透明”：主题没壁纸时 alpha 会让整块看着是透明的（模型像没显示）
+            # ⚠ 预览必须“不透明”：主题没壁纸时 alpha 会让整块看着是透明的（模型像没显示）
             _cc = list(self._clear_color())
             if len(_cc) == 4:
                 _cc[3] = 1.0
@@ -484,7 +502,7 @@ class Live2DPreviewWidget(QOpenGLWidget):
             self._draw_bg_quad()
         except Exception:
             pass
-        #  先铺一层不透明底色：即使模型没画出来，也能看到一块面板
+        # ★ 先铺一层不透明底色：即使模型没画出来，也能看到一块面板
         #   （避免"窗口一片透明像没显示"）
         try:
             from OpenGL.GL import (glMatrixMode, glLoadIdentity, glOrtho,
@@ -500,7 +518,7 @@ class Live2DPreviewWidget(QOpenGLWidget):
             glEnd()
         except Exception as _e:
             _l2d_log(f"底色绘制失败: {_e}")
-        #  兜底自愈：窗口隐藏/移动后 GL 上下文可能被系统重建，
+        # ⚠ 兜底自愈：窗口隐藏/移动后 GL 上下文可能被系统重建，
         #   此时旧模型的 GL 资源已失效（画面空白/错乱）→ 在当前上下文里重建一次。
         try:
             if self._render_ready and self.model is not None \
@@ -524,7 +542,7 @@ class Live2DPreviewWidget(QOpenGLWidget):
     def _ensure_viewport(self):
         """把模型画布尺寸对齐控件尺寸。
 
-         只靠 resizeGL 不够：控件嵌在布局/堆叠容器里时，resizeGL 可能早于模型加载
+        ⚠ 只靠 resizeGL 不够：控件嵌在布局/堆叠容器里时，resizeGL 可能早于模型加载
         或根本不触发 → 模型按 0×0 视口绘制（表现就是「Live2D 显示不出来 / 只有一小块」）。"""
         try:
             if self.model is None or not self._render_ready:
@@ -565,14 +583,29 @@ class Live2DPreviewWidget(QOpenGLWidget):
 
 
 # ══════════════════ 独立 Live2D 预览窗口（不透明 → GL 能正常渲染）══════════════════
+# 底部工具条按钮样式：画布恒为深色（见 __init__ 的 QColor(30,30,38)），
+# 所以按钮也必须恒为「浅字深底」，不能跟着主题走（浅色主题的深字会糊在深画布上）。
+_BAR_BTN_QSS = """
+QPushButton {
+    background: rgba(255, 255, 255, 0.10); color: #eef1f7;
+    border: 1px solid rgba(255, 255, 255, 0.24); border-radius: 8px;
+    padding: 6px 12px; font-size: 13px;
+}
+QPushButton:hover { background: rgba(255, 255, 255, 0.18);
+    border-color: rgba(255, 255, 255, 0.42); }
+QPushButton:pressed { background: rgba(255, 255, 255, 0.06); }
+QPushButton:disabled { color: rgba(255, 255, 255, 0.40); }
+"""
+
+
 class Live2DPreviewWindow(QWidget):
     """独立的 Live2D 实时预览窗口。
 
-     为什么单独开窗口：QOpenGLWidget 放在**透明窗口**（亚克力对话框）里渲染不出来，
+    ⚠ 为什么单独开窗口：QOpenGLWidget 放在**透明窗口**（亚克力对话框）里渲染不出来，
     旧版启动器的预览之所以正常，就是因为它在一个普通窗口里。这里同样用不透明窗口。
     """
 
-    def __init__(self, model_json: str = "", parent=None):
+    def __init__(self, model_json: str = "", parent=None, pet_id: str = None):
         # 置顶 + Tool 窗口：不被其它模态对话框锁住，也不会被启动器盖住
         super().__init__(parent, Qt.Tool | Qt.WindowStaysOnTopHint | Qt.WindowTitleHint
                          | Qt.WindowCloseButtonHint)
@@ -587,18 +620,41 @@ class Live2DPreviewWindow(QWidget):
             self.setPalette(pal)
         except Exception:
             pass
-        self.resize(560, 760)
+        # ⚠ 画布比例与缩放必须**跟角色走**：以前固定 560x760（竖长）且 model_scale 用默认 1.0，
+        #   于是方形半身模型（诺瓦 window_ratio=1.0 / scale=1.53）在竖长画布里被裁掉一截
+        #   （用户报"诺瓦显示不完全，毕竟这是个正方形画布"）。
+        disp = {}
+        try:
+            from pets.pet_registry import get_live2d_display
+            disp = get_live2d_display(pet_id) or {}
+        except Exception as _e:
+            print(f"[Live2DPreview] ⚠ 读取角色显示参数失败（用默认比例）: {_e}")
+        ratio = float(disp.get("window_ratio") or 0.67)
+        ratio = min(max(ratio, 0.3), 2.0)
+        _h = 760
+        _w = int(_h * ratio)
+        self.resize(_w, _h)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
-        self.view = Live2DPreviewWidget(model_json or None, self)
-        self.view.setMinimumSize(320, 420)
+        self.view = Live2DPreviewWidget(
+            model_json or None, self,
+            model_scale=float(disp.get("scale") or 1.0),
+            offset_x=float(disp.get("offset_x") or 0.0),
+            offset_y=float(disp.get("offset_y") or 0.0))
+        self.view.setMinimumSize(max(240, int(420 * ratio)), 420)
         lay.addWidget(self.view, 1)
         bar = QHBoxLayout()
         bar.setContentsMargins(8, 4, 8, 8)
-        self.btn_reload = QPushButton(" 重新加载")
+        self.btn_reload = QPushButton("🔄 重新加载")
         self.btn_reload.clicked.connect(lambda: self.view.load_model(self._model_json) if self._model_json else None)
-        self.btn_fit = QPushButton(" 适合窗口")
+        self.btn_fit = QPushButton("🎯 适合窗口")
         self.btn_fit.clicked.connect(self._fit)
+        for _b in (self.btn_reload, self.btn_fit):
+            # ⚠ 画布是**写死的深色**（QColor(30,30,38)），而全局 QSS 给按钮的文字色是
+            #   「当前主题的主文字色」——经典/千恋万花是**深色**字，压在深色画布上就成了
+            #   深底 + 深字（用户报的"预览窗口左下角的字对比度低"，只剩 emoji 看得见）。
+            #   这个窗口永远是深底，所以这里把底和字一起钉死，与主题无关。
+            _b.setStyleSheet(_BAR_BTN_QSS)
         bar.addWidget(self.btn_reload)
         bar.addWidget(self.btn_fit)
         bar.addStretch()
@@ -607,6 +663,28 @@ class Live2DPreviewWindow(QWidget):
         self.show()
         self.raise_()
         self.activateWindow()
+
+    def apply_pet(self, pet_id: str = None):
+        """按角色的显示参数重设画布比例 + 缩放/位移（换角色时必须调）。
+
+        ⚠ 预览窗口是**复用**的（同一个 GL 上下文，见 open_live2d_window），
+          不复用就画不出来；但复用时光换模型不够 —— 画布比例还是上一个角色的，
+          方形半身模型（诺瓦）就会被裁（用户报"诺瓦显示不完全"）。
+        """
+        try:
+            from pets.pet_registry import get_live2d_display
+            disp = get_live2d_display(pet_id) or {}
+            ratio = min(max(float(disp.get("window_ratio") or 0.67), 0.3), 2.0)
+            h = max(420, self.height() or 760)
+            self.resize(int(h * ratio), h)
+            self.view.setMinimumSize(max(240, int(420 * ratio)), 420)
+            self.view.set_display(disp.get("scale"), disp.get("offset_x"), disp.get("offset_y"))
+            _l2d_log("按角色调整画布：pet=%s ratio=%.2f scale=%s"
+                     % (pet_id, ratio, disp.get("scale")))
+            return True
+        except Exception as e:
+            _l2d_log(f"apply_pet 失败: {e}")
+            return False
 
     def _fit(self):
         try:
@@ -625,18 +703,25 @@ class Live2DPreviewWindow(QWidget):
                 self.view.reload_model(model_json)
         except Exception as e:
             _l2d_log(f"切换模型失败: {e}")
-            print(f"[Live2DWindow]  切换模型失败: {e}")
+            print(f"[Live2DWindow] ⚠ 切换模型失败: {e}")
 
 
 _WINDOWS = []
 
 
-def open_live2d_window(model_json: str = "", parent=None) -> "Live2DPreviewWindow":
-    """打开（或复用）Live2D 实时预览窗口；失败返回 None。"""
+def open_live2d_window(model_json: str = "", parent=None, pet_id: str = None) -> "Live2DPreviewWindow":
+    """打开（或复用）Live2D 实时预览窗口；失败返回 None。
+
+    `pet_id`：按这个角色的显示参数调整画布比例与缩放（方形半身模型不会被裁）。
+    """
     try:
         from PyQt5.QtWidgets import QApplication
         app = QApplication.instance()
-        #  关键：**复用同一个窗口/同一个 QOpenGLWidget**。
+        # ⚠ 不再关闭调试器窗口：以前以为"两个 Live2D 画布会互相抢引擎"，其实根因是各画布
+        #   用了各自的 GL 上下文；入口打开 Qt 的共享上下文开关后（enable_shared_gl_contexts）
+        #   预览窗口与调试器能并排渲染（实测 probe_l2d_two_canvases.py）。
+        #   用户拍板允许同时开着 → 这里不关任何窗口。
+        # ★ 关键：**复用同一个窗口/同一个 QOpenGLWidget**。
         #   Cubism 的 glInit 是绑定在「当前 GL 上下文」上的；每新建一个 QOpenGLWidget
         #   就是换了一个上下文 → 引擎在那个上下文里没初始化 → 第二/第三次打开就画不出来。
         for w in list(_WINDOWS):
@@ -644,14 +729,15 @@ def open_live2d_window(model_json: str = "", parent=None) -> "Live2DPreviewWindo
                 if w is not None:
                     if model_json and os.path.exists(model_json):
                         w.set_model(model_json)      # 同一上下文里换模型（安全）
+                    w.apply_pet(pet_id)              # 同一上下文里换显示参数（比例/缩放）
                     w.show()
                     w.raise_()
                     w.activateWindow()
-                    _l2d_log(f"复用预览窗口（同一 GL 上下文）：{model_json}")
+                    _l2d_log(f"复用预览窗口（同一 GL 上下文）：{model_json} pet={pet_id}")
                     return w
             except Exception as _e:
                 _l2d_log(f"复用失败，改为新建：{_e}")
-        win = Live2DPreviewWindow(model_json, parent)
+        win = Live2DPreviewWindow(model_json, parent, pet_id=pet_id)
         _WINDOWS.append(win)
         _l2d_log(f"已打开实时预览窗口：{model_json}")
         print(f"[Live2DWindow] 已打开实时预览窗口（不透明）：{os.path.basename(model_json or '')}")
@@ -659,5 +745,5 @@ def open_live2d_window(model_json: str = "", parent=None) -> "Live2DPreviewWindo
     except Exception as e:
         import traceback as _tb
         _l2d_log("打开失败: " + repr(e) + " | " + _tb.format_exc()[:900])
-        print(f"[Live2DWindow]  打开失败: {e}")
+        print(f"[Live2DWindow] ⚠ 打开失败: {e}")
         return None

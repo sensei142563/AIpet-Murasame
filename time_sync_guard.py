@@ -10,7 +10,6 @@
 日志：data/time_sync_guard.log
 """
 import os
-import sys
 import time
 import socket
 import subprocess
@@ -18,6 +17,7 @@ import subprocess
 BASE = os.path.dirname(os.path.abspath(__file__))
 LOG = os.path.join(BASE, "data", "time_sync_guard.log")
 LOCK_PORT = 29123  # 单实例端口锁
+PIDFILE = os.path.join(BASE, "data", "time_sync_guard.pid")   # 心跳文件（启动器靠它判断守护在不在跑）
 
 DRIFT_THRESHOLD = 4.0   # 偏差超过 4 秒即同步（NapCat 约 7 秒报警，提前处理）
 CHECK_INTERVAL = 180    # 每 3 分钟检测一次
@@ -69,6 +69,20 @@ def already_running():
         return None
 
 
+def heartbeat():
+    """写心跳文件（PID + 时间戳），每个检测周期刷新一次。
+
+    用途：启动器的插件页要显示「守护在不在跑」。以前那边是起 PowerShell 扫进程
+    （一次 500ms+，还每张卡片都调），现在只要读这个文件的一次 stat。
+    """
+    try:
+        os.makedirs(os.path.dirname(PIDFILE), exist_ok=True)
+        with open(PIDFILE, "w", encoding="utf-8") as f:
+            f.write("%d %d\n" % (os.getpid(), int(time.time())))
+    except Exception:
+        pass
+
+
 def main():
     # 启动即先同步一次（清掉历史漂移）
     ok = resync()
@@ -78,9 +92,11 @@ def main():
     if s is None:
         log("检测到已有守护实例在运行，本实例退出")
         return
+    heartbeat()
     try:
         while True:
             time.sleep(CHECK_INTERVAL)
+            heartbeat()
             n = net_timestamp()
             if n is None:
                 log("无法获取网络时间（网络异常？）跳过本轮")
@@ -99,6 +115,13 @@ def main():
     finally:
         try:
             s.close()
+        except Exception:
+            pass
+        # 正常退出时清掉心跳文件（只清自己的，避免误删新实例的）
+        try:
+            with open(PIDFILE, "r", encoding="utf-8") as f:
+                if int(f.read().split()[0]) == os.getpid():
+                    os.remove(PIDFILE)
         except Exception:
             pass
 

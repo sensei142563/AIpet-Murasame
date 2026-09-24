@@ -1,5 +1,13 @@
 # -*- coding: utf-8 -*-
 """最终验收：静默安装到临时目录 + 校验（运行环境/说明书/快捷方式/启动器可启动）"""
+
+try:  # 控制台被重定向（管道/日志）时 Windows 会用 GBK 编码 stdout，
+    # 打印 emoji 会 UnicodeEncodeError 直接打断进程 → 统一降级成替换字符
+    import sys as _sys
+    _sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    _sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 import os
 import shutil
 import subprocess
@@ -9,8 +17,9 @@ import time
 ROOT = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(ROOT)          # tmp/ → 项目根
 EXE = os.path.join(ROOT, "AIpet-Murasame-安装包.exe")
-TEST = r"D:\AIpet-安装测试"
-SHORTCUT = os.path.join(r"D:\桌面图标", "AIpet 丛雨桌宠.lnk")   # 本机桌面被重定向到 D:\桌面图标
+import tempfile
+TEST = os.path.join(tempfile.gettempdir(), "AIpet-安装测试")   # 用临时目录，避免硬编码他人盘符
+SHORTCUT = os.path.join(os.path.expanduser("~"), "Desktop", "AIpet 丛雨桌宠.lnk")
 
 print("安装包:", EXE, os.path.getsize(EXE) / 1e9, "GB")
 shutil.rmtree(TEST, ignore_errors=True)
@@ -61,6 +70,41 @@ print("=== 关键文件 ===")
 bad = [n for n, r in checks if not chk(r)]
 for n, r in checks:
     print(("  ✅ " if chk(r) else "  ❌ ") + n)
+
+print("=== NapCat / QQ 版本（应等于根目录 NAPCAT_VERSION.txt 的锁定值）===")
+try:
+    import re as _re
+    _anchor = {}
+    _ap = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                       "NAPCAT_VERSION.txt")
+    if os.path.isfile(_ap):
+        for _ln in open(_ap, encoding="utf-8"):
+            _ln = _ln.split("#")[0].strip()
+            if "=" in _ln:
+                _k, _v = _ln.split("=", 1)
+                _anchor[_k.strip()] = _v.strip()
+    _mjs = os.path.join(TEST, "NapCat.Shell.Windows.OneKey", "NapCat", "napcat.mjs")
+    _got = ""
+    if os.path.isfile(_mjs):
+        with open(_mjs, encoding="utf-8", errors="replace") as _f:
+            _m = _re.search(r'&&\s*"(\d+\.\d+\.\d+)"', _f.read(4_000_000))
+        _got = _m.group(1) if _m else ""
+    _want = _anchor.get("napcat", "")
+    print("  NapCat: 实际 %s / 锁定 %s → %s"
+          % (_got or "未读到", _want or "未读到",
+             "✅ 一致" if (_got and _got == _want) else "⚠ 不一致（打包机上的 NapCat 被更新过？）"))
+    _vj = os.path.join(TEST, "NapCat.Shell.Windows.OneKey", "bootmain", "versions", "config.json")
+    if os.path.isfile(_vj):
+        import json as _json
+        _d = _json.load(open(_vj, encoding="utf-8"))
+        _cur = str(_d.get("curVersion") or _d.get("baseVersion") or "")
+        _max = _anchor.get("qq_max_supported", "")
+        print("  QQ: 实际 %s / 支持上限 %s → %s"
+              % (_cur or "未知", _max or "未知",
+                 "✅ 在支持范围内" if (not _max or _cur <= _max)
+                 else "⚠ 超出支持表（NapCat 会报「不支持当前QQ版本架构」）"))
+except Exception as _e:
+    print("  版本校验失败（不影响其它检查）: %s" % _e)
 
 print("=== pyvenv.cfg ===")
 cfg = os.path.join(TEST, "runtime", "venv", "pyvenv.cfg")

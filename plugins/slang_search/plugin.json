@@ -4,7 +4,7 @@
   "version": "1.1.0",
   "kind": "feature",
   "desc": "群里出现看不懂的网络黑话/梗时自动联网搜索含义再接话（带缓存与限流）。停用后不联网查询。",
-  "default": true,
+  "default": false,
   "config_key": "qq_slang_enable",
   "extra_keys": [],
   "settings": [

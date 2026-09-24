@@ -116,11 +116,6 @@ _QUICK = {
 }
 
 
-def quick_line(key) -> str:
-    """该部位被碰到时的即时短句（没有就用通用一句）"""
-    return _QUICK.get(str(key), "呀…！")
-
-
 def reaction(key: str, gesture: str = "stroke", pet_id: str = None) -> str:
     """区域 + 手势 → 送去给模型的一句"发生的事情"。
 
@@ -209,10 +204,6 @@ def get_disabled(pet_id: str = None, mode: str = "2d") -> list:
         return []
 
 
-def part_enabled(pet_id: str = None, key: str = "", mode: str = "2d") -> bool:
-    return str(key) not in set(get_disabled(pet_id, mode))
-
-
 def get_pet_areas(pet_id: str = None, mode: str = "2d") -> dict:
     """取该角色的触摸区域（缺省项用默认值补齐；老角色也能直接用）"""
     areas = defaults()
@@ -241,19 +232,66 @@ def get_pet_areas(pet_id: str = None, mode: str = "2d") -> dict:
         return areas
 
 
+def has_areas(pet_id: str = None) -> bool:
+    """这个角色**配过**触摸区域吗？
+
+    和 `model.has_live2d`（角色包里有没有 Live2D 模型）同一套思路：
+    触摸互动是逐角色做出来的东西 —— 只有做过坐标的角色才算"有"。
+    没做过的角色不该凭空吃到一套"通用默认框"（对 Live2D 全身模型位置全错，
+    还会把"点下半身开输入框"的老操作吃掉）。
+    """
+    try:
+        from pets.pet_registry import get_pet_config
+        cfg = get_pet_config(pet_id) or {}
+        t = cfg.get("touch") or {}
+        for k in ("areas_2d", "areas", "areas_live2d"):
+            if isinstance(t.get(k), dict) and t[k]:
+                return True
+        return False
+    except Exception:
+        return False
+
+
 def touch_enabled(pet_id: str = None) -> bool:
+    """该角色现在是否启用全身触摸互动。
+
+    规则（用户定的）：**没做过的角色一律不开**（照旧用 摸头 / 点下半身开输入框）；
+    做过的角色看 pet.json 里的 touch.enabled，显式写死就照它，没写就默认开。
+    """
     try:
         from pets.pet_registry import get_pet_config
         cfg = get_pet_config(pet_id) or {}
         t = cfg.get("touch") or {}
         v = t.get("enabled")
         if v is None:
-            return True                          # 默认开启
+            return has_areas(pet_id)
         if isinstance(v, bool):
             return v
         return str(v).strip().lower() in ("true", "1", "on", "yes")
     except Exception:
+        return False
+
+
+def set_enabled(pet_id: str, on: bool) -> bool:
+    """写回角色包 pet.json 的 touch.enabled（"做了的可以选择开启/关闭"）"""
+    try:
+        from pets.pet_registry import get_pet_dir
+        p = os.path.join(get_pet_dir(pet_id), "pet.json")
+        if not os.path.exists(p):
+            print(f"[Touch] ⚠ 角色配置不存在: {p}")
+            return False
+        with open(p, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+        t = cfg.get("touch") or {}
+        t["enabled"] = bool(on)
+        cfg["touch"] = t
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
+        print("[Touch] %s全身触摸互动（%s）" % ("✅ 已开启" if on else "🚫 已关闭", pet_id))
         return True
+    except Exception as e:
+        print(f"[Touch] ⚠ 开关触摸失败: {e}")
+        return False
 
 
 def add_pet_area(pet_id: str, label: str, rect=None) -> str:
@@ -285,41 +323,6 @@ def remove_pet_area(pet_id: str, key: str) -> bool:
         return bool(save_pet_areas(pet_id, areas, labels=labs))
     except Exception as e:
         print(f"[Touch] ⚠ 删除部位失败: {e}")
-        return False
-
-
-def set_area_enabled(pet_id: str, key: str, on: bool, mode: str = "2d") -> bool:
-    """启用 / 禁用某个部位。
-
-    默认部位**不能删**（立绘上确实没有时用禁用）——这个标记也是 2D / Live2D 各一份。
-    """
-    try:
-        key = str(key)
-        dis = set(get_disabled(pet_id, mode))
-        if on:
-            dis.discard(key)
-        else:
-            dis.add(key)
-        areas = get_pet_areas(pet_id, mode)
-        ok = bool(save_pet_areas(pet_id, areas, mode=mode,
-                                 labels=labels(pet_id), disabled=sorted(dis)))
-        if ok:
-            print(f"[Touch] {'✅ 启用' if on else '🚫 禁用'}部位「{labels(pet_id).get(key, key)}」（{mode}）")
-        return ok
-    except Exception as e:
-        print(f"[Touch] ⚠ 切换部位启用状态失败: {e}")
-        return False
-
-
-def seed_pet_modes(pet_id: str, enabled: bool = True) -> bool:
-    """新建角色：给 2D / Live2D 各写一套默认区域（两套独立，之后可分别调）"""
-    try:
-        ok = True
-        for m in ("2d", "live2d"):
-            ok = save_pet_areas(pet_id, defaults(), enabled=enabled, mode=m, disabled=[]) and ok
-        return ok
-    except Exception as e:
-        print(f"[Touch] ⚠ 初始化两套触摸区域失败: {e}")
         return False
 
 

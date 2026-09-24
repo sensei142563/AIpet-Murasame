@@ -1,14 +1,37 @@
-# AIpet-Murasame (old packaged client archive) - ignore rules
-# Privacy / huge dirs / build artifacts are never committed.
+# AIpet-Murasame —— 忽略规则
+# 隐私 / 巨型资源 / 构建产物 一律不入库
 
-# ----- privacy: API keys, QQ ids, face photos, login state -----
+# ----- 隐私：密钥、QQ 号、人脸照片、登录态 -----
 config.json
 data/
 face_shibie/
 NapCat.Shell.Windows.OneKey/
 pets/*/memory/
+QQData/
+credentials*
+nul
 
-# ----- huge runtime resources -----
+# ----- 本地自用资源（第三方模型/素材，版权原因不随仓库分发）-----
+pets/arona/
+pets/hiyori/
+# 主题随包分发（classic = 默认纯色板、零素材；senrenbanka_copy = 作者自建主题），
+# 但作者主题里的壁纸视频体积大、属自用素材 → 只排除这一个文件
+pcl_launcher/themes/senrenbanka_copy/assets/bg_custom.mp4
+备用资源/
+
+# ----- 编辑器 / 系统 / 本地临时区 -----
+.ssh/
+.idea/
+.vscode/
+.mimosa/
+.zcode/
+_import_tmp/
+_repo_excluded/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ----- 巨型运行时资源 -----
 runtime/
 GPT-SoVITS/
 F5-TTS_Models/
@@ -16,8 +39,9 @@ models/
 reference_voices/*.wav
 reference_voices/*.mp3
 
-# ----- build artifacts / backups -----
+# ----- 构建产物 / 备份 -----
 AIpet-Murasame.exe
+AIpet-Murasame-安装包.exe
 AIPetDbg.spec
 _internal/
 _internal.bak*/
@@ -25,14 +49,20 @@ tmp/
 build/
 dist/
 *.spec
+*.exe
+*.old
+*.bak
+*.bak_*
+*.7z
+*.zip
 
-# ----- venv / python cache -----
+# ----- venv / Python 缓存 -----
 .venv/
 venv/
 __pycache__/
 *.py[cod]
 
-# ----- generic binary / big files -----
+# ----- 通用二进制 / 大文件 -----
 *.wav
 *.mp3
 *.ckpt

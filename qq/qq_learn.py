@@ -88,7 +88,7 @@ def _url_key(url):
 
 def bilibili_download(bvid, max_bytes=70 * 1024 * 1024, max_dur=600):
     """下载 B站视频(默认 480P, 超限降 360P)。返回 (本地路径, 标题)；失败返回 (None, 原因)"""
-    import os as _os, requests as _req, time as _t
+    import requests as _req, time as _t
     _UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0",
            "Referer": "https://www.bilibili.com/"}
     try:
@@ -221,7 +221,7 @@ def handle(text, msg_ctx=None):
         return (f"已按「{kw}」搜到并保存图片「{item['name']}」"
                 f"（{len(saved.names('images'))}/10），这就发给你看～"), acts
 
-    # ── 搜某个 UP 主/用户的视频（如「搜索申余不是鱼的视频」「看看某某的作品」）──
+    # ── 搜某个 UP 主/用户的视频（如「搜索某某UP的视频」「看看某某的作品」）──
     m = re.search(r"(?:搜索|搜|找|看看|来点)\s*([^\s，。？!！]{2,20}?)\s*的(?:视频|作品)", t)
     if m:
         uname = _strip(m.group(1)).strip()
@@ -352,7 +352,7 @@ def handle(text, msg_ctx=None):
             return "想点什么歌？对我说「点歌 晴天」试试～", []
         try:
             from qq.qq_config import get_qq_config as _mc
-            if not _mc().get("music_enabled", True):
+            if not _mc().get("music_enabled", False):
                 return "点歌功能已被停用（可在启动器「插件」页开启）", []
         except Exception:
             pass
@@ -401,14 +401,6 @@ def is_media_cmd(text) -> bool:
     if any(k in n for k in ("的视频", "的作品")) and any(k in n for k in ("搜", "找", "看", "来")):
         return True
     return False
-
-
-def is_search_cmd(text) -> bool:
-    """是否为搜索类指令（供对象分类）"""
-    n = (text or "").lower().replace(" ", "").replace("　", "")
-    return any(k in n for k in ("搜图", "搜索图片", "搜图片", "找图片", "搜个图", "搜张图",
-                                "搜索这个图", "帮我搜图", "搜视频", "搜索视频", "搜个视频",
-                                "搜段视频", "搜索这个视频", "帮我搜视频", "找视频", "看视频"))
 
 
 def cmd_object(text) -> str:

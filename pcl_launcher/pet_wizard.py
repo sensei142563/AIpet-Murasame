@@ -2,7 +2,7 @@
 """桌宠创建 / 设置 引导向导（分步，像安装向导一样一步步来）。
 
 新建：桌宠页 → 「+ 添加新桌宠」→ 本向导
-修改：桌宠卡片 → 「 设置」→ 同一个向导（预填现有配置）
+修改：桌宠卡片 → 「⚙ 设置」→ 同一个向导（预填现有配置）
 
 步骤：
   1 基础信息（ID / 名称 / 简介 / 头像）
@@ -11,7 +11,7 @@
       A 每个表情一张整图（简单，适合手绘单图）
       B 多图层拼合（像丛雨那样：表情/服装/发型/装饰分别一张图，拼成一张立绘）
   4 Live2D 模型（选 .model3.json，自动复制进角色包）
-  5 语音（日语语音=日语参考音频 GPT-SoVITS；汉语语音=中文参考音频；可选默认模型）
+  5 语音（短语音=日语参考音频 GPT-SoVITS；长语音=中文参考音频 F5-TTS；可选默认模型）
   6 人设（短文本=桌宠 / 长文本=QQ；与「提示词」页同一份文件，双向同步）
   7 完成
 
@@ -27,11 +27,14 @@ from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QComboBox,
     QCheckBox, QFileDialog, QMessageBox, QStackedWidget, QListWidget, QListWidgetItem,
     QPlainTextEdit, QGroupBox, QRadioButton, QButtonGroup, QScrollArea, QWidget,
-    QGridLayout, QInputDialog, QSizePolicy, QSlider, QSpinBox
+    QGridLayout, QSizePolicy, QSlider, QSpinBox
 )
 from PyQt5.QtGui import QFont, QPainter, QColor, QPixmap, QPen, QBrush, QPainterPath
 
 from .colors import _app_base_dir  # noqa: F401  （打包时确保该模块被收集）
+# 说明文字/状态字一律取主题色：写死的 #888 / #9a9aa8 / #8fd18f / #e07a90 / #7fc48f
+# 都是深色 UI 时代的值，浅色主题（经典 / 千恋万花）上就是"浅字压浅底"看不清。
+from .colors import Gray2, ok_text, warn_text  # noqa: F401
 
 S = 1.0
 EMOTION_PRESET = ["平静", "高兴", "害羞", "生气", "惊讶", "着急"]
@@ -233,7 +236,7 @@ def write_portrait_prompts(path: str, spec: dict, log=print) -> bool:
 def _safe_copy(src: str, dst_path: str) -> bool:
     """安全复制文件：源和目标其实是同一个文件时直接跳过。
 
-     编辑已有角色时，「音源目录」本来就是角色包自己的 voices/short →
+    ⚠ 编辑已有角色时，「音源目录」本来就是角色包自己的 voices/short →
     源 == 目标，shutil.copy2 会抛 SameFileError 把"保存"整条流程打断
     （用户看到的报错：'...\voices/short/害羞/ref.mp3' and '...\voices\short\害羞\ref.mp3'
      are the same file）。这里统一跳过 + 兜底，保存不再因此失败。
@@ -262,7 +265,7 @@ def _safe_copy(src: str, dst_path: str) -> bool:
             shutil.copy(src, dst_path)
         return True
     except Exception as e:
-        print(f"[Wizard]  复制文件失败（跳过）: {src} → {dst_path}: {e}")
+        print(f"[Wizard] ⚠ 复制文件失败（跳过）: {src} → {dst_path}: {e}")
         return False
 
 
@@ -376,7 +379,7 @@ def build_pet_json(spec: dict, existing: dict = None) -> dict:
         m["has_live2d"] = bool(m.get("has_live2d"))
         m["has_fgimages"] = True
         # 前缀留空 → 自动用角色 ID（与生成的素材文件名一致）。
-        #  以前留空会让桌宠退回「ムラサメ」前缀找索引 → 找不到 → 启动崩溃、桌宠不出现。
+        # ⚠ 以前留空会让桌宠退回「ムラサメ」前缀找索引 → 找不到 → 启动崩溃、桌宠不出现。
         m["fgimages_prefix"] = (str(spec.get("fgimages_prefix") or "").strip()
                                or str(spec.get("id") or "").strip())
         m["fgimages_sets"] = ["a"]
@@ -409,7 +412,7 @@ def build_pet_json(spec: dict, existing: dict = None) -> dict:
             adj[str((spec.get("sets") or ["a"])[0])] = pend
             m["layer_adjust"] = adj
     except Exception as e:
-        print(f"[Wizard]  写入显示设置失败: {e}")
+        print(f"[Wizard] ⚠ 写入显示设置失败: {e}")
     cfg["model"] = m
     # 对话框区域 / 字号：2D 与 Live2D **各存一份**（互不影响）
     try:
@@ -430,29 +433,34 @@ def build_pet_json(spec: dict, existing: dict = None) -> dict:
         if inter:
             cfg["interaction"] = inter
     except Exception as e:
-        print(f"[Wizard]  写入对话框设置失败: {e}")
+        print(f"[Wizard] ⚠ 写入对话框设置失败: {e}")
     # 触摸互动开关（九个部位的「范围」由「触摸互动」页的编辑器单独保存到 touch.areas）
     try:
         t = dict(cfg.get("touch") or {})
         chk = getattr(self, "chk_touch", None)
         if chk is not None:
             t["enabled"] = bool(chk.isChecked())
-        t.setdefault("enabled", True)
-        # 2D 与 Live2D **各写一套**默认范围（两套独立，互不影响；之后可在编辑器里分别调）
-        try:
-            from tool.touch_areas import defaults as _ta_defaults
-            _d = _ta_defaults()
-            t.setdefault("areas_2d", dict(_d))
-            t.setdefault("areas_live2d", dict(_d))
-            t.setdefault("disabled_2d", [])
-            t.setdefault("disabled_live2d", [])
-            if not t.get("areas"):
-                t["areas"] = dict(_d)            # 旧键兼容
-        except Exception as _e:
-            print(f"[Wizard]  写入默认触摸范围失败: {_e}")
+        # ⚠ 只在"确实要开触摸"（勾了开关）或"本来就配过区域"时才补默认范围。
+        #   以前这里无条件给每个角色塞一套 14 个通用框 → 等于"没做过的角色也开了触摸"，
+        #   而且通用框对 Live2D 全身模型位置全是错的（用户要的是：没做的不开）。
+        if t.get("enabled") or any(t.get(k) for k in ("areas", "areas_2d", "areas_live2d")):
+            # 2D 与 Live2D **各写一套**默认范围（两套独立，互不影响；之后可在编辑器里分别调）
+            try:
+                from tool.touch_areas import defaults as _ta_defaults
+                _d = _ta_defaults()
+                t.setdefault("areas_2d", dict(_d))
+                t.setdefault("areas_live2d", dict(_d))
+                t.setdefault("disabled_2d", [])
+                t.setdefault("disabled_live2d", [])
+                if not t.get("areas"):
+                    t["areas"] = dict(_d)        # 旧键兼容
+            except Exception as _e:
+                print(f"[Wizard] ⚠ 写入默认触摸范围失败: {_e}")
+        else:
+            print("[Wizard] 未启用触摸互动 → 不写默认触摸区域（保持「没做过就不开」）")
         cfg["touch"] = t
     except Exception as e:
-        print(f"[Wizard]  写入触摸设置失败: {e}")
+        print(f"[Wizard] ⚠ 写入触摸设置失败: {e}")
     v = dict(cfg.get("voices") or {})
     v["short_emotions"] = list(spec.get("short_emotions") or [])
     v["short_ref_dir"] = "voices/short/"
@@ -462,16 +470,7 @@ def build_pet_json(spec: dict, existing: dict = None) -> dict:
         v["default_emotion"] = spec["default_emotion"]
     cfg["voices"] = v
     if spec.get("portrait"):
-        _new_pt = dict(spec["portrait"])
-        _old_pt = existing.get("portrait") if isinstance(existing, dict) else None
-        if isinstance(_old_pt, dict):
-            # 动作（手臂姿势）与「按套分别存的表情/装饰表」向导界面里没有，
-            # 编辑已有角色时必须原样带过去，否则一进向导一保存就把它们清空了。
-            if _old_pt.get("actions") and not _new_pt.get("actions"):
-                _new_pt["actions"] = _old_pt["actions"]
-            if isinstance(_old_pt.get("sets"), dict) and not isinstance(_new_pt.get("sets"), dict):
-                _new_pt["sets"] = _old_pt["sets"]
-        cfg["portrait"] = _new_pt
+        cfg["portrait"] = spec["portrait"]
     return cfg
 
 
@@ -510,7 +509,7 @@ def create_or_update_pet(spec: dict, log=print) -> tuple:
     elif not os.path.exists(pl_path):
         shutil.copy2(ps_path, pl_path)
     # 立绘图层提示词模板（AI 选层用）
-    #  旧实现把丛雨的模板整体复制过来、并把 sets 写成 ["a"]（列表）→
+    # ⚠ 旧实现把丛雨的模板整体复制过来、并把 sets 写成 ["a"]（列表）→
     #   桌宠侧读 sets.get(...) 直接 AttributeError，启动就崩；而且描述还是丛雨的图层。
     #   现在按角色自己的立绘类型生成：单图模式=表情表，图层模式=沿用源角色的描述。
     # 2D 立绘素材
@@ -521,7 +520,7 @@ def create_or_update_pet(spec: dict, log=print) -> tuple:
             idx, layer_ids = write_single_image_pack(
                 os.path.join(dst, "fgimages"), prefix, mapping)
             notes.append(f"已生成立绘素材：{os.path.basename(idx)}（{len(layer_ids)} 个表情）")
-            #  必须写 portrait 块：立绘合成/表情表都按它走，
+            # ★ 必须写 portrait 块：立绘合成/表情表都按它走，
             #   否则会退回内置（丛雨）表 → 新角色合成必然失败
             first = next(iter(layer_ids), "平静")
             spec["portrait"] = {
@@ -546,7 +545,7 @@ def create_or_update_pet(spec: dict, log=print) -> tuple:
             if n:
                 notes.append(f"已导入 {n} 个图层素材（前缀 {prefix}）")
             else:
-                notes.append(f" 源目录里没有以「{prefix}」开头的图层文件，请稍后手动放入 fgimages/")
+                notes.append(f"⚠ 源目录里没有以「{prefix}」开头的图层文件，请稍后手动放入 fgimages/")
 
     # Live2D 模型
     if spec.get("kind") == "live2d" and spec.get("live2d_src"):
@@ -564,7 +563,7 @@ def create_or_update_pet(spec: dict, log=print) -> tuple:
                 _safe_copy(src, os.path.join(target, os.path.basename(src)))
             notes.append("Live2D 模型已复制进角色包")
         except Exception as e:
-            notes.append(f" Live2D 模型复制失败: {e}")
+            notes.append(f"⚠ Live2D 模型复制失败: {e}")
 
     # 立绘 AI 选层提示词（portrait_prompts.json）——必须放在立绘素材处理之后：
     # 单图模式要拿 spec["portrait"]["emotions"] 里的「表情名 → 编号」来写描述。
@@ -582,29 +581,29 @@ def create_or_update_pet(spec: dict, log=print) -> tuple:
         if need:
             write_portrait_prompts(pp, spec, log=log)
     except Exception as e:
-        log(f" 生成立绘提示词失败: {e}")
+        log(f"⚠ 生成立绘提示词失败: {e}")
 
     # 语音
     if spec.get("short_voice_dir"):
         emos, err = copy_short_voice_pack(spec["short_voice_dir"], os.path.join(dst, "voices"))
         spec["short_emotions"] = emos
-        notes.append(f"日语语音：导入 {len(emos)} 个情绪" + (f"（{err}）" if err else ""))
+        notes.append(f"短语音(日语)：导入 {len(emos)} 个情绪" + (f"（{err}）" if err else ""))
     elif spec.get("short_voice_single"):
         emos, err = copy_short_voice_single(spec["short_voice_single"],
                                             spec.get("short_voice_text", ""),
                                             os.path.join(dst, "voices"),
                                             spec.get("short_voice_emotions"))
         spec["short_emotions"] = emos
-        notes.append(f"日语语音：单一音色导入 {len(emos)} 个情绪" + (f"（{err}）" if err else ""))
+        notes.append(f"短语音(日语)：单一音色导入 {len(emos)} 个情绪" + (f"（{err}）" if err else ""))
     if spec.get("long_ref_src"):
         try:
             os.makedirs(os.path.join(dst, "voices", "long"), exist_ok=True)
             tgt = os.path.join(dst, "voices", "long", os.path.basename(spec["long_ref_src"]))
             _safe_copy(spec["long_ref_src"], tgt)
             spec["long_ref_audio"] = f"voices/long/{os.path.basename(spec['long_ref_src'])}"
-            notes.append("汉语语音：参考音频已导入")
+            notes.append("长语音(中文)：参考音频已导入")
         except Exception as e:
-            notes.append(f" 汉语语音参考音频复制失败: {e}")
+            notes.append(f"⚠ 长语音参考音频复制失败: {e}")
 
     # 头像：没给就尝试用立绘第一张图替代
     if spec.get("avatar_src") and os.path.exists(spec["avatar_src"]):
@@ -614,7 +613,7 @@ def create_or_update_pet(spec: dict, log=print) -> tuple:
             spec["avatar"] = "avatar" + ext
             notes.append("头像已设置")
         except Exception as e:
-            notes.append(f" 头像复制失败: {e}")
+            notes.append(f"⚠ 头像复制失败: {e}")
 
     # 写 pet.json
     existing = None
@@ -628,7 +627,7 @@ def create_or_update_pet(spec: dict, log=print) -> tuple:
     try:
         json.dump(cfg, open(pj, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     except Exception as e:
-        return pid, [f" 写入 pet.json 失败: {e}"]
+        return pid, [f"❌ 写入 pet.json 失败: {e}"]
 
     # 注册到角色列表
     try:
@@ -636,12 +635,12 @@ def create_or_update_pet(spec: dict, log=print) -> tuple:
         register_pet(pid)
         scan_pets()
     except Exception as e:
-        log(f" 注册角色失败: {e}")
+        log(f"⚠ 注册角色失败: {e}")
     return pid, notes
 
 
 # ══════════════════════ 向导界面 ══════════════════════
-from .silicon_dialog import SiliconDialog  # noqa: E402
+from .silicon_dialog import SiliconDialog, page_msg, page_confirm  # noqa: E402
 
 
 class DisplayPreview(QWidget):
@@ -663,7 +662,6 @@ class DisplayPreview(QWidget):
         self.font_scale = 1.0            # 对话框字号系数（框内文字大小随之变化）
         self.width_ratio = None          # Live2D 的窗口宽高比（None = 跟随立绘比例）
         self.pix = QPixmap()
-        self.canvas_wh = None            # 稳定画布（这套最宽外观）的宽高，None=按立绘比例
         self.mode = "2d"                 # 2d / live2d
         self._drag = None
         self.setCursor(Qt.OpenHandCursor)
@@ -681,22 +679,13 @@ class DisplayPreview(QWidget):
             self.bh = max(0.05, min(1.0, float(h)))
         self.update()
 
-    def set_canvas_wh(self, cw, ch):
-        """告诉预览"稳定画布"的宽高（桌面真实窗口就是这个比例）。
-         不设的话预览按当前立绘的宽高比画 → 比真实窗口窄，框的位置就跟桌面不一致。"""
-        try:
-            self.canvas_wh = (int(cw), int(ch)) if cw and ch else None
-        except Exception:
-            self.canvas_wh = None
-        self.update()
-
     def set_params(self, values: dict, pixmap: QPixmap):
         tb = values.get("text_box") or [self.bx, self.by, self.bw, self.bh]
         try:
             self.bx, self.by, self.bw, self.bh = [float(v) for v in tb[:4]]
         except Exception:
             pass
-        #  立绘缩放 / 偏移 / 对话框字号：以前套了参数但画布不用 → 调了看不到变化
+        # ★ 立绘缩放 / 偏移 / 对话框字号：以前套了参数但画布不用 → 调了看不到变化
         try:
             self.scale = max(0.2, min(3.0, float(values.get("scale") or 1.0)))
         except Exception:
@@ -731,9 +720,6 @@ class DisplayPreview(QWidget):
         if self.mode == "live2d" and self.width_ratio:
             # Live2D：窗口按角色的宽高比（模型本身是方的/半身的都常见）
             w = max(30, int(h * float(self.width_ratio)))
-        elif self.canvas_wh and self.canvas_wh[1] > 0:
-            # 与桌面窗口一致：用稳定画布宽高比（最宽的那种外观）
-            w = max(30, int(h * self.canvas_wh[0] / float(self.canvas_wh[1])))
         elif self.pix is not None and not self.pix.isNull() and self.pix.height() > 0:
             w = max(30, int(h * self.pix.width() / float(self.pix.height())))
         w = min(w, s.width())
@@ -742,11 +728,11 @@ class DisplayPreview(QWidget):
         return QRect(x, y, w, h)
 
     def paintEvent(self, event):
-        #  Qt 里 paintEvent 抛异常 = 整个程序直接 abort（不是普通报错）→ 全程兜底
+        # ⚠ Qt 里 paintEvent 抛异常 = 整个程序直接 abort（不是普通报错）→ 全程兜底
         try:
             self._paint(event)
         except Exception as e:
-            print(f"[Wizard]  预览绘制失败: {e}")
+            print(f"[Wizard] ⚠ 预览绘制失败: {e}")
 
     def _paint(self, event):
         p = QPainter(self)
@@ -797,7 +783,7 @@ class DisplayPreview(QWidget):
             bh = max(14, int(pr.height() * self.bh))
             box = QRect(bx, by, bw, bh)
             path = QPainterPath()
-            #  必须用 QRectF / 分开传坐标：PyQt5 不接受 QRect
+            # ⚠ 必须用 QRectF / 分开传坐标：PyQt5 不接受 QRect
             path.addRoundedRect(float(box.x()), float(box.y()),
                                 float(box.width()), float(box.height()), 6.0, 6.0)
             p.fillPath(path, QColor(80, 150, 255, 60))
@@ -868,7 +854,7 @@ class _LayerTuneDialog(QDialog):
         root.addWidget(tip)
 
         self.lbl_applied = QLabel("")
-        self.lbl_applied.setStyleSheet("color:#7fc48f;font-size:12px;")
+        self.lbl_applied.setStyleSheet(f"color:{ok_text().name()};font-size:12px;")
         self.lbl_applied.setWordWrap(True)
         self.preview = QLabel("（点「刷新预览」看效果）")
         self.preview.setMinimumHeight(220)
@@ -889,9 +875,9 @@ class _LayerTuneDialog(QDialog):
         root.addLayout(form)
 
         bar = QHBoxLayout()
-        btn_refresh = QPushButton(" 刷新预览")
-        btn_reset = QPushButton(" 恢复默认（全部归零）")
-        btn_ok = QPushButton(" 应用")
+        btn_refresh = QPushButton("🔄 刷新预览")
+        btn_reset = QPushButton("♻ 恢复默认（全部归零）")
+        btn_ok = QPushButton("✅ 应用")
         btn_cancel = QPushButton("取消")
         btn_refresh.clicked.connect(self.refresh)
         btn_reset.clicked.connect(self._reset_all)
@@ -927,7 +913,7 @@ class _LayerTuneDialog(QDialog):
                 wids[1].setValue(int(v[1]))
                 wids[2].setValue(int(round(float(v[2]) * 100)))
         except Exception as e:
-            print(f"[LayerTune]  载入微调失败: {e}")
+            print(f"[LayerTune] ⚠ 载入微调失败: {e}")
 
     def _collect_table(self) -> dict:
         out = {}
@@ -957,7 +943,7 @@ class _LayerTuneDialog(QDialog):
                 tbl = self._collect_table()
                 txt = "；".join(f"{dict(self.CATS).get(k, k)}({v[0]},{v[1]},{int(v[2]*100)}%)"
                                 for k, v in tbl.items())
-                self.lbl_applied.setText((" 已应用微调：" + txt) if txt else "（当前全部为 0 / 100%）")
+                self.lbl_applied.setText(("✅ 已应用微调：" + txt) if txt else "（当前全部为 0 / 100%）")
             except Exception:
                 pass
             pix = self._preview_getter()
@@ -968,7 +954,7 @@ class _LayerTuneDialog(QDialog):
             else:
                 self.preview.setText("（没有可用的立绘素材）")
         except Exception as e:
-            print(f"[LayerTune]  刷新预览失败: {e}")
+            print(f"[LayerTune] ⚠ 刷新预览失败: {e}")
 
     def _apply(self):
         try:
@@ -988,7 +974,7 @@ class _LayerTuneDialog(QDialog):
             print(f"[LayerTune] 已保存 {self._set_name} 套微调: {tbl}")
             self.accept()
         except Exception as e:
-            QMessageBox.warning(self, "保存失败", str(e))
+            page_msg(self, "保存失败", str(e))
 
 
 class PCLPetWizard(SiliconDialog):
@@ -1021,14 +1007,14 @@ class PCLPetWizard(SiliconDialog):
         self._build()
         if self.is_edit:
             self._load_existing()
-        #  无边框窗口第一次显示时容易用「最小尺寸」→ 看着很小、动一下才变大。
+        # ⚠ 无边框窗口第一次显示时容易用「最小尺寸」→ 看着很小、动一下才变大。
         #   显示后再强制按目标尺寸布局一次（并让子控件重新排布）。
         try:
             self.resize(*self._want_size)
             QTimer.singleShot(0, self._force_size)
             QTimer.singleShot(120, self._force_size)
         except Exception as _e:
-            print(f"[Wizard]  初始尺寸设置失败: {_e}")
+            print(f"[Wizard] ⚠ 初始尺寸设置失败: {_e}")
 
     def showEvent(self, event):
         """窗口真正显示后再强制尺寸（否则会"要挪一下才变大"）"""
@@ -1039,12 +1025,12 @@ class PCLPetWizard(SiliconDialog):
             QTimer.singleShot(0, self._force_size)
             QTimer.singleShot(120, self._force_size)
         except Exception as _e:
-            print(f"[Wizard]  showEvent 尺寸失败: {_e}")
+            print(f"[Wizard] ⚠ showEvent 尺寸失败: {_e}")
 
     def _force_size(self):
         """按目标尺寸强制布局一次。
 
-         改尺寸后必须同时做三件事，否则会出现「按钮显示的位置和能点的位置不一样」：
+        ⚠ 改尺寸后必须同时做三件事，否则会出现「按钮显示的位置和能点的位置不一样」：
         ① 重排所有布局；② clearMask() 清掉 Windows 残留的旧窗口区域；③ 重绘。
         """
         try:
@@ -1072,7 +1058,7 @@ class PCLPetWizard(SiliconDialog):
             self.update()
             print(f"[Wizard] 已按 {w}x{h} 重新布局（当前 {self.width()}x{self.height()}）")
         except Exception as e:
-            print(f"[Wizard]  强制尺寸失败: {e}")
+            print(f"[Wizard] ⚠ 强制尺寸失败: {e}")
 
     # ── 界面骨架 ──
     def _build(self):
@@ -1080,7 +1066,7 @@ class PCLPetWizard(SiliconDialog):
         root.setContentsMargins(14, 12, 14, 12)
         root.setSpacing(8)
 
-        head = QLabel(" 跟着向导走完这几步，就能拥有自己的桌宠")
+        head = QLabel("🧭 跟着向导走完这几步，就能拥有自己的桌宠")
         head.setFont(QFont("Microsoft YaHei", 11, QFont.Bold))
         root.addWidget(head)
 
@@ -1110,7 +1096,7 @@ class PCLPetWizard(SiliconDialog):
                 _lay.addWidget(self._page_portrait_extras())
                 print("[Wizard] 已在「立绘素材」页挂上 两套立绘 + 表情管理")
         except Exception as _e:
-            print(f"[Wizard]  挂载立绘扩展区失败: {_e}")
+            print(f"[Wizard] ⚠ 挂载立绘扩展区失败: {_e}")
         self.stack.addWidget(self._page_live2d())
         self.stack.addWidget(self._page_display())
         self.stack.addWidget(self._page_touch())
@@ -1121,7 +1107,7 @@ class PCLPetWizard(SiliconDialog):
         # 底部按钮
         bar = QHBoxLayout()
         self.hint = QLabel("")
-        self.hint.setStyleSheet("color:#e07a90;font-size:12px;")
+        self.hint.setStyleSheet(f"color:{warn_text().name()};font-size:12px;")
         bar.addWidget(self.hint, 1)
         self.btn_prev = QPushButton("上一步")
         self.btn_prev.clicked.connect(lambda: self._goto(self.stack.currentIndex() - 1))
@@ -1219,7 +1205,7 @@ class PCLPetWizard(SiliconDialog):
         lay.addLayout(grid)
         tip = QLabel("提示：ID 创建后不建议修改（它是角色包文件夹名）。\n"
                      "名称会用在对话里（AI 会知道「我叫这个名字」）。")
-        tip.setStyleSheet("color:#888;font-size:12px;")
+        tip.setStyleSheet(f"color:{Gray2.name()};font-size:12px;")
         lay.addWidget(tip)
         lay.addStretch()
         return w
@@ -1269,7 +1255,7 @@ class PCLPetWizard(SiliconDialog):
                      "· 进阶方式：需要图层素材 + 图层索引 txt（和丛雨角色包同格式），"
                      "可以换衣服、换发型、叠装饰。\n"
                      "· 两种方式互不影响，之后在本向导「设置」里随时可以改。")
-        tip.setStyleSheet("color:#888;font-size:12px;")
+        tip.setStyleSheet(f"color:{Gray2.name()};font-size:12px;")
         lay.addWidget(tip)
 
 
@@ -1323,7 +1309,7 @@ class PCLPetWizard(SiliconDialog):
         r2.addWidget(b_read)
         ll.addLayout(r2)
         self.lbl_layers = QLabel("（选择文件夹后点「读取图层」，下面就能下拉选择每个部位用哪张图层）")
-        self.lbl_layers.setStyleSheet("color:#888;font-size:12px;")
+        self.lbl_layers.setStyleSheet(f"color:{Gray2.name()};font-size:12px;")
         ll.addWidget(self.lbl_layers)
 
         g = QGridLayout()
@@ -1381,7 +1367,7 @@ class PCLPetWizard(SiliconDialog):
         le.setPlaceholderText("图片文件")
         b = QPushButton("选择…")
         b.setFixedWidth(70)
-        del_btn = QPushButton("×")
+        del_btn = QPushButton("✕")
         del_btn.setFixedWidth(30)
 
         def pick():
@@ -1414,18 +1400,18 @@ class PCLPetWizard(SiliconDialog):
         d = self.ed_layer_dir.text().strip()
         idxs = find_index_files(d)
         if not idxs:
-            self.lbl_layers.setText(" 这个文件夹里没找到图层索引 txt（应形如 <前缀>a.txt）")
+            self.lbl_layers.setText("❌ 这个文件夹里没找到图层索引 txt（应形如 <前缀>a.txt）")
             return
         idx = idxs[0]
         layers = parse_layer_index(idx)
         self._layers = layers
         if not layers:
-            self.lbl_layers.setText(f" 索引读取失败或没有图层：{os.path.basename(idx)}")
+            self.lbl_layers.setText(f"❌ 索引读取失败或没有图层：{os.path.basename(idx)}")
             return
         base = os.path.basename(idx)
         if not self.ed_prefix.text().strip():
             self.ed_prefix.setText(base[:-5] if base.endswith("a.txt") else os.path.splitext(base)[0])
-        self.lbl_layers.setText(f" {base}：共 {len(layers)} 个图层")
+        self.lbl_layers.setText(f"✅ {base}：共 {len(layers)} 个图层")
         names = [f"{l['name']}（ID {l['id']}）" for l in layers]
         for cb in [self.cb_emo_default] + list(self._emo_combos.values()):
             cb.clear()
@@ -1465,7 +1451,7 @@ class PCLPetWizard(SiliconDialog):
         self.cmb_preview_set_here.currentIndexChanged.connect(self._on_preview_set_here)
         _gsh.addWidget(self.cmb_preview_set_here)
         _ghint = QLabel("没有两套素材的角色不会出现这个选项，也不会有 a/b 切换。")
-        _ghint.setStyleSheet("color:#888;font-size:11px;")
+        _ghint.setStyleSheet(f"color:{Gray2.name()};font-size:11px;")
         _gsh.addWidget(_ghint)
         lay.addWidget(self.gb_sets_here)
 
@@ -1477,9 +1463,9 @@ class PCLPetWizard(SiliconDialog):
         self.emo_portrait_layout.setContentsMargins(0, 0, 0, 0)
         _gpe.addWidget(self.emo_portrait_host)
         _pr = QHBoxLayout()
-        _b1 = QPushButton(" 添加表情")
+        _b1 = QPushButton("➕ 添加表情")
         _b1.clicked.connect(lambda: self._emo_edit_add())
-        _b2 = QPushButton(" 读取现有表情")
+        _b2 = QPushButton("🔄 读取现有表情")
         _b2.clicked.connect(self._emo_edit_load)
         _pr.addWidget(_b1); _pr.addWidget(_b2); _pr.addStretch()
         _gpe.addLayout(_pr)
@@ -1499,7 +1485,7 @@ class PCLPetWizard(SiliconDialog):
             cb.addItem("（不使用）", 0)
             for l in getattr(self, "_layers", []):
                 cb.addItem(f"{l['name']}（ID {l['id']}）", l["id"])
-        del_btn = QPushButton("×")
+        del_btn = QPushButton("✕")
         del_btn.setFixedWidth(30)
 
         def remove():
@@ -1523,7 +1509,7 @@ class PCLPetWizard(SiliconDialog):
         cb.addItem("（不使用）", 0)
         for l in getattr(self, "_layers", []):
             cb.addItem(f"{l['name']}（ID {l['id']}）", l["id"])
-        del_btn = QPushButton("×")
+        del_btn = QPushButton("✕")
         del_btn.setFixedWidth(30)
 
         def remove():
@@ -1551,7 +1537,7 @@ class PCLPetWizard(SiliconDialog):
         tip = QLabel("· 选中的模型会连同同目录/子目录的贴图、动作、表情一起复制进角色包 live2d/；\n"
                      "· 桌宠运行时「长按 Shift 2 秒」可在 2D 立绘与 Live2D 之间切换；\n"
                      "· 需要安装 live2d-py 与 PyOpenGL 依赖（启动器首次启动会提示）。")
-        tip.setStyleSheet("color:#888;font-size:12px;")
+        tip.setStyleSheet(f"color:{Gray2.name()};font-size:12px;")
         lay.addWidget(tip)
         lay.addStretch()
         return w
@@ -1569,8 +1555,8 @@ class PCLPetWizard(SiliconDialog):
 
         # ① 显示方式（2D 立绘 / Live2D 模型）
         top = QHBoxLayout()
-        self.rb_disp_2d = QRadioButton(" 2D 立绘显示")
-        self.rb_disp_lv = QRadioButton(" Live2D 模型显示")
+        self.rb_disp_2d = QRadioButton("🖼 2D 立绘显示")
+        self.rb_disp_lv = QRadioButton("🎭 Live2D 模型显示")
         self._disp_group = QButtonGroup(self)
         self._disp_group.addButton(self.rb_disp_2d, 0)
         self._disp_group.addButton(self.rb_disp_lv, 1)
@@ -1580,13 +1566,13 @@ class PCLPetWizard(SiliconDialog):
         top.addWidget(self.rb_disp_2d)
         top.addWidget(self.rb_disp_lv)
         top.addStretch()
-        self.btn_open_studio = QPushButton(" 打开立绘工坊（换装 / 表情）")
+        self.btn_open_studio = QPushButton("🎨 打开立绘工坊（换装 / 表情）")
         self.btn_open_studio.clicked.connect(self._open_studio)
         top.addWidget(self.btn_open_studio)
         lay.addLayout(top)
 
         self.lbl_disp_tip = QLabel("")
-        self.lbl_disp_tip.setStyleSheet("color:#888;font-size:12px;")
+        self.lbl_disp_tip.setStyleSheet(f"color:{Gray2.name()};font-size:12px;")
         self.lbl_disp_tip.setWordWrap(True)
         lay.addWidget(self.lbl_disp_tip)
 
@@ -1636,12 +1622,12 @@ class PCLPetWizard(SiliconDialog):
         self.cmb_wiz_cloth = QComboBox()
         self.cmb_wiz_cloth.currentIndexChanged.connect(self._on_wiz_cloth_changed)
         gcl.addWidget(self.cmb_wiz_cloth)
-        self.btn_cloth_tune = QPushButton(" 服装位置 / 大小微调…")
+        self.btn_cloth_tune = QPushButton("👗 服装位置 / 大小微调…")
         self.btn_cloth_tune.clicked.connect(self._open_layer_tune)
         gcl.addWidget(self.btn_cloth_tune)
         l2.addWidget(self.gb_wiz_cloth)
 
-        self.btn_layer_tune = QPushButton(" 表情 / 装饰 / 基础 位置微调…")
+        self.btn_layer_tune = QPushButton("🧩 表情 / 装饰 / 基础 位置微调…")
         self.btn_layer_tune.clicked.connect(self._open_layer_tune)
         l2.addWidget(self.btn_layer_tune)
 
@@ -1653,9 +1639,9 @@ class PCLPetWizard(SiliconDialog):
         self.emo_edit_layout.setContentsMargins(0, 0, 0, 0)
         ge.addWidget(self.emo_edit_host)
         brow = QHBoxLayout()
-        self.btn_emo_add = QPushButton(" 添加表情")
+        self.btn_emo_add = QPushButton("➕ 添加表情")
         self.btn_emo_add.clicked.connect(self._emo_edit_add)
-        self.btn_emo_reload = QPushButton(" 读取现有表情")
+        self.btn_emo_reload = QPushButton("🔄 读取现有表情")
         self.btn_emo_reload.clicked.connect(self._emo_edit_load)
         brow.addWidget(self.btn_emo_add); brow.addWidget(self.btn_emo_reload)
         brow.addStretch()
@@ -1689,10 +1675,10 @@ class PCLPetWizard(SiliconDialog):
                 pass
         llv.addWidget(gb)
         self.lbl_lv_info = QLabel("")
-        self.lbl_lv_info.setStyleSheet("color:#888;font-size:12px;")
+        self.lbl_lv_info.setStyleSheet(f"color:{Gray2.name()};font-size:12px;")
         self.lbl_lv_info.setWordWrap(True)
         llv.addWidget(self.lbl_lv_info)
-        self.btn_l2d_win = QPushButton(" 打开 Live2D 实时预览窗口")
+        self.btn_l2d_win = QPushButton("🎭 打开 Live2D 实时预览窗口")
         self.btn_l2d_win.setMinimumHeight(36)
         self.btn_l2d_win.clicked.connect(self._open_l2d_window)
         llv.addWidget(self.btn_l2d_win)
@@ -1719,7 +1705,7 @@ class PCLPetWizard(SiliconDialog):
         self.sld_box_h = QSlider(Qt.Horizontal); self.sld_box_h.setRange(8, 70)
         self.sld_font = QSlider(Qt.Horizontal); self.sld_font.setRange(50, 250)
         self.lbl_font_px = QLabel("")
-        self.lbl_font_px.setStyleSheet("color:#888;font-size:11px;")
+        self.lbl_font_px.setStyleSheet(f"color:{Gray2.name()};font-size:11px;")
         for lab, wid in (("对话框宽度", self.sld_box_w), ("对话框高度", self.sld_box_h),
                          ("字号", self.sld_font)):
             rr = QHBoxLayout()
@@ -1729,7 +1715,7 @@ class PCLPetWizard(SiliconDialog):
         for wid in (self.sld_box_w, self.sld_box_h, self.sld_font):
             wid.valueChanged.connect(self._on_display_slider)
         col.addWidget(self.gb_box)
-        _rb = QPushButton(" 恢复默认（当前显示方式）")
+        _rb = QPushButton("♻ 恢复默认（当前显示方式）")
         _rb.setToolTip("把当前显示方式（2D 或 Live2D）的大小、位置、对话框区域、字号恢复默认")
         _rb.clicked.connect(self._reset_display_defaults)
         col.addWidget(_rb)
@@ -1792,7 +1778,7 @@ class PCLPetWizard(SiliconDialog):
             self.sld_box_h.setValue(int(float(tb[3]) * 100))
             self.sld_font.setValue(int(float(d.get("font_scale", 1.0)) * 100))
         except Exception as e:
-            print(f"[Wizard]  绑定显示控件失败: {e}")
+            print(f"[Wizard] ⚠ 绑定显示控件失败: {e}")
         for x in wid:
             try:
                 x.blockSignals(False)
@@ -1811,7 +1797,7 @@ class PCLPetWizard(SiliconDialog):
             self.hint.setText(f"已把「{'2D 立绘' if mode == '2d' else 'Live2D'}」的设置恢复默认")
             print(f"[Wizard] 显示设置已恢复默认: {mode}")
         except Exception as e:
-            print(f"[Wizard]  恢复默认失败: {e}")
+            print(f"[Wizard] ⚠ 恢复默认失败: {e}")
 
     def _write_back_disp(self, mode=None):
         """把控件值写回指定模式（默认当前模式）。切模式时必须显式传旧模式，
@@ -1835,7 +1821,7 @@ class PCLPetWizard(SiliconDialog):
                              round(self.sld_box_h.value() / 100.0, 3)]
             d["font_scale"] = round(self.sld_font.value() / 100.0, 2)
         except Exception as e:
-            print(f"[Wizard]  保存显示设置失败: {e}")
+            print(f"[Wizard] ⚠ 保存显示设置失败: {e}")
 
     def _on_disp_mode_changed(self, mode: str):
         try:
@@ -1848,7 +1834,7 @@ class PCLPetWizard(SiliconDialog):
             self._refresh_display_preview()
             # 不再自动弹 Live2D 预览窗口（只在用户点按钮时才开 → 避免突然冒出个窗口）
         except Exception as e:
-            print(f"[Wizard]  切换显示方式失败: {e}")
+            print(f"[Wizard] ⚠ 切换显示方式失败: {e}")
 
     def _on_two_sets_toggled_here(self, on: bool):
         self._on_two_sets_toggled(on)
@@ -1907,7 +1893,7 @@ class PCLPetWizard(SiliconDialog):
             self.lbl_font_px.setText(
                 f"实际字号 ≈ {px}px（桌宠按对话框宽度自动换算；此角色约 {area_w}px 宽）")
         except Exception as e:
-            print(f"[Wizard]  计算字号失败: {e}")
+            print(f"[Wizard] ⚠ 计算字号失败: {e}")
 
     def _set_text_box_pos(self, x: float, y: float):
         self.disp_preview.set_box(x, y, self.disp_preview.bw, self.disp_preview.bh)
@@ -1921,17 +1907,17 @@ class PCLPetWizard(SiliconDialog):
             from pets.pet_registry import get_live2d_model_json
             mj = get_live2d_model_json(self.pet_id) if self.pet_id else ""
             if not mj:
-                self.hint.setText(" 该角色没有可用的 Live2D 模型文件")
+                self.hint.setText("⚠ 该角色没有可用的 Live2D 模型文件")
                 return
-            w = open_live2d_window(mj, None)
-            self.hint.setText(" 已在新窗口打开 Live2D 实时预览" if w else " 打开失败（看日志）")
+            w = open_live2d_window(mj, None, pet_id=self.pet_id or None)
+            self.hint.setText("🎭 已在新窗口打开 Live2D 实时预览" if w else "⚠ 打开失败（看日志）")
         except Exception as e:
-            self.hint.setText(f" 打开失败：{e}")
+            self.hint.setText(f"⚠ 打开失败：{e}")
 
     def _open_studio(self):
         """打开立绘工坊（换装 / 表情 / Live2D 预览）
 
-         以前挂在「当前激活窗口」上并把它当父窗口 → 会开出第二个工坊、还可能被
+        ⚠ 以前挂在「当前激活窗口」上并把它当父窗口 → 会开出第二个工坊、还可能被
         向导盖住，而且没带角色 ID（编辑新角色时预览的是活动角色）。现在统一挂到
         启动器外壳上、按本向导的角色打开（与桌宠目录里的「立绘工坊」同一套逻辑）。
         """
@@ -1990,7 +1976,7 @@ class PCLPetWizard(SiliconDialog):
                 except Exception:
                     pass
         except Exception as e:
-            print(f"[Wizard]  打开立绘工坊失败: {e}")
+            print(f"[Wizard] ⚠ 打开立绘工坊失败: {e}")
 
     def _emo_edit_row(self, name: str, path: str):
         row = QWidget()
@@ -2003,7 +1989,7 @@ class PCLPetWizard(SiliconDialog):
         le.setPlaceholderText("图片文件")
         pb = QPushButton("选择…")
         pb.setFixedWidth(60)
-        db = QPushButton("×")
+        db = QPushButton("✕")
         db.setFixedWidth(28)
         db.setToolTip("删除这个表情")
 
@@ -2065,7 +2051,7 @@ class PCLPetWizard(SiliconDialog):
                         _seen.add(str(emo))
                         self._emo_edit_row(str(emo), p)
         except Exception as e:
-            print(f"[Wizard]  读取现有表情失败: {e}")
+            print(f"[Wizard] ⚠ 读取现有表情失败: {e}")
         self._refresh_display_preview()
 
     def _emo_edit_values(self) -> dict:
@@ -2089,7 +2075,7 @@ class PCLPetWizard(SiliconDialog):
                 pass
             self._refresh_display_preview()
         except Exception as e:
-            print(f"[Wizard]  打开图层微调失败: {e}")
+            print(f"[Wizard] ⚠ 打开图层微调失败: {e}")
 
     def _cloth_options(self) -> list:
         """该角色的服装（有服装才显示；单图 / 纯 Live2D 角色为空）"""
@@ -2117,7 +2103,7 @@ class PCLPetWizard(SiliconDialog):
                     out = [(str(x[0]), int(x[1]), int(x[2]))
                            for x in ((d.get("clothes") or {}).get(act) or [])]
         except Exception as e:
-            print(f"[Wizard]  枚举服装失败: {e}")
+            print(f"[Wizard] ⚠ 枚举服装失败: {e}")
         self._cloth_cache = out
         return out
 
@@ -2139,7 +2125,7 @@ class PCLPetWizard(SiliconDialog):
             QTimer.singleShot(1500, self._refresh_display_preview)
             self.hint.setText(f"已选择默认服装：{name}（立绘工坊同步）")
         except Exception as e:
-            print(f"[Wizard]  保存默认服装失败: {e}")
+            print(f"[Wizard] ⚠ 保存默认服装失败: {e}")
 
     def _ensure_two_sets_state(self):
         """自动检测角色有几套立绘：只有两套才给 a/b 的调节与切换入口"""
@@ -2173,11 +2159,11 @@ class PCLPetWizard(SiliconDialog):
                         self.cmb_preview_set_here.blockSignals(False)
                         break
             except Exception as _e:
-                print(f"[Wizard]  立绘页两套配置同步失败: {_e}")
+                print(f"[Wizard] ⚠ 立绘页两套配置同步失败: {_e}")
             self._disp().setdefault("2d", {})["sets"] = ["a", "b"] if two else ["a"]
             print(f"[Wizard] 立绘套数检测: {sets or '（无）'} → 两套={two}")
         except Exception as e:
-            print(f"[Wizard]  检测立绘套数失败: {e}")
+            print(f"[Wizard] ⚠ 检测立绘套数失败: {e}")
 
     def _preview_image(self) -> QPixmap:
         """预览立绘：拼合立绘走 runtime venv 真实合成（含待应用的图层微调）"""
@@ -2227,7 +2213,7 @@ class PCLPetWizard(SiliconDialog):
                     else:
                         os.environ[k] = v
         except Exception as e:
-            print(f"[Wizard]  拼合预览失败: {e}")
+            print(f"[Wizard] ⚠ 拼合预览失败: {e}")
         try:
             from pets.pet_registry import get_fgimages_dir, get_fgimages_prefix
             d = get_fgimages_dir(self.pet_id) if self.pet_id else ""
@@ -2287,27 +2273,11 @@ class PCLPetWizard(SiliconDialog):
                 if is_single and not getattr(self, "_emo_edit_rows", []):
                     self._emo_edit_load()
             except Exception as _e:
-                print(f"[Wizard]  表情区刷新失败: {_e}")
+                print(f"[Wizard] ⚠ 表情区刷新失败: {_e}")
             v = self._display_values()
             self.disp_preview.set_mode(mode)
             # 几何类调节走缓存（不重新合成 → 丝滑）；只有内容变化才重合成
             self.disp_preview.set_params(v, self._cached_preview() if mode == "2d" else QPixmap())
-            # 桌宠窗口的真实宽度 = 稳定画布（这套里最宽的那种外观）→ 同步给预览
-            try:
-                from tool.portrait_geom import canvas_size_for
-                from pets.pet_registry import get_active_pet_id
-                _pid = getattr(self, "pet_id", None) or getattr(self, "_pet_id", None) or get_active_pet_id()
-                _set = str(getattr(self, "sets", None) and (self.sets[0] if self.sets else "a") or "a")[-1:]
-                _th = int(1080 * (float(v.get("height_ratio") or 0.45)))
-                _extra = []
-                for _k in ("hair", "emotion"):
-                    _val = v.get(_k)
-                    if str(_val or "").strip().isdigit():
-                        _extra.append(int(_val))
-                _cw, _ch = canvas_size_for(_pid, _set, max(120, _th), _extra)
-                self.disp_preview.set_canvas_wh(_cw, _ch)
-            except Exception as _e:
-                print(f"[Wizard]  预览画布尺寸计算失败: {_e}")
             cloths = self._cloth_options()
             try:
                 self.gb_wiz_cloth.setVisible(bool(cloths) and mode == "2d")
@@ -2328,7 +2298,7 @@ class PCLPetWizard(SiliconDialog):
                                 break
                     self.cmb_wiz_cloth.blockSignals(False)
             except Exception as e:
-                print(f"[Wizard]  服装栏刷新失败: {e}")
+                print(f"[Wizard] ⚠ 服装栏刷新失败: {e}")
             try:
                 self.btn_layer_tune.setVisible(mode == "2d")
                 self.lbl_disp_tip.setText(
@@ -2340,7 +2310,7 @@ class PCLPetWizard(SiliconDialog):
             except Exception:
                 pass
         except Exception as e:
-            print(f"[Wizard]  刷新显示预览失败: {e}")
+            print(f"[Wizard] ⚠ 刷新显示预览失败: {e}")
 
 
     # ── 步骤 6：语音 ──
@@ -2353,12 +2323,14 @@ class PCLPetWizard(SiliconDialog):
         tip = QLabel("· 开启后，鼠标点到身上对应区域并拖动（抚摸）或轻点，桌宠都会回应；\n"
                      "· 九个部位的范围可以自由调整大小与位置：点下面按钮打开编辑器，\n"
                      "  在立绘上直接拖框（Live2D 角色会把框画在实时预览窗口上面，边看边调）。")
-        tip.setStyleSheet("color:#888;font-size:12px;")
+        tip.setStyleSheet(f"color:{Gray2.name()};font-size:12px;")
         tip.setWordWrap(True)
         lay.addWidget(tip)
 
         self.chk_touch = QCheckBox("启用全身触摸互动（头 / 胸口 / 小腹 / 下体 / 大腿 / 小腿 / 脚 / 胳膊 / 手掌）")
-        self.chk_touch.setChecked(True)
+        # 默认**不勾**：触摸区域是逐角色调的，没做过的角色不该凭空开
+        # （下面几行会用该角色真实的 touch_enabled 覆盖一次）
+        self.chk_touch.setChecked(False)
         lay.addWidget(self.chk_touch)
 
         gb = QGroupBox("部位区域（可在编辑器里拖动/缩放 / 增删，保存后桌宠立刻生效）")
@@ -2370,27 +2342,33 @@ class PCLPetWizard(SiliconDialog):
             _names = "头、胸口、小腹、下体、大腿、小腿、脚、胳膊、手掌"
         row = QLabel(_names)
         row.setWordWrap(True)
-        row.setStyleSheet("color:#9a9aa8;font-size:12px;")
+        row.setStyleSheet(f"color:{Gray2.name()};font-size:12px;")
         gv.addWidget(row)
-        btn = QPushButton(" 打开「触摸区域调节」界面（拖动框调整位置/大小）")
+        btn = QPushButton("🎯 打开「触摸区域调节」界面（拖动框调整位置/大小）")
         btn.setMinimumHeight(38)
         btn.clicked.connect(self._open_touch_editor)
         gv.addWidget(btn)
         self.lbl_touch_state = QLabel("")
-        self.lbl_touch_state.setStyleSheet("color:#8fd18f;font-size:12px;")
+        self.lbl_touch_state.setStyleSheet(f"color:{ok_text().name()};font-size:12px;")
         self.lbl_touch_state.setWordWrap(True)
         gv.addWidget(self.lbl_touch_state)
         lay.addWidget(gb)
         lay.addStretch()
         try:
-            from tool.touch_areas import touch_enabled, get_pet_areas
-            self.chk_touch.setChecked(bool(touch_enabled(getattr(self, "pet_id", None))))
-            from tool.touch_areas import custom_keys as _ck
+            from tool.touch_areas import touch_enabled, get_pet_areas, has_areas
             _pid = getattr(self, "pet_id", None)
+            _configured = bool(has_areas(_pid))
+            self.chk_touch.setChecked(bool(touch_enabled(_pid)))
+            from tool.touch_areas import custom_keys as _ck
             _n = len(get_pet_areas(_pid))
             _c = len(_ck(_pid))
-            self.lbl_touch_state.setText(
-                f"当前已有 {_n} 个部位区域" + (f"（其中自定义 {_c} 个，可在编辑器里删）" if _c else ""))
+            if _configured:
+                self.lbl_touch_state.setText(
+                    f"当前已有 {_n} 个部位区域" + (f"（其中自定义 {_c} 个，可在编辑器里删）" if _c else ""))
+            else:
+                self.lbl_touch_state.setText(
+                    "这个角色还没配过触摸区域 → 默认不启用（照旧：摸头 / 点下半身开输入框）。\n"
+                    f"想让身体部位能摸，点上面「调节触摸区域」把 {_n} 个框拖到她的身上并保存，即为该角色开启。")
         except Exception:
             pass
         return w
@@ -2401,9 +2379,7 @@ class PCLPetWizard(SiliconDialog):
             from pcl_launcher.touch_editor import TouchAreaEditor
             pid = getattr(self, "pet_id", None)
             if not pid:
-                QMessageBox.information(
-                    self, "触摸区域调节",
-                    "新建中的角色还没有保存，触摸区域要在角色创建完成后再调。\n"
+                page_msg(self, "触摸区域调节", "新建中的角色还没有保存，触摸区域要在角色创建完成后再调。\n"
                     "先走完向导点「完成」，再回到这一步打开编辑器即可。")
                 return
             ed = getattr(self, "_touch_editor", None)
@@ -2417,20 +2393,20 @@ class PCLPetWizard(SiliconDialog):
                 self._touch_editor = ed
             ed.show(); ed.raise_(); ed.activateWindow()
             try:
-                ed.saved.connect(lambda _p: self.lbl_touch_state.setText(" 触摸区域已保存"))
+                ed.saved.connect(lambda _p: self.lbl_touch_state.setText("✅ 触摸区域已保存"))
             except Exception:
                 pass
         except Exception as e:
-            print(f"[Wizard]  打开触摸编辑器失败: {e}")
-            QMessageBox.warning(self, "触摸区域调节", f"打开失败：{e}")
+            print(f"[Wizard] ⚠ 打开触摸编辑器失败: {e}")
+            page_msg(self, "触摸区域调节", f"打开失败：{e}")
 
     def _page_voice(self):
         w = QWidget()
         lay = QVBoxLayout(w)
 
-        g1 = QGroupBox("日语语音（GPT-SoVITS 逐句合成 · 音色=日语参考音频 · 语气=情绪）")
+        g1 = QGroupBox("短语音（日语 · GPT-SoVITS 逐句短句 · 音色=参考音频，语气=情绪）")
         l1 = QVBoxLayout(g1)
-        self.chk_short = QCheckBox("启用日语语音（桌宠说话发声）")
+        self.chk_short = QCheckBox("启用短语音（桌宠说话发声）")
         l1.addWidget(self.chk_short)
         r1 = QHBoxLayout()
         self.ed_short_dir = QLineEdit()
@@ -2454,9 +2430,9 @@ class PCLPetWizard(SiliconDialog):
         l1.addWidget(QLabel("不填则使用角色自带/默认（无参考音频时不会发声，不影响文字聊天）"))
         lay.addWidget(g1)
 
-        g2 = QGroupBox("汉语语音（中文参考音频 · 音色=参考音频）")
+        g2 = QGroupBox("长语音（中文 · F5-TTS 长文本朗读 · 音色=参考音频）")
         l2 = QVBoxLayout(g2)
-        self.chk_long = QCheckBox("启用汉语语音（中文录音当音色参考）")
+        self.chk_long = QCheckBox("启用长语音（长文本模式 / 大段朗读）")
         l2.addWidget(self.chk_long)
         r3 = QHBoxLayout()
         self.ed_long_ref = QLineEdit()
@@ -2472,9 +2448,9 @@ class PCLPetWizard(SiliconDialog):
         l2.addWidget(self.ed_long_text)
         lay.addWidget(g2)
 
-        tip = QLabel("说明：两种模式念的都是【中文】，区别只是用哪套录音当音色参考；"
-                     "日语语音=日语原声（更接近原作），汉语语音=中文录音。随时可在设置里切换。")
-        tip.setStyleSheet("color:#888;font-size:12px;")
+        tip = QLabel("说明：短语音合成的是【日语】（推理时用日语参考音频，情绪按台词语气切换）；\n"
+                     "长语音合成的是【中文】（长文本模式整段朗读）。两者都可以不配，随时在设置里改。")
+        tip.setStyleSheet(f"color:{Gray2.name()};font-size:12px;")
         lay.addWidget(tip)
         lay.addStretch()
         return w
@@ -2546,9 +2522,9 @@ class PCLPetWizard(SiliconDialog):
         self.lbl_summary.setWordWrap(True)
         self.lbl_summary.setTextFormat(Qt.RichText)
         lay.addWidget(self.lbl_summary)
-        tip = QLabel("创建后：桌宠卡片会出现这个角色 → 点「 设为活动」→ 启动桌宠即可。\n"
-                     "之后想改任何一项，点卡片上的「 设置」重新进入本向导。")
-        tip.setStyleSheet("color:#888;font-size:12px;")
+        tip = QLabel("创建后：桌宠卡片会出现这个角色 → 点「⭐ 设为活动」→ 启动桌宠即可。\n"
+                     "之后想改任何一项，点卡片上的「⚙ 设置」重新进入本向导。")
+        tip.setStyleSheet(f"color:{Gray2.name()};font-size:12px;")
         lay.addWidget(tip)
         lay.addStretch()
         return w
@@ -2570,9 +2546,9 @@ class PCLPetWizard(SiliconDialog):
                                    f"前缀 {s.get('fgimages_prefix') or '（未填）'}"))
         else:
             rows.append(("Live2D 模型", os.path.basename(s.get("live2d_src") or "（未选）")))
-        rows.append(("日语语音", f"启用，{len(s.get('short_voice_emotions') or []) or ('单一音色' if s.get('short_voice_single') else 0)} 个情绪"
+        rows.append(("短语音(日语)", f"启用，{len(s.get('short_voice_emotions') or []) or ('单一音色' if s.get('short_voice_single') else 0)} 个情绪"
                                  if (s.get("short_voice_dir") or s.get("short_voice_single")) else "未配置"))
-        rows.append(("汉语语音", "使用自定义参考音频" if s.get("long_ref_src") else "使用默认参考音频"))
+        rows.append(("长语音(中文)", "使用自定义参考音频" if s.get("long_ref_src") else "使用默认参考音频"))
         rows.append(("人设字数", f"短 {len(s.get('prompt_short') or '')} 字 / 长 {len(s.get('prompt_long') or '')} 字"))
         html = "<b>即将创建/保存：</b><br>" + "<br>".join(f"· {k}：{v}" for k, v in rows)
         self.lbl_summary.setText(html)
@@ -2618,7 +2594,7 @@ class PCLPetWizard(SiliconDialog):
             s["display_height_ratio"] = (dl.get("height_ratio") if s["display_mode"] == "live2d"
                                          else d2.get("height_ratio"))
         except Exception as e:
-            print(f"[Wizard]  读取显示设置失败: {e}")
+            print(f"[Wizard] ⚠ 读取显示设置失败: {e}")
         # 图层微调（对话框里刚改过就先用待应用的；否则沿用角色已有配置）
         try:
             pend = getattr(self, "_pending_layer_adjust", None)
@@ -2714,9 +2690,10 @@ class PCLPetWizard(SiliconDialog):
             self._goto(0)
             return
         if s["kind"] == "2d" and s["portrait_mode"] == "single" and not s["emotion_images"]:
-            if not QMessageBox.question(self, "还没有立绘",
-                                        "你还没有为任何表情选择图片。\n没有立绘时桌宠也可以聊天，"
-                                        "但不会显示形象。\n仍要继续吗？") == QMessageBox.Yes:
+            if not page_confirm(self, "还没有立绘",
+                                "你还没有为任何表情选择图片。",
+                                "没有立绘时桌宠也可以聊天，但不会显示形象。仍要继续吗？",
+                                ok_text="继续创建", danger=False):
                 return
         try:
             _pid, notes = create_or_update_pet(s)
@@ -2726,8 +2703,8 @@ class PCLPetWizard(SiliconDialog):
             return
         self._spec = s
         msg = "\n".join(notes) or "已保存"
-        QMessageBox.information(self, "完成", f"「{s['name']}」已{'保存' if self.is_edit else '创建'}！\n\n{msg}\n\n"
-                                              "下一步：在桌宠卡片点「 设为活动」，再启动桌宠。")
+        page_msg(self, "完成", f"「{s['name']}」已{'保存' if self.is_edit else '创建'}！\n\n{msg}\n\n"
+                                              "下一步：在桌宠卡片点「⭐ 设为活动」，再启动桌宠。")
         self.saved.emit(_pid)
         self.accept()
 
@@ -2748,7 +2725,7 @@ class PCLPetWizard(SiliconDialog):
             p = os.path.join(pets_dir(), self.pet_id, av)
             self.ed_avatar.setText(p if os.path.exists(p) else av)
         m = cfg.get("model") or {}
-        #  以前只要角色「有 Live2D 模型」就勾 Live2D → 打开桌宠设置总是进 Live2D 界面，
+        # ⚠ 以前只要角色「有 Live2D 模型」就勾 Live2D → 打开桌宠设置总是进 Live2D 界面，
         #   2D 立绘的步骤被跳过。现在按 pet.json 的 model.default 决定（有 2D 素材就默认 2D）。
         try:
             from pets.pet_registry import get_fgimages_dir
@@ -2760,7 +2737,7 @@ class PCLPetWizard(SiliconDialog):
                 self.rb_2d.setChecked(True)
             print(f"[Wizard] 编辑 {self.pet_id}: default={_def} 有2D素材={has_fg}")
         except Exception as e:
-            print(f"[Wizard]  判断显示方式失败: {e}")
+            print(f"[Wizard] ⚠ 判断显示方式失败: {e}")
         self.ed_prefix.setText(str(m.get("fgimages_prefix") or self.pet_id))
         try:
             l2d_dir = os.path.join(pets_dir(), self.pet_id, str(m.get("live2d_dir") or "live2d"))
@@ -2853,7 +2830,7 @@ class PCLPetWizard(SiliconDialog):
             self._bind_disp_widgets()
             self._refresh_display_preview()
         except Exception as e:
-            print(f"[Wizard]  回填显示设置失败: {e}")
+            print(f"[Wizard] ⚠ 回填显示设置失败: {e}")
 
 
     def _apply_portrait_block(self, pt: dict):
