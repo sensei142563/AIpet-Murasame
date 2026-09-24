@@ -84,6 +84,16 @@ class EmotionManager:
         """应用单个 exp3 预设（按文件名；model3.json 未登记表情时用 LoadExtraExpression 运行时注册）"""
         exp_path = os.path.join(self.exp_dir, fname)
         if not os.path.exists(exp_path):
+            # ⚠ 别静默跳过：配了却找不到文件（例如角色没有 exp 目录、或映射写的是别人的文件名）
+            #   以前这里直接 return，表情"永远不生效"却一点提示都没有（用户报"Live2D 换不了表情"）。
+            #   只对同一个文件名报一次，避免每句刷屏。
+            _warned = getattr(self, "_exp_missing_warned", None)
+            if _warned is None:
+                _warned = self._exp_missing_warned = set()
+            if fname not in _warned:
+                _warned.add(fname)
+                print(f"[Live2D] ⚠ 表情文件不存在：{exp_path}"
+                      f"（这个表情不会生效，检查 pet.json 的 model.emotions 或角色是否缺 exp 目录）")
             return
         try:
             self.model.LoadExtraExpression(fname, exp_path)

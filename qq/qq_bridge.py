@@ -319,7 +319,9 @@ class QQBotBridge:
     def __init__(self):
         self.cfg = get_qq_config()
         self.ws_url = self.cfg["ws_url"]
-        self.napcat_token = self.cfg.get("napcat_token", "")
+        # ⚠ 这里**不要**再存一份 self.napcat_token：它在 __init__ 只读一次、不会自动发现，
+        #   鉴权统一走 self._napcat_token()（config 优先 + 缺省时从 NapCat 配置里读）。
+        #   以前留着的那个属性只写不读（交接文档里挂着的清理项，2026-09-24 确认后删掉）。
         self.ws = None
         self.running = False
         self.self_id = None  # 登录的 QQ 号（识别是否自己发的消息）
