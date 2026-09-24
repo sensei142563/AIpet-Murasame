@@ -738,7 +738,7 @@ class QQBotBridge:
             "action": "set_online_status",
             "params": {"status": int(status), "ext_status": 0, "battery_status": 0},
             "echo": f"status_{uuid.uuid4().hex[:8]}",
-        }, label="状态设置 ")
+        }, label="状态设置 ", count_fail=False)
 
     def _wake_from_offline(self):
         """主人来消息 → 恢复在线状态并清除离线标志"""
@@ -1099,7 +1099,7 @@ class QQBotBridge:
             "action": "get_group_info",
             "params": {"group_id": int(group_id)},
             "echo": f"grpname_{gid}",
-        }, label="群名查询 ")
+        }, label="群名查询 ", count_fail=False)
 
     def _group_display_name(self, group_id) -> str:
         """群显示名：缓存群名优先，未知名用群号兜底"""
@@ -1161,6 +1161,10 @@ class QQBotBridge:
         核心判据：get_status 的 online 字段（QQ 真掉线时为 false，
         而 get_login_info 在掉线后仍会成功返回缓存的登录信息，不可靠）。"""
         now = time.time()
+        # 还没连上就别探：启动瞬间的第一次 tick 会在建连前发出探针，
+        # 失败后打出"活性探测 发送失败 / 1 次回复未送达"这种吓人的假警报（用户日志里就有）。
+        if not getattr(self, "running", False) or self.ws is None:
+            return
         # 无在途探针且距上次 >=50s → 发探针(get_status)
         if self._health_pending == 0 and now - self._last_recover_ts >= 50:
             self._health_seq += 1
@@ -1169,7 +1173,7 @@ class QQBotBridge:
                 _sent = self._safe_send({
                     "action": "get_status",
                     "echo": f"health_{self._health_seq}",
-                }, label="活性探测 ")
+                }, label="活性探测 ", count_fail=False)
                 if not _sent:
                     # WS 未连接/发送失败(重连中) → 不计失败，等重连后再探
                     self._health_pending = 0
@@ -1816,7 +1820,7 @@ class QQBotBridge:
                                 "action": "get_stranger_info",
                                 "params": {"user_id": int(_m)},
                                 "echo": f"mstnick_{_m}",
-                            }, label="主人昵称查询 ")
+                            }, label="主人昵称查询 ", count_fail=False)
                         except Exception:
                             pass
                 except Exception:
@@ -2463,23 +2467,33 @@ class QQBotBridge:
             print(f"[QQBridge] ⚠ 群指令回复失败: {e}")
 
     # ===== 断线安全的发送 =====
-    def _safe_send(self, payload: dict, label: str = "") -> bool:
+    def _safe_send(self, payload: dict, label: str = "", count_fail: bool = True) -> bool:
         """
         向 NapCat 发送一条 API 调用。断线/重连窗口内 self.ws 可能已关闭或为 None：
         发送失败不抛异常冒泡（会被调度线程吞掉造成丢消息），而是提示并计数返回 False。
+
+        count_fail 只对**真正的回复**用（默认 True）—— 它决定失败是否计入
+        「断线期间 N 次回复未送达」。控制类调用（活性探测 / 查群名 / 查昵称 /
+        改在线状态）不算"回复"，否则每次启动都会看到一句吓人的
+        「已重新连接（此前断线期间 1 次回复未送达，请对方重发）」，其实一条都没丢。
         """
         if self.ws is None:
-            self._send_fail_count += 1
-            print(f"[QQBridge] ⚠ {label}发送失败：连接尚未建立（累计 {self._send_fail_count} 次发送失败）")
+            if count_fail:
+                self._send_fail_count += 1
+                print(f"[QQBridge] ⚠ {label}发送失败：连接尚未建立"
+                      f"（累计 {self._send_fail_count} 次回复未送达）")
             return False
         try:
             with self._lock:
                 self.ws.send(json.dumps(payload, ensure_ascii=False))
             return True
         except Exception as e:
-            self._send_fail_count += 1
-            print(f"[QQBridge] ⚠ {label}发送失败（连接可能已断开）: {e}"
-                  f"（累计 {self._send_fail_count} 次发送失败，重连后请对方重发）")
+            if count_fail:
+                self._send_fail_count += 1
+                print(f"[QQBridge] ⚠ {label}发送失败（连接可能已断开）: {e}"
+                      f"（累计 {self._send_fail_count} 次发送失败，重连后请对方重发）")
+            else:
+                print(f"[QQBridge] ⚠ {label}发送失败（连接可能已断开，不影响回复）: {e}")
             return False
 
     def _stickers_on(self) -> bool:
