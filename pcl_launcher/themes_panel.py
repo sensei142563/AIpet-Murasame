@@ -477,6 +477,17 @@ class PCLThemesPanel(QScrollArea):
                         if _app is not None:                     # 全局样式跟着重刷一遍
                             from . import silicon_ui as _sui
                             _sui.install(_app, accent=_C.accent_hex())
+                            # 兜底：直接把"文字色"写进应用级样式表（页面内联样式的优先级
+                            # 更高，但这一条保证至少所有没自带样式的文字立刻变色）
+                            try:
+                                _tc = str(_C.Color1.name())
+                                _css = ("\n/* 用户自定义文字色 */\n"
+                                        "QLabel, QCheckBox, QRadioButton, QGroupBox, QListWidget,"
+                                        "QTreeWidget, QComboBox, QLineEdit, QTextEdit, QPlainTextEdit,"
+                                        "QTabBar::tab { color: " + _tc + "; }\n")
+                                _app.setStyleSheet((_app.styleSheet() or "") + _css)
+                            except Exception as _e2:
+                                print(f"[Themes] ⚠ 应用级文字色兜底失败: {_e2}")
                     except Exception as _e:
                         print(f"[Themes] ⚠ 直接重算色板失败: {_e}")
                 try:
@@ -488,24 +499,36 @@ class PCLThemesPanel(QScrollArea):
 
             def _save_text_color(hexv):
                 """写 ui_text_color → 立即应用（重算色板 + 重建当前页），不用重启"""
+                print(f"[Themes] 选中文字颜色: {hexv or '跟随主题'} → 写入 config.json")
                 if hexv:
                     self._text_color = _QC2(hexv)
                 _paint_txt_btn()
-                cc = _load_config() or {}
-                cc["ui_text_color"] = str(hexv or "")
-                _save_config(cc)
+                try:
+                    cc = _load_config() or {}
+                    cc["ui_text_color"] = str(hexv or "")
+                    _save_config(cc)
+                    self._text_hint.setText("已写入 config.json：" + (hexv or "跟随主题"))
+                    self._text_hint.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(11*S)}px;")
+                except Exception as _e:
+                    print(f"[Themes] ⚠ 文字颜色写盘失败: {_e}")
+                    try:
+                        self._text_hint.setText("写盘失败：" + str(_e))
+                    except Exception:
+                        pass
                 ok = _apply_everywhere(hexv)
                 try:
                     self._text_hint.setText(
                         ("已应用：文字颜色 %s（立即生效）" % (hexv or "跟随主题")) if hexv
                         else "已切回「跟随主题」自带的文字配色")
-                    self._text_hint.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(11*S)}px;")
                 except Exception:
                     pass
                 print(f"[Themes] 文字颜色 → {hexv or '自动'}（应用路径：{'外壳' if ok else '直接重算色板'}）")
 
             def _pick_text_color():
-                c = _QCD2.getColor(self._text_color, self, "选择文字颜色")
+                # ⚠ 取色对话框必须挂在**顶层窗口**上：挂在页面控件上时，无边框 + 半透明
+                #   的启动器会把对话框挡在后面（用户点了没反应 → 颜色根本没存进去）。
+                _top = self.window() or self
+                c = _QCD2.getColor(self._text_color, _top, "选择文字颜色")
                 if c.isValid():
                     _save_text_color(c.name())
 

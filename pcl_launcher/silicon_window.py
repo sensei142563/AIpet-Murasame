@@ -89,7 +89,14 @@ def SF(alpha: float) -> str:
     a = max(0.02, min(0.30, alpha))
     if _is_light_theme():
         return f"rgba(0,0,0,{a:.3f})"
-    return f"rgba(255,255,255,{a:.3f})"
+    # 深色底：以前是"白 + 0.30"，在纯黑底上就是一块灰白卡片（用户反馈"卡片变白了"）→
+    # 改用**派生面色** Color6（纯黑底时是 #191919）带透明度：卡片仍是深色，
+    # 层级靠边框与这点微亮体现，跟主题/底色都一致。
+    try:
+        _c = Color6
+        return f"rgba({_c.red()},{_c.green()},{_c.blue()},{min(0.92, 0.42 + a):.3f})"
+    except Exception:
+        return f"rgba(255,255,255,{a * 0.35:.3f})"
 
 
 def _app_base_dir() -> str:
