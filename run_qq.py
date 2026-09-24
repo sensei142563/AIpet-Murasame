@@ -134,6 +134,22 @@ def _setup_file_log():
         pass
 
 
+def _napcat_version_selfcheck():
+    """启动自检：NapCat / QQ 版本与 NAPCAT_VERSION.txt 对不对得上。
+
+    以前只有打包脚本会核对版本 —— 直接「启动 QQ」时，NapCat 被它自带的更新器
+    升级到未验证版本也没人提醒。这里只提示、绝不阻断（跑得起来比"版本不对"更重要）。
+    逻辑在 tool/napcat_version.py（打包检查用的是同一份）。
+    """
+    try:
+        from tool.napcat_version import check as _version_check
+        for f in _version_check(BASE_DIR):
+            mark = {"warn": "⚠", "ok": "✓"}.get(f.get("level"), " ")
+            print(f"[版本] {mark} {f.get('msg', '')}")
+    except Exception as e:
+        print(f"[版本] 自检跳过: {e}")
+
+
 def main():
     _setup_file_log()
     print("=" * 50)
@@ -147,6 +163,9 @@ def main():
         pass
     print(f"  QQ AIpet — {pet_name} QQ 聊天模块")
     print("=" * 50)
+
+    _napcat_version_selfcheck()
+    print()
 
     missing = []
     try:
