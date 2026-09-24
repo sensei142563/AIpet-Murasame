@@ -2045,8 +2045,7 @@ class PCLPetManager(QScrollArea):
                 print(f"[PCL] ⚠ 设为活动后透明化失败: {_e}")
             try:
                 from .widgets import show_save_toast as _toast
-                # 用显示名（「诺瓦」）而不是 id（noir），并说清下一步怎么启动它 ——
-                # 用户问过"怎么启动诺瓦？"，以前只提示"已设为活动"，没说去哪儿启动
+                # 用显示名（「诺瓦」）而不是 id（noir）
                 _name = pet_id
                 try:
                     from pets.pet_registry import get_pet_config
@@ -2059,9 +2058,21 @@ class PCLPetManager(QScrollArea):
                     _running = bool(_pet_api_alive())
                 except Exception:
                     pass
-                _tail = ("桌宠正在运行：关掉再启动就会换成它" if _running
-                         else "回「总览」点「启动 AIpet 桌宠」即可")
-                _toast(self, f"已把「{_name}」设为活动桌宠 —— {_tail}")
+                if _running:
+                    # 桌宠正在跑 → 交给总览页去换（0.5 秒防误触；不用用户自己关了再开）
+                    _scheduled = False
+                    try:
+                        _home = getattr(self.window(), "pages", {}).get("home")
+                        if _home is not None:
+                            _home.schedule_pet_switch(_name)
+                            _scheduled = True
+                    except Exception as _e:
+                        print(f"[PCL] ⚠ 排队换角色失败（退化为手动重启）: {_e}")
+                    _toast(self, f"已把「{_name}」设为活动桌宠 —— 正在切换，稍等几秒就好"
+                           if _scheduled else
+                           f"已把「{_name}」设为活动桌宠 —— 关掉再启动就会换成它")
+                else:
+                    _toast(self, f"已把「{_name}」设为活动桌宠 —— 回「总览」点「启动 AIpet 桌宠」即可")
             except Exception:
                 pass
             print(f"[PCL] 当前活动桌宠: {get_active_pet_id()}")

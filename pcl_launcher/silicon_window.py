@@ -346,6 +346,7 @@ class HomePage(QWidget):
     _probe_signal = pyqtSignal()
     _napcat_progress = pyqtSignal(str)             # 启动 NapCat 过程中的状态行文案
     _napcat_done = pyqtSignal(bool, str, str)      # (就绪?, 说明, 后续动作)
+    _switch_done = pyqtSignal(str)                 # 换角色完成（角色显示名）
 
     def __init__(self, shell, parent=None):
         super().__init__(parent)
@@ -465,6 +466,7 @@ class HomePage(QWidget):
         outer.addStretch()
 
         self._probe_signal.connect(self._apply_status)
+        self._switch_done.connect(self._on_switch_done)
         # 拉起 NapCat 的过程文案（"正在检查 NapCat…"/"已在运行"/"正在等待扫码…"）打在状态行上；
         # 结束回调决定"继续启动 QQ / 打开 WebUI"还是"弹窗说明为什么没就绪"
         self._napcat_progress.connect(self.status_lbl.setText)
@@ -561,20 +563,9 @@ class HomePage(QWidget):
             self._wait_pet_gone(12)
             return
         self._busy_btn(self.btn_pet, "⏳ 正在启动中…", 15000)
-        base = _app_base_dir()
-        py = _find_python(base)
-        if not py:
-            self._msg("启动失败", "没找到 Python 解释器，桌宠起不来。",
-                      "启动器需要 runtime\\venv 或系统 Python。打包版请确认 runtime 目录完整；"
-                      "源码版请先按 README 装好依赖。")
-            return
-        try:
-            self.shell._pet_proc = subprocess.Popen([py, os.path.join(base, "run.py")], cwd=base,
-                                                    creationflags=subprocess.CREATE_NEW_CONSOLE)
-            print("[NewUI] 已启动桌宠（run.py）")
-            QTimer.singleShot(6000, self.refresh_status)
-        except Exception as e:
-            self._msg("启动失败", "桌宠没能启动。", str(e))
+        if self._launch_pet():
+            # 用 0.5 秒轮询等它起来（以前固定等 6 秒，起来了也要干等）
+            self._poll_pet_up()
 
     def _wait_pet_gone(self, seconds: int):
         """后台轮询：桌宠真的退出了再恢复按钮（期间保持「正在关闭中…」）"""
@@ -586,6 +577,120 @@ class HomePage(QWidget):
                     break
             try:
                 self._probe_signal.emit()
+            except Exception:
+                pass
+        import threading
+        threading.Thread(target=_work, daemon=True).start()
+
+    # ── 换角色（用户："每次设置活动，可以立即切换桌宠，0.5 秒，而不是等 6 秒"）──
+
+    def schedule_pet_switch(self, pet_name: str = "", delay_ms: int = 500):
+        """「设为活动」后延迟 delay_ms 再真正切桌宠。
+
+        延迟是**防误触**：连点几个角色时只有最后那个生效（0.5 秒内重复调用会重置计时）。
+        反馈立刻给（芯片/状态行），不让用户干等。
+        """
+        self._switch_name = pet_name or self._active_pet_name() or "活动角色"
+        if getattr(self, "_switch_timer", None) is None:
+            self._switch_timer = QTimer(self)
+            self._switch_timer.setSingleShot(True)
+            self._switch_timer.timeout.connect(self._do_pet_switch)
+        self._switch_timer.start(max(0, int(delay_ms)))
+        try:
+            self.chip_pet.set_text(f"桌宠（{self._switch_name}）：正在切换…", False)
+            self.status_lbl.setText(f"⏳ 正在切换成「{self._switch_name}」…")
+        except Exception:
+            pass
+        print(f"[NewUI] 已排队换角色 → {self._switch_name}（{delay_ms}ms 防误触）")
+
+    def _do_pet_switch(self):
+        """真正切：桌宠在跑 → 关掉它、并用**新活动角色**重新起来；没在跑 → 只提示去哪启动。
+
+        以前这里只写注册表 + 弹一句"关掉再启动就会换成它"，用户得自己开关一次，
+        且启动后用固定 6 秒才刷状态。现在启动器自己完成这次切换，并用 0.5 秒轮询
+        等它回来（起来了立刻刷新状态）。
+        """
+        name = getattr(self, "_switch_name", "") or self._active_pet_name()
+        if not _pet_api_alive():
+            try:
+                self.status_lbl.setText(f"✅ 已设为「{name}」｜回总览点「启动 AIpet 桌宠」即可")
+                QTimer.singleShot(6000, lambda: self.status_lbl.setText(""))
+            except Exception:
+                pass
+            self.refresh_status()
+            return
+        try:
+            self._busy_btn(self.btn_pet, "⏳ 正在切换角色…", 30000)
+            self.status_lbl.setText(f"⏳ 正在把桌宠换成「{name}」…")
+        except Exception:
+            pass
+        print(f"[NewUI] 换角色：先关掉当前桌宠（{name}）")
+        _send_control("shutdown")
+
+        def _work():
+            import time as _t
+            for _ in range(60):                 # 最多 30 秒等它退出
+                _t.sleep(0.5)
+                if not _pet_api_alive():
+                    break
+            self._launch_pet()                  # 用新活动角色重新启动
+            for _ in range(60):                 # 最多 30 秒等它回来
+                _t.sleep(0.5)
+                if _pet_api_alive():
+                    break
+            try:
+                self._switch_done.emit(name)    # 回 UI 线程收尾（按钮/状态/芯片）
+            except Exception:
+                pass
+
+        import threading
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _on_switch_done(self, name: str):
+        """换角色收尾（UI 线程）：按钮恢复 + 立刻刷新状态，不再等 6 秒"""
+        try:
+            self.btn_pet.setEnabled(True)
+            self.status_lbl.setText(f"✅ 桌宠已换成「{name}」")
+            QTimer.singleShot(4000, lambda: self.status_lbl.setText(""))
+        except Exception:
+            pass
+        self.refresh_status()
+        print(f"[NewUI] 换角色完成 → {name}")
+
+    def _launch_pet(self):
+        """启动桌宠进程（toggle_pet 与换角色共用）"""
+        base = _app_base_dir()
+        py = _find_python(base)
+        if not py:
+            try:
+                self._msg("启动失败", "没找到 Python 解释器，桌宠起不来。",
+                          "启动器需要 runtime\\venv 或系统 Python。打包版请确认 runtime 目录完整；"
+                          "源码版请先按 README 装好依赖。")
+            except Exception:
+                pass
+            return False
+        try:
+            self.shell._pet_proc = subprocess.Popen([py, os.path.join(base, "run.py")], cwd=base,
+                                                    creationflags=subprocess.CREATE_NEW_CONSOLE)
+            print("[NewUI] 已启动桌宠（run.py）")
+            return True
+        except Exception as e:
+            try:
+                self._msg("启动失败", "桌宠没能启动。", str(e))
+            except Exception:
+                pass
+            return False
+
+    def _poll_pet_up(self, tries: int = 60):
+        """启动后用 0.5 秒轮询代替「固定等 6 秒」：桌宠一回来就刷新状态/按钮"""
+        def _work():
+            import time as _t
+            for _ in range(int(tries)):
+                _t.sleep(0.5)
+                if _pet_api_alive():
+                    break
+            try:
+                self._switch_done.emit(self._active_pet_name() or "")
             except Exception:
                 pass
         import threading
