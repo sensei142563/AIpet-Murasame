@@ -426,6 +426,20 @@ class PCLThemesPanel(QScrollArea):
                 row_c.addWidget(_b)
             row_c.addStretch()
             lay.addLayout(row_c)
+            # 写清"这个底色作用到哪些地方"：用户报过"设置桌宠/立绘工坊窗口没跟随底色"，
+            # 根因是那几个窗口跟随的是**这里设的底色**，而当时设的是"跟随主题"（米白）。
+            try:
+                from .colors import base_bg_color as _bbc2
+                _eff = _bbc2().name()
+                _src = "你设的底色" if str(_cfg_now.get("ui_bg_color") or "").strip() else "主题自带底色（跟随主题）"
+                _hint_c = QLabel("生效底色：%s（来源：%s）· 卡片与所有二级窗口（设置桌宠 / 立绘工坊 / "
+                                 "背景调节…）都跟随它" % (_eff, _src))
+                _hint_c.setWordWrap(True)
+                _hint_c.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(11*S)}px;"
+                                      f"padding: 2px 0 2px {int(6*S)}px;")
+                lay.addWidget(_hint_c)
+            except Exception as _e:
+                print(f"[Themes] ⚠ 底色提示行构建失败: {_e}")
         except Exception as _e:
             print(f"[Themes] ⚠ 背景底色控件构建失败: {_e}")
         # ── 文字颜色：和背景底色一样能选（浅色背景必须能改深色字，否则白底白字看不见）──

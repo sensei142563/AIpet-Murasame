@@ -3229,6 +3229,17 @@ def launch() -> int:
     from PyQt5.QtWidgets import QApplication
     from . import silicon_ui as _sui
     from .colors import current_theme_id
+    # ── 版本戳（排查"我打开的是不是新程序"用）─────────────────────────────
+    # 打印**这份 silicon_window.py 的修改时间** + 程序目录 + 生效的启动器底色。
+    # 换了新 exe 但看着没变化时，先看这一行：时间不对就是还在跑旧进程。
+    try:
+        import time as _tm
+        from .colors import base_bg_color as _bbc, current_theme_id as _ctid0
+        print("[PCL] 版本戳 %s｜程序目录 %s｜主题 %s｜启动器底色 %s"
+              % (_tm.strftime("%m-%d %H:%M", _tm.localtime(os.path.getmtime(__file__))),
+                 _app_base_dir(), _ctid0(), _bbc().name()))
+    except Exception as _e:
+        print(f"[PCL] ⚠ 版本戳打印失败: {_e}")
     # 首次运行生成空白 config.json（README 承诺过、代码里却一直没人做）：
     # 绿色版故意不带 config.json（隐私），但不生成的话，微信/QQ 入口读配置会
     # FileNotFoundError 秒退（用户实测"点启动微信秒卡退"）。只缺才建，绝不覆盖。

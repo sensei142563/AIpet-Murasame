@@ -17,6 +17,7 @@ from .silicon_ui import M, apply_acrylic
 
 
 _OPEN_DIALOGS = []          # 已打开的二级窗口（改底色时统一实时刷新）
+_BASE_LOGGED = []           # 底板色只打一次日志（避免刷屏）
 
 
 def _app_base_dir() -> str:
@@ -75,6 +76,14 @@ class SiliconDialog(QDialog):
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
         # 底板色 = 启动器底板色（用户自选则用它，否则跟随当前主题）
         self._base = QColor(_read_base_color())
+        # 排查用：把"这个窗口实际用的底板色"打一次日志（换 exe 后看着没变时先看这里）
+        try:
+            if not _BASE_LOGGED:
+                _BASE_LOGGED.append(1)
+                print("[SiliconDialog] 二级窗口底板 = %s（跟随启动器底色，与卡片同一套配色）"
+                      % self._base.name())
+        except Exception:
+            pass
         # 注册到全局：外壳改底色时所有已打开窗口一起实时更新
         try:
             _OPEN_DIALOGS.append(self)
