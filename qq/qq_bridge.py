@@ -1757,6 +1757,12 @@ class QQBotBridge:
 
         重连循环每次进入 _on_connected 都会调到这里；为避免"下载失败机器每次重连都刷
         一次注定失败的联网下载"，成功才置完成标志；失败最多重试 3 次（warmup 返回 bool）。
+
+        ⚠ 以前这里无条件 `setdefault("HF_HUB_OFFLINE", "1")` —— 于是**模型还没下载**的
+          机器会被永久锁在离线模式，第一次也下不下来（用户日志里那句
+          "Cannot find an appropriate cached snapshot folder ... outgoing traffic has been
+          disabled" 就是这么来的，而语音识别开关还显示"开"）。现在只有本地缓存确实可用
+          才进离线；没有缓存就允许联网下载（走 download_stt.py 或 HF_ENDPOINT 镜像）。
         """
         if getattr(self, "_stt_warm_done", False):
             return
@@ -1764,12 +1770,19 @@ class QQBotBridge:
         if self._stt_warm_tries > 3:
             return
         try:
-            # 模型已本地缓存（首次由镜像下载）：离线模式加载，避免每次联网探测
-            # huggingface.co（本机不可达）导致预热失败
-            os.environ.setdefault("HF_HUB_OFFLINE", "1")
-            from tool.stt import warmup
+            from tool.stt import warmup, cache_state, stt_hint
+            cached, _where = cache_state()
+            if cached:
+                os.environ.setdefault("HF_HUB_OFFLINE", "1")   # 缓存完整才离线，省掉联网探测
+            else:
+                os.environ.pop("HF_HUB_OFFLINE", None)          # 没缓存就别锁死，允许下载
             if warmup():
                 self._stt_warm_done = True
+            elif self._stt_warm_tries >= 3:
+                # 重试用尽 → 把"怎么修"完整打一次（第 1、2 次只报异常，别刷屏）
+                print("[QQBridge] 语音识别仍不可用：" + stt_hint().replace("\n", "\n[QQBridge] "))
+                print("[QQBridge] 提示：不需要语音识别就在设置里关掉「语音识别」，"
+                      "关掉后不会再尝试加载模型。")
         except Exception as e:
             print(f"[QQBridge] ⚠ 语音识别模型预热异常（第 {self._stt_warm_tries} 次）: {e}")
 

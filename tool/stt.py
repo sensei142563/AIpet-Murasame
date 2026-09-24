@@ -43,21 +43,77 @@ def _hf_cache_roots():
     return out
 
 
-def _set_hf_offline_if_cached(model_size="large-v3"):
-    try:
-        for cache_root in _hf_cache_roots():
-            repo_dir = os.path.join(cache_root, f"models--Systran--faster-whisper-{model_size}")
-            snap = os.path.join(repo_dir, "snapshots")
-            refs = os.path.join(repo_dir, "refs")
-            if os.path.isdir(snap) and os.path.isdir(refs) and os.listdir(refs):
-                os.environ["HF_HUB_OFFLINE"] = "1"  # 用赋值（非 setdefault）：明确进入离线
-                return True
-    except Exception:
-        pass
+def cache_roots_with_model(model_size="large-v3"):
+    """哪些缓存根里**确实**有完整模型（返回 hub 缓存目录，按候选顺序排）"""
+    model_size = model_size or "large-v3"
+    out = []
+    for cache_root in _hf_cache_roots():
+        repo_dir = os.path.join(cache_root, f"models--Systran--faster-whisper-{model_size}")
+        snap = os.path.join(repo_dir, "snapshots")
+        refs = os.path.join(repo_dir, "refs")
+        if os.path.isdir(snap) and os.path.isdir(refs) and os.listdir(refs):
+            out.append(cache_root)
+    return out
+
+
+def cache_state(model_size="large-v3"):
+    """语音识别模型有没有**可用的本地缓存**：返回 (ok, 实际/预期路径)
+
+    为什么要单独一个函数：`HF_HUB_OFFLINE` 一旦设上，缺模型时永远下不下来
+    （用户机器上 huggingface.co 还不一定通）→ 表现为"语音识别开着但完全没反应"。
+    调用方必须先问 cache_state()，**缓存可用才进离线**。
+    """
+    model_size = model_size or "large-v3"
+    roots = cache_roots_with_model(model_size)
+    if roots:
+        return True, os.path.join(roots[0], f"models--Systran--faster-whisper-{model_size}")
+    first = (_hf_cache_roots() or ["models/hf"])[0]
+    return False, os.path.join(first, f"models--Systran--faster-whisper-{model_size}")
+
+
+def _prepare_hf_env(model_size="large-v3") -> bool:
+    """把 HF 环境指到**真正有模型**的那个缓存目录；有模型才进离线。
+
+    ⚠ 必须在 huggingface_hub / faster_whisper import **之前**调用：HF_HUB_OFFLINE 与
+      HF_HUB_CACHE 都是它们的 import 期常量，之后再改环境变量没用。
+
+    为什么需要它（用户 2026-09-24 的日志）：
+      · 我们把 HF_HOME 指到项目内 models/hf（避免 C 盘被清理工具删），
+      · 但模型其实躺在默认用户缓存（C:\\Users\\...\\.cache\\huggingface\\hub）里，
+      · 于是"找的是空目录 + 被锁离线"→ 报
+        "Cannot find an appropriate cached snapshot folder … outgoing traffic has been
+        disabled"，语音识别看着开着、实际完全不可用。
+      现在：命中哪个根就把 HF_HUB_CACHE 指过去；都没命中就不锁离线（让首次下载能成）。
+    """
+    model_size = model_size or "large-v3"
+    roots = cache_roots_with_model(model_size)
+    if roots:
+        os.environ["HF_HUB_CACHE"] = roots[0]
+        os.environ["HF_HUB_OFFLINE"] = "1"      # 用赋值：明确进入离线，省掉联网探测
+        return True
+    os.environ.pop("HF_HUB_OFFLINE", None)      # 没缓存就别锁死，允许下载
     return False
 
 
-_set_hf_offline_if_cached(stt_model)
+def _set_hf_offline_if_cached(model_size="large-v3"):
+    """兼容旧调用名（打包脚本/别处可能引用）：等价于 _prepare_hf_env"""
+    return _prepare_hf_env(model_size)
+
+
+def stt_hint(model_size=None) -> str:
+    """模型没就绪时给用户看的一句话（说清怎么修，而不是甩一串英文异常）"""
+    model_size = model_size or stt_model or "large-v3"
+    ok, where = cache_state(model_size)
+    if ok:
+        return f"语音识别模型 {model_size} 已在本地：{where}"
+    return (f"语音识别模型 {model_size} 还没下载到本地（预期位置：{where}）。\n"
+            f"修法任选其一：\n"
+            f"  1) 运行 download_stt.py 下载（会走国内镜像）；\n"
+            f"  2) 在设置里把 stt_model 换成更小的模型（如 small，几百 MB）；\n"
+            f"  3) 不需要语音识别就在设置里关掉「语音识别」——关掉后不会再尝试加载。")
+
+
+_HF_CACHE_READY = _prepare_hf_env(stt_model)
 
 # faster_whisper 在离线判定之后才 import（否则 HF_HUB_OFFLINE 不生效）
 from faster_whisper import WhisperModel
@@ -74,7 +130,12 @@ def _get_model(model_size=None):
         model_size = stt_model or "large-v3"
     with _model_lock:
         if model_size not in _model_cache:
-            _set_hf_offline_if_cached(model_size)
+            # 若配置里换了别的模型：能定位到本地缓存就指过去（HF_* 是 import 期常量，
+            # 这一步只对"还没 import 过 huggingface_hub 的场景"有效，正常启动时已在
+            # 模块顶部准备好了；这里是为了让"换模型后重启"也走在正确路径上）
+            if not cache_roots_with_model(model_size):
+                print("[STT] " + stt_hint(model_size).replace("\n", "\n[STT] "))
+            _prepare_hf_env(model_size)
             try:
                 _model_cache[model_size] = WhisperModel(
                     model_size, device="cuda", compute_type="float16"
@@ -97,7 +158,9 @@ def warmup(model_size=None) -> bool:
         print("[STT] ✅ 语音识别模型已加载")
         return True
     except Exception as e:
+        # 不要只甩英文异常：说清"模型没下载 / 怎么修"（用户看到的就这一行）
         print(f"[STT] ⚠ 模型预热失败: {e}")
+        print("[STT] " + stt_hint(model_size).replace("\n", "\n[STT] "))
         return False
 
 
