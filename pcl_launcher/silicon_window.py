@@ -1190,6 +1190,12 @@ class SiliconLauncher(QWidget):
             if sig2 is not None and not getattr(page, "_accent_wired", False):
                 sig2.connect(self.apply_accent_live)
                 page._accent_wired = True
+            # 记忆页的「🔄 重新扫码登录微信」按钮：这个信号以前**没人接**，
+            # 点了完全没反应（用户报"重新登录微信桌宠好像坏了"）。
+            sig3 = getattr(page, "wechat_relogin_requested", None)
+            if sig3 is not None and not getattr(page, "_wx_relogin_wired", False):
+                sig3.connect(self.wechat_relogin)
+                page._wx_relogin_wired = True
         except Exception as e:
             print(f"[NewUI] ⚠ 主题信号挂接失败: {e}")
 
@@ -1416,6 +1422,74 @@ class SiliconLauncher(QWidget):
                 pass
         except Exception as e:
             print(f"[NewUI] ⚠ 实时应用强调色失败: {e}")
+
+    def wechat_relogin(self):
+        """记忆页的「🔄 重新扫码登录」：停掉微信桥接 → 清本地凭据 → 重新启动出码。
+
+        ⚠ 以前记忆页那个按钮只 `emit()` 了 `wechat_relogin_requested`，**外壳没人接**
+          → 点了完全没反应（用户报"记忆页里面的重新登录微信桌宠好像坏了"）。
+        """
+        from .silicon_dialog import page_confirm, page_msg
+        ok = True
+        try:
+            ok = page_confirm(
+                self, "重新扫码登录微信",
+                "会先关掉正在运行的微信桥接，并清除本机保存的登录凭据，然后重新出码扫码。",
+                "换绑 / 换手机 / 登录异常时用。聊天记录与角色记忆不受影响（只清登录凭据）。",
+                ok_text="清除并重新扫码", danger=True)
+        except Exception as e:
+            print(f"[NewUI] ⚠ 重新登录确认框打开失败，直接执行: {e}")
+        if not ok:
+            return
+
+        # 1) 停掉正在跑的微信桥接（进程句柄在外壳上）
+        stopped = False
+        proc = getattr(self, "_wx_proc", None)
+        if proc is not None and proc.poll() is None:
+            try:
+                proc.terminate()
+                for _ in range(12):
+                    if proc.poll() is not None:
+                        break
+                    time.sleep(0.25)
+                if proc.poll() is None:
+                    proc.kill()
+                stopped = True
+            except Exception as e:
+                print(f"[NewUI] ⚠ 关闭微信桥接失败: {e}")
+        self._wx_proc = None
+
+        # 2) 清掉本地登录凭据（只清凭据，聊天记录/记忆不动）
+        removed = []
+        try:
+            from wechat.ilink_client import CRED_FILE
+            if os.path.exists(CRED_FILE):
+                os.remove(CRED_FILE)
+                removed.append(os.path.basename(CRED_FILE))
+        except Exception as e:
+            print(f"[NewUI] ⚠ 清除微信登录凭据失败: {e}")
+
+        # 3) 重新启动（新控制台里会打印二维码）
+        home = self.pages.get("home")
+        started = False
+        try:
+            if home is not None and hasattr(home, "start_wechat"):
+                home.start_wechat()
+                started = True
+        except Exception as e:
+            print(f"[NewUI] ⚠ 重新启动微信桥接失败: {e}")
+
+        try:
+            page_msg(self, "重新扫码登录微信",
+                     "已清掉本地登录凭据，微信桥接正在重新启动。",
+                     ("新开的那两个控制台里会显示二维码，用手机微信扫一下即可"
+                      if started else "请在「总览」点「启动微信 AIpet」重新出码") +
+                     "\n\n本次清理：" + ("、".join(removed) if removed else "没有凭据文件（本来就没登录过）") +
+                     ("\n已关闭旧的微信桥接进程" if stopped else ""))
+        except Exception as e:
+            print(f"[NewUI] ⚠ 重新登录结果提示失败: {e}")
+        print(f"[NewUI] 微信重新登录：清理 {removed or '无'}，"
+              f"桥接{'已关闭' if stopped else '本来没在跑'}，{'已重新启动' if started else '未能自动启动'}")
 
     def _goto(self, key, force=False):
         if key == "home":

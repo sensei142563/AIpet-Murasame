@@ -284,7 +284,7 @@ class CurrentUsePanel(QWidget):
             slots_row.addWidget(sl, 1)
         v.addLayout(slots_row)
 
-        mine = QLabel("我的桌宠（拖进上面的框就换上；这里的胶囊不会消失）")
+        mine = QLabel("我的桌宠")
         mine.setStyleSheet(f"color: {Color1.name()}; font-size: {int(13*S)}px;"
                            f" font-weight: bold; font-family: '{M.font}';")
         v.addWidget(mine)

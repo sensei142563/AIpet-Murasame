@@ -169,9 +169,21 @@ QComboBox::down-arrow {{
     border-top: 5px solid {text_dim}; margin-right: 6px;
 }}
 QComboBox QAbstractItemView {{
-    background: {surface}; border: 1px solid {border}; border-radius: {r}px;
+    background: {surface}; color: {text}; border: 1px solid {border}; border-radius: {r}px;
     selection-background-color: {accent}; selection-color: white; outline: none;
     padding: 4px;
+}}
+/* ⚠ 下拉列表必须**显式**写颜色：它是个独立的弹出窗口，不写就吃 Fusion 深色调色板
+   （深底 + 浅字）或继承页面里的深色文字 → 浅色主题下"角色下拉看不清字"（用户报的）。
+   这里把背景/文字都钉成当前主题的 surface/text，选中行才用强调色。 */
+QComboBox QAbstractItemView::item {{
+    color: {text}; padding: 3px 8px; min-height: 18px;
+}}
+QComboBox QAbstractItemView::item:selected {{
+    background: {accent}; color: white;
+}}
+QComboBox QAbstractItemView::item:hover {{
+    background: {surface2}; color: {text};
 }}
 /* ===== 勾选框（圆角小方框 + 强调色对勾底）===== */
 QCheckBox, QRadioButton {{ spacing: 8px; }}
@@ -324,6 +336,62 @@ def dark_palette(accent="#4c8dff"):
     return p
 
 
+_COMBO_POPUP_ORIG = None
+
+
+def install_combo_popup_theme():
+    """全局：下拉弹出窗（列表 + 外面那层框）按**当前主题**上色。
+
+    为什么不能只靠 QSS：弹出的列表外面还有一层 QComboBoxPrivateContainer（QFrame），
+    它按**调色板**画底；而 install() 装的是 Fusion 深色调色板 → 浅色主题（经典/千恋万花）
+    下弹出窗就成了"深底 + 深字"或"深底 + 粉字"，用户报的"记忆管理切角色看不清字"就是这个。
+    QSS 里也补了 `QComboBox QAbstractItemView::item` 的颜色，但容器那层只有代码能刷干净。
+
+    做法沿用本文件的既有套路（install_no_wheel 也是覆盖类方法）：覆盖 showPopup，
+    弹出前刷两层调色板 + 内联样式。幂等。
+    """
+    global _COMBO_POPUP_ORIG
+    from PyQt5.QtWidgets import QComboBox
+    if _COMBO_POPUP_ORIG is not None:
+        return
+    _COMBO_POPUP_ORIG = QComboBox.showPopup
+
+    def _themed_show(self):
+        try:
+            from PyQt5.QtGui import QColor, QPalette
+            from . import colors as C
+            bg, fg = QColor(C.Color6.name()), QColor(C.Color1.name())
+            bd, acc = QColor(C.Color5.name()), QColor(C.accent_hex())
+            view = self.view()
+            if view is not None:
+                pal = view.palette()
+                for role, col in ((QPalette.Base, bg), (QPalette.Window, bg),
+                                  (QPalette.Text, fg), (QPalette.WindowText, fg),
+                                  (QPalette.Highlight, acc),
+                                  (QPalette.HighlightedText, QColor("#ffffff"))):
+                    pal.setColor(role, col)
+                view.setPalette(pal)
+                view.setStyleSheet(
+                    f"QListView {{ background: {bg.name()}; color: {fg.name()};"
+                    f" border: 1px solid {bd.name()}; outline: none; }}"
+                    f"QListView::item {{ color: {fg.name()}; padding: 3px 8px; }}"
+                    f"QListView::item:selected {{ background: {acc.name()}; color: #ffffff; }}")
+                cont = view.parentWidget()          # 外框（QComboBoxPrivateContainer）
+                if cont is not None and cont is not self:
+                    cp = cont.palette()
+                    cp.setColor(QPalette.Window, bg)
+                    cp.setColor(QPalette.Base, bg)
+                    cp.setColor(QPalette.WindowText, fg)
+                    cont.setPalette(cp)
+                    cont.setStyleSheet(f"background: {bg.name()};"
+                                       f" border: 1px solid {bd.name()};")
+        except Exception as e:
+            print(f"[SiliconUI] ⚠ 下拉弹窗上色失败: {e}")
+        _COMBO_POPUP_ORIG(self)
+
+    QComboBox.showPopup = _themed_show
+
+
 def install_no_wheel():
     """全局：滑块 / 数字框 / 下拉框**不响应滚轮**（防止滚动页面时误改数值）。
 
@@ -372,6 +440,7 @@ def install(app: QApplication = None, accent="#4c8dff"):
             app.setStyleSheet(silicon_qss(accent=accent))
         app.setFont(QFont(M.font, M.font_size))
         install_no_wheel()                     # 滚轮不许改数值（见该函数说明）
+        install_combo_popup_theme()            # 下拉弹窗按主题上色（浅色主题下看得清字）
         _installed = True
         print("[SiliconUI] 新界面样式已加载（亚克力 / 圆角 / 深色调色板 / 强调色）")
         return True
