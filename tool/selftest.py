@@ -87,6 +87,10 @@ WIRING = (
     ("tool/agent_bridge.py", "def run_task", "agent 桥接模块缺 run_task"),
     ("classes/murasame_class.py", "def _run_agent_task", "/agent 入口不见了"),
     ("classes/Worker_class.py", "class AgentWorker", "AgentWorker 不见了（/agent 会没反应）"),
+    ("tool/habits.py", "def note_active", "习惯模块缺 note_active"),
+    ("classes/murasame_class.py", "_habits_timer",
+     "习惯采集定时器不见了（「常用软件」统计会停）"),
+    ("tool/chat.py", "habits as _hb2", "提示词没注入「主人的习惯」"),
 )
 # 绝不能出现的（历史坑，回来就是 bug 复发）—— **正则**，只扫非注释行：
 #   注释里写着"原来写死了 infos[57:65]"是对的（解释历史），不能算复发（自测自己踩过这个误报）

@@ -27,6 +27,7 @@
   "agent_bridge_enabled": "false",
   "agent_backend": "auto",
   "agent_timeout_sec": 600,
+  "habits_enabled": "true",
  "DEFAULT_PORTRAIT_SCREEN_RATIO": 0.8,
  "screen_index": 0,
  "idle_thinking_minutes": 6,

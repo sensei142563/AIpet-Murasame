@@ -112,6 +112,15 @@ def qwen3_lora(history, user_input, role):
     except Exception:
         pass
 
+    # 1.6 他的习惯（作息/活跃时段/常用软件）—— 自然带一句，别背数据
+    try:
+        from tool import habits as _hb2
+        _hnote = _hb2.prompt_note()
+        if _hnote:
+            messages.append({"role": "system", "content": _hnote})
+    except Exception:
+        pass
+
     # 2. 高权重「最近的观察」（识别触发的内容，仅本轮有高权重）
     if high_observations:
         obs_text = "\n".join(f"- {obs}" for obs in high_observations[-5:])

@@ -369,6 +369,18 @@ class Murasame(QLabel):
         #   · 平时 BelowNormal、游戏里 Idle（调度器永远先伺候游戏，桌宠"卡一下"没人在意）
         #   · ⚠ 只调优先级：**不暂停**屏幕识别、**不暂停**主动搭话（主人明确要求）
         #   · 开关：config.json → perf_guard_enabled（默认开）
+        # 习惯采集：每 60 秒采一次前台窗口标题（统计"平时在用什么"）。
+        #   ⚠ 单独一个定时器：性能守卫是 3 秒一次，别把窗口查询混进去。
+        self._habits_timer = QTimer(self)
+        self._habits_timer.setInterval(60000)
+        self._habits_timer.timeout.connect(self._habits_tick)
+        try:
+            from tool import habits as _hb0
+            if _hb0.enabled():
+                self._habits_timer.start()
+        except Exception:
+            pass
+
         self._game_mode = None
         self._perf_timer = QTimer(self)
         self._perf_timer.setInterval(3000)
@@ -1477,6 +1489,15 @@ class Murasame(QLabel):
             print(f"[AIpet] 对话进行中，跳过自动触发: {text[:30]}...")
             return
 
+        # 主人主动来互动 → 记一次"习惯"（每天第一次/最后一次、每小时分布、总次数）
+        #   ⚠ 只记计数与时段，不记内容；开关：config.json → habits_enabled
+        if not t:
+            try:
+                from tool import habits as _hb
+                _hb.note_active()
+            except Exception:
+                pass
+
         # 记录本轮是否为识别触发（识别触发的内容不降权，留给下一轮高权重）
         self._current_input_is_observation = (t and role == "system")
         # 检查本轮传给 AI 的历史中是否有 high 观察（本轮结束后需降权）
@@ -2352,6 +2373,16 @@ class Murasame(QLabel):
         except Exception:
             pass
         return pixmap
+
+    def _habits_tick(self):
+        """采一次前台窗口标题记进"习惯"（60 秒一次；开关 habits_enabled）"""
+        try:
+            from tool import habits as _hb
+            if not _hb.enabled():
+                return
+            _hb.poll_foreground()
+        except Exception:
+            pass
 
     def _perf_guard_enabled(self) -> bool:
         """性能守卫开关（config.json: perf_guard_enabled，默认开）"""
