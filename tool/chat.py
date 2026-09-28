@@ -102,6 +102,16 @@ def qwen3_lora(history, user_input, role):
     else:
         messages.append({"role": "system", "content": identity})
 
+    # 1.5 她此刻的长期状态（心情/好感度）—— 影响语气，别念出来。
+    #     以前"情绪"只是这一轮的标签，说完就没；现在有存盘的长期数值。
+    try:
+        from tool import state as _st
+        _note = _st.prompt_note()
+        if _note:
+            messages.append({"role": "system", "content": _note})
+    except Exception:
+        pass
+
     # 2. 高权重「最近的观察」（识别触发的内容，仅本轮有高权重）
     if high_observations:
         obs_text = "\n".join(f"- {obs}" for obs in high_observations[-5:])
@@ -153,6 +163,13 @@ def qwen3_lora(history, user_input, role):
         reply = reply.split("</think>")[-1].strip()  # 取思考之后的部分
     history.append({"role": "assistant", "content": reply})  # 加入历史
     print(f"[{now_time()}] [qwen3-lora] Reply:{reply}")
+    # 长期状态：记一次"跟她说过话"（后面的「开口时机」要看沉默了多久）
+    if str(reply).strip():
+        try:
+            from tool import state as _st_talk
+            _st_talk.note_talk()
+        except Exception:
+            pass
     return reply, history
 
 def ollama_qwen3_sentence(sentence: str):

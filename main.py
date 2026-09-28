@@ -743,6 +743,13 @@ if __name__ == "__main__":
         live2d_widget.trigger_touch_head.connect(
             lambda: pet.start_thread("主人摸了摸你的头", role="system")
         )
+        # 长期状态：摸头让她心情变好（与 2D 触摸同一套数值）
+        try:
+            from tool import state as _st_head
+            live2d_widget.trigger_touch_head.connect(
+                lambda: _st_head.feel(+8, +0.5, "被摸头(Live2D)"))
+        except Exception:
+            pass
         # 身体各处触摸（头/胸/腹/下体/四肢/自定义部位）—— Live2D 模式下由模型控件转发，
         # 桌宠用与 2D 完全相同的「触摸区域」判定 + 同一套反应（这样 Live2D 也能摸全身）
         for _sig, _fn in ((live2d_widget.touch_pressed, pet._l2d_touch_pressed),

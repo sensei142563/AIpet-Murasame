@@ -1981,6 +1981,15 @@ class Murasame(QLabel):
             if not line:
                 return
             print(f"[桌宠] 👆 触摸 {key}({gesture}) → {line}")
+            # 长期状态：摸/戳都会让她心情变好，好感度涨得很慢（心情会随时间回落，好感度不会）
+            try:
+                from tool import state as _st_touch
+                if "poke" in str(gesture) or "戳" in str(gesture):
+                    _st_touch.feel(+3, +0.2, f"被戳了({key})")
+                else:
+                    _st_touch.feel(+6, +0.4, f"被摸了摸({key})")
+            except Exception:
+                pass
             # 只走模型的正式回应（对话框显示的就是云端生成的那句话）
             self.start_thread(line, role="system")
         except Exception as e:

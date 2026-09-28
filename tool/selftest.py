@@ -80,6 +80,10 @@ WIRING = (
      "打包没注入「非 ASCII 路径」修复（中文目录下会缺整个 PyQt5）"),
     ("tool/pyinstaller_qtfix/sitecustomize.py", "_repair",
      "非 ASCII 路径修复模块缺 _repair（或文件被删）"),
+    ("tool/state.py", "def prompt_note", "长期状态模块缺 prompt_note（心情/好感度）"),
+    ("tool/chat.py", "prompt_note", "聊天提示词没注入「她此刻的状态」"),
+    ("classes/murasame_class.py", "state as _st_touch",
+     "触摸没记长期状态（心情/好感度不再变化）"),
 )
 # 绝不能出现的（历史坑，回来就是 bug 复发）—— **正则**，只扫非注释行：
 #   注释里写着"原来写死了 infos[57:65]"是对的（解释历史），不能算复发（自测自己踩过这个误报）
