@@ -94,6 +94,9 @@ WIRING = (
     ("tool/experience.py", "def note_for", "经验模块缺 note_for"),
     ("classes/Worker_class.py", "note_for", "AgentWorker 没查经验（下次不会照做）"),
     ("classes/Worker_class.py", "learn(", "AgentWorker 没记经验（做过的事没沉淀）"),
+    ("tool/attention.py", "def should_speak", "开口时机模块缺 should_speak"),
+    ("classes/murasame_class.py", "def _attention_ok", "主动搭话没过「开口时机」闸门"),
+    ("classes/murasame_class.py", "note_spoke()", "开口后没记一笔（会变话痨）"),
 )
 # 绝不能出现的（历史坑，回来就是 bug 复发）—— **正则**，只扫非注释行：
 #   注释里写着"原来写死了 infos[57:65]"是对的（解释历史），不能算复发（自测自己踩过这个误报）

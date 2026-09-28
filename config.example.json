@@ -29,6 +29,8 @@
   "agent_timeout_sec": 600,
   "habits_enabled": "true",
   "experience_enabled": "true",
+  "attention_enabled": "true",
+  "attention_threshold": 3.0,
  "DEFAULT_PORTRAIT_SCREEN_RATIO": 0.8,
  "screen_index": 0,
  "idle_thinking_minutes": 6,

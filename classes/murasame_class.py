@@ -1215,6 +1215,35 @@ class Murasame(QLabel):
             print("[AIpet] 恢复截图线程")
             self.start_screenshot_worker(interval=self.interval)
 
+    def _attention_ok(self, idle_seconds=None, just_greeted=False) -> bool:
+        """主动搭话前的闸门：现在开口合不合适（打分见 tool/attention）。
+
+        不合适的常见情形：刚说过话（90 秒内）、你正在打字、这一小时已经说过好几次、
+        在打全屏游戏（降权）、勿扰模式。合适的时机才开口，并且记一次"她开口了"。
+        """
+        try:
+            if getattr(self, "_dnd_enabled", False):
+                print("[桌宠] 🔇 勿扰模式 → 不主动开口")
+                return False
+            from tool import attention as _at
+            _fs = False
+            try:
+                from tool.perf_guard import game_mode as _gm
+                _fs = bool(_gm())
+            except Exception:
+                _fs = False
+            ok, sc, why = _at.should_speak(user_idle_sec=idle_seconds,
+                                           fullscreen=_fs, just_greeted=just_greeted)
+            if not ok:
+                print(f"[桌宠] 🔇 这次不开口（分数 {sc:.2f}：{why}）")
+                return False
+            _at.note_spoke()
+            print(f"[桌宠] 💬 开口时机合适（分数 {sc:.2f}：{why}）")
+            return True
+        except Exception as e:
+            print(f"[桌宠] ⚠ 开口时机判断失败（按开口处理）: {e}")
+            return True
+
     def check_idle_state(self):
         """检查系统空闲时间并在阈值上触发对话"""
         idle_seconds = get_idle_seconds()
@@ -1227,6 +1256,9 @@ class Murasame(QLabel):
         ):
             elapsed = time.time() - self.away_trigger_time
             if elapsed >= 30:
+                if not self._attention_ok(idle_seconds=idle_seconds, just_greeted=True):
+                    self.away_trigger_time = None      # 这次时机不合适，放过这一回
+                    return
                 print("[AIpet] 触发回归")
                 greeting_prompt = (
                     "系统提示：用户刚刚从离开状态回到电脑前。"
@@ -1251,6 +1283,8 @@ class Murasame(QLabel):
             self.idle_away_triggered = True
             self.away_trigger_time = time.time()
             print(f"[AIpet] 空闲超过 {self.idle_away_seconds} 秒，判定为离开屏幕")
+            if not self._attention_ok(idle_seconds=idle_seconds):
+                return
             prompt = (
                 "系统提示：用户已经离开屏幕更长时间，没有对电脑进行任何输入。忽视最近的对话。"
                 f"你需要以“{self.pet_name}”的身份，问问主人还在不在，提醒适当休息。"
@@ -1264,6 +1298,8 @@ class Murasame(QLabel):
         if idle_seconds >= self.idle_thinking_seconds and not self.idle_thinking_triggered:
             self.idle_thinking_triggered = True
             print(f"[AIpet] 空闲超过 {self.idle_thinking_seconds} 秒")
+            if not self._attention_ok(idle_seconds=idle_seconds):
+                return
             prompt = (
                 "系统提示：用户已经有一段时间没有对电脑进行输入操作。忽视最近的对话。"
                 "可能是在发呆、走神或者安静地思考。"
