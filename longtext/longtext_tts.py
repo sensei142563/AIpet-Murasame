@@ -96,8 +96,14 @@ class LongTextVoice:
                             os.remove(save_path)
                     except Exception:
                         pass
+                    try:
+                        # 与短语音同一套后处理（统一响度 + 偏闷提亮）
+                        from tool.audio_polish import polish_wav_bytes as _polish
+                        _audio = _polish(resp.content)
+                    except Exception:
+                        _audio = resp.content
                     with open(save_path, "wb") as f:
-                        f.write(resp.content)
+                        f.write(_audio)
                 else:
                     try:
                         err = resp.json().get("error", resp.text[:200])

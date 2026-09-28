@@ -514,7 +514,14 @@ def gpt_sovits_tts(sentence: str, emotion: str, aux_ref_audio_paths: list = []):
     os.makedirs("./tmp", exist_ok=True)
     sentence_md5 = hashlib.md5(sentence.encode()).hexdigest()
     out_path = f"./tmp/{sentence_md5}.wav"
+    try:
+        # 统一响度 + 偏闷时提亮（不同情绪参考音频合成出来响度差最多 ~8dB，
+        # 听感就是"有时清楚有时糊/有时太小"；处理失败会原样返回，不影响出声）
+        from tool.audio_polish import polish_wav_bytes as _polish
+        _audio = _polish(reply.content)
+    except Exception:
+        _audio = reply.content
     with open(out_path, "wb") as f:
-        f.write(reply.content)
+        f.write(_audio)
     print(f"[{now_time()}] [gpt-sovits-tts] Wav_name:{sentence_md5}")
     return sentence_md5
