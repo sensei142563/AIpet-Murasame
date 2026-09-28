@@ -115,6 +115,9 @@ WIRING = (
     ("classes/murasame_class.py", "def _toggle_learn", "自主学习开关入口不见了"),
     ("tool/chat.py", "self_learn as _sl_note", "本地链路没注入她的长期记忆"),
     ("tool/cloud_API_chat.py", "self_learn as _sl_note", "云端链路没注入她的长期记忆"),
+    ("tool/screen_capture.py", "def capture_qimage", "Win32 抓屏模块缺 capture_qimage"),
+    ("classes/Worker_class.py", "screen_capture as _sc",
+     "截图线程又退回 QScreen.grabWindow 了（后台线程调用会让进程凭空消失）"),
 )
 # 绝不能出现的（历史坑，回来就是 bug 复发）—— **正则**，只扫非注释行：
 #   注释里写着"原来写死了 infos[57:65]"是对的（解释历史），不能算复发（自测自己踩过这个误报）

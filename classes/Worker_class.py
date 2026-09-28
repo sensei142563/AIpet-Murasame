@@ -339,7 +339,26 @@ class ScreenWorker(QThread):
             return
         while not self.isInterruptionRequested():
             # 抓屏（全屏）
-            pixmap = screen.grabWindow(0)
+            # ⚠ 这里在 QThread 里跑：QScreen.grabWindow() 只能在 GUI 线程调用，
+            #   后台调它会**没有任何报错地让整个进程消失**（用户看到"桌宠不见了"）。
+            #   改用纯 Win32 抓屏（tool/screen_capture，BitBlt + GetDIBits，线程安全）。
+            _img = None
+            try:
+                from tool import screen_capture as _sc
+                _img = _sc.capture_qimage()
+            except Exception as _e:
+                print(f"[截图线程] ⚠ Win32 抓屏失败: {_e}")
+            if _img is None:
+                try:
+                    from PyQt5.QtWidgets import QApplication
+                    _app = QApplication.instance()
+                    print("[截图线程] ⚠ 抓屏不可用，这一轮跳过（不再退回 grabWindow，避免崩进程）")
+                except Exception:
+                    pass
+                pixmap = None
+            else:
+                from PyQt5.QtGui import QPixmap
+                pixmap = QPixmap.fromImage(_img)
             # 存到临时文件
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png", dir="tmp")
             tmp_name = tmp.name
