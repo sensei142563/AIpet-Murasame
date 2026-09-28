@@ -172,6 +172,44 @@ def generate_fgimage(target, embeddings_layers, pet_id: str = None):
             print(f"[generate] ℹ 返回的图层 {embeddings_layers} 本角色都没有 → 改用默认表情图 {_dflt}")
             valid_layers = _dflt
         else:
+            # ★ layers 模式的角色**没有**"默认图层"（get_portrait_default_layers 只服务 single 模式），
+            #   但 pet.json 里有 portrait.sets.<套>.clothes / .emotions →
+            #   用「本套第一件衣服（含发型）+ 本套第一个表情」兜底。
+            #   不这么做的话，"AI 越界返回别的套的图层号"就会合成 1×1 空画布（表现为立绘看不见）。
+            _set = str(target)[-1:]
+            try:
+                from pets.pet_registry import get_pet_config as _gpc2
+                _pt = (_gpc2(pet_id) or {}).get("portrait") or {}
+                _sets = _pt.get("sets") if isinstance(_pt.get("sets"), dict) else None
+                _blk = (_sets or {}).get(_set) or (_pt if "clothes" in _pt else {})
+                _cands = []
+                for _v in (_blk.get("clothes") or {}).values():
+                    if not isinstance(_v, dict):
+                        continue
+                    for _k in ("cloth", "hair"):
+                        try:
+                            _iv = int(_v.get(_k) or 0)
+                        except Exception:
+                            _iv = 0
+                        if _iv and os.path.exists(os.path.join(fg_dir, f"{target}_{_iv}.png")):
+                            _cands.append(_iv)
+                    if _cands:
+                        break                      # 只取第一件衣服
+                for _v in (_blk.get("emotions") or {}).values():
+                    try:
+                        _iv = int(_v)
+                    except Exception:
+                        continue
+                    if os.path.exists(os.path.join(fg_dir, f"{target}_{_iv}.png")):
+                        _cands.append(_iv)
+                        break
+                _cands = list(dict.fromkeys(_cands))[:3]
+                if _cands:
+                    print(f"[generate] ℹ 图层全不可用且本角色无默认图层 → 改用「{_set} 套」默认组合 {_cands}")
+                    valid_layers = _cands
+            except Exception as _e:
+                print(f"[generate] ⚠ 默认组合兜底失败: {_e}")
+        if not valid_layers:
             print(f"[generate] ⚠ 所有图层均缺失，返回空画布")
             return np.zeros((1, 1, 4), dtype=np.uint8)
 
