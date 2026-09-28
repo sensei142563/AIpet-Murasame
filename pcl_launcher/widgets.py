@@ -121,13 +121,17 @@ class ChoiceRow(QWidget):
         # 选中态就是"当前值"，不能被页面透明化压淡：颜色全部用 0–1 小数写
         # （_make_transparent 只压实心色，小数形式原样保留），再打 keep_true_color 双保险。
         _c3 = Color3
+        # 选中态填色：既要「配白字够读」（深色主题的强调色当底只有 3.20:1），
+        # 又要保留小数 alpha 写法 —— _make_transparent 只压实心色，小数形式原样保留，
+        # 这是「选中态不被页面透明化压淡」的第一道保险（第二道是 keep_true_color）。
+        _c3f = fill_for_text(_c3)
         self.setProperty("keep_true_color", True)
         self.setStyleSheet(f"""
-            QPushButton {{ background: rgba(255,255,255,0.06); color: {Gray2.name()};
+            QPushButton {{ background: rgba(255,255,255,0.06); color: {secondary_text().name()};
                 border: 1px solid {Gray5.name()}; border-radius: {int(4*S)}px;
                 padding: {int(3*S)}px {int(10*S)}px; font-size: {int(13*S)}px; }}
             QPushButton:hover {{ background: rgba(255,255,255,0.15); border-color: {_c3.name()}; }}
-            QPushButton:checked {{ background: rgba({_c3.red()},{_c3.green()},{_c3.blue()},0.88);
+            QPushButton:checked {{ background: rgba({_c3f.red()},{_c3f.green()},{_c3f.blue()},0.88);
                 color: #ffffff; border-color: {_c3.name()}; font-weight: bold; }}
         """)
         self.setValue(0, emit=False)
@@ -214,7 +218,7 @@ class PCLSettingsPanel(QWidget):
                 font-size: {int(12*S)}px; border-radius: {btn_radius()}px;
                 font-family: 'Microsoft YaHei'; }}
             QPushButton:hover {{ background: {surface_fill(220, 44)}; }}
-            QPushButton:checked {{ background: {Color3.name()}; color: white;
+            QPushButton:checked {{ background: {fill_for_text(Color3).name()}; color: white;
                 border-color: {Color3.name()}; font-weight: bold; }}
         """
         cat_row = QHBoxLayout(); cat_row.setSpacing(int(6 * S))
@@ -456,7 +460,7 @@ class PCLSettingsPanel(QWidget):
         # 底部条改成反馈区：左边显示「已自动保存 ✓ 时间」，右边给一个重启桌宠的明确入口
         # （有些配置要桌宠重启后才生效，与其让用户自己去找「关闭桌宠」，不如放在这儿）。
         self._status_lbl = QLabel("改动会自动保存")
-        self._status_lbl.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(11*S)}px;")
+        self._status_lbl.setStyleSheet(f"color: {secondary_text().name()}; font-size: {int(11*S)}px;")
         btn_restart = QPushButton("🔄 重启桌宠以生效")
         btn_restart.setCursor(Qt.PointingHandCursor)
         btn_restart.setToolTip("关闭当前运行中的桌宠；下次启动时使用最新配置")
@@ -625,7 +629,7 @@ class PCLSettingsPanel(QWidget):
         lbl = QLabel(f"  {icon} {text}")
         lbl.setFont(QFont("Microsoft YaHei", int(13 * S), QFont.Bold))
         lbl.setStyleSheet(
-            f"color: {Color3.name()}; margin-top: {int(18*S)}px;"
+            f"color: {accent_text().name()}; margin-top: {int(18*S)}px;"
             f"padding: {int(5*S)}px {int(10*S)}px;"
             f"background: {surface_fill(120, 20)};"
             f"border-left: 4px solid {Color3.name()}; border-radius: {int(4*S)}px;")
@@ -666,7 +670,7 @@ class PCLSettingsPanel(QWidget):
                     font-size: {int(12*S)}px; border-radius: {int(4*S)}px;
                     font-family: 'Microsoft YaHei'; }}
                 QPushButton:hover {{ background: {surface_fill(235, 40)}; }}
-                QPushButton:checked {{ background: {Color3.name()}; color: white;
+                QPushButton:checked {{ background: {fill_for_text(Color3).name()}; color: white;
                     border-color: {Color3.name()}; }}
             """)
 
@@ -703,7 +707,7 @@ class PCLSettingsPanel(QWidget):
         """
         row = QHBoxLayout()
         lbl = QLabel(label)
-        lbl.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(14*S)}px; min-width: 160px;")
+        lbl.setStyleSheet(f"color: {secondary_text().name()}; font-size: {int(14*S)}px; min-width: 160px;")
         row.addWidget(lbl)
         choose = ChoiceRow(options, display)
         choose.setValue(options.index(default) if default in options else 0, emit=False)
@@ -723,7 +727,7 @@ class PCLSettingsPanel(QWidget):
         """
         row = QHBoxLayout()
         lbl = QLabel(label)
-        lbl.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(14*S)}px; min-width: 160px;")
+        lbl.setStyleSheet(f"color: {secondary_text().name()}; font-size: {int(14*S)}px; min-width: 160px;")
         row.addWidget(lbl)
         sw = BoolSwitch()
         sw.setChecked(str(default) == "true")
@@ -741,7 +745,7 @@ class PCLSettingsPanel(QWidget):
     def _add_spin(self, key, label, min_val, max_val, default, hint=None):
         row = QHBoxLayout()
         lbl = QLabel(f"{label}")
-        lbl.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(14*S)}px; min-width: 160px;")
+        lbl.setStyleSheet(f"color: {secondary_text().name()}; font-size: {int(14*S)}px; min-width: 160px;")
         row.addWidget(lbl)
         spin = QSpinBox()
         spin.setRange(min_val, max_val); spin.setValue(default)
@@ -758,7 +762,7 @@ class PCLSettingsPanel(QWidget):
     def _add_double_spin(self, key, label, min_val, max_val, default, step):
         row = QHBoxLayout()
         lbl = QLabel(f"{label}")
-        lbl.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(14*S)}px; min-width: 160px;")
+        lbl.setStyleSheet(f"color: {secondary_text().name()}; font-size: {int(14*S)}px; min-width: 160px;")
         row.addWidget(lbl)
         spin = QDoubleSpinBox()
         spin.setRange(min_val, max_val); spin.setValue(default); spin.setSingleStep(step)
@@ -773,7 +777,7 @@ class PCLSettingsPanel(QWidget):
         """可编辑模型名下选框（预设 + 自由输入）"""
         row = QHBoxLayout()
         lbl = QLabel(f"{label}")
-        lbl.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(14*S)}px; min-width: 120px;")
+        lbl.setStyleSheet(f"color: {secondary_text().name()}; font-size: {int(14*S)}px; min-width: 120px;")
         row.addWidget(lbl)
         combo = QComboBox()
         combo.setEditable(True)
@@ -1025,7 +1029,7 @@ class PCLFaceManager(QScrollArea):
         # 添加主人照片按钮
         btn_add_master = QPushButton("  + 添加主人照片")
         btn_add_master.setStyleSheet(f"""
-            QPushButton {{ background: {Color3.name()}; color: white; border: none;
+            QPushButton {{ background: {fill_for_text(Color3).name()}; color: white; border: none;
                 padding: {int(8*S)}px {int(16*S)}px; font-size: {int(13*S)}px;
                 border-radius: {btn_radius()}px; font-family: 'Microsoft YaHei'; }}
             QPushButton:hover {{ background: {Color4.name()}; }}
@@ -1048,7 +1052,7 @@ class PCLFaceManager(QScrollArea):
 
         btn_add_other = QPushButton("  + 添加其他人")
         btn_add_other.setStyleSheet(f"""
-            QPushButton {{ background: {Color3.name()}; color: white; border: none;
+            QPushButton {{ background: {fill_for_text(Color3).name()}; color: white; border: none;
                 padding: {int(8*S)}px {int(16*S)}px; font-size: {int(13*S)}px;
                 border-radius: {btn_radius()}px; font-family: 'Microsoft YaHei'; }}
             QPushButton:hover {{ background: {Color4.name()}; }}
@@ -1265,7 +1269,7 @@ class PCLMemoryManager(QScrollArea):
         # ===== 操作按钮 =====
         btn_row = QHBoxLayout()
         btn_backup = QPushButton("  📦 备份该角色记忆 ")
-        btn_backup.setStyleSheet(self._btn_style("#2f8f4e"))
+        btn_backup.setStyleSheet(self._btn_style(fill_for_text(ACTION_GREEN).name()))
         btn_backup.clicked.connect(self._backup_pet)
         btn_row.addWidget(btn_backup)
         btn_clear_all = QPushButton("  🗑 清空该角色全部记忆 ")
@@ -1698,7 +1702,7 @@ class PCLPetManager(QScrollArea):
         # 添加桌宠按钮 → 打开分步引导向导
         btn_add = QPushButton("  + 添加新桌宠（跟着引导一步步来）")
         btn_add.setStyleSheet(f"""
-            QPushButton {{ background: {Color3.name()}; color: white; border: none;
+            QPushButton {{ background: {fill_for_text(Color3).name()}; color: white; border: none;
                 padding: {int(8*S)}px {int(16*S)}px; font-size: {int(13*S)}px;
                 border-radius: {btn_radius()}px; font-family: 'Microsoft YaHei'; }}
             QPushButton:hover {{ background: {Color4.name()}; }}
@@ -1852,8 +1856,11 @@ class PCLPetManager(QScrollArea):
             cap_row.setSpacing(int(4*S))
             for text, color in badges:
                 b = QLabel(f" {text} ")
+                # 白字 + 填色 → 填色必须先满足对比度（实测琥珀 #d4a020 只有 2.37:1、
+                # 绿 #30a030 只有 3.39:1、灰 #808080 约 3.9:1；fill_for_text 自动压暗）。
+                _fill = fill_for_text(color)
                 b.setStyleSheet(f"""
-                    background: {color}; color: white; border: none;
+                    background: {_fill.name()}; color: white; border: none;
                     padding: {int(2*S)}px {int(6*S)}px; font-size: {int(10*S)}px;
                     border-radius: {int(4*S)}px; font-weight: bold;
                 """)
@@ -1884,7 +1891,7 @@ class PCLPetManager(QScrollArea):
             btn_active = QPushButton("🐾 用作桌宠形象" if _pet_running else "🐾 设为桌宠角色")
             btn_active.setToolTip("等于把这个角色拖进「当前使用 → 桌宠」槽"
                                   "（桌宠正在跑的话会自动关掉重开成它）")
-            btn_active.setStyleSheet(self._btn_style(GreenDark.name()))
+            btn_active.setStyleSheet(self._btn_style(fill_for_text(ACTION_GREEN).name()))
             btn_active.clicked.connect(lambda checked, pid=p["id"]: self._slot_assign("pet", pid))
             btn_row.addWidget(btn_active)
 
@@ -2552,7 +2559,7 @@ class PCLPromptEditor(QWidget):
         btn_reload = QPushButton(" 🔄 重新加载")
         for b in (btn_save, btn_reload):
             b.setStyleSheet(f"""
-                QPushButton {{ background: {Color3.name()}; color: white; border: none;
+                QPushButton {{ background: {fill_for_text(Color3).name()}; color: white; border: none;
                     padding: {int(8*S)}px {int(16*S)}px; font-size: {int(13*S)}px;
                     border-radius: {btn_radius()}px; font-family: 'Microsoft YaHei'; }}
                 QPushButton:hover {{ background: {Color4.name()}; }}

@@ -322,7 +322,7 @@ class PCLPluginSettingsDialog(SiliconDialog):
         btn_cancel = QPushButton("  取消")
         for b in (btn_save, btn_cancel):
             b.setStyleSheet(f"""
-                QPushButton {{ background: {Color3.name()}; color: white; border: none;
+                QPushButton {{ background: {fill_for_text(Color3).name()}; color: white; border: none;
                     padding: {int(8*S)}px {int(18*S)}px; font-size: {int(13*S)}px;
                     border-radius: {btn_radius()}px; font-family: 'Microsoft YaHei'; }}
                 QPushButton:hover {{ background: {Color4.name()}; }}
@@ -340,7 +340,7 @@ class PCLPluginSettingsDialog(SiliconDialog):
         if meta.get("id") == "face":
             info = QLabel("📷 主人 / 其他人的照片在这里添加、删除；下面是识别参数。")
             info.setWordWrap(True)
-            info.setStyleSheet(f"color: {Color3.name()}; font-size: {int(12*S)}px;"
+            info.setStyleSheet(f"color: {accent_text().name()}; font-size: {int(12*S)}px;"
                                f"background: {Color6.name()}; border-radius: {int(4*S)}px;"
                                f"padding: {int(8*S)}px;")
             lay.addWidget(info)
@@ -432,7 +432,7 @@ class PCLPluginsPanel(QScrollArea):
                 font-size: {int(12*S)}px; border-radius: {btn_radius()}px;
                 font-family: 'Microsoft YaHei'; }}
             QPushButton:hover {{ background: {surface_fill(220, 44)}; }}
-            QPushButton:checked {{ background: {Color3.name()}; color: white;
+            QPushButton:checked {{ background: {fill_for_text(Color3).name()}; color: white;
                 border-color: {Color3.name()}; font-weight: bold; }}
         """
         self._grp_filt = QButtonGroup(self)
@@ -460,7 +460,7 @@ class PCLPluginsPanel(QScrollArea):
         btn_refresh = QPushButton("  🔄 刷新")
         for b in (btn_import, btn_refresh):
             b.setStyleSheet(f"""
-                QPushButton {{ background: {Color3.name()}; color: white; border: none;
+                QPushButton {{ background: {fill_for_text(Color3).name()}; color: white; border: none;
                     padding: {int(8*S)}px {int(16*S)}px; font-size: {int(13*S)}px;
                     border-radius: {btn_radius()}px; font-family: 'Microsoft YaHei'; }}
                 QPushButton:hover {{ background: {Color4.name()}; }}
@@ -582,7 +582,7 @@ class PCLPluginsPanel(QScrollArea):
         _official = bool(meta.get("builtin", True))
         # ⚠ 标签色也要按当前主题底板算：写死的 #c98a1e 在浅色卡片上只有 2.9:1（看不清）
         _mine = readable_on(QColor("#c98a1e")).name()
-        _tag = (f"<span style='color:{Color3.name()};font-size:{int(10*S)}px;'>官方</span>"
+        _tag = (f"<span style='color:{accent_text().name()};font-size:{int(10*S)}px;'>官方</span>"
                 if _official else
                 f"<span style='color:{_mine};font-size:{int(10*S)}px;'>我的</span>")
         name_lbl = QLabel(f"{meta.get('name', meta['id'])}  {_tag}  "

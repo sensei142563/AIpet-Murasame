@@ -203,7 +203,7 @@ class PCLThemesPanel(QScrollArea):
         acc_label = QLabel("  🎨 主题色（强调色，点击即时预览切换）")
         acc_label.setFont(QFont("Microsoft YaHei", int(13 * S), QFont.Bold))
         acc_label.setStyleSheet(
-            f"color: {Color3.name()}; margin-top: {int(8*S)}px;"
+            f"color: {accent_text().name()}; margin-top: {int(8*S)}px;"
             f"padding: {int(5*S)}px {int(10*S)}px;"
             f"background: {surface_fill(120, 20)};"
             f"border-left: 4px solid {Color3.name()}; border-radius: {int(4*S)}px;")
@@ -229,7 +229,7 @@ class PCLThemesPanel(QScrollArea):
         btn_refresh = QPushButton("  🔄 刷新")
         for b in (btn_import, btn_refresh):
             b.setStyleSheet(f"""
-                QPushButton {{ background: {Color3.name()}; color: white; border: none;
+                QPushButton {{ background: {fill_for_text(Color3).name()}; color: white; border: none;
                     padding: {int(8*S)}px {int(16*S)}px; font-size: {int(13*S)}px;
                     border-radius: {btn_radius()}px; font-family: 'Microsoft YaHei'; }}
                 QPushButton:hover {{ background: {Color4.name()}; }}
@@ -403,7 +403,7 @@ class PCLThemesPanel(QScrollArea):
                 f"QPushButton {{ background: rgba(255,255,255,0.10); color: {Color1.name()};"
                 f" border: 1px solid {Color3.name()}; border-radius: 6px; padding: 0 10px;"
                 f" font-size: {int(11*S)}px; }}"
-                f"QPushButton:hover {{ background: {Color3.name()}; color: white; }}")
+                f"QPushButton:hover {{ background: {fill_for_text(Color3).name()}; color: white; }}")
             _b_follow.clicked.connect(lambda _=False: _save_color(self._bg_color, follow=True))
             btn_col.clicked.connect(_pick_color)
             _paint_btn()
@@ -505,12 +505,12 @@ class PCLThemesPanel(QScrollArea):
             name += "   ✅ 当前使用"
         name_lbl = QLabel(name)
         name_lbl.setFont(QFont("Microsoft YaHei", int(14*S), QFont.Bold))
-        name_lbl.setStyleSheet(f"color: {Color3.name() if is_cur else Color1.name()}; "
+        name_lbl.setStyleSheet(f"color: {accent_text().name() if is_cur else Color1.name()}; "
                                f"background: transparent; border: none;")
         left.addWidget(name_lbl)
         desc = QLabel(meta["desc"] + ("" if meta["builtin"] else "（我的主题）"))
         desc.setWordWrap(True)
-        desc.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(12*S)}px; background: transparent; border: none;")
+        desc.setStyleSheet(f"color: {secondary_text().name()}; font-size: {int(12*S)}px; background: transparent; border: none;")
         left.addWidget(desc)
         # 配色预览条
         sw = QHBoxLayout()
@@ -546,7 +546,7 @@ class PCLThemesPanel(QScrollArea):
                 font-size: {int(11*S)}px; border-radius: {int(4*S)}px;
                 font-family: 'Microsoft YaHei'; }}
             QPushButton:hover {{ background: {Color4.name()}; color: white; }}
-            QPushButton:disabled {{ color: {Gray4.name()}; }}
+            QPushButton:disabled {{ color: {secondary_text().name()}; }}   /* 浅色主题下 Gray4 压在浅底上只有 2.06:1（实测「使用中」按钮） */
         """
 
         def _mk(text, tip=""):

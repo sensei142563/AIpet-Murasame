@@ -288,18 +288,23 @@ def readable_on(color, bg=None, target: float = 4.5):
     """把 color 沿明暗调到在当前主题底板上达到 target 对比度。
 
     bg 默认取「窗口底板色」base_bg_color()。已经够清楚就原样返回（不改变设计色）。
+
+    ⚠ 方向判据是"**朝远离底色的方向调**"（文字比底暗就继续压暗，比底亮就提亮），
+      不能用"底色亮度 < 0.5 就算深色"这种阈值判断：中灰底（如 #b3b9c2，亮度 0.46）
+      会被误判成深色底 → 于是把灰字**提亮成白色**压在浅灰上（实测 1.97:1，比不改还糟）。
+      这个坑是本函数的自测（test_contrast_fills.py）当场抓出来的。
     """
     c = QColor(color)
     b = QColor(bg) if bg is not None else base_bg_color()
     if contrast_ratio(c, b) >= target:
         return c
-    dark_bg = rel_luminance(b) < 0.5
+    toward_black = rel_luminance(c) < rel_luminance(b)
     out = QColor(c)
-    for _ in range(40):
-        out = out.lighter(112) if dark_bg else out.darker(112)
+    for _ in range(60):
+        out = out.darker(110) if toward_black else out.lighter(110)
         if contrast_ratio(out, b) >= target:
             return out
-    return QColor("#ffffff") if dark_bg else QColor("#000000")
+    return QColor("#000000") if toward_black else QColor("#ffffff")
 
 
 def ok_text():
@@ -310,6 +315,88 @@ def ok_text():
 def warn_text():
     """警告 / 失败的状态字"""
     return readable_on(RedDark)
+
+
+# 「正向动作」的语义绿（**固定色，不跟主题走**）。
+# 为什么固定：项目里红=危险、紫=创作 早就是固定色（#e03030 / #7a5cd8），绿却跟着主题走 ——
+#   主题自带的绿配白字只有 3.08:1（#21aa11），而"压暗到够亮"会把色相退化成橄榄灰
+#   （实测 senrenbanka 压完是 #5f874e，HLS 饱和度 0.27，看起来已经不是绿色了）。
+#   固定成这个值：白字 5.4:1、HLS 饱和度 0.60（明确是绿），四个主题下语义一致。
+ACTION_GREEN = QColor("#1e7a33")
+
+
+def fill_for_text(fill, text="#ffffff", target: float = 4.8):
+    """**填色 + 固定文字** 这类配对的保险：把填色压暗/提亮到与文字达到 target。
+
+    为什么需要它（用户报的"彩色徽章白字看不清"，实测）：
+      · 琥珀徽章 `#d4a020` + 白字 = **2.37:1**
+      · 绿徽章   `#30a030` + 白字 = **3.39:1**
+      · 绿按钮   `#21aa11` + 白字 = **3.08:1** ／ 备份按钮 `#2f8f4e` = 4.07:1
+      · 深色主题的强调色当按钮底 `#4c8dff` + 白字 = **3.20:1**（它当文字/描边时是够的，当底不够）
+    这类"底"必须自己保证对比度，不能指望主题色恰好够深。
+
+    target 默认 4.8（留一点余量：实际渲染还会叠加 6% 白膜，实测会把底色抬亮 ~0.2:1）。
+    """
+    f = QColor(fill)
+    t = QColor(text)
+    if contrast_ratio(f, t) >= target:
+        return f
+    # 文字亮 → 底要压暗；文字暗 → 底要提亮
+    toward_black = rel_luminance(t) > 0.5
+    out = QColor(f)
+    for _ in range(60):
+        out = out.darker(110) if toward_black else out.lighter(110)
+        if contrast_ratio(out, t) >= target:
+            return out
+    return QColor("#000000") if toward_black else QColor("#ffffff")
+
+
+def blend_over(fg, alpha_0_255, bg) -> QColor:
+    """把 fg 以 alpha（0–255）叠在 bg 上，返回**合成后的实色**。
+
+    用途：半透明胶囊/卡片上的文字要不要换色，得先知道合成出来到底是什么颜色
+    （例：`rgba(Color3, 60)` 压在浅底上合成 #4b92f5，配 Color1 文字只有 3.5:1）。
+    """
+    a = max(0, min(255, int(alpha_0_255))) / 255.0
+    f, b = QColor(fg), QColor(bg)
+    return QColor(int(f.red() * a + b.red() * (1 - a) + 0.5),
+                  int(f.green() * a + b.green() * (1 - a) + 0.5),
+                  int(f.blue() * a + b.blue() * (1 - a) + 0.5))
+
+
+# 启动器窗口底不是单纯的主题色：是「渐变底板 + 6% 蒙版/磨砂」，
+# 浅色主题实测顶部会到 #b3b9c2 这种中灰（探针无壁纸时的最坏情况）。
+# 所以"次级文字"不能直接用 Gray2 压在上面（实测 3.18:1）——统一按最坏底色压暗一次。
+_FILM_WORST_BG = QColor("#b3b9c2")
+
+
+def secondary_text() -> QColor:
+    """次级/提示文字的**可读**版本（浅色主题下会自动比 Gray2 更深）。
+
+    深色主题里 Gray2 本来就够（实测 6.6:1+）→ 原样返回，观感不变。
+    """
+    try:
+        if rel_luminance(QColor(Color8)) < 0.25:      # 深色主题：Gray2 已经够亮
+            return QColor(Gray2)
+        return readable_on(Gray2, _FILM_WORST_BG, 4.5)
+    except Exception:
+        return QColor(Gray2)
+
+
+# 浅色主题里"卡片/药丸/说明条"那层乳白膜（surface_fill(120..190)）压在渐变底板上，
+# 实测合成在 #cfd7e4 ~ #d6dde8。强调色当**文字**压在这层上只有 3.2~4.4:1（实测主题页
+# 「旧版主题 ✅ 当前使用」3.24、「🔑 基础信息与密钥」4.40），所以单独给一个可读版本。
+_FILM_LIGHT_BG = QColor("#cfd7e4")
+
+
+def accent_text() -> QColor:
+    """强调色当**文字**用时的可读版本（浅色主题下自动压深；深色主题保持鲜亮）。"""
+    try:
+        if rel_luminance(QColor(Color8)) < 0.25:      # 深色主题：强调色本来就鲜亮够用
+            return QColor(Color3)
+        return readable_on(Color3, _FILM_LIGHT_BG, 4.5)
+    except Exception:
+        return QColor(Color3)
 
 
 def surface_fill(light_alpha: int = 150, dark_alpha: int = 22) -> str:

@@ -32,6 +32,16 @@ Windows 事件日志里是 `python.exe` 在 `PyQt5\\Qt5\\bin\\MSVCP140.dll` 里
   · 改名 = `<名字>.aipet-disabled`，幂等、可回滚（改回来即可）；
   · 纯文件改名，不动注册表、不下载任何东西。
 """
+
+try:  # 控制台被重定向（管道/日志）时 Windows 会用 GBK 编码 stdout，
+    # 打印 emoji / ⚠ 之类字符会 UnicodeEncodeError 直接打断调用方。
+    # 本模块会被 .bat 用 `python -c "from tool.xxx import ..."` 直接调用 ——
+    # 那条路**没有**进程入口的 stdout 守卫，所以在这里自己兜一层（幂等、只放宽编码）。
+    import sys as _sys
+    _sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    _sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 import os
 
 # PyQt5\Qt5\bin 里那套旧运行时的文件名（Qt 自己的 DLL 不碰）

@@ -306,7 +306,7 @@ QPushButton {{
     font-size: 13px; font-family: "{silicon_ui.M.font}";
 }}
 QPushButton:hover {{ background: {SF(0.16)}; border-color: {Color3.name()}; }}
-QPushButton:disabled {{ color: {Gray3.name()}; border-color: {Color5.name()}; }}
+QPushButton:disabled {{ color: {secondary_text().name()}; border-color: {Color5.name()}; }}
 """
 
 
@@ -331,7 +331,7 @@ QPushButton:checked {{
     border: 1px solid {accent}; font-weight: bold;
 }}
 QPushButton:checked:hover {{ background: {fill}; border-color: {accent}; }}
-QPushButton:disabled {{ color: {Gray3.name()}; border-color: {Color5.name()}; }}
+QPushButton:disabled {{ color: {secondary_text().name()}; border-color: {Color5.name()}; }}
 """
 
 
@@ -350,9 +350,9 @@ QPushButton {{
 }}
 QPushButton:hover {{ background: {SF(0.16)}; border-color: {Color3.name()}; }}
 QPushButton:pressed {{
-    background: {accent}; color: white; border: 1px solid {accent}; font-weight: bold;
+    background: {fill_for_text(accent).name()}; color: white; border: 1px solid {accent}; font-weight: bold;
 }}
-QPushButton:disabled {{ color: {Gray3.name()}; border-color: {Color5.name()}; }}
+QPushButton:disabled {{ color: {secondary_text().name()}; border-color: {Color5.name()}; }}
 """
 
 
@@ -1190,9 +1190,12 @@ class SiliconLauncher(QWidget):
         self.nav_btns["settings"] = b_set
         lay.addWidget(b_set)
         ver = QLabel("Silicon UI · 新版")
-        # ⚠ 以前用 Gray3：浅色主题下这条页脚压在侧栏的浅色面上只有 1.6:1（实测），
-        #   基本看不见；换成主题的次级文字色（浅色主题 5.2:1 / 深色主题 9.9:1）。
-        ver.setStyleSheet(f"color: {Gray2.name()}; font-size: 11px; padding: 2px 8px;")
+        # ⚠ 这条页脚历史上踩过两次：Gray3 → 1.6:1；改成 Gray2 后**压在侧栏那层中灰蒙版上**
+        #   实测仍只有 2.50:1（探针无壁纸时最坏情况）。根因是它背后是"半透明蒙版 + 底板渐变"，
+        #   颜色不可预知 —— 所以别再让它透明：给它一个**实色小药丸**，底色和文字色都确定。
+        ver.setStyleSheet(
+            f"color: {readable_on(Color1, Color6).name()}; background: {Color6.name()};"
+            f" font-size: 11px; padding: 2px 8px; border-radius: 6px;")
         lay.addWidget(ver)
         self._nav_rail = rail
         self._nav_sep = sep

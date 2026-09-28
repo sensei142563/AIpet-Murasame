@@ -220,6 +220,21 @@ def install_requirements():
         _ensure_cfg("./config.json")
     except Exception as _e:
         log(f"生成 config.json 失败（继续）: {_e}", "WARN")
+    # 第二道保险：**顺序**。PyQt5 与 torch 的 MSVC 运行时冲突只发生在"Qt 先、torch 后"
+    # 这个顺序上（见 tool/msvc_runtime.py 的长注释）：
+    #   · 上面的自愈是治本（让旧运行时让位给系统新版）；
+    #   · 万一这台机器**没装更新的 VC++ 运行库**、自愈只能跳过，先 torch 后 Qt 仍然能跑
+    #     —— 实测：带旧运行时时"先 torch 再 Qt"exit=0、"先 Qt 再 torch"崩。
+    # 代价为零：torch 本来在每条路径上都会被 import（ensure_cpu_torch / setup_runtime_and_pytorch），
+    # 这里只是把它**提前**，之后 Qt 再加载就安全了。
+    try:
+        import importlib.util as _iu
+        if _iu.find_spec("torch") is not None:
+            import torch as _early_torch
+            log(f"已提前加载 PyTorch {_early_torch.__version__}"
+                f"（避开 Qt/torch 的 DLL 加载顺序冲突）", "INFO")
+    except Exception as _e:
+        log(f"提前加载 PyTorch 跳过（{_e}）", "INFO")
     try:
         import cv2
         import numpy

@@ -74,3 +74,6 @@ __pycache__/
 *.db
 *.sqlite3
 *.log
+
+# 对比度/渲染探针落下的截图目录（探针在 _audit 里跑，但 OUT 可能传成仓库根）
+shots_contrast/

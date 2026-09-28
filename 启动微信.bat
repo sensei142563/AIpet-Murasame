@@ -3,6 +3,8 @@ chcp 65001 >nul
 title 微信 ClawBot AIpet - 启动器
 setlocal
 cd /d "%~dp0"
+rem 给内联的 python 统一 UTF-8 输出：这些 -c 调用没有 stdout 守卫，打印非 GBK 字符会把这一步搞失败
+set "PYTHONIOENCODING=utf-8"
 
 rem 优先使用项目虚拟环境，否则回退系统 Python
 set "VENV_PYTHON=%~dp0runtime\venv\Scripts\python.exe"

@@ -515,7 +515,7 @@ def install(app: QApplication = None, accent="#4c8dff"):
                 text=_C.Color1.name(), text_dim=_C.Gray2.name(),
                 surface=_C.Color6.name(), surface2=_C.Color7.name(),
                 bg=_C.Color8.name(), border=_C.Color5.name(),
-                disabled=_C.Gray3.name()))
+                disabled=_C.secondary_text().name()))
         except Exception as _e:
             print(f"[SiliconUI] ⚠ 主题 QSS 失败，回退深色默认值: {_e}")
             app.setStyleSheet(silicon_qss(accent=accent))

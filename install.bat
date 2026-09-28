@@ -4,6 +4,12 @@ title AIpet 丛雨AI桌宠 - 首次安装
 setlocal
 cd /d "%~dp0"
 
+rem 让被调用的 python 一律按 UTF-8 输出：本脚本会内联 `python -c "..."`（版本检查/装 torch/修
+rem MSVC 运行时），这些内联调用**没有**进程入口的 stdout 守卫 —— 一旦被调代码打印了 GBK 编不出的
+rem 字符（例如 ⚠），管道场景下会 UnicodeEncodeError 把这一步搞失败（我们已经在 tool/config.py
+rem 上踩过一次）。设成 utf-8 之后，这类打印最坏只是显示成乱码，不会中断安装。
+set "PYTHONIOENCODING=utf-8"
+
 echo ============================================
 echo    AIpet 丛雨AI桌宠 - 首次安装引导
 echo ============================================

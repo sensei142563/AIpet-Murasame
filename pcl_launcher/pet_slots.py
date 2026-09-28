@@ -21,7 +21,8 @@ from PyQt5.QtGui import QDrag, QFont, QPixmap
 from PyQt5.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel, QVBoxLayout,
                              QWidget)
 
-from .colors import Color1, Color3, Color5, Gray2, Gray3, GreenDark
+from .colors import (Color1, Color3, Color5, Gray2, Gray3, GreenDark,
+                     base_bg_color, blend_over, readable_on)
 from .silicon_ui import M
 from .widgets import S                     # 统一的缩放系数（widgets 是常量来源）
 
@@ -63,14 +64,22 @@ class PetCapsule(QFrame):
 
         self.setObjectName("petCapsule")
         self.setCursor(Qt.OpenHandCursor)
+        # ⚠ 这个胶囊原来是**双层半透明**（自身 60 + 外层 petSlotBox 40）叠出来的中蓝，
+        #   实测合成 #4b92f5：配 Color1 深字只有 3.52:1、配白字 3.12:1 —— 两头都不够
+        #   （不是"字选错了"，是底色本身落在中间灰蓝带）。
+        #   改成"不透明浅色调 + 按合成色选文字色"：底色确定，文字必然够读；
+        #   悬停态仍是同一套算法，只是色调更实一点。
+        _tint = blend_over(Color3, 46, base_bg_color())
+        _tint_hover = blend_over(Color3, 96, base_bg_color())
+        _cap_fg = readable_on(Color1, _tint, 4.5)
         self.setStyleSheet(f"""
             QFrame#petCapsule {{
-                background: rgba({Color3.red()},{Color3.green()},{Color3.blue()},60);
+                background: {_tint.name()};
                 border: 1px solid {Color5.name()};
                 border-radius: {int(14*S)}px;
             }}
             QFrame#petCapsule:hover {{
-                background: rgba({Color3.red()},{Color3.green()},{Color3.blue()},110);
+                background: {_tint_hover.name()};
             }}
         """)
         row = QHBoxLayout(self)
@@ -87,7 +96,7 @@ class PetCapsule(QFrame):
                                                  Qt.KeepAspectRatio, Qt.SmoothTransformation))
             row.addWidget(av)
         lb = QLabel(self.pet_name)
-        lb.setStyleSheet(f"color: {Color1.name()}; border: none;"
+        lb.setStyleSheet(f"color: {_cap_fg.name()}; border: none;"
                          f" font-size: {int(12*S)}px; font-family: '{M.font}';")
         row.addWidget(lb)
         self.setToolTip(f"{self.pet_name}（{pet_id}）\n拖动我 → 放进上面的「当前使用」槽位")
