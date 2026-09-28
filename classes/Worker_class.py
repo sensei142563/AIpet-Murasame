@@ -421,13 +421,36 @@ class AgentWorker(QThread):
         text, ok = "", False
         try:
             from tool.agent_bridge import run_task
-            r = run_task(self.task, on_confirm=lambda t: True)   # 主线程已经确认过了
+            # ① 查旧经验：做过类似的事就把"上次怎么做的"一起交给 agent（又快又不容易跑偏）
+            hint = ""
+            try:
+                from tool import experience as _exp
+                if _exp.enabled():
+                    hint = _exp.note_for(self.task)
+            except Exception:
+                hint = ""
+            task = ((hint + "\n") if hint else "") + self.task
+            r = run_task(task, on_confirm=lambda t: True)   # 主线程已经确认过了
             ok = bool(r.get("ok"))
             if ok:
                 text = (r.get("output") or "").strip() or "（它没给出文字答复）"
             else:
                 why = r.get("refused") or r.get("error") or "没成功"
                 text = "（这件事没办成：%s）" % str(why)[:300]
+            # ② 记经验：成功/失败都记（失败只累加 fail，不当可复用经验）
+            try:
+                from tool import experience as _exp2
+                if _exp2.enabled():
+                    _first = ""
+                    for _ln in (r.get("output") or "").splitlines():
+                        if _ln.strip():
+                            _first = _ln.strip()[:60]
+                            break
+                    _steps = ["由 %s 完成" % (r.get("backend") or "?"),
+                              _first or ("失败：%s" % str(r.get("error") or "")[:40])]
+                    _exp2.learn(self.task, _steps, ok=ok)
+            except Exception:
+                pass
         except Exception as e:
             text = "（agent 桥接出错：%s）" % e
         try:
