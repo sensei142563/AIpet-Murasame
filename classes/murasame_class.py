@@ -1733,8 +1733,8 @@ class Murasame(QLabel):
             w = max(old.width(), new_pm.width(), 1)
             h = max(old.height(), new_pm.height(), 1)
             canvas = QSize(w, h)
-            old = self._pad_pixmap(old, canvas)
-            new_pm = self._pad_pixmap(new_pm, canvas)
+            old = self._pad_pixmap(old, canvas, center_x=True)
+            new_pm = self._pad_pixmap(new_pm, canvas, center_x=True)
             try:
                 self.resize(canvas)
             except Exception:
@@ -1774,6 +1774,13 @@ class Murasame(QLabel):
                 fin = st.get("pm_in")
                 self._fade_state = None
                 if fin is not None and not fin.isNull():
+                    # 收尾这一帧也要补到窗口宽度并居中，否则立绘会贴在窗口左边
+                    # （过渡结束后"人物突然偏左"，直到下一次 update_portrait 才回正）
+                    try:
+                        _w = max(int(fin.width()), int(self.width() or 0))
+                        fin = self._pad_pixmap(fin, QSize(_w, int(fin.height())), center_x=True)
+                    except Exception:
+                        pass
                     self.setPixmap(fin)
                     self.resize(fin.size())
                     self.update()
@@ -1782,8 +1789,13 @@ class Murasame(QLabel):
             print(f"[桌宠] ⚠ 立绘渐变帧失败: {e}")
 
     @staticmethod
-    def _pad_pixmap(pm, size):
-        """把 pixmap 画到指定尺寸的透明画布上（左上对齐），尺寸已一致则原样返回"""
+    def _pad_pixmap(pm, size, center_x=False):
+        """把 pixmap 画到指定尺寸的透明画布上，尺寸已一致则原样返回。
+
+        center_x=True 时水平居中（默认左上对齐）。为什么要它：过渡动画里旧/新两张图
+        宽度不同，左对齐补透明边会让角色在过渡中"突然向左跳一截"，收尾那一帧也会贴在
+        窗口左边，直到下一次 update_portrait 才回正 —— 用户看到的就是"人物忽然偏左"。
+        """
         try:
             if pm is None or pm.isNull():
                 return pm
@@ -1793,7 +1805,8 @@ class Murasame(QLabel):
             out.fill(Qt.transparent)
             p = QPainter(out)
             if p.isActive():
-                p.drawPixmap(0, 0, pm)
+                _x = max(0, (size.width() - pm.width()) // 2) if center_x else 0
+                p.drawPixmap(_x, 0, pm)
                 p.end()
             return out
         except Exception:

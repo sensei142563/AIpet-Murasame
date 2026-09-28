@@ -142,10 +142,11 @@ def generate_fgimage(target, embeddings_layers, pet_id: str = None):
     with open(os.path.join(fg_dir, f"{target}.txt"), encoding='utf-16 le') as cf:
         infos = list(csv.reader(cf, delimiter='\t'))
 
-    if target == "ムラサメa":
-        all_base = infos[57:65]
-    else:
-        all_base = infos[47:51]
+    # ⚠ 这里原来写死了丛雨索引的行区间（ムラサメa → infos[57:65]，其它 → infos[47:51]）。
+    #   那些行给的是"站立位置"基准，对别的角色/别的图层集合会**大于**所选图层 →
+    #   算出来的偏移为负 → 人物被裁掉一大块（实测：b 套左边裁 365/1016px、上边 282px；
+    #   a 套 453/1156px、197px）—— 这正是反复反馈的「立绘只显示了一半」。
+    #   现在画布原点只按**所选图层**求（见下面的 base_x/base_y），不再依赖任何写死的行号。
 
     # ===== 关键修复：图层文件存在性过滤（AI 偶发跨服装返回不存在的 ID → 跳过不崩）=====
     # 例：A 立绘模式 AI 返回 B 套 ID(如 1475 撒娇) → A 套素材没有该文件 →
@@ -174,8 +175,22 @@ def generate_fgimage(target, embeddings_layers, pet_id: str = None):
             print(f"[generate] ⚠ 所有图层均缺失，返回空画布")
             return np.zeros((1, 1, 4), dtype=np.uint8)
 
-    all_positions = [(int(x[2]), int(x[3]), int(x[4]), int(x[5]))
-                     for name in valid_layers for x in infos if x[9] == str(name)]
+    # ★ 图层与坐标必须**一一对应**：按索引里的图层号建表，再按 valid_layers 的顺序取。
+    #   老写法是"遍历 infos 找匹配"，某个图层在索引里查不到时 all_positions 会比 valid_layers
+    #   短 → 后面 `valid_layers[idx]` 张冠李戴，身体图被贴到表情的坐标上 → 只画出一小块。
+    _pos_of = {}
+    for _x in infos:
+        if len(_x) > 9:
+            try:
+                _pos_of[str(_x[9])] = (int(_x[2]), int(_x[3]), int(_x[4]), int(_x[5]))
+            except (ValueError, IndexError):
+                pass
+    _pairs = [(n, _pos_of.get(str(n))) for n in valid_layers]
+    _lost = [n for n, _p in _pairs if _p is None]
+    if _lost:
+        print(f"[generate] ⚠ 图层 {_lost} 不在 {target}.txt 索引里 → 跳过（避免贴错位置）")
+    valid_layers = [n for n, _p in _pairs if _p is not None]
+    all_positions = [_p for _n, _p in _pairs if _p is not None]
 
     # ===== 兜底（一·五）：图层里没有「表情」→ 补上该角色默认表情 =====
     # （AI 有时只返回服装/头发，结果就是「只有衣服没有脸」）
@@ -197,9 +212,11 @@ def generate_fgimage(target, embeddings_layers, pet_id: str = None):
                 _dflt = EMOTION_MAP.get("平静", (1292, None))[0] if _emo_ids else None
                 if _dflt and os.path.exists(os.path.join(fg_dir, f"{target}_{_dflt}.png")):
                     print(f"[generate] ℹ 图层里没有表情 → 补默认表情 {_dflt}")
-                    valid_layers.append(_dflt)
-                    all_positions += [(int(x[2]), int(x[3]), int(x[4]), int(x[5]))
-                                      for x in infos if len(x) > 9 and x[9] == str(_dflt)]
+                    if str(_dflt) in _pos_of:
+                        valid_layers.append(_dflt)
+                        all_positions.append(_pos_of[str(_dflt)])
+                    else:
+                        print(f"[generate] ⚠ 默认表情 {_dflt} 不在索引里 → 不补（否则会贴错位置）")
         except Exception as _e:
             print(f"[generate] ⚠ 补表情失败: {_e}")
 
@@ -212,34 +229,23 @@ def generate_fgimage(target, embeddings_layers, pet_id: str = None):
         except Exception:
             _dflt = []
         if _dflt:
-            print(f"[generate] ℹ 图层 {valid_layers} 不在本角色索引中 → 改用默认表情图 {_dflt}")
-            valid_layers = _dflt
-            all_positions = [(int(x[2]), int(x[3]), int(x[4]), int(x[5]))
-                             for name in valid_layers for x in infos if x[9] == str(name)]
+            _p2 = [(n, _pos_of.get(str(n))) for n in _dflt]
+            _d2 = [n for n, _p in _p2 if _p is None]
+            if _d2:
+                print(f"[generate] ⚠ 默认表情 {_d2} 不在索引里 → 跳过")
+            valid_layers = [n for n, _p in _p2 if _p is not None]
+            all_positions = [_p for _n, _p in _p2 if _p is not None]
+            if valid_layers:
+                print(f"[generate] ℹ 图层不在本角色索引中 → 改用默认表情图 {valid_layers}")
         if not all_positions:
             print(f"[generate] ⚠ 图层 ID {valid_layers} 在 {target}.txt 中未匹配到，返回空画布")
             return np.zeros((1, 1, 4), dtype=np.uint8)
 
-    def _pos_rows(rows):
-        out = []
-        for x in rows:
-            if len(x) <= 9:
-                continue
-            try:
-                out.append((int(x[2]), int(x[3]), int(x[4]), int(x[5])))
-            except (ValueError, IndexError):
-                continue
-        return out
-
-    # 基准图层（用于求画布原点偏移）：
-    # - 丛雨索引里是固定的行区间（57:65 / 47:51）
-    # - 其它角色包（新建的「每个表情一张图」）索引没有那么长 → 用索引里全部行兜底，
-    #   否则 min() 空序列会直接 ValueError（新建角色启动不显示的第二个原因）
-    all_base = _pos_rows(infos[57:65] if target == "ムラサメa" else infos[47:51])
-    if not all_base:
-        all_base = _pos_rows(infos)
-    base_x = min(p[0] for p in all_base) if all_base else 0
-    base_y = min(p[1] for p in all_base) if all_base else 0
+    # 画布原点 = **所有要画的图层**的左上角最小者。
+    # ⚠ 绝不能让"基准行"反超所选图层（那会把偏移变成负数 → 人物被裁，见文件上方说明）；
+    #   也不能用"索引里全部行"兜底 —— 那同样可能反超（别的角色索引行长得多）。
+    base_x = min((p[0] for p in all_positions), default=0)
+    base_y = min((p[1] for p in all_positions), default=0)
 
     all_positions = [(pos[0] - base_x, pos[1] - base_y, pos[2], pos[3])
                      for pos in all_positions]
@@ -270,8 +276,16 @@ def generate_fgimage(target, embeddings_layers, pet_id: str = None):
             x_offset = pos[0] + _dx
             y_offset = pos[1] + _dy
             h, w = image.shape[:2]
-            # 微调/留白后可能超出画布 → 裁掉溢出部分（否则广播报错）
+            # ★ 图比画布大（索引里宽高写小了、或微调放大过）→ **画布就地长大**，绝不裁人物。
             _ch, _cw = canvas.shape[0], canvas.shape[1]
+            if (x_offset >= 0 and y_offset >= 0
+                    and (x_offset + w > _cw or y_offset + h > _ch)):
+                _nw, _nh = max(_cw, x_offset + w), max(_ch, y_offset + h)
+                _big = np.zeros((_nh, _nw, 4), dtype=np.uint8)
+                _big[:_ch, :_cw] = canvas
+                canvas = _big
+                _ch, _cw = _nh, _nw
+            # 偏移为负（微调把它推到画布外）→ 这种情况只能裁，避免广播报错
             if x_offset < 0 or y_offset < 0 or x_offset + w > _cw or y_offset + h > _ch:
                 _x0, _y0 = max(0, x_offset), max(0, y_offset)
                 _x1, _y1 = min(_cw, x_offset + w), min(_ch, y_offset + h)
