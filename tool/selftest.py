@@ -100,6 +100,9 @@ WIRING = (
     ("tool/desire.py", "def wants", "动机层缺 wants（她不会自己找事做）"),
     ("classes/murasame_class.py", "_desire_timer", "动机结算定时器不见了（需求不再变化）"),
     ("tool/chat.py", "desire as _dz3", "提示词没注入她的动机"),
+    ("tool/care.py", "def check", "主动关怀模块缺 check"),
+    ("classes/murasame_class.py", "_care_timer", "关怀定时器不见了（熬夜/久坐不再提醒）"),
+    ("main.py", "startup_line", "开机问候不见了（「在一起第 N 天」不说了）"),
 )
 # 绝不能出现的（历史坑，回来就是 bug 复发）—— **正则**，只扫非注释行：
 #   注释里写着"原来写死了 infos[57:65]"是对的（解释历史），不能算复发（自测自己踩过这个误报）

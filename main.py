@@ -737,6 +737,18 @@ if __name__ == "__main__":
     pet.keyPressEvent = _on_pet_key_press
     pet.keyReleaseEvent = _on_pet_key_release
 
+    # ===== 开机问候：今天是你们在一起的第 N 天 =====
+    # 延后几秒等窗口/模型就绪；开关：config.json → care_startup_greeting
+    try:
+        from tool import care as _cr_start
+        if _cr_start.enabled() and _cr_start.startup_greeting_enabled():
+            _line = _cr_start.startup_line()
+            if _line:
+                QTimer.singleShot(6000, lambda: pet.start_thread(_line, role="system", t=True))
+                print("[AIpet] 已排上开机问候（在一起第 %d 天）" % _cr_start.companion_days())
+    except Exception as _e:
+        print(f"[AIpet] 开机问候跳过: {_e}")
+
     # ===== 连接 Live2D 信号到 pet 功能 =====
     if live2d_widget:
         live2d_widget.trigger_text.connect(lambda text: pet.show_text(text, typing=True))

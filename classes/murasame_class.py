@@ -369,6 +369,19 @@ class Murasame(QLabel):
         #   · 平时 BelowNormal、游戏里 Idle（调度器永远先伺候游戏，桌宠"卡一下"没人在意）
         #   · ⚠ 只调优先级：**不暂停**屏幕识别、**不暂停**主动搭话（主人明确要求）
         #   · 开关：config.json → perf_guard_enabled（默认开）
+        # 主动关怀：每 10 分钟看一次"该不该关心他一下"（熬夜 / 久坐）。
+        #   ⚠ 关怀是低频的事，别跟着 60 秒的定时器跑。
+        self._care_last_break = time.time()      # 上一次"离开键鼠"的时刻（算连续使用时长）
+        self._care_timer = QTimer(self)
+        self._care_timer.setInterval(600000)
+        self._care_timer.timeout.connect(self._care_tick)
+        try:
+            from tool import care as _cr0
+            if _cr0.enabled():
+                self._care_timer.start()
+        except Exception:
+            pass
+
         # 动机层：每 60 秒结算一次需求（无聊/想说话/精力）。60 秒够用又不会频繁写盘。
         self._desire_timer = QTimer(self)
         self._desire_timer.setInterval(60000)
@@ -1225,6 +1238,30 @@ class Murasame(QLabel):
         ):
             print("[AIpet] 恢复截图线程")
             self.start_screenshot_worker(interval=self.interval)
+
+    def _care_tick(self):
+        """主动关怀检查：熬夜催睡、久坐提醒（会议/演示时内部会自己安静下来）"""
+        try:
+            from tool import care as _cr
+            if not _cr.enabled():
+                return
+            # 连续使用时长：只要键鼠空闲超过 5 分钟就认为"休息过了"，重新计时
+            try:
+                _idle = get_idle_seconds()
+            except Exception:
+                _idle = 0
+            if _idle > 300:
+                self._care_last_break = time.time()
+            _active = max(0.0, time.time() - float(self._care_last_break or time.time()))
+            _reason = _cr.check(active_sec=_active)
+            if not _reason:
+                return
+            if not self._attention_ok():
+                return                      # 开口时机不合适就放过这一回
+            print(f"[桌宠] 💗 主动关怀：{_reason}")
+            self.start_thread(_cr.nudge_prompt(_reason), role="system", t=True)
+        except Exception as e:
+            print(f"[桌宠] ⚠ 关怀检查失败: {e}")
 
     def _desire_tick(self):
         """结算一次需求值：聊过就解渴、主人在活动就没那么无聊（见 tool/desire 的说明）"""
