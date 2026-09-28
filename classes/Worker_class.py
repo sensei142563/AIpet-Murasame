@@ -403,3 +403,34 @@ class CameraWorker(QThread):
             except Exception:
                 pass
             self._cap = None
+
+
+class AgentWorker(QThread):
+    """/agent <任务>：把任务交给本机 agent（DSH headless 优先、Codex 回落）去做。
+
+    ⚠ 确认框必须在**主线程**问（见 classes/murasame_class.py 的 _run_agent_task），
+      这里只负责跑；结果用 done 信号回主线程显示（QThread 里不碰界面）。
+    """
+    done = pyqtSignal(str, bool)          # (要显示的文字, 是否成功)
+
+    def __init__(self, task, parent=None):
+        super().__init__(parent)
+        self.task = str(task or "")
+
+    def run(self):
+        text, ok = "", False
+        try:
+            from tool.agent_bridge import run_task
+            r = run_task(self.task, on_confirm=lambda t: True)   # 主线程已经确认过了
+            ok = bool(r.get("ok"))
+            if ok:
+                text = (r.get("output") or "").strip() or "（它没给出文字答复）"
+            else:
+                why = r.get("refused") or r.get("error") or "没成功"
+                text = "（这件事没办成：%s）" % str(why)[:300]
+        except Exception as e:
+            text = "（agent 桥接出错：%s）" % e
+        try:
+            self.done.emit(text, ok)
+        except Exception:
+            pass

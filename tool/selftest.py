@@ -84,6 +84,9 @@ WIRING = (
     ("tool/chat.py", "prompt_note", "聊天提示词没注入「她此刻的状态」"),
     ("classes/murasame_class.py", "state as _st_touch",
      "触摸没记长期状态（心情/好感度不再变化）"),
+    ("tool/agent_bridge.py", "def run_task", "agent 桥接模块缺 run_task"),
+    ("classes/murasame_class.py", "def _run_agent_task", "/agent 入口不见了"),
+    ("classes/Worker_class.py", "class AgentWorker", "AgentWorker 不见了（/agent 会没反应）"),
 )
 # 绝不能出现的（历史坑，回来就是 bug 复发）—— **正则**，只扫非注释行：
 #   注释里写着"原来写死了 infos[57:65]"是对的（解释历史），不能算复发（自测自己踩过这个误报）
