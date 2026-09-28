@@ -136,7 +136,25 @@ print("=" * 60)
 print()
 print("命令:", " ".join(cmd))
 print()
-subprocess.run(cmd, check=True)
+# ── 非 ASCII 路径修复（中文目录下打包会缺 PyQt5）────────────────────────
+# PyQt5 的 QLibraryInfo 把 Qt 插件路径按 latin-1 解码 → 项目放在「D:\下载\AI桌宠」这类
+# 中文目录时，PyInstaller 的 hook-PyQt5 拿到乱码路径，要么直接抛
+# "Qt plugin directory does not exist!"，要么产物缺整个 PyQt5（用户双击报
+# "DLL load failed while importing QtWidgets"）。
+# 用 PYTHONPATH 注入 tool/pyinstaller_qtfix/sitecustomize.py，在**构建进程**里还原路径；
+# 不动 site-packages，正常路径一律原样返回（不会误伤）。
+_qtfix_dir = os.path.join(os.getcwd(), "tool", "pyinstaller_qtfix")
+_build_env = None
+if os.path.isfile(os.path.join(_qtfix_dir, "sitecustomize.py")):
+    _build_env = dict(os.environ)
+    _old_pp = _build_env.get("PYTHONPATH", "")
+    _build_env["PYTHONPATH"] = _qtfix_dir + (os.pathsep + _old_pp if _old_pp else "")
+    _build_env["AIPET_QT_PATHFIX"] = "1"
+    print(f"[INFO] 已启用「非 ASCII 路径」修复：PYTHONPATH={_qtfix_dir}")
+else:
+    print("[WARN] 没找到 tool/pyinstaller_qtfix/sitecustomize.py —— 中文路径下打包可能缺 PyQt5")
+
+subprocess.run(cmd, check=True, env=_build_env)
 
 out_dir = os.path.join("dist", "AIpet-Murasame")
 

@@ -76,6 +76,10 @@ WIRING = (
     ("longtext/longtext_tts.py", "polish_wav_bytes", "长语音没做响度统一"),
     ("pcl_launcher/portrait_studio.py", "stable_canvas_width", "工坊预览没和桌面共用几何"),
     ("tool/portrait_geom.py", "def canvas_size_for", "立绘几何模块少了算法入口"),
+    ("build_launcher.py", "AIPET_QT_PATHFIX",
+     "打包没注入「非 ASCII 路径」修复（中文目录下会缺整个 PyQt5）"),
+    ("tool/pyinstaller_qtfix/sitecustomize.py", "_repair",
+     "非 ASCII 路径修复模块缺 _repair（或文件被删）"),
 )
 # 绝不能出现的（历史坑，回来就是 bug 复发）—— **正则**，只扫非注释行：
 #   注释里写着"原来写死了 infos[57:65]"是对的（解释历史），不能算复发（自测自己踩过这个误报）
