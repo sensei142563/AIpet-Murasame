@@ -144,6 +144,20 @@ def qwen3_lora(history, user_input, role):
     except Exception as _e:
         print("[看屏幕] ⚠ 失败: %s" % _e)
 
+    # 1.66 他在问需要外面信息的事？→ 先上网查一眼，把结果并进这一轮（见 tool/web_search）
+    try:
+        from tool import web_search as _ws
+        _q = _ws.needs_search(user_input or "")
+        if _q:
+            _ctx = _ws.context_text(_q)
+            if _ctx:
+                messages.append({"role": "system", "content": _ctx})
+                print("[搜索] 已联网查到「%s」的结果并并入提问" % _q)
+            else:
+                print("[搜索] 想查「%s」但没搜到（网络不通？）→ 让她如实说没查到" % _q)
+    except Exception as _e:
+        print("[搜索] ⚠ 失败: %s" % _e)
+
     # 1.7 她自己的长期记忆（自主学习攒的：关于主人的事、情节、刚才在忙什么、日记）
     try:
         from tool import self_learn as _sl_note

@@ -151,6 +151,13 @@ WIRING = (
     ("tool/chat.py", "plugins as _pl_rules", "本地链路没注入插件能力"),
     ("tool/cloud_API_chat.py", "plugins as _pl_rules", "云端链路没注入插件能力"),
     ("classes/murasame_class.py", "_toggle_plugins", "右键菜单没挂插件总开关"),
+    ("tool/web_search.py", "def needs_search",
+     "联网搜索缺意图判断（问「最新/多少钱」也不会去查）"),
+    ("tool/web_search.py", "def parse_bing",
+     "联网搜索缺 Bing 解析（外网结果取不到）"),
+    ("tool/chat.py", "web_search as _ws", "本地链路没接「不确定就上网查」"),
+    ("tool/cloud_API_chat.py", "web_search as _ws", "云端链路没接「不确定就上网查」"),
+    ("classes/murasame_class.py", "_toggle_search", "右键菜单没挂联网搜索开关"),
 )
 # 绝不能出现的（历史坑，回来就是 bug 复发）—— **正则**，只扫非注释行：
 #   注释里写着"原来写死了 infos[57:65]"是对的（解释历史），不能算复发（自测自己踩过这个误报）

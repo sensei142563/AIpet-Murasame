@@ -1318,6 +1318,16 @@ class Murasame(QLabel):
         except Exception as e:
             print(f"[桌宠] ⚠ 读记忆失败: {e}")
 
+    def _toggle_search(self, checked):
+        """右键：联网搜索开关（写 config.json 的 web_search_enabled，只改这一个键）"""
+        try:
+            from tool import web_search as _ws_set
+            if _ws_set.set_enabled(bool(checked)):
+                self.show_text("（联网搜索：%s）" % ("已开启" if checked else "已关闭"),
+                               typing=True)
+        except Exception as e:
+            print(f"[桌宠] ⚠ 切换搜索开关失败: {type(e).__name__}: {e}")
+
     def _toggle_plugins(self, checked):
         """右键：插件系统总开关（写 config.json 的 plugins_enabled，只改这一个键）"""
         try:
@@ -1916,6 +1926,15 @@ class Murasame(QLabel):
                     _pl_sub.addAction(_t).setEnabled(False)
             except Exception as _e:
                 print(f"[桌宠] ⚠ 插件菜单失败: {_e}")
+            # 联网搜索：开关（问「最新/今天/多少钱/是谁」这类问题时她才会去查）
+            try:
+                from tool import web_search as _ws_menu
+                _act_ws = menu.addAction("🔎 联网搜索（不确定就上网查）")
+                _act_ws.setCheckable(True)
+                _act_ws.setChecked(_ws_menu.enabled())
+                _act_ws.triggered.connect(self._toggle_search)
+            except Exception as _e:
+                print(f"[桌宠] ⚠ 搜索菜单失败: {_e}")
 
             # 自主性：安静 / 适中 / 活跃（写 config.json 的 autonomy_level，立即生效）
             try:

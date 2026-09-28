@@ -40,6 +40,7 @@
   "learn_enabled": "false",
   "plugins_enabled": "true",
   "plugins_timeout_sec": 20,
+  "web_search_enabled": "true",
   "vision_source": "cloud",
   "vision_local_model_dir": "",
   "vision_local_port": 28460,
