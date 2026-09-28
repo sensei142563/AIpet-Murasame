@@ -118,6 +118,9 @@ WIRING = (
     ("tool/screen_capture.py", "def capture_qimage", "Win32 抓屏模块缺 capture_qimage"),
     ("classes/Worker_class.py", "screen_capture as _sc",
      "截图线程又退回 QScreen.grabWindow 了（后台线程调用会让进程凭空消失）"),
+    ("tool/screen_intent.py", "def needs_screen_look", "屏幕意图模块缺 needs_screen_look"),
+    ("tool/chat.py", "screen_intent as _si", "本地链路没接「当场看屏幕」"),
+    ("tool/cloud_API_chat.py", "screen_intent as _si", "云端链路没接「当场看屏幕」"),
 )
 # 绝不能出现的（历史坑，回来就是 bug 复发）—— **正则**，只扫非注释行：
 #   注释里写着"原来写死了 infos[57:65]"是对的（解释历史），不能算复发（自测自己踩过这个误报）

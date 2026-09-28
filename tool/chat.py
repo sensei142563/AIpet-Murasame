@@ -130,6 +130,20 @@ def qwen3_lora(history, user_input, role):
     except Exception:
         pass
 
+    # 1.65 他在问我屏幕上的事？→ 当场抓屏看一眼，再连着描述一起回答（见 tool/screen_intent）
+    try:
+        from tool import screen_intent as _si
+        if _si.needs_screen_look(user_input or ""):
+            _desc, _shot = _si.look_now()
+            if _desc:
+                messages.append({"role": "system",
+                                 "content": _si.build_screen_prompt(_desc, user_input)})
+                print("[看屏幕] 已当场抓屏识别（%d 字）" % len(_desc))
+            else:
+                print("[看屏幕] 他想让我看屏幕，但抓屏/识别没成功（%s）" % (_shot or "抓屏失败"))
+    except Exception as _e:
+        print("[看屏幕] ⚠ 失败: %s" % _e)
+
     # 1.7 她自己的长期记忆（自主学习攒的：关于主人的事、情节、刚才在忙什么、日记）
     try:
         from tool import self_learn as _sl_note
