@@ -485,9 +485,13 @@ if os.path.exists(napcat_src) and not os.path.exists(napcat_dst):
         ignore=shutil.ignore_patterns(
             "config", "logs", "cache", "temp",
             "*.log", "*.db", "qrcode.png", "__pycache__",
+            # 非 Windows 平台的原生模块：绿色包是 Windows 专用，带上纯属死重量
+            # （实测 NapCat\native 下 linux/darwin 的 .node 合计 69.6 MB，Windows 上永不加载）。
+            "*.linux.*", "*.darwin.*", "*.so", "*.dylib",
         )
     )
-    print("  [复制] NapCat.Shell.Windows.OneKey/ ✅（已排除本机登录数据 config/logs/cache/db）")
+    print("  [复制] NapCat.Shell.Windows.OneKey/ ✅"
+          "（已排除本机登录数据 config/logs/cache/db + 非 Windows 平台模块）")
 else:
     print("  [跳过] NapCat.Shell.Windows.OneKey/（不存在或已复制）")
 
