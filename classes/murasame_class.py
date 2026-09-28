@@ -1318,6 +1318,15 @@ class Murasame(QLabel):
         except Exception as e:
             print(f"[桌宠] ⚠ 读记忆失败: {e}")
 
+    def _toggle_plugins(self, checked):
+        """右键：插件系统总开关（写 config.json 的 plugins_enabled，只改这一个键）"""
+        try:
+            from tool import plugins as _pl_set
+            if _pl_set.set_enabled(bool(checked)):
+                self.show_text("（插件：%s）" % ("已开启" if checked else "已关闭"), typing=True)
+        except Exception as e:
+            print(f"[桌宠] ⚠ 切换插件开关失败: {type(e).__name__}: {e}")
+
     def _show_status_window(self):
         """右键：她的状态（把 9 个内心模块收成一页看）。
 
@@ -1887,6 +1896,26 @@ class Murasame(QLabel):
                 _act_win.triggered.connect(self._show_status_window)
             except Exception as _e:
                 print(f"[桌宠] ⚠ 学习菜单失败: {_e}")
+            # 插件：总开关 + 清单（清单只读，把"没加载起来"的原因也写在条目上）
+            try:
+                from tool import plugins as _pl_menu
+                menu.addSeparator()
+                _pl_sub = menu.addMenu("🔌 插件（给她加本事）")
+                _pl_on = _pl_sub.addAction("启用插件系统")
+                _pl_on.setCheckable(True)
+                _pl_on.setChecked(_pl_menu.enabled())
+                _pl_on.triggered.connect(self._toggle_plugins)
+                _pl_sub.addSeparator()
+                _pl_items = _pl_menu.list_plugins()
+                if not _pl_items:
+                    _pl_sub.addAction("（plugins/ 里还没有插件）").setEnabled(False)
+                for _p in _pl_items[:20]:
+                    _t = ("✅ " if _p["ok"] else "　　") + _p["name"]
+                    if not _p["ok"]:
+                        _t += "（%s）" % str(_p.get("error") or "")[:24]
+                    _pl_sub.addAction(_t).setEnabled(False)
+            except Exception as _e:
+                print(f"[桌宠] ⚠ 插件菜单失败: {_e}")
 
             # 自主性：安静 / 适中 / 活跃（写 config.json 的 autonomy_level，立即生效）
             try:

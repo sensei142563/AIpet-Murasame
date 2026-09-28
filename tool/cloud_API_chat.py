@@ -138,6 +138,16 @@ def cloud_talk(history: list, user_input: str, role: str):
     except Exception:
         pass
 
+    # 1.85 插件能力（主人自己装的本事，见 tool/plugins 的 rules_text）
+    try:
+        from tool import plugins as _pl_rules
+        if _pl_rules.enabled():
+            _pt = _pl_rules.rules_text()
+            if _pt:
+                messages.append({"role": "system", "content": _pt})
+    except Exception:
+        pass
+
     # 1.9 她的行动边界（哪些能自己做、哪些要主人开口、哪些永远不做）
     try:
         from tool import autonomy as _au_note
@@ -197,6 +207,12 @@ def cloud_talk(history: list, user_input: str, role: str):
         reply = _rm_reply.handle_reply(reply)
     except Exception as _e:
         print(f"[云端] [提醒] ⚠ 处理失败: {_e}")
+    # 插件：模型写了【插件:xxx】标记 → 执行插件，把标记去掉，把结果接在后面说
+    try:
+        from tool import plugins as _pl_reply
+        reply = _pl_reply.handle_reply(reply)
+    except Exception as _e:
+        print(f"[云端] [插件] ⚠ 处理失败: {_e}")
     history.append({"role": "assistant", "content": reply})  # 加入历史
     return reply, history
 

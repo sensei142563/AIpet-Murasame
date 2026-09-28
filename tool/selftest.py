@@ -34,7 +34,7 @@ except Exception:
 CORE_MODULES = (
     "tool.config", "tool.paths", "tool.net_env", "tool.perf_guard", "tool.audio_polish",
     "tool.msvc_runtime", "tool.napcat_version", "tool.portrait_geom", "tool.portrait_outfit",
-    "tool.vision_check", "tool.status_snapshot",
+    "tool.vision_check", "tool.status_snapshot", "tool.plugins",
     "tool.portrait_cli", "tool.generate", "tool.chat", "tool.cloud_API_chat", "tool.api_server",
     "tool.stt", "tool.camera", "tool.face_recognition", "tool.touch_areas",
     "tool.voice_trigger", "tool.time_utils", "tool.weather_utils",
@@ -141,6 +141,16 @@ WIRING = (
      "状态窗缺入口（右键「她的状态」会没反应）"),
     ("classes/murasame_class.py", "_show_status_window",
      "右键菜单没挂「她的状态」入口"),
+    ("tool/config.py", "def set_key",
+     "config 少了安全的单键写入（整份 dump 会把示例占位值当成主人的设置落盘）"),
+    ("tool/plugins.py", "def handle_reply",
+     "插件框架缺 handle_reply（回复里的插件标记没人处理）"),
+    ("tool/plugins.py", "def run_one", "插件框架缺 run_one"),
+    ("tool/plugins.py", "def manifest_dirs",
+     "插件清单会漏掉只有 plugin.json 的目录（主人会以为插件丢了）"),
+    ("tool/chat.py", "plugins as _pl_rules", "本地链路没注入插件能力"),
+    ("tool/cloud_API_chat.py", "plugins as _pl_rules", "云端链路没注入插件能力"),
+    ("classes/murasame_class.py", "_toggle_plugins", "右键菜单没挂插件总开关"),
 )
 # 绝不能出现的（历史坑，回来就是 bug 复发）—— **正则**，只扫非注释行：
 #   注释里写着"原来写死了 infos[57:65]"是对的（解释历史），不能算复发（自测自己踩过这个误报）

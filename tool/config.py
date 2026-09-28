@@ -94,6 +94,52 @@ def ensure_config(path: str = "./config.json") -> str:
     return path
 
 
+def set_key(path: str, key: str, value, create: bool = True) -> bool:
+    """只改 config.json 里的**一个键**（其它键原样保留），写完原子替换。
+
+    为什么要单独有这个：写配置这件事在仓库里被手抄过好几份，抄出来的版本有两种毛病
+    （下面两种都真踩过）：
+      1) `cfg = dict(get_config(p))` 然后整份 dump —— config.json **不存在**时
+         get_config 返回的是 config.example.json，于是把示例里的占位值
+         （sk-your-deepseek-key 这种）当成主人的设置落了盘；而且从此 config.json 存在了，
+         以后再也走不到"缺失就回退示例"那条路。
+      2) 写 "./config.json" 这种**相对路径**：桌宠被别的 cwd 拉起（快捷方式/计划任务/
+         其它宿主）时会写到别的地方去，表现是"设置改了但不生效"。
+    所以这里统一：先 ensure_config()（缺失时由示例生成一份真正的 config.json），
+    再**原样读回**、只改这一个键、继承原换行风格、写 .tmp 后 os.replace 换上去。
+    """
+    try:
+        p = os.path.abspath(path)
+        if create:
+            ensure_config(p)
+        raw = {}
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                raw = json.load(f) or {}
+        except Exception:
+            raw = _example_defaults(p)      # 真损坏时用示例兜底，至少键是齐的
+        if not isinstance(raw, dict):
+            raw = {}
+        try:
+            with open(p, "rb") as f:
+                head = f.read(65536)
+            nl = "\r\n" if b"\r\n" in head else "\n"
+        except Exception:
+            nl = "\n"
+        raw[key] = value
+        text = json.dumps(raw, ensure_ascii=False, indent=2)
+        if nl != "\n":
+            text = text.replace("\n", nl)
+        tmp = p + ".tmp"
+        with open(tmp, "w", encoding="utf-8", newline="") as f:
+            f.write(text + nl)
+        os.replace(tmp, p)
+        return True
+    except Exception as e:
+        _say(f"[Config] ⚠ 写 {key} 到 {path} 失败: {e}")
+        return False
+
+
 def as_bool(value, default: bool = False) -> bool:
     """配置里的「真值」判定：1/true/yes/y/on/开/开启 → True，其余 → False。
 

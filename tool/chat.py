@@ -161,6 +161,16 @@ def qwen3_lora(history, user_input, role):
     except Exception:
         pass
 
+    # 1.85 插件能力（主人自己装的本事，见 tool/plugins 的 rules_text）
+    try:
+        from tool import plugins as _pl_rules
+        if _pl_rules.enabled():
+            _pt = _pl_rules.rules_text()
+            if _pt:
+                messages.append({"role": "system", "content": _pt})
+    except Exception:
+        pass
+
     # 1.9 她的行动边界（哪些能自己做、哪些要主人开口、哪些永远不做）
     try:
         from tool import autonomy as _au_note
@@ -226,6 +236,15 @@ def qwen3_lora(history, user_input, role):
             print(f"[{now_time()}] [提醒] 已处理回复里的提醒标记")
     except Exception as _e:
         print(f"[{now_time()}] [提醒] ⚠ 处理失败: {_e}")
+    # 插件：模型写了【插件:xxx】标记 → 执行插件，把标记去掉，把结果接在后面说
+    try:
+        from tool import plugins as _pl_reply
+        _before = reply
+        reply = _pl_reply.handle_reply(reply)
+        if reply != _before:
+            print(f"[{now_time()}] [插件] 已处理回复里的插件标记")
+    except Exception as _e:
+        print(f"[{now_time()}] [插件] ⚠ 处理失败: {_e}")
     history.append({"role": "assistant", "content": reply})  # 加入历史
     print(f"[{now_time()}] [qwen3-lora] Reply:{reply}")
     # 长期状态：记一次"跟她说过话"（后面的「开口时机」要看沉默了多久）
