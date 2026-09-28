@@ -121,6 +121,15 @@ def qwen3_lora(history, user_input, role):
     except Exception:
         pass
 
+    # 1.7 她自己的动机（无聊/想你/累了）—— 自然流露，别念出来
+    try:
+        from tool import desire as _dz3
+        _dnote = _dz3.note()
+        if _dnote:
+            messages.append({"role": "system", "content": _dnote})
+    except Exception:
+        pass
+
     # 2. 高权重「最近的观察」（识别触发的内容，仅本轮有高权重）
     if high_observations:
         obs_text = "\n".join(f"- {obs}" for obs in high_observations[-5:])

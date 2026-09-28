@@ -369,6 +369,17 @@ class Murasame(QLabel):
         #   · 平时 BelowNormal、游戏里 Idle（调度器永远先伺候游戏，桌宠"卡一下"没人在意）
         #   · ⚠ 只调优先级：**不暂停**屏幕识别、**不暂停**主动搭话（主人明确要求）
         #   · 开关：config.json → perf_guard_enabled（默认开）
+        # 动机层：每 60 秒结算一次需求（无聊/想说话/精力）。60 秒够用又不会频繁写盘。
+        self._desire_timer = QTimer(self)
+        self._desire_timer.setInterval(60000)
+        self._desire_timer.timeout.connect(self._desire_tick)
+        try:
+            from tool import desire as _dz0
+            _dz0.tick(talked=False, screen_changed=True, elapsed_sec=0)   # 先记一次时间戳
+            self._desire_timer.start()
+        except Exception:
+            pass
+
         # 习惯采集：每 60 秒采一次前台窗口标题（统计"平时在用什么"）。
         #   ⚠ 单独一个定时器：性能守卫是 3 秒一次，别把窗口查询混进去。
         self._habits_timer = QTimer(self)
@@ -1215,6 +1226,25 @@ class Murasame(QLabel):
             print("[AIpet] 恢复截图线程")
             self.start_screenshot_worker(interval=self.interval)
 
+    def _desire_tick(self):
+        """结算一次需求值：聊过就解渴、主人在活动就没那么无聊（见 tool/desire 的说明）"""
+        try:
+            from tool import desire as _dz
+            _talked = False
+            try:
+                from tool import state as _st
+                _talked = _st.last_talk_ago() < 60.0
+            except Exception:
+                pass
+            _active = True
+            try:
+                _active = get_idle_seconds() < 60
+            except Exception:
+                pass
+            _dz.tick(talked=_talked, screen_changed=_active)
+        except Exception:
+            pass
+
     def _attention_ok(self, idle_seconds=None, just_greeted=False) -> bool:
         """主动搭话前的闸门：现在开口合不合适（打分见 tool/attention）。
 
@@ -1300,12 +1330,27 @@ class Murasame(QLabel):
             print(f"[AIpet] 空闲超过 {self.idle_thinking_seconds} 秒")
             if not self._attention_ok(idle_seconds=idle_seconds):
                 return
+            # 先问她"现在想做什么"：有动机就用她的措辞，更像"自己有想法"
+            _motive = ""
+            _want = {}
+            try:
+                from tool import desire as _dz2
+                _want = _dz2.wants(user_idle_sec=idle_seconds) or {}
+                _motive = str(_want.get("prompt") or "")
+                _dz2note = _dz2.note()
+                if _dz2note:
+                    _motive = (_dz2note + "\n" + _motive) if _motive else _dz2note
+                if _want:
+                    print(f"[桌宠] 💭 她想{_want.get('text')}")
+            except Exception:
+                _motive = ""
             prompt = (
                 "系统提示：用户已经有一段时间没有对电脑进行输入操作。忽视最近的对话。"
                 "可能是在发呆、走神或者安静地思考。"
                 f"请你以“{self.pet_name}”的身份，"
                 "用温柔、贴心但不过分打扰的方式主动搭话，可以简单关心一下主人在想什么，或者是不是走神，在摸鱼，"
                 "或者轻轻提醒他注意放松，回答不超过三句话。"
+                + (("\n" + _motive) if _motive else "")
             )
             self.start_thread(prompt, role="system", t=True)
 

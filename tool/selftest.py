@@ -97,6 +97,9 @@ WIRING = (
     ("tool/attention.py", "def should_speak", "开口时机模块缺 should_speak"),
     ("classes/murasame_class.py", "def _attention_ok", "主动搭话没过「开口时机」闸门"),
     ("classes/murasame_class.py", "note_spoke()", "开口后没记一笔（会变话痨）"),
+    ("tool/desire.py", "def wants", "动机层缺 wants（她不会自己找事做）"),
+    ("classes/murasame_class.py", "_desire_timer", "动机结算定时器不见了（需求不再变化）"),
+    ("tool/chat.py", "desire as _dz3", "提示词没注入她的动机"),
 )
 # 绝不能出现的（历史坑，回来就是 bug 复发）—— **正则**，只扫非注释行：
 #   注释里写着"原来写死了 infos[57:65]"是对的（解释历史），不能算复发（自测自己踩过这个误报）
