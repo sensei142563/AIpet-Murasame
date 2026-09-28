@@ -36,6 +36,7 @@
   "care_startup_greeting": "true",
   "care_meeting_quiet": "true",
   "reminder_enabled": "true",
+  "learn_enabled": "false",
  "DEFAULT_PORTRAIT_SCREEN_RATIO": 0.8,
  "screen_index": 0,
  "idle_thinking_minutes": 6,

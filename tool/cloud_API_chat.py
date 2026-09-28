@@ -107,6 +107,15 @@ def cloud_talk(history: list, user_input: str, role: str):
     else:
         messages.append({"role": "system", "content": identity_default})
 
+    # 1.7 她自己的长期记忆（自主学习攒的：关于主人的事、情节、刚才在忙什么、日记）
+    try:
+        from tool import self_learn as _sl_note
+        _memo = _sl_note.memory_note(user_input or "")
+        if _memo:
+            messages.append({"role": "system", "content": _memo})
+    except Exception:
+        pass
+
     # 1.8 提醒/待办语法（她能帮主人记事，见 tool/reminder 的 prompt_rules）
     try:
         from tool import reminder as _rm_rules

@@ -369,6 +369,19 @@ class Murasame(QLabel):
         #   · 平时 BelowNormal、游戏里 Idle（调度器永远先伺候游戏，桌宠"卡一下"没人在意）
         #   · ⚠ 只调优先级：**不暂停**屏幕识别、**不暂停**主动搭话（主人明确要求）
         #   · 开关：config.json → perf_guard_enabled（默认开）
+        # 自主学习：每 5 分钟看一眼要不要学点东西（真正做不做由 self_learn.maybe_cycle
+        #   自己的保险丝决定：够 20 分钟间隔、主人 3 分钟没说话、每天不超过 40 次调用）。
+        #   ⚠ 一定丢后台线程：学习要调用模型，绝不能卡住界面。
+        self._learn_timer = QTimer(self)
+        self._learn_timer.setInterval(300000)
+        self._learn_timer.timeout.connect(self._learn_tick)
+        try:
+            from tool import self_learn as _sl0
+            if _sl0.enabled():
+                self._learn_timer.start()
+        except Exception:
+            pass
+
         # 提醒：每 30 秒看一次有没有到点的（主人自己要求的事，到点一定要说）
         self._reminder_timer = QTimer(self)
         self._reminder_timer.setInterval(30000)
@@ -1250,6 +1263,56 @@ class Murasame(QLabel):
             print("[AIpet] 恢复截图线程")
             self.start_screenshot_worker(interval=self.interval)
 
+    def _learn_tick(self):
+        """自主学习周期：丢进后台线程跑（省钱/防打扰的保险丝在 self_learn 里）"""
+        try:
+            from tool import self_learn as _sl
+            if not _sl.enabled():
+                return
+            import threading
+
+            def _work():
+                try:
+                    _last = 0.0
+                    try:
+                        from tool import state as _st_l
+                        _last = time.time() - float(_st_l.last_talk_ago())
+                    except Exception:
+                        _last = 0.0
+                    _did = _sl.maybe_cycle(list(getattr(self, "history", []) or []),
+                                           self.pet_name, last_user_ts=_last)
+                    if _did:
+                        print(f"[桌宠] 📖 自主学习做了一件事：{_did}")
+                except Exception as e:
+                    print(f"[桌宠] ⚠ 自主学习失败: {e}")
+
+            threading.Thread(target=_work, daemon=True).start()
+        except Exception as e:
+            print(f"[桌宠] ⚠ 自主学习入口失败: {e}")
+
+    def _toggle_learn(self):
+        """右键开关：自主学习（写 config.json 的 learn_enabled）"""
+        try:
+            from tool import self_learn as _sl
+            _on = not _sl.enabled()
+            if _sl.set_enabled(_on):
+                if _on:
+                    self._learn_timer.start()
+                    self.show_text("（好，我会自己记点东西、学点东西了）", typing=True)
+                else:
+                    self._learn_timer.stop()
+                    self.show_text("（那我先不自己学了）", typing=True)
+        except Exception as e:
+            print(f"[桌宠] ⚠ 切换自主学习失败: {e}")
+
+    def _show_learned(self):
+        """右键：看看她学了什么（直接说出来）"""
+        try:
+            from tool import self_learn as _sl
+            self.show_text(_sl.summary_text(), typing=True)
+        except Exception as e:
+            print(f"[桌宠] ⚠ 读记忆失败: {e}")
+
     def _set_autonomy(self, level):
         """切换自主性档位（写 config.json 的 autonomy_level，立即生效）"""
         try:
@@ -1789,6 +1852,19 @@ class Murasame(QLabel):
                 act_auto.setCheckable(True)
                 act_auto.setChecked(self._auto_switch_enabled())
                 act_auto.triggered.connect(self._toggle_auto_switch)
+            # 自主学习：开关 + 看她学了什么
+            try:
+                from tool import self_learn as _sl_menu
+                menu.addSeparator()
+                _act_l = menu.addAction("📖 自主学习（自己记东西）")
+                _act_l.setCheckable(True)
+                _act_l.setChecked(_sl_menu.enabled())
+                _act_l.triggered.connect(self._toggle_learn)
+                _act_seen = menu.addAction("📔 看看她学了什么")
+                _act_seen.triggered.connect(self._show_learned)
+            except Exception as _e:
+                print(f"[桌宠] ⚠ 学习菜单失败: {_e}")
+
             # 自主性：安静 / 适中 / 活跃（写 config.json 的 autonomy_level，立即生效）
             try:
                 from tool import desire as _dz_menu
