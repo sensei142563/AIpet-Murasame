@@ -4,7 +4,8 @@
   "qwen3_lora": "http://localhost:28565/qwen3-lora",
   "gpt_sovits_tts": "http://localhost:28565/tts",
   "cloud_api": "http://localhost:28565/cloudAPI",
-  "longtext_tts": "http://localhost:28565/tts_long"
+  "longtext_tts": "http://localhost:28565/tts_long",
+  "vision": "http://127.0.0.1:28460/describe"
  },
  "APIKEY": {
   "deepseek": "sk-your-deepseek-key",
@@ -37,6 +38,12 @@
   "care_meeting_quiet": "true",
   "reminder_enabled": "true",
   "learn_enabled": "false",
+  "vision_source": "cloud",
+  "vision_local_model_dir": "",
+  "vision_local_port": 28460,
+  "vision_runtime_python": "",
+  "vision_max_side": 896,
+  "vision_idle_unload": 300,
  "DEFAULT_PORTRAIT_SCREEN_RATIO": 0.8,
  "screen_index": 0,
  "idle_thinking_minutes": 6,
