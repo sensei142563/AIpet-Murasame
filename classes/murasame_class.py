@@ -365,6 +365,23 @@ class Murasame(QLabel):
         # 勿扰模式：开启后关闭截图与空闲检测，并禁止主动搭话
         self._dnd_enabled = False
 
+        # 性能守卫：检测「全屏游戏 / 演示模式」→ 把进程优先级让给游戏
+        #   · 平时 BelowNormal、游戏里 Idle（调度器永远先伺候游戏，桌宠"卡一下"没人在意）
+        #   · ⚠ 只调优先级：**不暂停**屏幕识别、**不暂停**主动搭话（主人明确要求）
+        #   · 开关：config.json → perf_guard_enabled（默认开）
+        self._game_mode = None
+        self._perf_timer = QTimer(self)
+        self._perf_timer.setInterval(3000)
+        self._perf_timer.timeout.connect(self._perf_tick)
+        try:
+            if self._perf_guard_enabled():
+                from tool import perf_guard as _pg0
+                _pg0.set_process_priority(False)      # 平时就跑在「低于正常」
+                _pg0.note_state(False)
+                self._perf_timer.start()
+        except Exception:
+            pass
+
         # Live2D 模式相关
         self._live2d_widget = None
         self._live2d_mode = False
@@ -2265,6 +2282,32 @@ class Murasame(QLabel):
         except Exception:
             pass
         return pixmap
+
+    def _perf_guard_enabled(self) -> bool:
+        """性能守卫开关（config.json: perf_guard_enabled，默认开）"""
+        try:
+            from tool.config import get_config, as_bool
+            return as_bool(get_config("./config.json").get("perf_guard_enabled", "true"), True)
+        except Exception:
+            return True
+
+    def _perf_tick(self):
+        """每 3 秒看一次是不是在全屏游戏/演示 → 切换进程优先级。
+
+        游戏里降到 Idle（然后调度器永远优先伺候游戏），结束回到 BelowNormal；
+        只在状态变化时写一行日志。按主人要求：识别与主动搭话都不暂停。
+        """
+        try:
+            from tool import perf_guard as _pg
+            if not self._perf_guard_enabled():
+                return
+            g = bool(_pg.game_mode())
+            if g != getattr(self, "_game_mode", None):
+                self._game_mode = g
+                _pg.set_process_priority(g)
+                _pg.note_state(g)
+        except Exception:
+            pass
 
     def _display_cfg_2d(self) -> dict:
         """2D 立绘的显示设置（pet.json model.display_2d；兼容旧的 display.* 键）。
