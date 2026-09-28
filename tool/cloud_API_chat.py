@@ -28,8 +28,10 @@ def post(name: str, payload, api_key: str = ""):
     }
     try:
         # 显式超时：防止云端/代理挂起导致线程永不结束（桌面端非守护线程会卡住退出）
-        resp = requests.post(url, json={"payload": payload, "headers": headers},
-                             timeout=(15, 180))
+        # 走系统代理失败时自动改「直连」重试一次（代理端口没开时桌宠不再哑掉）
+        from tool.net_env import post_with_direct_fallback as _postf
+        resp = _postf(url, json={"payload": payload, "headers": headers},
+                      timeout=(15, 180))
     except Exception as e:
         print(f"[{now_time()}] [{name}] ⚠ 请求失败: {e}")
         return ""
@@ -309,8 +311,10 @@ def cloud_vl(image_path: str):
         'Authorization': 'Bearer ' + vcfg["api_key"]
     }
     try:
-        resp = requests.post(url, json={"payload": payload, "headers": headers},
-                             timeout=(15, 180))
+        # 走系统代理失败时自动改「直连」重试一次（代理端口没开时桌宠不再哑掉）
+        from tool.net_env import post_with_direct_fallback as _postf
+        resp = _postf(url, json={"payload": payload, "headers": headers},
+                      timeout=(15, 180))
     except Exception as e:
         print(f"[{now_time()}] [qwen-vl] ⚠ 请求失败: {e}")
         return ""

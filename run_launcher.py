@@ -11,6 +11,13 @@ try:  # 控制台被重定向（管道/日志）时 Windows 会用 GBK 编码 st
 except Exception:
     pass
 
+try:  # 本机地址一律绕过系统代理（挂梯子时 127.0.0.1 会被送去代理 →
+    # 控制接口显示"未运行"、本地语音服务请求失败）。幂等，放最前面最保险。
+    from tool.net_env import bypass_proxy_for_local as _bpfl
+    _bpfl()
+except Exception:
+    pass
+
 import os
 import sys
 

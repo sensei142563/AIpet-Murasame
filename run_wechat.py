@@ -27,6 +27,16 @@ F5TTS_PORT = 9881
 F5TTS_PID_FILE = data_path("data", "wechat_f5tts.pid")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+# 本机地址一律绕过系统代理（挂梯子时 127.0.0.1 会被送去代理 → 控制接口显示"未运行"、
+# 本地语音服务请求失败）。幂等，入口处调一次即可。
+try:
+    if BASE_DIR not in sys.path:
+        sys.path.insert(0, BASE_DIR)
+    from tool.net_env import bypass_proxy_for_local as _bpfl
+    _bpfl()
+except Exception:
+    pass
+
 
 def _f5tts_venv_python():
     """拉起 F5-TTS 优先使用项目自带 runtime\venv 的 Python：
