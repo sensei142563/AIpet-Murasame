@@ -1202,11 +1202,22 @@ if __name__ == "__main__":
     clear_action = QAction("Clear History")
     clear_action.triggered.connect(pet.cleer_history)
 
+    # 自主性：安静 → 适中 → 活跃 轮换（写 config.json，立即生效）
+    try:
+        from tool import desire as _dz_tray
+        autonomy_action = QAction("🧠 切换自主性（当前：%s）" % _dz_tray.level_label())
+        autonomy_action.triggered.connect(lambda: pet._set_autonomy(_dz_tray.next_level()))
+    except Exception as _e:
+        print(f"[AIpet] ⚠ 托盘自主性项失败: {_e}")
+        autonomy_action = None
+
     # 退出
     exit_action = QAction("Exit")
     exit_action.triggered.connect(app.quit)
 
     # 菜单绑定
+    if autonomy_action is not None:
+        tray_menu.addAction(autonomy_action)
     tray_menu.addAction(dnd_action)
     tray_menu.addAction(screenshot_action)
     tray_menu.addAction(clear_action)

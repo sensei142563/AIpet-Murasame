@@ -1250,6 +1250,16 @@ class Murasame(QLabel):
             print("[AIpet] 恢复截图线程")
             self.start_screenshot_worker(interval=self.interval)
 
+    def _set_autonomy(self, level):
+        """切换自主性档位（写 config.json 的 autonomy_level，立即生效）"""
+        try:
+            from tool import desire as _dz_set
+            if _dz_set.set_level(level):
+                self.show_text(f"（自主性：{_dz_set.level_label()}）", typing=True)
+                print(f"[桌宠] 🧠 自主性 → {_dz_set.level_label()}")
+        except Exception as e:
+            print(f"[桌宠] ⚠ 切换自主性失败: {e}")
+
     def _reminder_tick(self):
         """到点的提醒：**一定要说**（这是主人自己要求的事），只让勿扰模式挡。
 
@@ -1779,6 +1789,17 @@ class Murasame(QLabel):
                 act_auto.setCheckable(True)
                 act_auto.setChecked(self._auto_switch_enabled())
                 act_auto.triggered.connect(self._toggle_auto_switch)
+            # 自主性：安静 / 适中 / 活跃（写 config.json 的 autonomy_level，立即生效）
+            try:
+                from tool import desire as _dz_menu
+                menu.addSeparator()
+                _sub = menu.addMenu("🧠 自主性（当前：%s）" % _dz_menu.level_label())
+                for _lv, _lb in (("quiet", "安静（不主动动手）"), ("normal", "适中（只读的可自己做）"),
+                                 ("active", "活跃（改动类可以提议）")):
+                    _act = _sub.addAction(("✅ " if _dz_menu.level() == _lv else "　　") + _lb)
+                    _act.triggered.connect(lambda checked=False, l=_lv: self._set_autonomy(l))
+            except Exception as _e:
+                print(f"[桌宠] ⚠ 自主性菜单失败: {_e}")
             if menu.isEmpty():
                 return
             menu.exec_(global_pos)

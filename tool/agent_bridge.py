@@ -203,10 +203,12 @@ def _argv_for(backend: str, task: str):
     return (None, {})
 
 
-def run_task(task: str, *, timeout=None, on_confirm=None, cwd=None) -> dict:
+def run_task(task: str, *, timeout=None, on_confirm=None, cwd=None, is_auto=False) -> dict:
     """让 agent 去做一件事。
 
     on_confirm(task) -> bool 是**必须**的：主人点头才跑（不给回调 = 一律拒绝，fail-safe）。
+    is_auto=True 表示这是**她自己想做的**（主人没开口）—— 会先过 tool.autonomy 的政策：
+    只读类允许，改动类要等主人开口，系统/删除/关机类永远不做。
     返回 {ok, backend, output, error, seconds, refused}；任何异常都不抛给调用方。
     """
     t0 = time.time()
@@ -231,6 +233,19 @@ def run_task(task: str, *, timeout=None, on_confirm=None, cwd=None) -> dict:
         res["refused"] = "任务看起来是破坏性的，已拒绝（防手滑黑名单）"
         _log({"ts": t0, "task": task[:200], "refused": res["refused"]})
         return res
+    # 自主行动分档（tool/autonomy）：never 直接拒；quiet 时她自己不主动动手
+    try:
+        from tool import autonomy as _au
+        _ok, _why = _au.allowed(task, is_auto=bool(is_auto))
+        if not _ok:
+            res["refused"] = _why
+            res["tier"] = _au.classify(task)
+            _log({"ts": t0, "task": task[:200], "refused": res["refused"],
+                  "tier": res["tier"]})
+            return res
+        res["tier"] = _au.classify(task)
+    except Exception:
+        pass
     try:
         if not on_confirm(task):
             res["refused"] = "主人取消了"

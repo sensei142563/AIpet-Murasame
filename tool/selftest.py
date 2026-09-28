@@ -107,6 +107,9 @@ WIRING = (
     ("classes/murasame_class.py", "_reminder_timer", "提醒轮询不见了（到点不会叫她）"),
     ("tool/chat.py", "reminder as _rm_rules", "本地链路没注入提醒语法（她不会记事）"),
     ("tool/cloud_API_chat.py", "reminder as _rm_rules", "云端链路没注入提醒语法"),
+    ("tool/autonomy.py", "def may_propose", "自主行动分档模块缺 may_propose"),
+    ("tool/agent_bridge.py", "autonomy as _au", "agent 桥接没读「自主行动分档」政策"),
+    ("classes/murasame_class.py", "def _set_autonomy", "自主性切换入口不见了"),
 )
 # 绝不能出现的（历史坑，回来就是 bug 复发）—— **正则**，只扫非注释行：
 #   注释里写着"原来写死了 infos[57:65]"是对的（解释历史），不能算复发（自测自己踩过这个误报）

@@ -138,6 +138,13 @@ def qwen3_lora(history, user_input, role):
     except Exception:
         pass
 
+    # 1.9 她的行动边界（哪些能自己做、哪些要主人开口、哪些永远不做）
+    try:
+        from tool import autonomy as _au_note
+        messages.append({"role": "system", "content": _au_note.note()})
+    except Exception:
+        pass
+
     # 2. 高权重「最近的观察」（识别触发的内容，仅本轮有高权重）
     if high_observations:
         obs_text = "\n".join(f"- {obs}" for obs in high_observations[-5:])
