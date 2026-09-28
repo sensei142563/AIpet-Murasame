@@ -103,6 +103,10 @@ WIRING = (
     ("tool/care.py", "def check", "主动关怀模块缺 check"),
     ("classes/murasame_class.py", "_care_timer", "关怀定时器不见了（熬夜/久坐不再提醒）"),
     ("main.py", "startup_line", "开机问候不见了（「在一起第 N 天」不说了）"),
+    ("tool/reminder.py", "def take_due", "提醒模块缺 take_due"),
+    ("classes/murasame_class.py", "_reminder_timer", "提醒轮询不见了（到点不会叫她）"),
+    ("tool/chat.py", "reminder as _rm_rules", "本地链路没注入提醒语法（她不会记事）"),
+    ("tool/cloud_API_chat.py", "reminder as _rm_rules", "云端链路没注入提醒语法"),
 )
 # 绝不能出现的（历史坑，回来就是 bug 复发）—— **正则**，只扫非注释行：
 #   注释里写着"原来写死了 infos[57:65]"是对的（解释历史），不能算复发（自测自己踩过这个误报）

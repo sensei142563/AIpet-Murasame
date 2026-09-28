@@ -130,6 +130,14 @@ def qwen3_lora(history, user_input, role):
     except Exception:
         pass
 
+    # 1.8 提醒/待办语法（她能帮主人记事，见 tool/reminder 的 prompt_rules）
+    try:
+        from tool import reminder as _rm_rules
+        if _rm_rules.enabled():
+            messages.append({"role": "system", "content": _rm_rules.prompt_rules()})
+    except Exception:
+        pass
+
     # 2. 高权重「最近的观察」（识别触发的内容，仅本轮有高权重）
     if high_observations:
         obs_text = "\n".join(f"- {obs}" for obs in high_observations[-5:])
@@ -179,6 +187,15 @@ def qwen3_lora(history, user_input, role):
         reply = str(data)
     if "<think>" in reply:
         reply = reply.split("</think>")[-1].strip()  # 取思考之后的部分
+    # 提醒：模型写了【提醒】标记 → 在这里记下/取消/列出来，并把标记从要说出口的话里去掉
+    try:
+        from tool import reminder as _rm_reply
+        _before = reply
+        reply = _rm_reply.handle_reply(reply)
+        if reply != _before:
+            print(f"[{now_time()}] [提醒] 已处理回复里的提醒标记")
+    except Exception as _e:
+        print(f"[{now_time()}] [提醒] ⚠ 处理失败: {_e}")
     history.append({"role": "assistant", "content": reply})  # 加入历史
     print(f"[{now_time()}] [qwen3-lora] Reply:{reply}")
     # 长期状态：记一次"跟她说过话"（后面的「开口时机」要看沉默了多久）

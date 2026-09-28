@@ -166,8 +166,10 @@ def startup_line(pet_name: str = "我") -> str:
             from tool import reminder as _rm
             its = _rm.items()
             if its:
+                # ⚠ 别把裸时间戳念出来：用 reminder 自己的格式化（今天只显示 HH:MM）
                 txt += "今天挂着这些提醒：" + "、".join(
-                    "%s %s" % (x.get("at"), x.get("what")) for x in its[:3]) + "。"
+                    "%s %s" % (_rm._fmt_ts(x.get("at")), x.get("what")) for x in its[:3])
+                txt += ("等 %d 条。" % len(its)) if len(its) > 3 else "。"
         except Exception:
             pass
         txt += ("用你自己的口吻跟主人打个招呼，一句话就行（别提'系统提示'、别报时）。"

@@ -107,6 +107,14 @@ def cloud_talk(history: list, user_input: str, role: str):
     else:
         messages.append({"role": "system", "content": identity_default})
 
+    # 1.8 提醒/待办语法（她能帮主人记事，见 tool/reminder 的 prompt_rules）
+    try:
+        from tool import reminder as _rm_rules
+        if _rm_rules.enabled():
+            messages.append({"role": "system", "content": _rm_rules.prompt_rules()})
+    except Exception:
+        pass
+
     # 2. 高权重「最近的观察」（识别触发的内容，仅本轮有高权重）
     if high_observations:
         obs_text = "\n".join(f"- {obs}" for obs in high_observations[-5:])  # 最多注入最近 5 条
@@ -153,6 +161,12 @@ def cloud_talk(history: list, user_input: str, role: str):
     }
     payload.update(cfg["reasoning"])  # 推理等级附加参数（off 时可能为空 dict）
     reply = post(name=f"{cfg['name']}-talk", payload=payload, api_key=cfg["api_key"])
+    # 提醒：模型写了【提醒】标记 → 在这里记下/取消/列出来，并把标记从要说出口的话里去掉
+    try:
+        from tool import reminder as _rm_reply
+        reply = _rm_reply.handle_reply(reply)
+    except Exception as _e:
+        print(f"[云端] [提醒] ⚠ 处理失败: {_e}")
     history.append({"role": "assistant", "content": reply})  # 加入历史
     return reply, history
 

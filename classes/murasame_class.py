@@ -369,6 +369,17 @@ class Murasame(QLabel):
         #   · 平时 BelowNormal、游戏里 Idle（调度器永远先伺候游戏，桌宠"卡一下"没人在意）
         #   · ⚠ 只调优先级：**不暂停**屏幕识别、**不暂停**主动搭话（主人明确要求）
         #   · 开关：config.json → perf_guard_enabled（默认开）
+        # 提醒：每 30 秒看一次有没有到点的（主人自己要求的事，到点一定要说）
+        self._reminder_timer = QTimer(self)
+        self._reminder_timer.setInterval(30000)
+        self._reminder_timer.timeout.connect(self._reminder_tick)
+        try:
+            from tool import reminder as _rm0
+            if _rm0.enabled():
+                self._reminder_timer.start()
+        except Exception:
+            pass
+
         # 主动关怀：每 10 分钟看一次"该不该关心他一下"（熬夜 / 久坐）。
         #   ⚠ 关怀是低频的事，别跟着 60 秒的定时器跑。
         self._care_last_break = time.time()      # 上一次"离开键鼠"的时刻（算连续使用时长）
@@ -1238,6 +1249,26 @@ class Murasame(QLabel):
         ):
             print("[AIpet] 恢复截图线程")
             self.start_screenshot_worker(interval=self.interval)
+
+    def _reminder_tick(self):
+        """到点的提醒：**一定要说**（这是主人自己要求的事），只让勿扰模式挡。
+
+        刻意**不**过「开口时机」那套打分 —— 那套只决定"她自己想聊时要不要开口"。
+        她正在说话时先不取，等下一轮（30 秒后再看），这样提醒不会被吞掉。
+        """
+        try:
+            from tool import reminder as _rm
+            if not _rm.enabled():
+                return
+            if getattr(self, "_dnd_enabled", False):
+                return
+            if getattr(self, "_talking", False):
+                return                      # 正在对话 → 下一轮再说（take_due 还没被调用，不会丢）
+            for _it in _rm.take_due():
+                print(f"[桌宠] ⏰ 到点提醒：{_it.get('what')}")
+                self.start_thread(_rm.fire_prompt(_it), role="system", t=True)
+        except Exception as e:
+            print(f"[桌宠] ⚠ 提醒检查失败: {e}")
 
     def _care_tick(self):
         """主动关怀检查：熬夜催睡、久坐提醒（会议/演示时内部会自己安静下来）"""
