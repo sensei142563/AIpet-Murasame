@@ -8,8 +8,9 @@
 记忆凑答案，或者干脆说看不到。所以：先判意图，命中就**当场抓屏识别**，再把描述和
 主人的问题一起交给她回答。
 
-依赖：抓屏用 tool.screen_capture（Win32，后台线程安全）；识别优先用现有的云端视觉
-（tool.cloud_API_chat.cloud_vl），没配视觉模型就如实返回空，不编内容。
+依赖：抓屏用 tool.screen_capture（Win32，后台线程安全）；识别先问本机视觉服务
+（tool.vision_local，config 里 vision_source=local 时才发请求，短超时），拿不到就
+回落云端视觉（tool.cloud_API_chat.cloud_vl）；两条路都没配就如实返回空，不编内容。
 """
 import os
 import sys
@@ -84,6 +85,14 @@ def look_now(save_dir: str = None):
     except Exception as e:
         print("[看屏幕] ⚠ 抓屏失败: %s" % e)
         return "", ""
+    try:
+        # 先问本机的视觉服务（vision_source=local 时才发请求；它自己会判断服务在不在）
+        from tool import vision_local as _vl
+        desc = str(_vl.look(img_path) or "").strip()
+        if desc:
+            return desc, img_path
+    except Exception as e:
+        print("[看屏幕] 本地视觉不可用（回落云端）: %s" % e)
     try:
         from tool.cloud_API_chat import cloud_vl
         desc = str(cloud_vl(img_path) or "").strip()

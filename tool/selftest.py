@@ -34,7 +34,7 @@ except Exception:
 CORE_MODULES = (
     "tool.config", "tool.paths", "tool.net_env", "tool.perf_guard", "tool.audio_polish",
     "tool.msvc_runtime", "tool.napcat_version", "tool.portrait_geom", "tool.portrait_outfit",
-    "tool.vision_setup",
+    "tool.vision_setup", "tool.vision_local",
     "tool.portrait_cli", "tool.generate", "tool.chat", "tool.cloud_API_chat", "tool.api_server",
     "tool.stt", "tool.camera", "tool.face_recognition", "tool.touch_areas",
     "tool.voice_trigger", "tool.time_utils", "tool.weather_utils",
@@ -130,6 +130,12 @@ WIRING = (
      "本地视觉配置模块缺 readiness（没法如实回答能不能用本地识别）"),
     ("tool/vision_setup.py", "def download_model",
      "本地视觉配置模块缺 download_model（模型下不了/不能续传）"),
+    ("tool/vision_local.py", "def something_listening",
+     "本地视觉客户端丢了端口预检（服务没开时要先白等 1.5 秒才回落云端）"),
+    ("tool/vision_local.py", "def look",
+     "本地视觉客户端缺 look（本地识别接不上）"),
+    ("tool/screen_intent.py", "vision_local as _vl",
+     "「当场看屏幕」没接本地视觉（应本地优先、拿不到再回落云端）"),
 )
 # 绝不能出现的（历史坑，回来就是 bug 复发）—— **正则**，只扫非注释行：
 #   注释里写着"原来写死了 infos[57:65]"是对的（解释历史），不能算复发（自测自己踩过这个误报）
