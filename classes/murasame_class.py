@@ -2167,7 +2167,9 @@ class Murasame(QLabel):
 
         # 4. Convert to QPixmap and apply adaptive scaling
         pixmap = QPixmap.fromImage(qimg)
-        return self._scale_portrait_pixmap(pixmap)
+        # ★ 稳定画布：把宽度补到「本套最宽」，否则换表情/换装时窗口忽宽忽窄，
+        #   对话框（按窗口宽高归一化）就会跟着忽大忽小、左右跳。
+        return self._stabilize_portrait_canvas(self._scale_portrait_pixmap(pixmap), target)
 
     def _scale_portrait_pixmap(self, pixmap: QPixmap) -> QPixmap:
         """
@@ -2243,6 +2245,26 @@ class Murasame(QLabel):
         self._update_text_scaling()
 
         return pixmap.scaledToHeight(target_height, Qt.SmoothTransformation)
+
+    def _stabilize_portrait_canvas(self, pixmap: QPixmap, target) -> QPixmap:
+        """把立绘画布宽度稳定到「这一套里最宽的那种」（透明补齐、水平居中）。
+
+        · 2D 立绘按图层包围盒合成，宽度随衣服/表情变化 → 不稳定的宽会让窗口和对话框抖动；
+        · 宽度用 tool.portrait_geom 算（与「设置 → 立绘」的预览同一套算法，两边比例才一致）；
+        · 算不出几何（没索引 / 没素材 / 新角色）时**原样返回**，行为与以前完全一样。
+        """
+        try:
+            from tool.portrait_geom import stable_canvas_width
+            from pets.pet_registry import get_active_pet_id
+            from PyQt5.QtCore import QSize
+            _s = str(target or "")[-1:]
+            _want = stable_canvas_width(get_active_pet_id(), _s, pixmap.height())
+            if _want > pixmap.width():
+                return self._pad_pixmap(pixmap, QSize(int(_want), pixmap.height()),
+                                        center_x=True)
+        except Exception:
+            pass
+        return pixmap
 
     def _display_cfg_2d(self) -> dict:
         """2D 立绘的显示设置（pet.json model.display_2d；兼容旧的 display.* 键）。

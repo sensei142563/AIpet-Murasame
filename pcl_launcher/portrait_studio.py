@@ -1071,6 +1071,35 @@ class PortraitStudio(SiliconDialog):
 
         threading.Thread(target=_work, daemon=True).start()
 
+    def _stabilize_preview(self, pm):
+        """预览也用「本套最宽画布」当宽度 —— 与桌宠窗口同一套几何，比例和位置才对得上。
+
+        桌宠窗口用的是稳定画布（换装不抖动），预览若按**当前这张图**的宽高比画，
+        立绘与对话框的相对位置就会和桌面不一致（用户反馈过）。
+        """
+        try:
+            from tool.portrait_geom import stable_canvas_width
+            try:
+                set_name = str(self._current()[0] or "")
+            except Exception:
+                set_name = ""
+            _want = stable_canvas_width(getattr(self, "_pet_id", None),
+                                        set_name or "a", pm.height())
+            if _want > pm.width():
+                from PyQt5.QtGui import QPixmap as _QP
+                from PyQt5.QtCore import Qt as _Qt, QSize as _QS
+                out = _QP(_QS(int(_want), pm.height()))
+                out.fill(_Qt.transparent)
+                from PyQt5.QtGui import QPainter as _QPt
+                p = _QPt(out)
+                if p.isActive():
+                    p.drawPixmap(max(0, (int(_want) - pm.width()) // 2), 0, pm)
+                    p.end()
+                return out
+        except Exception:
+            pass
+        return pm
+
     def _show_pixmap(self):
         # 调参时保留上一帧（等新图回来再替换）→ 滑块拖动不闪、不空白
         try:
@@ -1086,6 +1115,7 @@ class PortraitStudio(SiliconDialog):
                 self._last_path = path
                 pm = QPixmap(path)
                 if not pm.isNull():
+                    pm = self._stabilize_preview(pm)
                     self._last_pixmap = pm
                     self._show_pixmap()
                     return
