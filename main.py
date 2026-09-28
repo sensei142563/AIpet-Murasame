@@ -1028,17 +1028,25 @@ if __name__ == "__main__":
                 try:
                     print("[API Control] 触发屏幕识别")
                     from tool.cloud_API_chat import cloud_vl
-                    from PyQt5.QtGui import QGuiApplication
-                    screen = QGuiApplication.primaryScreen()
-                    pixmap = screen.grabWindow(0)
-                    import tempfile
                     import os as _os
-                    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png", dir="tmp")
-                    tmp_name = tmp.name
-                    tmp.close()
-                    pixmap.save(tmp_name, "PNG")
+                    # ⚠ 这里在**后台线程**里跑：QScreen.grabWindow() 只能在 GUI 线程调用，
+                    #   在子线程里用会让整个进程无报错消失（截图线程 ScreenWorker 就是踩了这个
+                    #   才改用 Win32 抓屏的，这处漏改了）。所以统一走 tool.screen_capture。
+                    from tool import screen_capture as _sc
+                    tmp_name = _os.path.join("tmp", "api_shot.png")
+                    _os.makedirs("tmp", exist_ok=True)
+                    if not _sc.capture_png(tmp_name):
+                        print("[API Control] 抓屏失败 → 本次不评论屏幕")
+                        return
                     desc = cloud_vl(tmp_name)
-                    _os.remove(tmp_name)
+                    try:
+                        _os.remove(tmp_name)
+                    except OSError:
+                        pass
+                    if not str(desc or "").strip():
+                        # 没配视觉模型 / 请求失败 → 不下"你亲眼看到了"的指令（否则她会照着念错误信息）
+                        print("[API Control] 没拿到屏幕描述 → 本次不评论屏幕")
+                        return
                     prompt = (
                         "【重要系统指令】你刚刚通过屏幕截图看到了主人当前的真实状态。"
                         "以下是对主人屏幕内容的描述，这是你亲眼所见的事实，你必须围绕这个内容展开对话：\n"

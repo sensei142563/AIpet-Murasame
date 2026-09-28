@@ -34,6 +34,7 @@ except Exception:
 CORE_MODULES = (
     "tool.config", "tool.paths", "tool.net_env", "tool.perf_guard", "tool.audio_polish",
     "tool.msvc_runtime", "tool.napcat_version", "tool.portrait_geom", "tool.portrait_outfit",
+    "tool.vision_check",
     "tool.portrait_cli", "tool.generate", "tool.chat", "tool.cloud_API_chat", "tool.api_server",
     "tool.stt", "tool.camera", "tool.face_recognition", "tool.touch_areas",
     "tool.voice_trigger", "tool.time_utils", "tool.weather_utils",
@@ -121,6 +122,17 @@ WIRING = (
     ("tool/screen_intent.py", "def needs_screen_look", "屏幕意图模块缺 needs_screen_look"),
     ("tool/chat.py", "screen_intent as _si", "本地链路没接「当场看屏幕」"),
     ("tool/cloud_API_chat.py", "screen_intent as _si", "云端链路没接「当场看屏幕」"),
+    ("tool/net_env.py", "def port_open",
+     "net_env 少了本机端口探测（bind 预检：0ms 判断本机代理在不在）"),
+    ("tool/vision_check.py", "def check", "识图自检模块缺 check（识图通不通没人能一眼看出来）"),
+    ("tool/vision_check.py", "def tiny_png",
+     "识图自检少了「自造测试小图」（拿屏幕截图去测等于把主人屏幕送出去）"),
+    ("tool/cloud_API_chat.py", "本次不识别",
+     "cloud_vl 没配视觉模型时又返回人话占位了（她会把它当成亲眼所见照着念）"),
+    ("tool/camera.py", "本次不识别",
+     "摄像头识图又把错误提示当描述返回了（她会照着念）"),
+    ("main.py", "from tool import screen_capture as _sc",
+     "截图任务又退回 QScreen.grabWindow（后台线程里调用会让进程凭空消失）"),
 )
 # 绝不能出现的（历史坑，回来就是 bug 复发）—— **正则**，只扫非注释行：
 #   注释里写着"原来写死了 infos[57:65]"是对的（解释历史），不能算复发（自测自己踩过这个误报）

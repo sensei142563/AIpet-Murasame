@@ -332,17 +332,39 @@ def cloud_emotion(history: list):
     return reply
 
 def cloud_vl(image_path: str):
+    """云端识图：把图片交给 vision_model_name 配置的模型，返回描述文字。
+
+    ⚠ 拿不到描述时**一律返回空串**（原因只打印在控制台）：调用方会把返回值当成
+      "我亲眼看到的屏幕内容"直接塞进提示词（见 classes/murasame_class.py 的截图段与
+      main.py 的 _screenshot_task）。早先这里返回的是一句人话提示，于是她会一本正经地
+      评论那句提示（踩过）—— 所以本函数**任何**失败分支都只能返回空串。
+    """
     # 视觉模型统一走 longtext.model_config（vision_model_name + 对应 API Key）
     from longtext.model_config import get_vision_model_config
     vcfg = get_vision_model_config()
     if not vcfg:
-        return "（未配置视觉模型 API Key）"
-    identity = "你是一个AI桌宠的助手，你应该可以在屏幕上看到这个桌宠角色，是一个绿色头发的动漫人物。你需要简要描述用户正在做的事与使用的软件。我会将你的描述以system消息提供给另外一个处理语言的AI模型。只输出描述内容，且不要描述桌宠。"
-    with open(image_path, "rb") as f:
-        img_b64 = base64.b64encode(f.read()).decode()
+        print(f"[{now_time()}] [qwen-vl] ⚠ 没配视觉模型（config.json 的 vision_model_name "
+              f"与对应 APIKEY）→ 本次不识别")
+        return ""
+    # 不再写死"绿色头发"：本仓库有 3 个角色（murasame/noir/natsume），
+    # 说错外貌会让视觉模型顺着提示编一个不存在的人。
+    identity = ("你是一个AI桌宠的助手。屏幕上会有一个桌宠角色，请忽略它。"
+                "你需要简要描述用户正在做的事与使用的软件。"
+                "我会将你的描述以system消息提供给另外一个处理语言的AI模型。"
+                "只输出描述内容，且不要描述桌宠。")
+    try:
+        with open(image_path, "rb") as f:
+            img_b64 = base64.b64encode(f.read()).decode()
+    except Exception as e:
+        print(f"[{now_time()}] [qwen-vl] ⚠ 读图失败: {e}")
+        return ""
+    # 按扩展名给对 MIME：屏幕截图是 png，但别处存过来的可能是 jpg
+    _ext = os.path.splitext(str(image_path))[1].lower().lstrip(".")
+    _mime = {"jpg": "jpeg", "jpeg": "jpeg", "webp": "webp",
+             "bmp": "bmp", "gif": "gif"}.get(_ext, "png")
 
     payload = {
-        "messages": [{"role": "user", "content": [{"type": "image_url","image_url": {"url": f"data:image/png;base64,{img_b64}"}},
+        "messages": [{"role": "user", "content": [{"type": "image_url","image_url": {"url": f"data:image/{_mime};base64,{img_b64}"}},
                      {"type": "text", "text": identity}]}],
         "model": vcfg["model"],
         "max_tokens": 4096,
@@ -369,8 +391,12 @@ def cloud_vl(image_path: str):
         return ""
     reply = ""
     if "choices" in resp:
-        reply = resp['choices'][0]['message']['content']
+        try:
+            reply = resp['choices'][0]['message']['content'] or ""
+        except Exception as e:
+            print(f"[{now_time()}] [qwen-vl] ⚠ 响应结构不认识: {e}")
+            reply = ""
     else:
-        print(resp)
+        print(f"[{now_time()}] [qwen-vl] ⚠ 云端没给 choices: {str(resp)[:200]}")
     print(f"[{now_time()}] [qwen-vl] Reply:{reply}")
     return reply

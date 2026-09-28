@@ -1216,6 +1216,11 @@ class Murasame(QLabel):
                             print("[ollama-qwen2.5vl] 已中断生成")
                             return
                         desc = ollama_qwen25vl(path)
+                    if not str(desc or "").strip():
+                        # 没拿到描述（没配视觉模型 Key / 请求失败 / 断网）→ 如实说看不到，
+                        # 绝不把空描述包装成"你亲眼所见的事实"再让她编（finally 会删临时截图）
+                        print("[cloud-vl] 没拿到屏幕描述 → 本次不评论屏幕")
+                        return
                     propmt = (
                         "【重要系统指令】你刚刚通过屏幕截图看到了主人当前的真实状态。"
                         "以下是对主人屏幕内容的描述，这是你亲眼所见的事实，你必须围绕这个内容展开对话：\n"

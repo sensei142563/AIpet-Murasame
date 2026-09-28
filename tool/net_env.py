@@ -142,6 +142,32 @@ def proxy_state() -> dict:
     return st
 
 
+def port_open(host: str = "127.0.0.1", port: int = 0) -> bool:
+    """本机某个端口上有没有程序在监听 —— 用 bind 试探，**0 网络往返**。
+
+    为什么不 connect 一下试试：本机实测（2026-09-28）连一个没在听的回环端口**不会
+    立刻被拒** —— 裸 socket 要 1.511s 才 TimeoutError、urllib 1.501s 才 URLError
+    （像是安全软件静默丢掉了 SYN）。于是"探活"反而成了最慢的一步：本机 API 代理
+    （api.py，28565）没起来时，判断一次要白赔一个超时。bind 失败 = EADDRINUSE =
+    有人在听，是 0ms 的。
+
+    ⚠ 前提是占位方没开 SO_REUSEADDR；本仓库自己的服务都关了它（防静默双开），
+      所以对自己人准。别人占着端口时最坏结果是"多走一次探测"，不会误判成"在跑"。
+    """
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.bind((host, int(port)))
+        return False
+    except OSError:
+        return True
+    finally:
+        try:
+            s.close()
+        except Exception:
+            pass
+
+
 if __name__ == "__main__":
     _say("=== 当前代理状态 ===")
     for k, v in proxy_state().items():

@@ -85,12 +85,17 @@ def _encode_frame(frame) -> str:
 
 
 def _qwen_vision(image_b64_url: str, prompt: str) -> str:
-    """通过云端视觉模型分析图像（模型由 vision_model_name 配置）"""
+    """通过云端视觉模型分析图像（模型由 vision_model_name 配置）。
+
+    ⚠ 拿不到描述时**一律返回空串**（原因只打印）：调用方会把返回值当"亲眼所见"塞进
+      提示词，返回一句人话错误提示会让她照着念（踩过）。本函数任何失败分支都只能返回空串。
+    """
     import requests
     from longtext.model_config import get_vision_model_config
     vcfg = get_vision_model_config()
     if not vcfg:
-        return "错误：未配置视觉模型 API Key"
+        print("[camera] ⚠ 没配视觉模型（vision_model_name + 对应 APIKEY）→ 本次不识别")
+        return ""
 
     payload = {
         "messages": [{
@@ -118,10 +123,11 @@ def _qwen_vision(image_b64_url: str, prompt: str) -> str:
         data = resp.json()
         if "choices" in data:
             return data["choices"][0]["message"]["content"].strip()
-        print(f"[camera] API错误: {data}")
-        return f"识别失败: {data.get('error', '未知错误')}"
+        print(f"[camera] API错误: {str(data)[:200]}")
+        return ""
     except Exception as e:
-        return f"识别失败: {str(e)[:80]}"
+        print(f"[camera] ⚠ 识别请求失败: {str(e)[:120]}")
+        return ""
 
 
 # ==================== 全局单例 ====================
