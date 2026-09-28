@@ -34,7 +34,7 @@ except Exception:
 CORE_MODULES = (
     "tool.config", "tool.paths", "tool.net_env", "tool.perf_guard", "tool.audio_polish",
     "tool.msvc_runtime", "tool.napcat_version", "tool.portrait_geom", "tool.portrait_outfit",
-    "tool.vision_check",
+    "tool.vision_check", "tool.status_snapshot",
     "tool.portrait_cli", "tool.generate", "tool.chat", "tool.cloud_API_chat", "tool.api_server",
     "tool.stt", "tool.camera", "tool.face_recognition", "tool.touch_areas",
     "tool.voice_trigger", "tool.time_utils", "tool.weather_utils",
@@ -133,6 +133,14 @@ WIRING = (
      "摄像头识图又把错误提示当描述返回了（她会照着念）"),
     ("main.py", "from tool import screen_capture as _sc",
      "截图任务又退回 QScreen.grabWindow（后台线程里调用会让进程凭空消失）"),
+    ("tool/status_snapshot.py", "def snapshot",
+     "状态快照模块缺 snapshot（「她的状态」没有数据来源）"),
+    ("tool/status_snapshot.py", "def as_text",
+     "状态快照模块缺 as_text（出问题时没法一键复制成文字）"),
+    ("classes/status_window.py", "def show_status_window",
+     "状态窗缺入口（右键「她的状态」会没反应）"),
+    ("classes/murasame_class.py", "_show_status_window",
+     "右键菜单没挂「她的状态」入口"),
 )
 # 绝不能出现的（历史坑，回来就是 bug 复发）—— **正则**，只扫非注释行：
 #   注释里写着"原来写死了 infos[57:65]"是对的（解释历史），不能算复发（自测自己踩过这个误报）

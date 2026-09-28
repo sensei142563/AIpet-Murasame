@@ -1318,6 +1318,22 @@ class Murasame(QLabel):
         except Exception as e:
             print(f"[桌宠] ⚠ 读记忆失败: {e}")
 
+    def _show_status_window(self):
+        """右键：她的状态（把 9 个内心模块收成一页看）。
+
+        ⚠ 窗口构造要挡住异常：状态窗只是"看一眼"的功能，绝不能因为它把桌宠带崩。
+        """
+        try:
+            from classes.status_window import show_status_window
+            show_status_window(self)
+        except Exception as e:
+            print(f"[桌宠] ⚠ 打开状态窗失败: {type(e).__name__}: {e}")
+            try:
+                from tool import status_snapshot as _ss
+                self.show_text(_ss.as_text(), typing=False)     # 退而求其次：说出来
+            except Exception:
+                pass
+
     def _set_autonomy(self, level):
         """切换自主性档位（写 config.json 的 autonomy_level，立即生效）"""
         try:
@@ -1867,6 +1883,8 @@ class Murasame(QLabel):
                 _act_l.triggered.connect(self._toggle_learn)
                 _act_seen = menu.addAction("📔 看看她学了什么")
                 _act_seen.triggered.connect(self._show_learned)
+                _act_win = menu.addAction("🪟 她的状态（一页看完）")
+                _act_win.triggered.connect(self._show_status_window)
             except Exception as _e:
                 print(f"[桌宠] ⚠ 学习菜单失败: {_e}")
 
