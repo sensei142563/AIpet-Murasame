@@ -9,7 +9,7 @@ from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtGui import QGuiApplication
 
 from tool.cloud_API_chat import cloud_portrait, cloud_translate, cloud_talk, cloud_emotion
-from tool.config import as_bool, get_config
+from tool.config import as_bool, get_config, num
 from tool.chat import qwen3_lora, ollama_qwen3_sentence, ollama_qwen3_portrait, gpt_sovits_tts, ollama_qwen3_emotion, ollama_qwen3_translate
 
 portrait_type = get_config("./config.json")['portrait']
@@ -322,20 +322,30 @@ class cloud_API_Worker(QThread):
         self.finished.emit(reply_list, portrait_list, history, portrait_history, voices, emotion_list)
 
 
-screen_index = get_config("./config.json")["screen_index"]
+# ⚠ 屏幕索引：原来是**直接下标** `get_config(...)["screen_index"]` —— 配置里没这个键就
+#   KeyError（而且是在模块导入期），写成 "abc" 也直接抛。越界/负数在截图线程里的后果
+#   见 ScreenWorker.run() 的注释（线程静默死掉 / 静默抓错屏）。
+screen_index = int(num(get_config("./config.json").get("screen_index"), 0, 0, 15))
 class ScreenWorker(QThread):
     # 发出临时文件路径（主线程负责删除）
     screenshot_captured = pyqtSignal(str)
 
     def __init__(self, interval_sec=3.0, parent=None):
         super().__init__(parent)
-        self.interval = interval_sec
+        # ⚠ 间隔必须是**正数**（见 tool/config.py::num 的说明）：写成 0/负数会让下面
+        #   `for _ in range(int(self.interval * 10))` 一次都不睡 → 满速抓屏，
+        #   而且每轮都写一个临时 PNG（磁盘会被塞满）。这里夹到 [1, 3600] 秒。
+        self.interval = num(interval_sec, 3.0, 1.0, 3600.0)
         os.makedirs("tmp", exist_ok=True)
 
     def run(self):
         screens = QGuiApplication.screens()
-        screen = screens[screen_index]
+        # ⚠ 屏幕索引也要夹：越界 → 线程里 IndexError（静默死掉）；负数 → Python 负索引
+        #   会**静默选到另一块屏**（用户设的屏幕和实际抓的不是同一个）。
+        idx = int(num(screen_index, 0, 0, max(0, len(screens) - 1)))
+        screen = screens[idx] if screens else None
         if screen is None:
+            print("[截图线程] ⚠ 没有可用屏幕，截图线程退出")
             return
         while not self.isInterruptionRequested():
             # 抓屏（全屏）
@@ -367,7 +377,9 @@ class ScreenWorker(QThread):
             # 发信号，让主线程去处理（网络调用等）
             self.screenshot_captured.emit(tmp_name)
             # sleep 可被 requestInterruption() 打断（间隔相对宽松）
-            for _ in range(int(self.interval * 10)):
+            # ⚠ max(1, ...)：哪怕 interval 被人从外面改成 0/负数，也保证每轮至少睡一次，
+            #   不会变成忙循环（这一层是兜底，__init__ 里已经夹过一次）
+            for _ in range(max(1, int(self.interval * 10))):
                 if self.isInterruptionRequested():
                     break
                 time.sleep(0.1)
@@ -382,8 +394,11 @@ class CameraWorker(QThread):
 
     def __init__(self, interval_sec=300.0, camera_id=0, parent=None):
         super().__init__(parent)
-        self.interval = interval_sec
-        self.camera_id = camera_id
+        # ⚠ 同 ScreenWorker：间隔写 0/负数 → 忙循环满速抓帧（还带 JPEG 编码）；
+        #   写成字符串 → 下面 int() 当场抛异常、线程静默死掉。夹到 [1, 86400] 秒。
+        self.interval = num(interval_sec, 300.0, 1.0, 86400.0)
+        # 摄像头编号同理：越界只会让"初始化失败"（有提示），负数会被 OpenCV 当成别的设备
+        self.camera_id = int(num(camera_id, 0, 0, 63))
         self._cap = None
 
     def _init_camera(self):
@@ -410,7 +425,9 @@ class CameraWorker(QThread):
                 img_url = f"data:image/jpeg;base64,{img_b64}"
                 self.camera_captured.emit(img_url)
             # 按间隔 sleep
-            for _ in range(int(self.interval * 10)):
+            # ⚠ max(1, ...)：哪怕 interval 被人从外面改成 0/负数，也保证每轮至少睡一次，
+            #   不会变成忙循环（__init__ 里已夹过一次，这里是兜底 —— 两个 worker 都要有）
+            for _ in range(max(1, int(self.interval * 10))):
                 if self.isInterruptionRequested():
                     break
                 time.sleep(0.1)

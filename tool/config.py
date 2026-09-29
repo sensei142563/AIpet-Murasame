@@ -188,6 +188,33 @@ def set_key(path: str, key: str, value, create: bool = True) -> bool:
         return False
 
 
+def num(value, default: float, lo: float = None, hi: float = None) -> float:
+    """配置里的**数值**：读不懂（None/""/"abc"/列表…）就用 default，越界夹到 [lo, hi]。
+
+    为什么要有它：用户会手改 config.json（本项目里真改过），而数值键写错有两种后果，
+    都很难查：
+      1) 写成 "abc" → `int()/float()` 抛异常。在**后台线程**里抛 = 线程静默死掉
+         （摄像头/截图就此不再工作，界面上没有任何提示）
+      2) 写成 0 或负数 → "间隔"类参数变成**忙循环**：Worker_class 里的
+         `for _ in range(int(self.interval * 10)): time.sleep(0.1)` 一次都不睡 →
+         满速抓帧（摄像头）/ 满速抓屏并且不停写临时 PNG（截图线程）
+    返回 float（调用方需要 int 自己 int()：`int(num(cfg.get("x"), 100, 1, 86400))`）。
+    """
+    try:
+        if isinstance(value, bool):          # True/False 不是"数值"的意思，别当 1/0
+            return default
+        v = float(value)
+        if v != v:                           # NaN
+            return default
+    except (TypeError, ValueError):
+        return default
+    if lo is not None and v < lo:
+        v = lo
+    if hi is not None and v > hi:
+        v = hi
+    return v
+
+
 def as_bool(value, default: bool = False) -> bool:
     """配置里的「真值」判定：1/true/yes/y/on/开/开启 → True，其余 → False。
 

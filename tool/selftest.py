@@ -208,6 +208,17 @@ WIRING = (
      "启动器插件页的真值判断没走权威实现"),
     ("main.py", 'as_bool(CONFIG.get("voice_trigger"), False)',
      "语音触发开关又变成大小写敏感判断了（写 True 会被当成关）"),
+    # ── 数值型配置：读不懂用默认、越界夹住（写 0/负数会让"间隔"变忙循环，见 §27.6）──
+    ("tool/config.py", "def num(",
+     "配置数值的兜底/夹取实现没了（间隔写 0 会让抓屏/抓帧变忙循环）"),
+    ("classes/Worker_class.py", "num(interval_sec,",
+     "worker 的间隔没走 num() 夹取（0/负数 → run() 里一次都不睡）"),
+    ("classes/Worker_class.py", 'get_config("./config.json").get("screen_index")',
+     "screen_index 又用直接下标了（缺键 KeyError、越界在截图线程里静默死掉）"),
+    ("classes/murasame_class.py", 'num(CONFIG.get("camera_interval")',
+     "摄像头间隔没走 num() 夹取"),
+    ("classes/murasame_class.py", 'num(CONFIG.get("screen_interval")',
+     "截图间隔没走 num() 夹取（原来还是直接下标，缺键就 KeyError）"),
 )
 # 绝不能出现的（历史坑，回来就是 bug 复发）—— **正则**，只扫非注释行：
 #   注释里写着"原来写死了 infos[57:65]"是对的（解释历史），不能算复发（自测自己踩过这个误报）

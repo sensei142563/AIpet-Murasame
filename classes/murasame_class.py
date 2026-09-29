@@ -65,7 +65,7 @@ def stop_voice_wav() -> None:
             _qs.stop()
     except Exception:
         pass
-from tool.config import as_bool, get_config
+from tool.config import as_bool, get_config, num
 from tool.chat import ollama_qwen25vl
 from tool.cloud_API_chat import cloud_vl
 from tool.generate import generate_fgimage
@@ -90,7 +90,7 @@ portrait_type = CONFIG["portrait"]
 model_type = CONFIG["model_type"]
 screen_type = CONFIG.get("screen_type", "false")     # 默认值与 config.example.json / 设置页一致
 camera_type = CONFIG.get("camera_enabled", "false")
-camera_interval = CONFIG.get("camera_interval", 100)  # 同上：示例配置是 100 秒
+camera_interval = int(num(CONFIG.get("camera_interval"), 100, 1, 86400))  # 同上：夹到 [1, 86400] 秒（写 0/负数会让摄像头线程忙循环）
 DEFAULT_PORTRAIT_SCREEN_RATIO = CONFIG["DEFAULT_PORTRAIT_SCREEN_RATIO"]
 IDLE_THINKING_MINUTES = CONFIG.get("idle_thinking_minutes")
 IDLE_AWAY_MINUTES = CONFIG.get("idle_away_minutes")
@@ -323,7 +323,7 @@ class Murasame(QLabel):
 
         # 线程
         self.worker = None
-        self.interval = CONFIG["screen_interval"]
+        self.interval = num(CONFIG.get("screen_interval"), 3.0, 1.0, 3600.0)   # 原来直接下标：缺键 KeyError；0/负数会让截图线程忙循环
         self._screenshot_worker = None
         self._screenshot_executor = ThreadPoolExecutor(
             max_workers=1
@@ -2175,7 +2175,7 @@ class Murasame(QLabel):
     def _auto_switch_enabled(self) -> bool:
         """立绘类型自动切换开关（config.json: portrait_auto_switch，默认开）"""
         try:
-            from tool.config import as_bool, get_config
+            from tool.config import as_bool, get_config, num
             v = get_config("./config.json").get("portrait_auto_switch", "true")
             return str(v).strip().lower() not in ("false", "0", "off", "no")
         except Exception:
@@ -2700,7 +2700,7 @@ class Murasame(QLabel):
     def _perf_guard_enabled(self) -> bool:
         """性能守卫开关（config.json: perf_guard_enabled，默认开）"""
         try:
-            from tool.config import as_bool, get_config
+            from tool.config import as_bool, get_config, num
             return as_bool(get_config("./config.json").get("perf_guard_enabled", "true"), True)
         except Exception:
             return True
