@@ -193,6 +193,11 @@ WIRING = (
      "插件标记的参数正则没了/又和清理正则合并（实测会把标记后面她的话一起删掉）"),
     ("tool/plugins.py", "_MARK_ARG_RE.fullmatch(line.strip())",
      "清理不复用 fullmatch 判据了（分不清'整行就是标记+参数'与'她把话写在标记后面'）"),
+    # ── NapCat token：显式配置优先、没配才自动发现（曾经被同名重复键静默覆盖，见 §27.4）──
+    ("qq/qq_config.py", "or get_qq_token(_ws)",
+     "NapCat token 的自动发现又被挤掉了（口径应是：显式配置优先，没配才自动发现）"),
+    ("qq/qq_config.py", '"http_url"',
+     "QQ 配置里 http_url 没了（启动器的「打开 WebUI」会失效）"),
 )
 # 绝不能出现的（历史坑，回来就是 bug 复发）—— **正则**，只扫非注释行：
 #   注释里写着"原来写死了 infos[57:65]"是对的（解释历史），不能算复发（自测自己踩过这个误报）

@@ -224,12 +224,15 @@ def get_qq_config():
         # NapCat WebSocket 地址（事件上报 + 调用 API 走同一连接）
         "ws_url": _ws,
         # NapCat 正向 WS token 鉴权（NapCat 开启 token 时必填，否则连上即断 retcode 1403）
-        # 未配置时自动从 NapCat 的 onebot11_*.json 读取（仅本机）
-        "napcat_token": get_qq_token(_ws),
+        # 口径：**显式配置优先，没配才自动发现**（从 NapCat 的 onebot11_*.json 读，仅本机）
+        # ⚠ 这里原来写了**两个同名字段**（先 `get_qq_token()` 自动发现、后读 `qq_napcat_token`），
+        #   而字典字面量里**后者覆盖前者** → 自动发现从来没生效：用户不手填 token 就必然拿到空串，
+        #   明明 NapCat 配置里有 token 也连不上（注释承诺的"自动读取"是假的；实测返回 ''）。
+        #   现在 `or` 起来，并且**没配才去读文件**（省掉每次 get_qq_config() 都扫一遍 NapCat 目录）。
+        "napcat_token": (str(cfg.get("qq_napcat_token", "") or "").strip()
+                         or get_qq_token(_ws)),
         # NapCat WebUI (HTTP API，主要用于发送消息等)
         "http_url": cfg.get("qq_napcat_http", "http://127.0.0.1:6099"),
-        # NapCat OneBot11 正向 WS 鉴权 token（为空 = 不鉴权，兼容未开启 token 的 NapCat）
-        "napcat_token": str(cfg.get("qq_napcat_token", "") or "").strip(),
         # 是否在回复时携带表情包 gif
         "send_sticker": str(cfg.get("qq_send_sticker", "true")).lower() == "true",
         # 是否在回复时附带 F5-TTS 语音
