@@ -15,6 +15,7 @@ from PyQt5.QtWidgets import (QOpenGLWidget, QWidget, QVBoxLayout, QHBoxLayout,
 # ⚠ 从旧版主窗口抽出来时漏了 colors 里的常量（PREVIEW_BG 等）→ initializeGL 抛 NameError
 #   → 预览一直是空白/透明（这就是「Live2D 显示不出来」的真正原因）
 from .colors import *            # noqa: F401,F403
+from tool.config import num      # 数值参数的兜底 + 夹取（见 tool/config.py::num）
 from .colors import background_info, PREVIEW_BG   # noqa: F401
 
 
@@ -638,9 +639,9 @@ class Live2DPreviewWindow(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         self.view = Live2DPreviewWidget(
             model_json or None, self,
-            model_scale=float(disp.get("scale") or 1.0),
-            offset_x=float(disp.get("offset_x") or 0.0),
-            offset_y=float(disp.get("offset_y") or 0.0))
+            model_scale=num(disp.get("scale"), 1.0, 0.30, 2.00),
+            offset_x=num(disp.get("offset_x"), 0.0, -800.0, 800.0),
+            offset_y=num(disp.get("offset_y"), 0.0, -800.0, 800.0))
         self.view.setMinimumSize(max(240, int(420 * ratio)), 420)
         lay.addWidget(self.view, 1)
         bar = QHBoxLayout()

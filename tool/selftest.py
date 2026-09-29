@@ -219,6 +219,15 @@ WIRING = (
      "摄像头间隔没走 num() 夹取"),
     ("classes/murasame_class.py", 'num(CONFIG.get("screen_interval")',
      "截图间隔没走 num() 夹取（原来还是直接下标，缺键就 KeyError）"),
+    # ── 显示参数（pet.json）：离谱值要夹，但**真实角色的值一个都不能被改动**（见 §27.7）──
+    ("pets/pet_registry.py", '"live2d_font_scale": (0.10, 3.00)',
+     "字号夹取下界被改大了（真实角色 pet.json 里就是 0.35，夹到 0.40 = 改了角色的显示）"),
+    ("pets/pet_registry.py", "num(m.get(key, default), default, lo, hi)",
+     "显示参数的夹取没走 num()（读得懂但离谱的值会原样传下去：模型看不见/交互区跑到屏外）"),
+    ("pcl_launcher/live2d_preview.py", 'num(disp.get("scale"), 1.0, 0.30, 2.00)',
+     "Live2D 预览窗的缩放没夹（原来连 try 都没有，值写坏就抛异常、窗口打不开）"),
+    ("classes/murasame_class.py", 'num(_pet_cfg.get("model", {}).get("portrait_height_ratio")',
+     "立绘占屏比没夹（写 0 → 桌宠高度 0，直接看不见）"),
 )
 # 绝不能出现的（历史坑，回来就是 bug 复发）—— **正则**，只扫非注释行：
 #   注释里写着"原来写死了 infos[57:65]"是对的（解释历史），不能算复发（自测自己踩过这个误报）

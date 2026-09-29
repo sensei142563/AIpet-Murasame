@@ -17,6 +17,7 @@ import os
 import json
 
 from tool.paths import app_base_dir
+from tool.config import num   # 数值参数的兜底 + 夹取（权威实现，见 tool/config.py::num）
 
 # ============ 目录基准 ============
 # 必须用 app_base_dir()：exe 模式（PyInstaller onedir 壳）下 __file__ 位于 _internal/，
@@ -610,17 +611,44 @@ def get_live2d_display(pet_id: str = None) -> dict:
     m = cfg.get("model", {})
     inter = cfg.get("interaction", {}) or {}
 
+    # 每个显示参数的合法范围 —— 依据是**启动器向导里那些控件的取值范围**（不自己拍）：
+    #   height_ratio 滑块 10~95 → 0.10~0.95；scale 滑块 30~200 → 0.30~2.00；
+    #   Live2D 偏移输入框 ±800；font_scale 向导里本来就夹 0.40~3.00。
+    # 为什么要夹：`pet.json` 会被手改（第三方角色包也可能写坏），而 _f/_fi 原来只兜
+    # "读不懂"（→ 默认值），**读得懂但离谱**的值会原样传下去 → 模型缩成看不见、
+    # 交互区（摸头/对话）跑到屏幕外、字号变 0……界面上没有任何提示，只能靠猜。
+    # ⚠ 表的键必须是 **pet.json 里的源键名**（`live2d_scale`／`head_bottom`…），
+    #   不是下面返回字典的键名（`scale`／`head_bottom`）—— 我第一版按返回字典的键名写，
+    #   结果 _f 收到的是 live2d_*，一个都没匹配上，**模型那 6 个参数全没夹住**。
+    RANGES = {
+        # model 段（桌宠渲染用）
+        "live2d_window_ratio": (0.2, 3.0),
+        "live2d_window_height_ratio": (0.10, 0.95),
+        "live2d_scale": (0.30, 2.00),
+        "live2d_offset_x": (-800.0, 800.0),
+        "live2d_offset_y": (-800.0, 800.0),
+        # ⚠ 下界取 0.10 而不是向导滑块的 0.40：真实角色 pet.json 里 live2d_font_scale
+        #   最小就是 **0.35**（arona/hiyori/murasame），按 0.40 夹会**改掉角色的显示**。
+        #   夹取范围以真实数据为准（见 _audit_fish9269/scan_display_ranges.py）。
+        "live2d_font_scale": (0.10, 3.00),
+        # interaction 段（摸头/对话交互区，都是相对窗口的比例）
+        "head_top": (0.0, 1.0),
+        "head_bottom": (0.0, 1.0),
+        "talk_top": (0.0, 1.0),
+        "talk_bottom": (0.0, 1.0),
+        "edge_margin_x": (0.0, 0.5),
+        # 文本框微调（Shift+方向键，单位是像素）—— 只挡"明显写疯了的"值
+        "text_offset_x": (-10000.0, 10000.0),
+        "text_offset_y": (-10000.0, 10000.0),
+    }
+
     def _f(key, default):
-        try:
-            return float(m.get(key, default))
-        except (TypeError, ValueError):
-            return default
+        lo, hi = RANGES.get(key, (None, None))
+        return num(m.get(key, default), default, lo, hi)
 
     def _fi(key, default):
-        try:
-            return float(inter.get(key, default))
-        except (TypeError, ValueError):
-            return default
+        lo, hi = RANGES.get(key, (None, None))
+        return num(inter.get(key, default), default, lo, hi)
 
     return {
         "window_ratio": _f("live2d_window_ratio", 0.67),

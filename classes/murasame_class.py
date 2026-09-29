@@ -166,15 +166,15 @@ class Murasame(QLabel):
         self._has_fgimages = bool(get_fgimages_dir())
         # Live2D 文字层字号缩放（pet.json model.live2d_font_scale）
         try:
-            self._live2d_font_scale = float(_pet_cfg.get("model", {}).get("live2d_font_scale", 1.0) or 1.0)
+            self._live2d_font_scale = num(_pet_cfg.get("model", {}).get("live2d_font_scale"), 1.0, 0.10, 3.00)
         except (TypeError, ValueError):
             self._live2d_font_scale = 1.0
         # 文字区域位置（pet.json interaction.text_area：top 上半身 / bottom 下半身）
         self._text_area_bottom = str(_pet_cfg.get("interaction", {}).get("text_area", "top")).lower() == "bottom"
         # 文本框位置微调（pet.json interaction.text_offset_x/y，Shift+方向键调整，F5 保存）
         try:
-            self._text_offset_x = int(_pet_cfg.get("interaction", {}).get("text_offset_x", 0) or 0)
-            self._text_offset_y = int(_pet_cfg.get("interaction", {}).get("text_offset_y", 0) or 0)
+            self._text_offset_x = int(num(_pet_cfg.get("interaction", {}).get("text_offset_x"), 0, -10000, 10000))
+            self._text_offset_y = int(num(_pet_cfg.get("interaction", {}).get("text_offset_y"), 0, -10000, 10000))
         except (TypeError, ValueError):
             self._text_offset_x = 0
             self._text_offset_y = 0
@@ -2625,8 +2625,8 @@ class Murasame(QLabel):
             _ratio = None
         if _ratio is None:
             try:
-                _ratio = float(_pet_cfg.get("model", {}).get("portrait_height_ratio")
-                               or DEFAULT_PORTRAIT_SCREEN_RATIO)
+                _ratio = num(_pet_cfg.get("model", {}).get("portrait_height_ratio"),
+                               DEFAULT_PORTRAIT_SCREEN_RATIO, 0.10, 0.95)
             except Exception:
                 _ratio = DEFAULT_PORTRAIT_SCREEN_RATIO
 

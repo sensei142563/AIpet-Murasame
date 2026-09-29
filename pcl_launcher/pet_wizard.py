@@ -35,6 +35,7 @@ from .colors import _app_base_dir  # noqa: F401  （打包时确保该模块被�
 # 说明文字/状态字一律取主题色：写死的 #888 / #9a9aa8 / #8fd18f / #e07a90 / #7fc48f
 # 都是深色 UI 时代的值，浅色主题（经典 / 千恋万花）上就是"浅字压浅底"看不清。
 from .colors import Gray2, ok_text, warn_text  # noqa: F401
+from tool.config import num   # 数值参数的兜底 + 夹取（见 tool/config.py::num）
 
 S = 1.0
 EMOTION_PRESET = ["平静", "高兴", "害羞", "生气", "惊讶", "着急"]
@@ -699,7 +700,7 @@ class DisplayPreview(QWidget):
             self.font_scale = max(0.4, min(3.0, float(values.get("font_scale") or 1.0)))
         except Exception:
             self.font_scale = 1.0
-        self.height_ratio = float(values.get("height_ratio") or 0.45)
+        self.height_ratio = num(values.get("height_ratio"), 0.45, 0.10, 0.95)
         try:
             wr = values.get("width_ratio")
             self.width_ratio = float(wr) if wr else None
