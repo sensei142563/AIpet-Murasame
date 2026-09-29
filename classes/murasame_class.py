@@ -1051,6 +1051,51 @@ class Murasame(QLabel):
     def is_camera_enabled(self) -> bool:
         return camera_type == "true"
 
+    def stop_agent_worker(self):
+        """停掉正在跑的 agent 任务。
+
+        ⚠ 为什么必须有：agent 会**以主人的身份操作电脑**（`tool/agent_bridge` 起外部进程，
+          自带超时 + 杀进程树）。但以前 `self._agent_worker` 只被赋值、**没有任何人能停**：
+          关掉桌宠时它还在跑，最长能把主人的电脑继续操作到超时（默认 600 秒）。
+          这里和截图线程一个口径：请求中断 → quit → wait，然后清掉引用。
+        """
+        w = getattr(self, "_agent_worker", None)
+        if w is None:
+            return
+        try:
+            if w.isRunning():
+                w.requestInterruption()
+                w.quit()
+                if not w.wait(3000):
+                    print("[AIpet] ⚠ agent 任务 3 秒内没停下来（它可能卡在外部进程上，超时后会自己收）")
+        except Exception as e:
+            print(f"[AIpet] 停 agent 任务时出错（忽略，继续退出）: {e}")
+        finally:
+            self._agent_worker = None
+
+    def stop_all_workers(self):
+        """退出前把所有后台线程收干净（截图 / 摄像头 / agent / 聊天）。
+
+        ⚠ 以前**没人调用任何 stop_**：`app.aboutToQuit` 只保存了屏幕类型和窗口位置，
+          Qt 退出时线程还活着 → 轻则告警、重则 "QThread: Destroyed while thread is still
+          running" 直接把进程 abort；agent 那种还会让外部进程继续动主人的电脑。
+        """
+        for name in ("stop_screenshot_worker", "stop_camera_worker", "stop_agent_worker"):
+            try:
+                fn = getattr(self, name, None)
+                if callable(fn):
+                    fn()
+            except Exception as e:
+                print(f"[AIpet] 退出收尾：{name}() 出错（忽略）: {e}")
+        w = getattr(self, "worker", None)
+        if w is not None:
+            try:
+                if w.isRunning():
+                    w.stop_all()          # 通知线程中断（和起新请求前的处理一致）
+                    w.wait(1000)
+            except Exception as e:
+                print(f"[AIpet] 退出收尾：聊天线程出错（忽略）: {e}")
+
     def on_camera_captured(self, img_url: str):
         """常开摄像头回调 — 通过 AI 识别后触发对话"""
         if self.is_dnd_enabled():
@@ -2335,6 +2380,13 @@ class Murasame(QLabel):
         av = available()
         if not av.get("chosen"):
             self.show_text(f"（没找到可用的 agent：{av.get('reason') or '未知原因'}）", typing=True)
+            return True
+        # ⚠ 同一时间只允许一个 agent 任务：它会**以主人的身份操作电脑**，
+        #   起第二个 = 两个 agent 同时在动这台机器（而且旧的没有任何人能停）。
+        #   在**弹确认框之前**挡住，并明说原因（而不是静默什么都不做）。
+        _aw = getattr(self, "_agent_worker", None)
+        if _aw is not None and _aw.isRunning():
+            self.show_text("（我还在做上一件事呢，等它做完再说～）", typing=True)
             return True
         try:
             from PyQt5.QtWidgets import QMessageBox

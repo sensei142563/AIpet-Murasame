@@ -250,6 +250,19 @@ WIRING = (
      "tool.chat 没导入 enum_of（用了就是导入期 NameError）"),
     ("api.py", 'enum_of(get_config("./config.json").get("model_type")',
      "api.py 的 model_type 没归一（同一个文件里两处判断会相反）"),
+    # ── 后台线程要停得掉：agent 会以主人身份操作电脑，退出时必须收干净（见 §27.10）──
+    ("tool/agent_bridge.py", "should_stop=None",
+     "run_task 不支持取消（关掉桌宠后外部 agent 会继续操作电脑到超时为止）"),
+    ("tool/agent_bridge.py", "if cancelled:",
+     "取消分支没了（should_stop 为真时要立刻杀进程树收手）"),
+    ("classes/Worker_class.py", "should_stop=lambda: self.isInterruptionRequested()",
+     "AgentWorker 没把线程中断接到取消上"),
+    ("classes/murasame_class.py", "def stop_all_workers",
+     "退出前的统一收尾没了（线程还活着就退出 → QThread 告警/abort）"),
+    ("main.py", "aboutToQuit.connect(lambda: pet.stop_all_workers())",
+     "退出钩子没挂上（没人停后台线程）"),
+    ("classes/murasame_class.py", "我还在做上一件事",
+     "agent 又允许同时跑多个了（两个 agent 同时在动主人的电脑）"),
 )
 # 绝不能出现的（历史坑，回来就是 bug 复发）—— **正则**，只扫非注释行：
 #   注释里写着"原来写死了 infos[57:65]"是对的（解释历史），不能算复发（自测自己踩过这个误报）

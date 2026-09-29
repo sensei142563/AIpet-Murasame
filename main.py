@@ -248,6 +248,11 @@ if __name__ == "__main__":
     app.aboutToQuit.connect(lambda: save_screen_type(pet))
     # 退出时记录桌宠位置（下次启动回到原位置；配合启动器「重置桌宠位置」按钮）
     app.aboutToQuit.connect(lambda: save_window_pos(pet))
+    # ⚠ 退出前把后台线程收干净（截图/摄像头/agent/聊天）——以前没人调用任何 stop_：
+    #   线程还活着就退出，轻则 Qt 告警，重则 "QThread: Destroyed while thread is still
+    #   running" 直接 abort；agent 那种还会让**外部进程继续操作主人的电脑**（最长到超时）。
+    #   放在保存之后：先落盘状态，再停线程（停线程可能等几秒）。
+    app.aboutToQuit.connect(lambda: pet.stop_all_workers())
     pet.show()  # 显示窗口
 
     # ===== Live2D 初始化 =====

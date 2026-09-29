@@ -203,12 +203,15 @@ def _argv_for(backend: str, task: str):
     return (None, {})
 
 
-def run_task(task: str, *, timeout=None, on_confirm=None, cwd=None, is_auto=False) -> dict:
+def run_task(task: str, *, timeout=None, on_confirm=None, cwd=None, is_auto=False,
+             should_stop=None) -> dict:
     """让 agent 去做一件事。
 
     on_confirm(task) -> bool 是**必须**的：主人点头才跑（不给回调 = 一律拒绝，fail-safe）。
     is_auto=True 表示这是**她自己想做的**（主人没开口）—— 会先过 tool.autonomy 的政策：
     只读类允许，改动类要等主人开口，系统/删除/关机类永远不做。
+    should_stop() -> bool（可选）：返回 True 时**立刻杀掉外部进程树并收手**（桌宠退出/
+    主人打断）。不给 = 只按超时收（老行为）。
     返回 {ok, backend, output, error, seconds, refused}；任何异常都不抛给调用方。
     """
     t0 = time.time()
@@ -282,9 +285,22 @@ def run_task(task: str, *, timeout=None, on_confirm=None, cwd=None, is_auto=Fals
                                         env=env, creationflags=creation)
                 # ⚠ 不用 communicate(timeout)：agent 会再开子进程，管道被继承就永远不关。
                 #   输出已经写文件，这里只等进程结束即可（轮询 + 超时杀树）。
+                # ⚠ should_stop：桌宠退出/主人打断时要能**立刻**收手。以前这里只认超时，
+                #   于是"关掉桌宠"之后外部 agent 还能继续操作电脑到超时为止（默认 600 秒）。
                 deadline = time.time() + to
+                cancelled = False
                 while proc.poll() is None and time.time() < deadline:
+                    if should_stop is not None and should_stop():
+                        cancelled = True
+                        break
                     time.sleep(0.2)
+                if cancelled:
+                    _kill_tree(proc)
+                    res["cancelled"] = True
+                    res["backend"] = backend
+                    res["error"] = "已被取消（主人打断或桌宠退出）"
+                    tried.append("%s: 已取消" % backend)
+                    break
                 if proc.poll() is None:
                     tried.append("%s: 超时(%ds)" % (backend, to))
                     _kill_tree(proc)

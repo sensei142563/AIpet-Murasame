@@ -467,7 +467,10 @@ class AgentWorker(QThread):
             except Exception:
                 hint = ""
             task = ((hint + "\n") if hint else "") + self.task
-            r = run_task(task, on_confirm=lambda t: True)   # 主线程已经确认过了
+            r = run_task(task, on_confirm=lambda t: True,   # 主线程已经确认过了
+                         # ⚠ 把"线程被请求中断"接到取消上：桌宠退出/主人打断时
+                         #   立刻杀掉外部 agent 进程树，而不是等它跑到超时（默认 600 秒）
+                         should_stop=lambda: self.isInterruptionRequested())
             ok = bool(r.get("ok"))
             if ok:
                 text = (r.get("output") or "").strip() or "（它没给出文字答复）"
