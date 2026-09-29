@@ -57,7 +57,7 @@ def _ensure_project_python():
 
 _ensure_project_python()
 
-from tool.config import as_bool, get_config
+from tool.config import as_bool, enum_of, get_config
 
 TORCH_OK = False        # 是否成功加载了 torch（云端模式不加载也能跑）
 
@@ -575,7 +575,7 @@ def setup_runtime_and_pytorch(config_path="config.json", cfg=None, hardware_type
     return model_type
 
 def run_download():
-    tts_type = get_config("./config.json").get("tts_type", "local")
+    tts_type = enum_of(get_config("./config.json").get("tts_type"), ("local", "cloud"), "local", "tts_type")
     if tts_type == "local":
         log("检测到 tts_type = local", "INFO")
         script_path = os.path.abspath(r".\download.py")
@@ -670,7 +670,7 @@ def start_f5tts_api():
 def start_tts_api():
     """使用 GPT-SoVITS 自带解释器在新的控制台窗口中启动 TTS API。"""
     cfg = get_config("./config.json")
-    tts_type = cfg.get("tts_type", "local")
+    tts_type = enum_of(cfg.get("tts_type"), ("local", "cloud"), "local", "tts_type")
     if tts_type == "local":
         # 「启用短语音」关掉时不必把服务拉起来：GPT-SoVITS 一启动就会把模型加载进显存，
         # 白占几 GB。开关的语义是"不用短语音"，那就服务也别起。

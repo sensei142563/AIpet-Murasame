@@ -233,10 +233,23 @@ WIRING = (
      "配置缺键时不再给可读提示（用户只会看到 KeyError + 一大段 traceback）"),
     ("tool/chat.py", '_api = _cfg0.get("local_api") or {}',
      "tool.chat 的双层下标又回来了（这几行在**模块导入期**执行 → 缺键 KeyError → 桌宠起不来）"),
-    ("classes/murasame_class.py", 'CONFIG.get("model_type", "qwen")',
-     "model_type 又用下标访问了（配置缺这个键就启动期 KeyError）"),
+    ("classes/murasame_class.py", 'enum_of(CONFIG.get("model_type")',
+     "model_type 又裸比了（同一进程里两处判断会不一致）"),
     ("main.py", 'CONFIG.get("screen_index", 0)',
      "screen_index 又用下标访问了"),
+    # ── 枚举值（model_type / tts_type / screen_type）：读取点必须归一（见 §27.9）──
+    ("tool/config.py", "def enum_of(",
+     "枚举值的归一/提示实现没了（写 Local/LOCAL/尾随空格会被当成另一条分支）"),
+    ("classes/murasame_class.py", 'enum_of(CONFIG.get("model_type")',
+     "model_type 又裸比了（同一进程里两处判断会不一致）"),
+    ("classes/murasame_class.py", 'enum_of(CONFIG.get("screen_type")',
+     "screen_type 没归一（写 True 会被当成关）"),
+    ("run.py", 'enum_of(cfg.get("tts_type")',
+     "tts_type 没归一（写 LOCAL 会走错分支）"),
+    ("tool/chat.py", "from tool.config import enum_of, get_config",
+     "tool.chat 没导入 enum_of（用了就是导入期 NameError）"),
+    ("api.py", 'enum_of(get_config("./config.json").get("model_type")',
+     "api.py 的 model_type 没归一（同一个文件里两处判断会相反）"),
 )
 # 绝不能出现的（历史坑，回来就是 bug 复发）—— **正则**，只扫非注释行：
 #   注释里写着"原来写死了 infos[57:65]"是对的（解释历史），不能算复发（自测自己踩过这个误报）

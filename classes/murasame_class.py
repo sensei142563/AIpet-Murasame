@@ -65,7 +65,7 @@ def stop_voice_wav() -> None:
             _qs.stop()
     except Exception:
         pass
-from tool.config import as_bool, get_config, num
+from tool.config import as_bool, enum_of, get_config, num
 from tool.chat import ollama_qwen25vl
 from tool.cloud_API_chat import cloud_vl
 from tool.generate import generate_fgimage
@@ -87,8 +87,8 @@ def wrap_text(s, width=10):
 
 CONFIG = get_config("./config.json")
 portrait_type = CONFIG.get("portrait", "b")
-model_type = CONFIG.get("model_type", "qwen")
-screen_type = CONFIG.get("screen_type", "false")     # 默认值与 config.example.json / 设置页一致
+model_type = enum_of(CONFIG.get("model_type"), ("local", "qwen", "deepseek"), "qwen", "model_type")
+screen_type = enum_of(CONFIG.get("screen_type"), ("true", "false"), "false", "screen_type")     # 默认值与 config.example.json / 设置页一致
 camera_type = CONFIG.get("camera_enabled", "false")
 camera_interval = int(num(CONFIG.get("camera_interval"), 100, 1, 86400))  # 同上：夹到 [1, 86400] 秒（写 0/负数会让摄像头线程忙循环）
 DEFAULT_PORTRAIT_SCREEN_RATIO = CONFIG.get("DEFAULT_PORTRAIT_SCREEN_RATIO", 0.8)
@@ -1055,7 +1055,7 @@ class Murasame(QLabel):
         """常开摄像头回调 — 通过 AI 识别后触发对话"""
         if self.is_dnd_enabled():
             return
-        model_type = get_config("./config.json").get("model_type", "qwen")
+        model_type = enum_of(get_config("./config.json").get("model_type"), ("local", "qwen", "deepseek"), "qwen", "model_type")
 
         def task(url):
             try:
@@ -1196,7 +1196,7 @@ class Murasame(QLabel):
             except Exception:
                 pass
             return
-        model_type = get_config("./config.json").get("model_type", "qwen")
+        model_type = enum_of(get_config("./config.json").get("model_type"), ("local", "qwen", "deepseek"), "qwen", "model_type")
 
         def task(path):
             try:
@@ -2176,7 +2176,7 @@ class Murasame(QLabel):
     def _auto_switch_enabled(self) -> bool:
         """立绘类型自动切换开关（config.json: portrait_auto_switch，默认开）"""
         try:
-            from tool.config import as_bool, get_config, num
+            from tool.config import as_bool, enum_of, get_config, num
             v = get_config("./config.json").get("portrait_auto_switch", "true")
             return str(v).strip().lower() not in ("false", "0", "off", "no")
         except Exception:
@@ -2701,7 +2701,7 @@ class Murasame(QLabel):
     def _perf_guard_enabled(self) -> bool:
         """性能守卫开关（config.json: perf_guard_enabled，默认开）"""
         try:
-            from tool.config import as_bool, get_config, num
+            from tool.config import as_bool, enum_of, get_config, num
             return as_bool(get_config("./config.json").get("perf_guard_enabled", "true"), True)
         except Exception:
             return True

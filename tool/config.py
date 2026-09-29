@@ -222,6 +222,30 @@ def set_key(path: str, key: str, value, create: bool = True) -> bool:
         return False
 
 
+_enum_warned = set()
+
+
+def enum_of(value, allowed, default: str, name: str = "") -> str:
+    """配置里的**枚举值**：去掉首尾空白 + 转小写后返回；不认识 → default +（一次性）可读提示。
+
+    为什么要有它：枚举值决定**走哪条分支**。实测同一个键在仓库里有 23 处裸比、只有 4 处
+    做了 .lower() —— 用户把 `model_type` 写成 `"Local"`，`api.py` 第 479 行按「本地」走、
+    第 87 行按「非本地」走，**同一个进程里自相矛盾**（用户感受是"有时好使有时不好使"）；
+    还有 `"local "`（尾随空格）、`"LOCAL"` 这类手写变体。
+
+    没配（None/""）时**不提示** —— 那是"用默认值"，不是"写错了"。
+    """
+    s = str(value if value is not None else "").strip().lower()
+    if s in allowed:
+        return s
+    if s and name and (name, s) not in _enum_warned:
+        _enum_warned.add((name, s))
+        _say("[Config] %s 的值是 %r，不在可用取值（%s）里 → 按 %r 处理；"
+             "要改请在启动器设置页或 config.json 里改（本提示只出现一次）"
+             % (name, value, " / ".join(allowed), default))
+    return default
+
+
 def num(value, default: float, lo: float = None, hi: float = None) -> float:
     """配置里的**数值**：读不懂（None/""/"abc"/列表…）就用 default，越界夹到 [lo, hi]。
 

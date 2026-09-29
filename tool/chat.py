@@ -6,7 +6,7 @@ from datetime import datetime
 
 import requests
 
-from tool.config import get_config
+from tool.config import enum_of, get_config
 from tool.time_utils import build_time_context
 from pets.pet_registry import get_chat_pet_id, get_short_emotion_dirs, get_short_voices_dir, get_short_emotions
 
@@ -24,7 +24,7 @@ ollama_url = _api.get("ollama", "http://localhost:28565/ollama")
 qwen3_lora_url = _api.get("qwen3_lora", "http://localhost:28565/qwen3-lora")
 gpt_sovits_tts_url = _api.get("gpt_sovits_tts", "http://localhost:28565/tts")
 _TTS_HINT_SHOWN = False   # 语音服务未就绪的提示只打一次（防刷屏）
-tts_type = _cfg0.get("tts_type", "local")
+tts_type = enum_of(_cfg0.get("tts_type"), ("local", "cloud"), "local", "tts_type")
 
 
 def ollama_post(name: str, prompt: dict):

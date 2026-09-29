@@ -6,9 +6,9 @@ import shutil
 from modelscope.hub.snapshot_download import snapshot_download
 from rich.console import Console
 
-from tool.config import get_config
+from tool.config import enum_of, get_config
 
-model_type = get_config("./config.json").get("model_type", "qwen")
+model_type = enum_of(get_config("./config.json").get("model_type"), ("local", "qwen", "deepseek"), "qwen", "model_type")
 console = Console()
 
 MODELS_DIR = "./models"
