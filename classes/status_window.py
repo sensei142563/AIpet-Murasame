@@ -85,6 +85,23 @@ def _card_widget(card: dict) -> QWidget:
     return box
 
 
+def _tag_row(tags) -> QWidget:
+    """一排彩色小标签（页级那些"一眼要看到的数"）"""
+    box = QWidget()
+    row = QHBoxLayout(box)
+    row.setContentsMargins(2, 2, 2, 0)
+    row.setSpacing(6)
+    for t in tags:
+        if isinstance(t, (list, tuple)):
+            txt = t[0]
+            style = t[1] if len(t) > 1 else SS.TAG_PLAIN
+        else:
+            txt, style = t, SS.TAG_PLAIN
+        row.addWidget(_tag_label(str(txt), style))
+    row.addStretch(1)
+    return box
+
+
 class StatusWindow(QDialog):
     """一页看完她此刻的状态（数据取自 tool.status_snapshot）"""
 
@@ -156,6 +173,10 @@ class StatusWindow(QDialog):
             v = QVBoxLayout(holder)
             v.setContentsMargins(6, 6, 6, 6)
             v.setSpacing(8)
+            # ⚠ 页级标签（心情 62·不错 / 关系 20.0 / 在一起第 N 天 / 活跃度）也要画出来：
+            #   它们本来只出现在副标题那一行里，等于"一眼要看到的数"被藏起来了。
+            if page.get("tags"):
+                v.addWidget(_tag_row(page["tags"]))
             for card in page.get("cards") or []:
                 v.addWidget(_card_widget(card))
             v.addStretch(1)

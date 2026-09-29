@@ -38,6 +38,7 @@ _CONTROL_BASE = "http://localhost:28565/control"
 NAV = [
     ("home",    "🏠", "总览",  "启动与状态"),
     ("pets",    "🐾", "桌宠",  "角色与立绘"),
+    ("status",  "💗", "状态",  "心情 · 习惯 · 记忆"),
     ("memory",  "🧠", "记忆",  "对话与备份"),
     ("prompt",  "📝", "提示词", "人设微调"),
     ("plugins", "🧩", "插件",  "功能开关"),
@@ -1227,6 +1228,7 @@ class SiliconLauncher(QWidget):
             return _f
 
         self._host_page("pets", _mk("pcl_launcher.widgets", "PCLPetManager"))
+        self._host_page("status", _mk("pcl_launcher.status_panel", "PCLStatusPanel"))
         self._host_page("settings", _mk("pcl_launcher.widgets", "PCLSettingsPanel"))
         self._host_page("memory", _mk("pcl_launcher.widgets", "PCLMemoryManager"))
         self._host_page("prompt", _mk("pcl_launcher.widgets", "PCLPromptEditor"))
@@ -1970,7 +1972,8 @@ class SiliconLauncher(QWidget):
         # 之后点导航就是秒开（以前第一次点插件目录会卡一下 = 现建页面）
         if not getattr(self, "_prewarm_started", False):
             self._prewarm_started = True
-            self._prewarm_queue = ["plugins", "pets", "memory", "settings", "prompt", "themes"]
+            self._prewarm_queue = ["plugins", "pets", "status", "memory", "settings", "prompt",
+                                   "themes"]
             QTimer.singleShot(1500, self._prewarm_next)
 
     def _prewarm_next(self):

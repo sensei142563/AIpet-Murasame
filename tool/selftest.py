@@ -48,6 +48,9 @@ COMPILE_ONLY = (
     "tool/pack/build_installer.py", "tool/pack/installer_main.py", "tool/pack/verify_installer.py",
     "longtext/longtext_tts.py", "longtext/f5tts_server.py", "qq/qq_bridge.py",
     "wechat/ilink_client.py",
+    # 启动器外壳（12 万字节、全仓库最大）以前**既不在导入表也不在语法表**里，
+    # 改坏了要等到真启动才知道；这里补上语法检查，改动后至少不会带语法错上桌。
+    "pcl_launcher/silicon_window.py", "pcl_launcher/status_panel.py",
 )
 
 # ── 2. 关键接线（源码断言）─────────────────────────────────────────
@@ -158,6 +161,15 @@ WIRING = (
     ("tool/chat.py", "web_search as _ws", "本地链路没接「不确定就上网查」"),
     ("tool/cloud_API_chat.py", "web_search as _ws", "云端链路没接「不确定就上网查」"),
     ("classes/murasame_class.py", "_toggle_search", "右键菜单没挂联网搜索开关"),
+    ("pcl_launcher/status_panel.py", "class PCLStatusPanel",
+     "启动器缺「状态」页面板（前端看不到她的状态）"),
+    ("pcl_launcher/status_panel.py", "def _switches",
+     "启动器状态页没列新增开关（本次更新的东西前端还是找不到）"),
+    ("pcl_launcher/silicon_window.py",
+     '_host_page("status", _mk("pcl_launcher.status_panel", "PCLStatusPanel"))',
+     "启动器没登记「状态」页（导航点了会显示错误页）"),
+    ("pcl_launcher/silicon_window.py", '("status",',
+     "启动器左栏导航没有「状态」入口"),
 )
 # 绝不能出现的（历史坑，回来就是 bug 复发）—— **正则**，只扫非注释行：
 #   注释里写着"原来写死了 infos[57:65]"是对的（解释历史），不能算复发（自测自己踩过这个误报）
