@@ -34,7 +34,19 @@ except Exception:
 
 PLUGIN_MARK_PREFIX = "【插件:"
 # 标记后面最多抓 80 个字符当参数；不允许跨行（一行一个标记）
-_MARK_RE = re.compile("[【\\[]\\s*插件\\s*[:：]\\s*([^】\\]]+)[】\\]]\\s*([^\"\\]\\n]{0,80})")
+_MARK_RE = re.compile("[【\\[]\\s*插件\\s*[:：]\\s*([^】\\]]+)[】\\]]")
+# ⚠ 这里曾经是「标记 + 其后最多 80 字」一个正则走天下，**parse 和 clean 共用**，
+#   于是出过两个错（2026-09-29 实测）：
+#     1) clean 拿它做 sub → **把她自己的话一起删掉**：
+#        '【插件:系统信息】内存用了 8.5G。' → 空串；'前半句【插件:x】后半句' → 只剩 '前半句'
+#     2) 清理是"整段 sub"，无法区分"整行就是标记+参数"和"她把话写在标记后面"
+#   现在拆开：
+#     · _MARK_RE     只匹配**标记本身**（清理/判断用）——绝不吃掉别的字
+#     · _MARK_ARG_RE 标记 + **同行尾巴**（解析参数用，上限 60 字）
+#   清理时的判据是 fullmatch：**整行恰好是"标记(+短参数)"才整行不念**；
+#   长度超过上限（= 她把一整句话写在标记后面）就只挖掉标记、话全留下。
+_MARK_ARG_RE = re.compile("[【\\[]\\s*插件\\s*[:：]\\s*([^】\\]]+)[】\\]][ \\t]*"
+                          "([^\\n【\\[]{0,60})")
 MAX_MARKS_PER_REPLY = 2          # 一句回复最多触发两个插件（不然会连锁喊一串）
 MIN_SCHEDULE_SEC = 30.0          # 定时任务的最小间隔（太密会把桌宠拖住）
 DEFAULT_TIMEOUT_SEC = 20.0       # 单个插件最多跑多久
@@ -277,23 +289,44 @@ def rules_text() -> str:
 
 
 def parse(text: str) -> list:
-    """从回复里解析【插件:标记】参数 → [(标记, 参数)]（最多 MAX_MARKS_PER_REPLY 个）"""
+    """从回复里解析【插件:标记】→ [(标记, 参数)]（最多 MAX_MARKS_PER_REPLY 个）
+
+    参数 = 标记后面**同一行的尾巴**（上限 60 字，两端标点剥掉）。这是 rules_text() 给她的
+    写法「【插件:标记】参数」；夹在句中写也一样认（`我帮你点一首【插件:点歌】夜曲`）。
+    """
     out = []
-    for m in _MARK_RE.finditer(str(text or "")):
+    src = str(text or "")
+    args = {}
+    for m in _MARK_ARG_RE.finditer(src):
         mk = str(m.group(1)).strip()
-        arg = str(m.group(2)).strip("：:，,。\"'「」")
+        if mk and mk not in args:
+            args[mk] = str(m.group(2)).strip("：:，,。\"'「」 \t")
+    for m in _MARK_RE.finditer(src):
+        mk = str(m.group(1)).strip()
         if mk:
-            out.append((mk, arg))
+            out.append((mk, args.get(mk, "")))
     return out[:MAX_MARKS_PER_REPLY]
 
 
 def clean_for_speech(text: str) -> str:
-    """把标记那一行去掉再念（不然她会把「【插件:天气】北京」当台词念出来）"""
+    """把标记（那一行）去掉再念（不然她会把「【插件:天气】北京」当台词念出来）
+
+    **判据**（2026-09-29 修的真 bug）：整行 `fullmatch` 到"标记(+短参数)"才整行不念
+    —— 那行是给插件的指令；否则只挖掉标记本身，**她的话一个字都不许少**。
+    以前复用"标记+最多 80 字参数"的正则做 sub，把两种情况混为一谈，实测
+    `'【插件:系统信息】内存用了 8.5G。'` 被整句删成空串、
+    `'前半句【插件:x】后半句'` 只剩 `'前半句'`。
+    """
     src = str(text or "")
     try:
         if not _MARK_RE.search(src):
             return src
-        return re.sub("\\n{2,}", "\n", _MARK_RE.sub("", src)).strip()
+        out = []
+        for line in src.splitlines():
+            if _MARK_ARG_RE.fullmatch(line.strip()):
+                continue                       # 整行就是"标记（+短参数）" → 这行不念
+            out.append(_MARK_RE.sub("", line))  # 其它情况：只挖掉标记，话全留下
+        return re.sub("\\n{2,}", "\n", "\n".join(out)).strip()
     except Exception:
         return src
 
