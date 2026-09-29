@@ -86,12 +86,12 @@ def wrap_text(s, width=10):
 
 
 CONFIG = get_config("./config.json")
-portrait_type = CONFIG["portrait"]
-model_type = CONFIG["model_type"]
+portrait_type = CONFIG.get("portrait", "b")
+model_type = CONFIG.get("model_type", "qwen")
 screen_type = CONFIG.get("screen_type", "false")     # 默认值与 config.example.json / 设置页一致
 camera_type = CONFIG.get("camera_enabled", "false")
 camera_interval = int(num(CONFIG.get("camera_interval"), 100, 1, 86400))  # 同上：夹到 [1, 86400] 秒（写 0/负数会让摄像头线程忙循环）
-DEFAULT_PORTRAIT_SCREEN_RATIO = CONFIG["DEFAULT_PORTRAIT_SCREEN_RATIO"]
+DEFAULT_PORTRAIT_SCREEN_RATIO = CONFIG.get("DEFAULT_PORTRAIT_SCREEN_RATIO", 0.8)
 IDLE_THINKING_MINUTES = CONFIG.get("idle_thinking_minutes")
 IDLE_AWAY_MINUTES = CONFIG.get("idle_away_minutes")
 
@@ -204,7 +204,7 @@ class Murasame(QLabel):
         # 字体 = 文字区宽度 × 该比例（0.0295 ≈ 丛雨原值 12px/406px）→ 换角色不跑偏
         self._font_ratio = 0.0295
 
-        self.user_name = CONFIG["user_name"]  # 用户名字
+        self.user_name = CONFIG.get("user_name", "你的名字")  # 用户名字
         self.display_text = ""  # 将要展示的文字
         self._font_family = "思源黑体Bold.otf"
         self._base_font_size = 40
@@ -1055,7 +1055,7 @@ class Murasame(QLabel):
         """常开摄像头回调 — 通过 AI 识别后触发对话"""
         if self.is_dnd_enabled():
             return
-        model_type = get_config("./config.json")["model_type"]
+        model_type = get_config("./config.json").get("model_type", "qwen")
 
         def task(url):
             try:
@@ -1090,7 +1090,8 @@ class Murasame(QLabel):
                     "Content-Type": "application/json",
                     "Authorization": f"Bearer {vcfg['api_key']}",
                 }
-                cloud_api_url = cfg["local_api"]["cloud_api"]
+                cloud_api_url = (cfg.get("local_api") or {}).get(
+            "cloud_api", "http://localhost:28565/cloudAPI")
                 resp = requests.post(cloud_api_url,
                                      json={"payload": payload, "headers": headers}, timeout=30)
                 data = resp.json()
@@ -1195,7 +1196,7 @@ class Murasame(QLabel):
             except Exception:
                 pass
             return
-        model_type = get_config("./config.json")["model_type"]
+        model_type = get_config("./config.json").get("model_type", "qwen")
 
         def task(path):
             try:
@@ -2599,7 +2600,7 @@ class Murasame(QLabel):
         """
 
         # 读取配置中的屏幕编号（默认 0 = 主屏）
-        screen_index = get_config("./config.json")["screen_index"]
+        screen_index = get_config("./config.json").get("screen_index", 0)
 
         # 获取所有屏幕
         screens = QGuiApplication.screens()

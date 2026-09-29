@@ -9,7 +9,8 @@ from tool.config import get_config
 from tool.time_utils import build_time_context
 from pets.pet_registry import get_chat_pet_id, get_prompt_path, get_short_emotion_dirs
 
-url = get_config("./config.json")["local_api"]["cloud_api"]
+url = (get_config("./config.json").get("local_api") or {}).get(
+    "cloud_api", "http://localhost:28565/cloudAPI")
 
 
 def now_time():

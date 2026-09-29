@@ -83,7 +83,7 @@ async def qwen3_lora(req: Qwen3LoraRequest):
     global model, tokenizer
     history = req.history
 
-    model_type = get_config("./config.json")["model_type"]
+    model_type = get_config("./config.json").get("model_type", "qwen")
     if model_type != "local":
         return {"error": "qwen3-lora 不可用：当前为云端模式"}
 

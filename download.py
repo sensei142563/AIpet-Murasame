@@ -8,7 +8,7 @@ from rich.console import Console
 
 from tool.config import get_config
 
-model_type = get_config("./config.json")["model_type"]
+model_type = get_config("./config.json").get("model_type", "qwen")
 console = Console()
 
 MODELS_DIR = "./models"

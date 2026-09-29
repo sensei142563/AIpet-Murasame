@@ -228,6 +228,15 @@ WIRING = (
      "Live2D 预览窗的缩放没夹（原来连 try 都没有，值写坏就抛异常、窗口打不开）"),
     ("classes/murasame_class.py", 'num(_pet_cfg.get("model", {}).get("portrait_height_ratio")',
      "立绘占屏比没夹（写 0 → 桌宠高度 0，直接看不见）"),
+    # ── 配置"存在但缺键"时不许 KeyError（老配置/手删键/精简配置，见 §27.8）──
+    ("tool/config.py", "_notice_missing_keys",
+     "配置缺键时不再给可读提示（用户只会看到 KeyError + 一大段 traceback）"),
+    ("tool/chat.py", '_api = _cfg0.get("local_api") or {}',
+     "tool.chat 的双层下标又回来了（这几行在**模块导入期**执行 → 缺键 KeyError → 桌宠起不来）"),
+    ("classes/murasame_class.py", 'CONFIG.get("model_type", "qwen")',
+     "model_type 又用下标访问了（配置缺这个键就启动期 KeyError）"),
+    ("main.py", 'CONFIG.get("screen_index", 0)',
+     "screen_index 又用下标访问了"),
 )
 # 绝不能出现的（历史坑，回来就是 bug 复发）—— **正则**，只扫非注释行：
 #   注释里写着"原来写死了 infos[57:65]"是对的（解释历史），不能算复发（自测自己踩过这个误报）

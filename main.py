@@ -95,7 +95,7 @@ except Exception as _e:
 
 
 CONFIG = get_config("./config.json")
-screen_index = CONFIG["screen_index"]
+screen_index = CONFIG.get("screen_index", 0)
 VOICE_TRIGGER_ENABLED = as_bool(CONFIG.get("voice_trigger"), False)
 
 

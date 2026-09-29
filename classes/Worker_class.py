@@ -12,7 +12,7 @@ from tool.cloud_API_chat import cloud_portrait, cloud_translate, cloud_talk, clo
 from tool.config import as_bool, get_config, num
 from tool.chat import qwen3_lora, ollama_qwen3_sentence, ollama_qwen3_portrait, gpt_sovits_tts, ollama_qwen3_emotion, ollama_qwen3_translate
 
-portrait_type = get_config("./config.json")['portrait']
+portrait_type = get_config("./config.json").get('portrait', "b")
 
 # 句内情绪标签（只覆盖「显示用情绪」= 表情/动作，语音不受影响）。
 # ⚠ 人设里写的标签是**全角**【白】（见 pets/noir/prompt.txt、longtext_prompt.txt），

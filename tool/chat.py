@@ -15,11 +15,16 @@ def now_time():
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     return now
 
-ollama_url = get_config("./config.json")["local_api"]["ollama"]
-qwen3_lora_url = get_config("./config.json")["local_api"]["qwen3_lora"]
-gpt_sovits_tts_url = get_config("./config.json")["local_api"]["gpt_sovits_tts"]
+# ⚠ 这里原来是 get_config(...)["local_api"]["ollama"] 这种双层下标，而且**在模块导入期**执行：
+#   配置存在但少键（老配置/手删键/精简配置）→ KeyError → tool.chat 导入失败 → 桌宠起不来。
+#   兜底值取 config.example.json 里的本地代理地址（见交接文档 §27.8）。
+_cfg0 = get_config("./config.json")
+_api = _cfg0.get("local_api") or {}
+ollama_url = _api.get("ollama", "http://localhost:28565/ollama")
+qwen3_lora_url = _api.get("qwen3_lora", "http://localhost:28565/qwen3-lora")
+gpt_sovits_tts_url = _api.get("gpt_sovits_tts", "http://localhost:28565/tts")
 _TTS_HINT_SHOWN = False   # 语音服务未就绪的提示只打一次（防刷屏）
-tts_type = get_config("./config.json")["tts_type"]
+tts_type = _cfg0.get("tts_type", "local")
 
 
 def ollama_post(name: str, prompt: dict):

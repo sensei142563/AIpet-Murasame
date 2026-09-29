@@ -83,6 +83,38 @@ def _example_defaults(path: str) -> dict:
         return {}
 
 
+_missing_warned = set()
+
+
+def _notice_missing_keys(path: str, cfg: dict) -> None:
+    """配置文件**存在**、但少了示例里的键时，给一句可读提示（一次性，不刷屏）。
+
+    ⚠ 以前这种情况**完全静默**：而调用方大量用 `cfg["model_type"]` 这类下标访问
+      （本函数上面的 docstring 就承诺"示例配置保证这些键都在"，但那只在
+      **文件缺失/损坏**时才成立）。缺键 + 下标 = KeyError + 一大段 traceback，
+      用户看不懂发生了什么。实测（_audit_fish9269/repro_cfg_missing_key.py）：
+      config 裁到最小时 6/6 种读取全部 KeyError。
+
+    这里**只说清事实，不改任何值、不写文件**（不合并默认值：示例的默认值未必等于
+    各功能内部的默认值，比如 qq_stt_enabled 示例是 true 而代码默认 False ，
+    贸然合并会把"没配"变成"开启"）。
+    """
+    if not cfg or path in _missing_warned:
+        return
+    ex = _example_defaults(path)
+    if not ex:
+        return
+    missing = [k for k in ex if k not in cfg]
+    if not missing:
+        return
+    _missing_warned.add(path)
+    show = "、".join(missing[:5])
+    more = ("等 %d 个" % len(missing)) if len(missing) > 5 else ""
+    _say("[Config] 提示：%s 里没有示例中的 %d 个键（%s%s）—— 没配的功能各自用自己的默认值；"
+         "要补齐可对照 config.example.json（本提示只出现一次）"
+         % (os.path.basename(path), len(missing), show, more))
+
+
 def get_config(path: str) -> dict:
     """读 config.json；**文件缺失/损坏时回退到 config.example.json 的默认值**，不抛异常。
 
@@ -102,7 +134,9 @@ def get_config(path: str) -> dict:
     p = resolve_path(path)
     try:
         with open(p, "r", encoding="utf-8") as f:
-            return json.load(f)
+            cfg = json.load(f)
+        _notice_missing_keys(p, cfg)
+        return cfg
     except FileNotFoundError:
         if p not in _warned:
             _warned.add(p)

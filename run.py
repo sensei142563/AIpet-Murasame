@@ -575,7 +575,7 @@ def setup_runtime_and_pytorch(config_path="config.json", cfg=None, hardware_type
     return model_type
 
 def run_download():
-    tts_type = get_config("./config.json")["tts_type"]
+    tts_type = get_config("./config.json").get("tts_type", "local")
     if tts_type == "local":
         log("检测到 tts_type = local", "INFO")
         script_path = os.path.abspath(r".\download.py")
