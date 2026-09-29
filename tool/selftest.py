@@ -263,6 +263,13 @@ WIRING = (
      "退出钩子没挂上（没人停后台线程）"),
     ("classes/murasame_class.py", "我还在做上一件事",
      "agent 又允许同时跑多个了（两个 agent 同时在动主人的电脑）"),
+    # ── 点了启动却"秒退"时，界面必须说话（用户报过"点启动微信秒卡退"，见 §27.11）──
+    ("pcl_launcher/silicon_window.py", "def _watch_child",
+     "秒退看门狗没了（子进程一崩，启动器界面上一个字都不说）"),
+    ("pcl_launcher/silicon_window.py", 'argv = ["cmd", "/k"] + argv',
+     "控制台又不留了（子进程秒退时报错一闪就关，用户来不及看）"),
+    ("pcl_launcher/silicon_window.py", "def _spawn_console_argv",
+     "起控制台程序的共用方法没了（三处启动 + NapCat 的 bat 会各自裸 Popen）"),
 )
 # 绝不能出现的（历史坑，回来就是 bug 复发）—— **正则**，只扫非注释行：
 #   注释里写着"原来写死了 infos[57:65]"是对的（解释历史），不能算复发（自测自己踩过这个误报）
