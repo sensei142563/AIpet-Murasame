@@ -13,6 +13,48 @@ import os
 
 _warned = set()
 
+# 程序目录（tool/ 的上一级）。**不 import tool.paths**：本模块被 `python -c` 直接调用，
+# 要保持零依赖 —— 多引一个模块就多一个把这条路弄崩的机会。
+APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def resolve_path(path: str) -> str:
+    """把 `"./config.json"` 这种相对路径**钉到真正那份配置**上，返回绝对路径。
+
+    为什么要有这一步：仓库里读配置的地方有 50+ 处，几乎全写 `get_config("./config.json")`，
+    而"当前工作目录"并不等于程序目录：
+      * 快捷方式 / 计划任务 / 别的宿主拉起 → cwd 可能是 System32、用户主目录、宿主目录
+      * `python -c "from tool.xxx import ..."` 在别的目录里跑（.bat 就是这么干的）
+      * 自测与探针脚本会 chdir
+    那时 `"./config.json"` 指向别处：轻则**读不到**（静默退回示例默认值 → 表现为
+    "设置改了不生效"），重则模块级下标访问 KeyError 直接崩 —— `tool/chat.py` 与
+    `tool/cloud_API_chat.py` 是在**导入期**读的，最典型（§22 记过这个坑）。
+
+    规则（向后兼容优先，绝不改变"正常情况"的行为）：
+      1) 绝对路径 → 原样返回
+      2) cwd 下**确实存在** → 用它（老行为：在自己目录里放配置照样生效）
+      3) 带子目录的相对路径（`cfg/config.json`）→ **保留结构**：先试程序目录下的同结构，
+         没有就按 cwd 解析。⚠ 不能拿 basename 去找程序目录的同名文件 —— 那会把
+         `cfg/config.json` 悄悄变成根目录的 `config.json`（探针抓过这个错）。
+      4) 光秃秃的文件名（`./config.json`）→ 程序目录下有同名文件就用它，
+         谁都没有也用程序目录的路径：第一次写入落在程序目录，不散落到 cwd。
+    """
+    try:
+        if not path:
+            return path
+        if os.path.isabs(path):
+            return path
+        if os.path.isfile(path):
+            return os.path.abspath(path)
+        rel_dir = os.path.dirname(path)
+        if rel_dir and rel_dir not in (".", ""):
+            under_app = os.path.join(APP_DIR, path.lstrip("./\\"))
+            return under_app if os.path.isfile(under_app) else os.path.abspath(path)
+        alt = os.path.join(APP_DIR, os.path.basename(path))
+        return alt
+    except Exception:
+        return path
+
 
 def _say(msg: str) -> None:
     """打印提示，但**绝不因为编码问题把调用方搞崩**。
@@ -52,21 +94,26 @@ def get_config(path: str) -> dict:
     回退用示例配置（而不是空 dict）是故意的：调用方大量使用
     `get_config("./config.json")["model_type"]` 这种**下标访问**，返回空 dict 只会把
     FileNotFoundError 换成 KeyError，照样崩。示例配置保证这些键都在。
+
+    ⚠ 读之前先过 `resolve_path()`：cwd 不是程序目录时（宿主/计划任务/`python -c`），
+      `"./config.json"` 会指向别处 —— 那时**不是"配置缺失"而是"看错了地方"**，
+      以前会静默退回示例默认值，表现为"我明明配好了却不生效"。
     """
+    p = resolve_path(path)
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(p, "r", encoding="utf-8") as f:
             return json.load(f)
     except FileNotFoundError:
-        if path not in _warned:
-            _warned.add(path)
-            _say(f"[Config] 未找到 {path}（绿色版首次运行还没生成？）→ "
+        if p not in _warned:
+            _warned.add(p)
+            _say(f"[Config] 未找到 {p}（绿色版首次运行还没生成？）→ "
                  f"先用 config.example.json 的默认值继续；可在启动器设置页或手工填入自己的配置。")
-        return _example_defaults(path)
+        return _example_defaults(p)
     except Exception as e:
-        if path not in _warned:
-            _warned.add(path)
-            _say(f"[Config] 读取 {path} 失败（{e}）→ 用 config.example.json 的默认值继续")
-        return _example_defaults(path)
+        if p not in _warned:
+            _warned.add(p)
+            _say(f"[Config] 读取 {p} 失败（{e}）→ 用 config.example.json 的默认值继续")
+        return _example_defaults(p)
 
 
 def ensure_config(path: str = "./config.json") -> str:
@@ -78,6 +125,7 @@ def ensure_config(path: str = "./config.json") -> str:
     （用户实测"点启动微信秒卡退"）。这里补齐这个承诺。
     返回生成后的路径（生成失败/示例缺失时返回原 path）。
     """
+    path = resolve_path(path)
     try:
         if os.path.isfile(path):
             return path
@@ -109,7 +157,7 @@ def set_key(path: str, key: str, value, create: bool = True) -> bool:
     再**原样读回**、只改这一个键、继承原换行风格、写 .tmp 后 os.replace 换上去。
     """
     try:
-        p = os.path.abspath(path)
+        p = resolve_path(path)
         if create:
             ensure_config(p)
         raw = {}

@@ -101,9 +101,14 @@ def scan_plugins():
             try:
                 with io.open(pj, encoding="utf-8") as f:
                     meta = json.load(f)
-                if isinstance(meta, dict) and meta.get("id"):
+                if isinstance(meta, dict):
+                    # ⚠ 以前这里要求**必须有 "id"**，于是 plugins/系统信息/plugin.json
+                    #   （只有 name/description/marker/enabled）被整条跳过 —— 结果
+                    #   启动器插件页里**唯一真能用的插件反而不显示**，8 个"开关面板"却全列着。
+                    #   两套清单 schema 是并存的（见 plugins/README），用目录名兜底 id。
+                    meta.setdefault("id", name)
                     meta.setdefault("name", meta["id"])
-                    meta.setdefault("desc", "")
+                    meta.setdefault("desc", meta.get("description", ""))
                     meta.setdefault("version", "1.0.0")
                     meta.setdefault("kind", "feature")
                     meta.setdefault("config_key", None)
@@ -113,6 +118,13 @@ def scan_plugins():
                     meta.setdefault("default", False)
                     # 官方插件（随包自带）= builtin true；导入的第三方插件导入时写 false
                     meta.setdefault("builtin", True)
+                    # 有没有 main.py = 她能不能自己写【插件:x】喊它（与 tool/plugins.py 同一判据）
+                    meta["_has_main"] = os.path.isfile(os.path.join(d, "main.py"))
+                    # 没有 config_key 的清单（系统信息 / 模板）开关就写在 plugin.json 的
+                    # `enabled` 上 —— 而 tool/plugins.py 读的正是这个字段。别让启动器显示
+                    # "停用"、桌宠那边其实能用（两套说法不一致）。
+                    if not meta.get("config_key") and "enabled" in meta:
+                        meta["default"] = _bool_of(meta.get("enabled"), bool(meta.get("default")))
                     meta["_dir"] = d
                     result.append(meta)
             except Exception as e:
@@ -142,12 +154,44 @@ def set_enabled(meta, enabled: bool) -> bool:
         return True
     key = meta.get("config_key")
     if not key:
-        return False
+        # 没有 config_key 的清单（系统信息 / 模板）：开关在 plugin.json 的 `enabled` 上。
+        # 以前这里直接 return False → 那唯一真能用的插件一点开关就报失败。
+        return _write_manifest_enabled(meta, enabled)
     cfg = _load_config()
     cfg[key] = "true" if enabled else "false"
     _save_config(cfg)
     print(f"[Plugins] {meta.get('id')} -> {'启用' if enabled else '停用'}（{key}={cfg[key]}）")
     return True
+
+
+def _write_manifest_enabled(meta, enabled: bool) -> bool:
+    """把开关写回 plugin.json 的 `enabled`（没有 config_key 的那类清单）。
+
+    ⚠ 为什么写清单而不写 config：`tool/plugins.py`（真正决定"她能不能用这个插件"的那层）
+      读的就是 plugin.json 的 `enabled`。写 config 只会让两边说法不一致 ——
+      "启动器里关了，桌宠那边照样能用"。
+    换行固定用 LF：plugin.json 在仓库里是 LF，用默认写法会被 Windows 换成 CRLF。
+    """
+    try:
+        d = meta.get("_dir")
+        if not d:
+            return False
+        p = os.path.join(d, "plugin.json")
+        with io.open(p, encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return False
+        data["enabled"] = bool(enabled)
+        tmp = p + ".tmp"
+        with io.open(tmp, "w", encoding="utf-8", newline="\n") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, p)
+        print(f"[Plugins] {meta.get('id')} -> "
+              f"{'启用' if enabled else '停用'}（plugin.json 的 enabled）")
+        return True
+    except Exception as e:
+        print(f"[Plugins] 写入 plugin.json 失败: {e}")
+        return False
 
 
 def _time_guard_pidfile() -> str:
@@ -600,6 +644,14 @@ class PCLPluginsPanel(QScrollArea):
             k = QLabel(f"配置键：{key_hint}")
             k.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(10*S)}px; background: transparent; border: none;")
             left.addWidget(k)
+        if meta.get("_has_main") is False:
+            # ⚠ 说清楚：这类条目是"开关面板"，功能在 QQ / 桌宠那边实现过；缺的只是
+            #   main.py —— 也就是她不能自己写【插件:x】喊它。以前会被误读成"功能没做"。
+            m = QLabel("开关面板：她不能自己喊它；功能在 QQ / 桌宠那边，这个开关只负责开关")
+            m.setWordWrap(True)
+            m.setStyleSheet(f"color: {warn_text().name()}; font-size: {int(10*S)}px;"
+                            f" background: transparent; border: none;")
+            left.addWidget(m)
         row.addLayout(left, 1)
 
         # 右侧：启用开关 + 按钮

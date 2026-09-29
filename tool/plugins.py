@@ -113,9 +113,17 @@ def plugin_dirs() -> list:
 def manifest_dirs() -> list:
     """所有带 plugin.json 的目录 —— **包括缺 main.py 的**。
 
-    为什么要分开：本仓库的 plugins/ 里有一批"只声明了功能、实现还没做"的目录
-    （face / galgame / lively / …）。`plugin_dirs()` 会把它们当"不存在"跳过，
-    于是清单里凭空少了 8 项，主人只会以为插件丢了。清单要如实说明它们的状态。
+    为什么要分开：本仓库的 plugins/ 里有一批**只有 plugin.json、没有 main.py** 的目录
+    （face / galgame / lively / request_music / slang_search / auto_offline /
+    auto_learning / time_guard）。它们的定位是**启动器插件页里的开关面板** ——
+    功能本身在别处实现（`qq/qq_learn.py`、`qq/qq_music.py`、`qq/qq_slang.py`、
+    `qq/qq_galgame.py`、`qq/qq_offline.py`、`tool/face_recognition*.py`、
+    `time_sync_guard.py`），配置键也确实被 `qq/qq_config.py` 与
+    `classes/murasame_class.py` 读取。
+
+    ⚠ 所以缺 main.py **不等于"功能没做"**（这里原来的注释就是这么写的，是错的）——
+      它只意味着**她不能自己写【插件:xxx】喊它**。`plugin_dirs()` 会把它们当"不存在"跳过，
+      于是清单里凭空少了 8 项，主人只会以为插件丢了。清单要如实说明它们的状态。
     """
     out = []
     try:
@@ -214,7 +222,11 @@ def list_plugins() -> list:
         if nm in alive:
             why = ""
         elif not has_main:
-            why = "只有 plugin.json，缺 main.py（这个功能的实现还没做）"
+            # ⚠ 措辞要对："缺 main.py"**不是**"功能没做" —— 这些目录是启动器插件页的
+            #   开关面板，功能在 qq/ 或桌宠那边实现；缺的只是"她能自己喊它"那部分。
+            why = ("缺 main.py：她不能自己写【插件:%s】喊它"
+                   "（这类目录是启动器里的开关面板，功能在 QQ / 桌宠那边实现）"
+                   % str(meta.get("marker") or nm))
         else:
             why = _errors.get(base, "未加载")
         out.append({"name": nm,
@@ -223,7 +235,9 @@ def list_plugins() -> list:
                     "version": str(meta.get("version") or ""),
                     "ok": nm in alive,
                     "error": why,
-                    "dir": base})
+                    "dir": base,
+                    # 给前端用：能不能被她自己喊（False = 只是开关面板）
+                    "callable": bool(has_main)})
     return out
 
 

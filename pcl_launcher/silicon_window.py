@@ -35,6 +35,24 @@ from .colors import (ACCENT_ID, THEME_COLORS, background_info, btn_radius)
 _CONTROL_BASE = "http://localhost:28565/control"
 
 # 导航项（key, 图标, 标题, 副标题）
+def _spawn_blocked() -> bool:
+    """自动化/自测里**禁止真的拉起外部程序**（桌宠 / QQ / 微信 / NapCat）。
+
+    为什么要有这道闸门：自测与截图脚本会构造**完整外壳**（SiliconLauncher + HomePage）
+    来验界面，而外壳里几条路径会真的 `subprocess.Popen` 起进程 —— 实测某次自测把
+    `run.py` → `runtime\\venv` 的 `main.py` → GPT-SoVITS 运行时全带起来了，而主人不在电脑前，
+    桌宠就那么自己跑着（还是他自己回来才发现的）。
+
+    对**用户**没有任何影响：只有自测/自动化显式把 AIPET_NO_SPAWN=1 放进环境时才生效
+    （见 `_audit_fish9269/run_tests_progress.py`）。行为类断言请自己打桩 Popen 覆盖，
+    别依赖这里（参考 test_napcat_autostart.py）。
+    """
+    try:
+        return str(os.environ.get("AIPET_NO_SPAWN", "")).strip().lower() in ("1", "true", "yes")
+    except Exception:
+        return False
+
+
 NAV = [
     ("home",    "🏠", "总览",  "启动与状态"),
     ("pets",    "🐾", "桌宠",  "角色与立绘"),
@@ -746,6 +764,9 @@ class HomePage(QWidget):
         py = self._require_python("桌宠", PET_NEED)
         if not py:
             return False
+        if _spawn_blocked():
+            print("[NewUI] 自测模式（AIPET_NO_SPAWN=1）：不真的启动桌宠")
+            return False
         try:
             self.shell._pet_proc = subprocess.Popen([py, os.path.join(base, "run.py")], cwd=base,
                                                     creationflags=subprocess.CREATE_NEW_CONSOLE)
@@ -819,6 +840,9 @@ class HomePage(QWidget):
         except Exception as e:
             print(f"[NewUI] ⚠ 读取微信开关失败（继续尝试启动）: {e}")
         self._busy_btn(self.btn_wx, "⏳ 正在启动微信…", 12000)
+        if _spawn_blocked():
+            print("[NewUI] 自测模式（AIPET_NO_SPAWN=1）：不真的启动微信桥接")
+            return
         try:
             self.shell._wx_proc = subprocess.Popen([py, os.path.join(base, "run_wechat.py")], cwd=base,
                                                    creationflags=subprocess.CREATE_NEW_CONSOLE)
@@ -864,6 +888,9 @@ class HomePage(QWidget):
         """强制拉起 NapCat 重新扫码（跟「启动 QQ」用的是同一条脚本）。"""
         bat = _napcat_launcher_bat()
         if os.path.exists(bat):
+            if _spawn_blocked():
+                print("[NewUI] 自测模式（AIPET_NO_SPAWN=1）：不真的拉起 NapCat 扫码")
+                return
             try:
                 subprocess.Popen([bat], cwd=os.path.dirname(bat),
                                  creationflags=subprocess.CREATE_NEW_CONSOLE)
@@ -910,6 +937,9 @@ class HomePage(QWidget):
                       "QQ 桥接随程序包一起提供；如果你是精简安装，请把 qq 目录补回来。")
             return
         self._busy_btn(self.btn_qq, "⏳ 正在启动 QQ…", 12000)
+        if _spawn_blocked():
+            print("[NewUI] 自测模式（AIPET_NO_SPAWN=1）：不真的启动 QQ 桥接")
+            return
         try:
             self.shell._qq_proc = subprocess.Popen([py, os.path.join(base, "run_qq.py")], cwd=base,
                                                    creationflags=subprocess.CREATE_NEW_CONSOLE)
@@ -979,6 +1009,10 @@ class HomePage(QWidget):
                         action)
                     return
                 try:
+                    if _spawn_blocked():
+                        self._napcat_done.emit(False, "自测模式（AIPET_NO_SPAWN=1）："
+                                                      "不真的拉起 NapCat", action)
+                        return
                     subprocess.Popen([bat], cwd=os.path.dirname(bat),
                                      creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
                 except Exception as e:

@@ -982,10 +982,9 @@ class Murasame(QLabel):
         screen_type = "true" if enabled else "false"
         # 持久化当前开关状态，保证即使直接关闭命令行也能保留设置
         try:
-            config = get_config("./config.json")
-            config["screen_type"] = screen_type
-            with open("./config.json", "w", encoding="utf-8") as f:
-                json.dump(config, f, ensure_ascii=False, indent=2)
+            from tool.config import set_key as _set_key
+            if not _set_key("./config.json", "screen_type", screen_type):
+                print("[AIpet] ⚠ 保存 screen_type 失败（原因见上一行的 [Config] 提示）")
         except Exception as e:
             print(f"[AIpet] 保存 screen_type 失败: {e}")
 
@@ -1034,10 +1033,9 @@ class Murasame(QLabel):
         global camera_type
         camera_type = "true" if enabled else "false"
         try:
-            config = get_config("./config.json")
-            config["camera_enabled"] = camera_type
-            with open("./config.json", "w", encoding="utf-8") as f:
-                json.dump(config, f, ensure_ascii=False, indent=2)
+            from tool.config import set_key as _set_key
+            if not _set_key("./config.json", "camera_enabled", camera_type):
+                print("[AIpet] ⚠ 保存 camera_enabled 失败（原因见上一行的 [Config] 提示）")
         except Exception as e:
             print(f"[AIpet] 保存 camera_enabled 失败: {e}")
 
@@ -2025,16 +2023,14 @@ class Murasame(QLabel):
     def _toggle_auto_switch(self, checked=None):
         """右键菜单：切换「自动切换立绘类型」并写入 config.json（立即生效）"""
         try:
-            import json as _json
-            from tool.config import get_config
-            cfg = get_config("./config.json")
+            from tool.config import set_key as _set_key
             if checked is None:
                 val = "false" if self._auto_switch_enabled() else "true"
             else:
                 val = "true" if checked else "false"
-            cfg["portrait_auto_switch"] = val
-            with open("./config.json", "w", encoding="utf-8") as f:
-                _json.dump(cfg, f, ensure_ascii=False, indent=2)
+            if not _set_key("./config.json", "portrait_auto_switch", val):
+                print("[桌宠] ⚠ 保存自动切换开关失败（原因见上一行的 [Config] 提示）")
+                return
             print(f"[桌宠] 🔁 自动切换立绘类型已{'开启' if val == 'true' else '关闭'}（已写入 config.json）")
         except Exception as e:
             print(f"[桌宠] ⚠ 保存自动切换开关失败: {e}")

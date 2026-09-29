@@ -265,11 +265,9 @@ if __name__ == "__main__":
             print("[Live2D] ⚠ 检测到上次进入 Live2D 后进程异常退出 → 本次不再自动进入 Live2D，"
                   "并把兼容性探测结果记为失败（可在设置里改回来）")
             try:
-                with open("./config.json", "r", encoding="utf-8") as _f:
-                    _c = json.load(_f)
-                _c["live2d_probe_ok"] = "false"
-                with open("./config.json", "w", encoding="utf-8") as _f:
-                    json.dump(_c, _f, ensure_ascii=False, indent=2)
+                from tool.config import set_key as _set_key
+                if not _set_key("./config.json", "live2d_probe_ok", "false"):
+                    print("[Live2D] ⚠ 写入探测结果失败（原因见上一行的 [Config] 提示）")
             except Exception as _e:
                 print(f"[Live2D] ⚠ 写入探测结果失败: {_e}")
             os.remove(_L2D_FLAG)
@@ -319,13 +317,14 @@ if __name__ == "__main__":
                 _ok = _probe_live2d()
                 _LIVE2D_AVAILABLE = _ok
                 try:
-                    with open("./config.json", "r", encoding="utf-8") as _f:
-                        _c = json.load(_f)
-                    _c["live2d_probe_ok"] = "true" if _ok else "false"
-                    with open("./config.json", "w", encoding="utf-8") as _f:
-                        json.dump(_c, _f, ensure_ascii=False, indent=2)
-                except Exception:
-                    pass
+                    from tool.config import set_key as _set_key
+                    # ⚠ 这里原来是 `except Exception: pass` —— 配置写不进去**一声不吭**，
+                    #   表现为"探测结果明明记下来了，下次还是老样子"。
+                    if not _set_key("./config.json", "live2d_probe_ok",
+                                    "true" if _ok else "false"):
+                        print("[Live2D] ⚠ 写入探测结果失败（原因见上一行的 [Config] 提示）")
+                except Exception as _e:
+                    print(f"[Live2D] ⚠ 写入探测结果失败: {_e}")
         except Exception as _e:
             print(f"[Live2D] ⚠ 探测流程异常: {_e}")
 
