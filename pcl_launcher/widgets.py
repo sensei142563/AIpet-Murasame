@@ -1349,9 +1349,9 @@ class PCLMemoryManager(QScrollArea):
         """返回 (是否已登录, bot_id/user_id 详情, 是否启用)"""
         enabled = False
         try:
-            from tool.config import get_config
+            from tool.config import as_bool, get_config
             cfg = get_config("./config.json")
-            enabled = str(cfg.get("wechat_enabled", "false")).lower() == "true"
+            enabled = as_bool(cfg.get("wechat_enabled"), False)
         except Exception:
             pass
         creds = None

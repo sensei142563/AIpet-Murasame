@@ -68,7 +68,7 @@ from classes.murasame_class import Murasame
 from api import app as api_app
 import uvicorn
 
-from tool.config import get_config
+from tool.config import as_bool, get_config
 from pets.pet_registry import get_live2d_dir, get_live2d_model_json, get_active_pet_id, detect_capabilities
 
 # Live2D 导入（延迟，仅在 Live2D 模式下激活）
@@ -83,7 +83,7 @@ try:
             _l2d_cfg = _json_l2d.load(_f) or {}
     except Exception:
         _l2d_cfg = {}
-    if str(_l2d_cfg.get("live2d_enabled", "false")).lower() != "true":
+    if not as_bool(_l2d_cfg.get("live2d_enabled"), False):
         print("[AIpet] 配置 live2d_enabled=false → 不加载 Live2D 引擎（更稳，也更快）")
     else:
         from Live2d.live2d_ui import Live2DWidget
@@ -96,7 +96,7 @@ except Exception as _e:
 
 CONFIG = get_config("./config.json")
 screen_index = CONFIG["screen_index"]
-VOICE_TRIGGER_ENABLED = CONFIG.get("voice_trigger")
+VOICE_TRIGGER_ENABLED = as_bool(CONFIG.get("voice_trigger"), False)
 
 
 class VoiceBridge(QObject):
@@ -255,7 +255,7 @@ if __name__ == "__main__":
     # 默认值必须是 "false"，并且要忽略大小写：文件顶部（_LIVE2D_AVAILABLE）、run.py、
     # config.example.json、设置页面板全都是 false，这里写 "true" 会让"键缺失"时
     # 桌面端以为该进 Live2D，而引擎其实根本没加载（显示与真实状态不一致）。
-    _LIVE2D_CONFIG_ENABLED = str(CONFIG.get("live2d_enabled", "false")).lower() == "true"
+    _LIVE2D_CONFIG_ENABLED = as_bool(CONFIG.get("live2d_enabled"), False)
 
     # ===== Live2D 崩溃自学习 =====
     # 上次进 Live2D 留下的标记还在 → 说明那次进程被崩掉了（原生崩溃，抓不到异常）
@@ -487,7 +487,7 @@ if __name__ == "__main__":
 
                 # 人脸识别
                 face_result = ""
-                if CONFIG.get("face_recognition_enabled") == "true":
+                if as_bool(CONFIG.get("face_recognition_enabled"), False):
                     try:
                         from tool.face_recognition import recognize_faces_in_frame
                         frame = get_camera_frame()
@@ -956,7 +956,7 @@ if __name__ == "__main__":
 
         # PCL 按钮语音识别（长按录音 → 识别 → 对话，等同 CapsLock 逻辑）
         if check_voice_start():
-            if VOICE_TRIGGER_ENABLED == "true":
+            if VOICE_TRIGGER_ENABLED:
                 try:
                     from tool.voice_trigger import AudioRecorder
                     if _pcl_voice_recorder is None:
@@ -1011,9 +1011,9 @@ if __name__ == "__main__":
         # 语音识别切换（旧逻辑保留，兼容之前的使用方式）
         if check_flag("voice"):
             try:
-                from tool.config import get_config as _get_cfg
+                from tool.config import get_config as _get_cfg   # as_bool 已在上方模块级导入
                 cfg = _get_cfg("./config.json")
-                if cfg.get("voice_trigger") == "true":
+                if as_bool(cfg.get("voice_trigger"), False):
                     print("[API Control] 切换语音识别")
                     pet.show_text("语音识别功能已触发~", typing=True)
                     set_feature_status("voice", "on")
@@ -1074,7 +1074,7 @@ if __name__ == "__main__":
 
                     # 人脸识别
                     face_result = ""
-                    if CONFIG.get("face_recognition_enabled") == "true":
+                    if as_bool(CONFIG.get("face_recognition_enabled"), False):
                         try:
                             from tool.face_recognition import recognize_faces_in_frame
                             frame = get_camera_frame()
@@ -1233,7 +1233,7 @@ if __name__ == "__main__":
     tray_icon.show()
 
     # ===== CapsLock 语音触发 =====
-    if VOICE_TRIGGER_ENABLED == "true":
+    if VOICE_TRIGGER_ENABLED:
         from tool.voice_trigger import CapslockVoiceTrigger
         bridge = VoiceBridge()
 

@@ -13,6 +13,11 @@ CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 # 表情包根目录 — 按当前角色动态解析（不再固定根目录）
 # 由 pet_registry.get_sticker_dir() 返回角色包内的 biaoqingbao/（若无则返回空 → QQ 不发图）
 from pets.pet_registry import get_sticker_dir
+# 真值判断统一走权威实现（1/true/yes/y/on/开/开启 → 真）。
+# ⚠ 这里原来是一堆手抄的 `str(cfg.get(k, "false")).lower() == "true"`：只认小写 "true"，
+#   用户手写成 "1" / "on" / "开" 就会**静默当成关**（`as_bool` 的 docstring 就写着这些抄来的
+#   判断要"逐步替换过来"）。缺键时的行为完全一致（as_bool(None, default) 返回 default）。
+from tool.config import as_bool
 STICKER_DIR = get_sticker_dir()
 if not STICKER_DIR:
     STICKER_DIR = os.path.join(BASE_DIR, "biaoqingbao")  # 兜底旧路径
@@ -234,27 +239,27 @@ def get_qq_config():
         # NapCat WebUI (HTTP API，主要用于发送消息等)
         "http_url": cfg.get("qq_napcat_http", "http://127.0.0.1:6099"),
         # 是否在回复时携带表情包 gif
-        "send_sticker": str(cfg.get("qq_send_sticker", "true")).lower() == "true",
+        "send_sticker": as_bool(cfg.get("qq_send_sticker"), True),
         # 是否在回复时附带 F5-TTS 语音
-        "send_voice": str(cfg.get("qq_send_voice", "false")).lower() == "true",
+        "send_voice": as_bool(cfg.get("qq_send_voice"), False),
         # 是否启用图片识别（收到图片时调用视觉模型识别，模型由 vision_model_name 配置）
-        "vision_enabled": str(cfg.get("qq_vision_enabled", "true")).lower() == "true",
+        "vision_enabled": as_bool(cfg.get("qq_vision_enabled"), True),
         # 是否启用语音识别（收到语音消息时用 faster-whisper 转文字）
-        "stt_enabled": str(cfg.get("qq_stt_enabled", "false")).lower() == "true",
+        "stt_enabled": as_bool(cfg.get("qq_stt_enabled"), False),
         # 是否允许群聊（只 @ 时回复）
-        "allow_groups": str(cfg.get("qq_allow_groups", "true")).lower() == "true",
+        "allow_groups": as_bool(cfg.get("qq_allow_groups"), True),
         # 离线消息补拉（默认开：启动时补回离线期间消息；NapCat 不支持时可在 PCL 设置关闭。
         # 即便开启，任何请求失败/超时也已做极短超时 + 不拖断主 WS）
-        "offline_enabled": str(cfg.get("qq_offline_enable", "true")).lower() == "true",
+        "offline_enabled": as_bool(cfg.get("qq_offline_enable"), True),
         # 空闲自动离线（默认关：保持始终活跃，不会自动离线导致不回复。
         # 开启后：空闲超过 qq_auto_offline_minutes 分钟 → QQ 状态切为「离开」并暂停自动回复；
         # 收到主人 QQ 的消息 → 立即恢复在线并正常回复）
-        "auto_offline_enabled": str(cfg.get("qq_auto_offline_enable", "false")).lower() == "true",
+        "auto_offline_enabled": as_bool(cfg.get("qq_auto_offline_enable"), False),
         # 非法值（0/负数/非数字）一律回退默认并取下限 1 分钟
         "auto_offline_minutes": _cfg_int_min(cfg.get("qq_auto_offline_minutes", 30), 30, 1),
         # 活泼模式（默认关：仅在被 @ 时回复群聊。开启后：监控所在群的消息，
         # 冷却间隔后若群里有新动静，会作为角色主动接一句话活跃群气氛）
-        "lively_enabled": str(cfg.get("qq_lively_enable", "false")).lower() == "true",
+        "lively_enabled": as_bool(cfg.get("qq_lively_enable"), False),
         # 接话间隔最低 1 分钟（UI 调节范围 1~120）；非法值兜底 15
         "lively_interval": _cfg_int_min(cfg.get("qq_lively_interval", 15), 15, 1),
         # 对话调节：单次回复字数上限（0=不限；非法值兜底 0）
@@ -266,29 +271,29 @@ def get_qq_config():
         #   private_master_only   true  = 只回主人私信（覆盖下面两项）
         #   private_reply_friend  是否回好友私信（sub_type=friend/group）
         #   private_reply_stranger 是否回陌生人私信（非好友/临时会话）
-        "private_enable": str(cfg.get("qq_private_enable", "true")).lower() == "true",
-        "private_master_only": str(cfg.get("qq_private_master_only", "false")).lower() == "true",
-        "private_reply_friend": str(cfg.get("qq_private_reply_friend", "true")).lower() == "true",
-        "private_reply_stranger": str(cfg.get("qq_private_reply_stranger", "true")).lower() == "true",
+        "private_enable": as_bool(cfg.get("qq_private_enable"), True),
+        "private_master_only": as_bool(cfg.get("qq_private_master_only"), False),
+        "private_reply_friend": as_bool(cfg.get("qq_private_reply_friend"), True),
+        "private_reply_stranger": as_bool(cfg.get("qq_private_reply_stranger"), True),
         # 点歌（官方插件「点歌」开关；默认关：插件页自己开）
-        "music_enabled": str(cfg.get("qq_music_enable", "false")).lower() == "true",
+        "music_enabled": as_bool(cfg.get("qq_music_enable"), False),
         # 自主学习（官方插件「自主学习」开关；默认关：会联网学习并把群图片/视频/链接/
         # 群聊记录存到本机 data/qq_learnstore.json，属于隐私敏感功能，交给用户自己开）
-        "auto_learn_enable": str(cfg.get("qq_auto_learn_enable", "false")).lower() == "true",
-        "auto_learn_search": str(cfg.get("qq_auto_learn_search", "false")).lower() == "true",
-        "auto_learn_media": str(cfg.get("qq_auto_learn_media", "false")).lower() == "true",
-        "auto_learn_links": str(cfg.get("qq_auto_learn_links", "false")).lower() == "true",
-        "auto_learn_chats": str(cfg.get("qq_auto_learn_chats", "false")).lower() == "true",
+        "auto_learn_enable": as_bool(cfg.get("qq_auto_learn_enable"), False),
+        "auto_learn_search": as_bool(cfg.get("qq_auto_learn_search"), False),
+        "auto_learn_media": as_bool(cfg.get("qq_auto_learn_media"), False),
+        "auto_learn_links": as_bool(cfg.get("qq_auto_learn_links"), False),
+        "auto_learn_chats": as_bool(cfg.get("qq_auto_learn_chats"), False),
         # 自主学习·表情收藏：把群里看到的动画表情自动存入自存表情池（供以后随机发送）
-        "auto_learn_sticker_save": str(cfg.get("qq_auto_learn_sticker_save", "false")).lower() == "true",
+        "auto_learn_sticker_save": as_bool(cfg.get("qq_auto_learn_sticker_save"), False),
         # 主人白名单（最多 5 个 QQ 号；第一位 = 主主人，负责共享记忆/离线补拉）
         "master_ids": _parse_master_ids(cfg),
         # 主主人（owner 兼容键，供离线补拉/共享记忆等"主号"逻辑使用）
         "owner_id": (_parse_master_ids(cfg) or [""])[0],
         # 插件全局总开关（启动器「插件」页管控；协作者插件默认**停用**，用户自己开）
-        "adult_allowed": str(cfg.get("qq_adult_enable", "true")).lower() == "true",
-        "galgame_allowed": str(cfg.get("qq_galgame_enable", "false")).lower() == "true",
-        "slang_allowed": str(cfg.get("qq_slang_enable", "false")).lower() == "true",
+        "adult_allowed": as_bool(cfg.get("qq_adult_enable"), True),
+        "galgame_allowed": as_bool(cfg.get("qq_galgame_enable"), False),
+        "slang_allowed": as_bool(cfg.get("qq_slang_enable"), False),
         # F5-TTS 服务是否就绪（端口 9881）
         "f5tts_ready": f5tts_ready,
     }

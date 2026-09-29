@@ -198,6 +198,16 @@ WIRING = (
      "NapCat token 的自动发现又被挤掉了（口径应是：显式配置优先，没配才自动发现）"),
     ("qq/qq_config.py", '"http_url"',
      "QQ 配置里 http_url 没了（启动器的「打开 WebUI」会失效）"),
+    # ── 真值判断统一走权威实现 as_bool（1/true/yes/y/on/开/开启 → 真）──
+    #    抄出来的版本普遍更窄（只认小写 "true"）或方向写反，见交接文档 §27.5
+    ("qq/qq_config.py", "from tool.config import as_bool",
+     "QQ 配置的真值判断没走权威实现（用户写 1/on/开 会被当成关）"),
+    ("tool/weather_utils.py", "as_bool(_read_cfg()",
+     "天气开关又变成反向判断了（只有恰好写 false 才算关：0/off/no/关 全算开）"),
+    ("pcl_launcher/plugins_panel.py", "from tool.config import as_bool",
+     "启动器插件页的真值判断没走权威实现"),
+    ("main.py", 'as_bool(CONFIG.get("voice_trigger"), False)',
+     "语音触发开关又变成大小写敏感判断了（写 True 会被当成关）"),
 )
 # 绝不能出现的（历史坑，回来就是 bug 复发）—— **正则**，只扫非注释行：
 #   注释里写着"原来写死了 infos[57:65]"是对的（解释历史），不能算复发（自测自己踩过这个误报）

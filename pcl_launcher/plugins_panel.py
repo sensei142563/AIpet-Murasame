@@ -81,9 +81,14 @@ def _save_config(cfg, toast=True):
 
 
 def _bool_of(value, default=False) -> bool:
-    if isinstance(value, bool):
-        return value
-    return str(value).lower() == "true" if value is not None else default
+    """配置/清单里的真值判断 —— 统一走仓库的权威实现 `tool.config.as_bool`
+
+    ⚠ 这里原来是 `str(value).lower() == "true"`：只认小写 "true"，用户手写成 "1"/"on"/"开"
+      就会被当成**关**（`as_bool` 的 docstring 写着这些抄来的判断要"逐步替换过来"）。
+      缺省/空串 → default（清单没写 default 时按"装了不自己联网/学习"处理）。
+    """
+    from tool.config import as_bool
+    return as_bool(value, default)
 
 
 def scan_plugins():

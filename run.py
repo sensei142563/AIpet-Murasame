@@ -71,7 +71,7 @@ def _live2d_enabled_in_cfg() -> bool:
     try:
         import json as _j
         with open("./config.json", "r", encoding="utf-8") as f:
-            return str((_j.load(f) or {}).get("live2d_enabled", "false")).lower() == "true"
+            return as_bool((_j.load(f) or {}).get("live2d_enabled"), False)
     except Exception:
         return False
 

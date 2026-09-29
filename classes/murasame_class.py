@@ -65,7 +65,7 @@ def stop_voice_wav() -> None:
             _qs.stop()
     except Exception:
         pass
-from tool.config import get_config
+from tool.config import as_bool, get_config
 from tool.chat import ollama_qwen25vl
 from tool.cloud_API_chat import cloud_vl
 from tool.generate import generate_fgimage
@@ -453,7 +453,7 @@ class Murasame(QLabel):
 
         # ===== 长文本模式 =====
         # config 总开关（关闭后禁止开启长文本模式）
-        self.long_text_mode_enabled = CONFIG.get("longtext_enabled", "true") == "true"
+        self.long_text_mode_enabled = as_bool(CONFIG.get("longtext_enabled"), True)
         # 当前是否处于长文本模式（false = 短文本模式）
         self.long_text_mode = False
 
@@ -496,7 +496,7 @@ class Murasame(QLabel):
         if self._default_display == "live2d":
             return True
         try:
-            if str(CONFIG.get("live2d_enabled", "false")).lower() == "true":
+            if as_bool(CONFIG.get("live2d_enabled"), False):
                 from pets.pet_registry import get_live2d_model_json
                 if get_live2d_model_json():
                     print("[Live2D] 设置里已启用 Live2D 且角色有模型 → 启动即进入 Live2D")
@@ -887,7 +887,7 @@ class Murasame(QLabel):
         # 配置里关掉 Live2D 时，任何入口（快捷键/AI 指令/启动器按钮）都不许打开：
         # ⚠ 个别机器上 Live2D 的 GL 初始化会直接把进程干掉（表现为「桌宠突然消失」）
         try:
-            if str(get_config("./config.json").get("live2d_enabled", "false")).lower() != "true":
+            if not as_bool(get_config("./config.json").get("live2d_enabled"), False):
                 self.show_text(f"Live2D 已在设置里关闭（想用请到启动器「设置 → 桌宠配置」打开）", typing=False)
                 print("[Live2D] 配置 live2d_enabled=false → 拒绝切换（避免个别机器上 GL 初始化崩溃）")
                 return
@@ -1102,7 +1102,7 @@ class Murasame(QLabel):
 
                 # 人脸识别
                 face_result = ""
-                if cfg.get("face_recognition_enabled") == "true":
+                if as_bool(cfg.get("face_recognition_enabled"), False):
                     try:
                         import numpy as np
                         import cv2 as cv
@@ -2175,7 +2175,7 @@ class Murasame(QLabel):
     def _auto_switch_enabled(self) -> bool:
         """立绘类型自动切换开关（config.json: portrait_auto_switch，默认开）"""
         try:
-            from tool.config import get_config
+            from tool.config import as_bool, get_config
             v = get_config("./config.json").get("portrait_auto_switch", "true")
             return str(v).strip().lower() not in ("false", "0", "off", "no")
         except Exception:
@@ -2700,7 +2700,7 @@ class Murasame(QLabel):
     def _perf_guard_enabled(self) -> bool:
         """性能守卫开关（config.json: perf_guard_enabled，默认开）"""
         try:
-            from tool.config import get_config, as_bool
+            from tool.config import as_bool, get_config
             return as_bool(get_config("./config.json").get("perf_guard_enabled", "true"), True)
         except Exception:
             return True
