@@ -84,6 +84,10 @@ def ensure_project_python(script: str = "") -> bool:
     用法：入口文件（`run.py` / `run_launcher.py`）最顶部调一次。
     ⚠ 冻结版（PyInstaller exe）不适用：exe 不是 .py，换解释器没意义 → 直接返回。
     ⚠ Windows 上换解释器不能用 os.execv（实测换完会 segfault）：拉子进程后本进程退出。
+    ⚠ 这里**不加** `__name__ != "__main__"` 那种守卫 —— 本函数所在模块的 `__name__` 永远是
+      `tool.paths`，加了会把 `run_launcher.py` 的**正当自切换一起禁掉**（test_source_startup
+      当场抓到）；而且 import 本模块**没有任何副作用**，只有入口脚本"调用"它才会切换，
+      所以不需要守卫。真正需要守卫的是入口脚本自己的那份（见 run.py）。
     返回是否发生了切换（切换时本函数不会返回，因为 sys.exit(0)）。
     """
     try:

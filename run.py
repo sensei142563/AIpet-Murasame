@@ -27,6 +27,12 @@ import time
 #   这里检测到解释器不对就自动用 venv 重新执行自己（os.execv，不会留下多份进程）。
 def _ensure_project_python():
     try:
+        # ⚠ **只有直接跑这个脚本时才换解释器**（`python run.py`）。被 `import run` 时绝不
+        #   拉新进程 —— 实测有探针为测一个纯函数 `import run`，于是这里起了第二个解释器，
+        #   真桌宠（连带 GPT-SoVITS）在主人不在电脑前自己跑了起来。
+        #   入口脚本被 import 本来就不该有"启动程序"的副作用。
+        if __name__ != "__main__":
+            return
         if os.environ.get("AIPET_REEXEC") == "1":
             return
         _base = os.path.dirname(os.path.abspath(__file__))

@@ -185,14 +185,24 @@ WIRING = (
      "启动器没登记「状态」页（导航点了会显示错误页）"),
     ("pcl_launcher/silicon_window.py", '("status",',
      "启动器左栏导航没有「状态」入口"),
+    # ── 入口脚本不许"被 import 就启动程序"（实测把真桌宠拉起来过，见交接文档 §27.1）──
+    ("run.py", 'if __name__ != "__main__":',
+     "run.py 的换解释器缺 import 守卫（被 import 会拉起一个真解释器 → 真桌宠自己跑起来）"),
 )
 # 绝不能出现的（历史坑，回来就是 bug 复发）—— **正则**，只扫非注释行：
 #   注释里写着"原来写死了 infos[57:65]"是对的（解释历史），不能算复发（自测自己踩过这个误报）
 FORBIDDEN = (
     (r"infos\[57:65\]", "立绘合成又把丛雨索引行号写死了（会裁人）"),
     (r"infos\[47:51\]", "立绘合成又把丛雨索引行号写死了（会裁人）"),
+    # ⚠ 2026-09-29 自己踩的：给 tool/paths.py 也加了 `if __name__ != "__main__":` 守卫，
+    #   结果 (a) 该模块的 __name__ 永远是 "tool.paths" → 把 run_launcher 的**正当自切换**
+    #   一起禁掉（test_source_startup 当场抓到）；(b) 文件里出现 "__main__" 字样 →
+    #   被 test_entry_console_guard 误判成"入口脚本且缺编码守卫"。
+    #   入口脚本自己的那份守卫在 run.py（WIRING 里有断言），这里钉住 paths.py **不许加**。
+    (r'if __name__ != "__main__":',
+     "tool/paths.py 又加了 name 守卫（它的 __name__ 永远是 tool.paths，会禁掉正当自切换）"),
 )
-FORBIDDEN_FILES = ("tool/generate.py",)
+FORBIDDEN_FILES = ("tool/generate.py", "tool/paths.py")
 
 
 def _src(rel: str) -> str:
