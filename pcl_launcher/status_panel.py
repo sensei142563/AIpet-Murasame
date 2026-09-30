@@ -23,7 +23,7 @@ from PyQt5.QtWidgets import (QApplication, QFrame, QGroupBox, QHBoxLayout, QLabe
                              QPushButton, QScrollArea, QSizePolicy, QTabWidget,
                              QVBoxLayout, QWidget)
 
-from .colors import accent_text, ok_text, warn_text, S
+from .colors import accent_text, ok_text, warn_text, S, surface_fill, Gray5
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -142,6 +142,12 @@ class PCLStatusPanel(QWidget):
         # 开关一览：放在最上面 —— 这正是"本次更新的东西在哪儿"的答案
         self.box_sw = QGroupBox("这次新增的开关（在桌宠右键菜单里改；识图在「设置」页）")
         self.box_sw.setObjectName("statusSwitches")
+        # 与下面 _card 同一套：QSS 写 background 必须同时开 WA_StyledBackground，
+        # 否则首次显示不画底、字贴在主题壁纸上看不清
+        self.box_sw.setAttribute(Qt.WA_StyledBackground, True)
+        self.box_sw.setStyleSheet(
+            "QGroupBox { border: 1px solid %s; background: %s; border-radius: 8px; }"
+            % (Gray5.name(), surface_fill()))
         self.lay_sw = QVBoxLayout(self.box_sw)
         self.lay_sw.setContentsMargins(10, 6, 10, 8)
         self.lay_sw.setSpacing(3)
@@ -227,9 +233,13 @@ class PCLStatusPanel(QWidget):
         err = bool(card.get("error"))
         box = QGroupBox(str(card.get("title") or ""))
         box.setObjectName("statusCardError" if err else "statusCard")
-        if err:
-            # 不给写死底色（浅色主题会变"浅字压浅底"），只给一条主题色的边
-            box.setStyleSheet("QGroupBox { border: 1px solid %s; }" % warn_text().name())
+        # QSS 里的 background 要真画出来，必须开 WA_StyledBackground（否则首次显示是透明的，
+        # 字直接压在本页的主题壁纸上 —— 用户报"字体不明显，点刷新才有底色"）
+        box.setAttribute(Qt.WA_StyledBackground, True)
+        _border = warn_text().name() if err else Gray5.name()
+        box.setStyleSheet(
+            "QGroupBox { border: 1px solid %s; background: %s; border-radius: 8px; }"
+            % (_border, surface_fill()))
         lay = QVBoxLayout(box)
         lay.setContentsMargins(8, 4, 8, 4)
         lay.setSpacing(3)

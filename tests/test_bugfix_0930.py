@@ -305,6 +305,58 @@ check("示例配置默认不开 Live2D（新用户也是 2D 启动）",
       str(ex_cfg.get("live2d_enabled")).lower() == "false", str(ex_cfg.get("live2d_enabled")))
 check("示例配置默认 b 套立绘", ex_cfg.get("portrait") == "b", str(ex_cfg.get("portrait")))
 
+print("== ④ 状态窗/状态页的卡片底色必须真的画出来 ==")
+print("   （根因：QSS 里写了 background，但没开 WA_StyledBackground → 首次显示不画底，"
+      "要等一次样式 polish；\n"
+      "     用户看到的就是「字压在壁纸上看不清，点刷新后那块底色才出现」）")
+from classes.status_window import StatusWindow      # noqa: E402
+from PyQt5.QtCore import Qt                        # noqa: E402
+from PyQt5.QtWidgets import QGroupBox              # noqa: E402
+
+_win = StatusWindow()
+_win.show()
+app.processEvents()
+check("状态窗开了 WA_StyledBackground", _win.testAttribute(Qt.WA_StyledBackground) is True)
+check("状态窗自己有不透明底（QSS 里 QDialog#statusWindow background）",
+      "QDialog#statusWindow" in _win.styleSheet()
+      and "background" in _win.styleSheet().split("QDialog#statusWindow")[1][:80])
+_cards = _win.findChildren(QGroupBox)
+check("状态窗里的卡片都开了 WA_StyledBackground（%d 张）" % len(_cards),
+      bool(_cards) and all(c.testAttribute(Qt.WA_StyledBackground) for c in _cards),
+      str([c.objectName() for c in _cards][:4]))
+_img = _win.grab().toImage()
+_paper = _total = 0
+for _x in range(0, _img.width(), 6):
+    for _y in range(0, _img.height(), 6):
+        _total += 1
+        _c = _img.pixelColor(_x, _y)
+        if (abs(_c.red() - 0xFB) <= 8 and abs(_c.green() - 0xF9) <= 8
+                and abs(_c.blue() - 0xF5) <= 8):
+            _paper += 1
+check("★ 抓图里确实有纸色底（不是全透明/壁纸透出来）",
+      _paper >= max(20, _total // 20), "纸色采样 %d/%d" % (_paper, _total))
+_win.close()
+
+try:
+    from pcl_launcher.status_panel import PCLStatusPanel   # noqa: E402
+    _sp = PCLStatusPanel()
+    _sp.show()
+    app.processEvents()
+    _sc = (_sp.findChildren(QGroupBox, "statusCard")
+           + _sp.findChildren(QGroupBox, "statusCardError"))
+    check("状态页卡片存在（%d 张）" % len(_sc), bool(_sc))
+    check("★ 状态页卡片有主题底（QSS 里 background 不再是空）",
+          bool(_sc) and all("background:" in c.styleSheet() for c in _sc),
+          str([c.styleSheet()[:44] for c in _sc[:2]]))
+    check("状态页卡片开了 WA_StyledBackground",
+          bool(_sc) and all(c.testAttribute(Qt.WA_StyledBackground) for c in _sc))
+    check("状态页的开关盒也有底",
+          "background:" in _sp.box_sw.styleSheet()
+          and _sp.box_sw.testAttribute(Qt.WA_StyledBackground) is True)
+    _sp.close()
+except Exception as e:
+    check("状态页能构建并检查卡片底色", False, "%s: %s" % (type(e).__name__, e))
+
 print()
 if FAILS:
     print("FAILED %d 项：%s" % (len(FAILS), "、".join(FAILS)))

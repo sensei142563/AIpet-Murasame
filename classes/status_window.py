@@ -33,6 +33,9 @@ _TAG_COLORS = {
     SS.TAG_PLAIN: "#7a7a7a",
 }
 _CARD_QSS = """
+/* 对话框自己的底：它挂在半透明的桌宠窗口下，不给不透明底就会透出立绘/壁纸，
+   字直接压在画上（用户报"字体不明显，点刷新以后黄色的遮盖才出现"）。 */
+QDialog#statusWindow { background: #fbf9f5; }
 QGroupBox { border: 1px solid #d8d2c6; border-radius: 6px; margin-top: 12px;
             padding: 8px 8px 6px 8px; background: #fbf9f5; }
 QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; color: #6b5a3e; }
@@ -57,6 +60,7 @@ def _card_widget(card: dict) -> QWidget:
     """一张卡：标题 + 彩色标签 + 正文（出错时整张卡偏红，一眼能看出哪项坏了）"""
     box = QGroupBox(str(card.get("title") or ""))
     box.setObjectName("statusCardError" if card.get("error") else "statusCard")
+    box.setAttribute(Qt.WA_StyledBackground, True)   # 让 _CARD_QSS 的 background 真画出来
     if card.get("error"):
         box.setStyleSheet("QGroupBox { border: 1px solid #c2564f; }")
     lay = QVBoxLayout(box)
@@ -112,6 +116,10 @@ class StatusWindow(QDialog):
         self.setMinimumSize(520, 420)
         self.resize(640, 620)
         self.setStyleSheet(_CARD_QSS)
+        # ⚠ WA_StyledBackground 是 QSS 里 background 生效的前提：
+        #   不开的话首次显示不画底，要等一次样式 polish（"点刷新才出现底色"就是这么来的）
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setAttribute(Qt.WA_TranslucentBackground, False)
         self._snap = {}
 
         outer = QVBoxLayout(self)
