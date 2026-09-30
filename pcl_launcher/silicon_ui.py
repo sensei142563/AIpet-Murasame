@@ -125,6 +125,8 @@ def silicon_qss(accent="#4c8dff", text="#e6eaf2", text_dim="#a9b2c6",
     """现代 QSS：只覆盖“Qt 默认皮肤”那部分控件（业务自带内联样式的优先）"""
     r = int(radius if radius is not None else M.radius_ctrl)
     f = M.font
+    # 勾选用的对勾图（颜色随主题明暗变）——下面 QCheckBox::indicator:checked 引用它
+    _check_url = _check_png(_check_color()).replace(os.sep, "/")
     return f"""
 /* ===== 全局 ===== */
 * {{ font-family: "{f}", "Microsoft YaHei", sans-serif; }}
@@ -185,14 +187,20 @@ QComboBox QAbstractItemView::item:selected {{
 QComboBox QAbstractItemView::item:hover {{
     background: {surface2}; color: {text};
 }}
-/* ===== 勾选框（圆角小方框 + 强调色对勾底）===== */
+/* ===== 勾选框（圆角小方框 + 强调色描边 + 对勾）=====
+   原来是 checked 态直接用强调色填满的实心块：浅色主题上「选中/未选中」几乎一样，
+   而且对勾图写死白色 → 浅底上完全看不见（用户报「打勾的对比度太小，完全看不清」）。
+   现在：描边用强调色 + 对勾颜色按主题明暗自动选（深底白勾 / 浅底深勾）。 */
 QCheckBox, QRadioButton {{ spacing: 8px; }}
 QCheckBox::indicator, QRadioButton::indicator {{ width: 16px; height: 16px; }}
 QCheckBox::indicator {{
     border: 1px solid {border}; border-radius: 4px; background: rgba(255,255,255,0.06);
 }}
 QCheckBox::indicator:hover {{ border-color: {accent}; }}
-QCheckBox::indicator:checked {{ background: {accent}; border: 1px solid {accent}; }}
+QCheckBox::indicator:checked {{
+    border: 1.6px solid {accent}; background: rgba(255,255,255,0.10);
+    image: url({_check_url});
+}}
 QRadioButton::indicator {{ border-radius: 8px; border: 1px solid {border};
     background: rgba(255,255,255,0.06); }}
 QRadioButton::indicator:checked {{ background: {accent}; border: 4px solid {surface}; }}
@@ -602,6 +610,27 @@ QPushButton:hover {{ background: {'rgba(255,255,255,0.12)' if not on else a}; co
 _check_png_cache = {}
 
 
+def _is_dark_theme() -> bool:
+    """当前主题底色是不是深色（用 Color8 亮度判断，和 silicon_window 同一口径）"""
+    try:
+        from .colors import Color8
+        return Color8.lightness() <= 140
+    except Exception:
+        return True
+
+
+def _check_color() -> str:
+    """对勾颜色：深色主题白勾、浅色主题深勾。
+
+    真实案例：千恋万花 / 沫子的日常是浅色主题，这里原来写死 #ffffff →
+    勾选后只剩一圈浅描边、对勾看不见（用户：打勾对比度太小，完全看不清）。
+    """
+    try:
+        return "#ffffff" if _is_dark_theme() else "#2b3245"
+    except Exception:
+        return "#ffffff"
+
+
 def _check_png(color="#ffffff") -> str:
     """生成一张带透明背景的对勾 PNG（QSS 里用 image: url(...)）"""
     if color in _check_png_cache and os.path.exists(_check_png_cache[color]):
@@ -633,7 +662,7 @@ def _check_png(color="#ffffff") -> str:
 def enabled_check_qss(text_color="#e6eaf2", accent=None) -> str:
     """插件「启用」开关：未选中=空心圆角框，选中=强调色描边 + √ 号（不再用蓝色填充）"""
     acc = accent or accent_hex_static()
-    img = _check_png("#ffffff")
+    img = _check_png(_check_color())
     img_qss = f"image: url({img.replace(os.sep, '/')});" if img else ""
     return f"""
 QCheckBox {{ color: {text_color}; font-size: 13px; spacing: 8px; }}

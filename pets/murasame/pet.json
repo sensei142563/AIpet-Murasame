@@ -155,7 +155,7 @@
    "平静": 1.0
   },
   "long_speed": 1.06,
-  "default_emotion": "高兴"
+  "default_emotion": "平静"
  },
  "sticker": {
   "dir": "biaoqingbao/"

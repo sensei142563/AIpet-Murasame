@@ -77,6 +77,21 @@ def _path() -> str:
     return os.path.join(d, "care.json")
 
 
+# 合理性下限：本项目 2026 年才有；比这更早的 first_seen 一定是脏数据
+# （真实案例：按「角色包里最老文件」回填时挑到从压缩包导入、mtime 停在 2021-12-10 的
+#   资源文件 → first_seen=2021 年 → 陪伴天数算出 1756 天，被 max() 固化后再也回不去）
+_FLOOR = time.mktime((2026, 1, 1, 0, 0, 0, 0, 0, -1))
+
+
+def _plausible(ts) -> bool:
+    """这个时间戳像不像「真的第一次见到主人」：不许早于 _FLOOR，也不许是未来。"""
+    try:
+        v = float(ts)
+    except Exception:
+        return False
+    return _FLOOR <= v <= time.time() + 86400
+
+
 def _load() -> dict:
     try:
         with open(_path(), encoding="utf-8") as f:
@@ -104,6 +119,9 @@ def _touch_first_seen() -> float:
     比记忆文件靠谱 —— 记忆文件每次保存都会更新 mtime），这样"在一起第 N 天"从一开始就准。
     """
     d = _load()
+    # 已有的值也不盲信：不合理的（2021 年那种）直接丢掉重算
+    if not _plausible(d.get("first_seen")):
+        d.pop("first_seen", None)
     if not d.get("first_seen"):
         first = time.time()
         try:
@@ -132,6 +150,7 @@ def _touch_first_seen() -> float:
                             pass
                     if len(ts) > 3000:
                         break
+            ts = [t for t in ts if _plausible(t)]      # 过滤掉导入资源那种远古 mtime
             if ts:
                 first = min(min(ts), first)
         except Exception:
@@ -143,14 +162,23 @@ def _touch_first_seen() -> float:
 
 
 def companion_days() -> int:
-    """在一起第几天（第一次记录的那天算第 1 天）"""
+    """在一起第几天（第一次记录的那天算第 1 天）
+
+    ⚠ 别再写回 max(旧值, 新值)：旧值一旦被错算（例如 2021 年那种 first_seen），
+    max() 会让它永远下不来（用户看到的 1756 天就是这么来的）。现在每次由 first_seen
+    现算，只有 first_seen 不合理时才回填重算。
+    """
     try:
-        _touch_first_seen()
-        n = int((time.time() - _touch_first_seen()) // 86400) + 1
+        first = _touch_first_seen()
+        if not _plausible(first):
+            first = time.time()
+        n = int((time.time() - first) // 86400) + 1
+        n = max(1, min(n, 36500))          # 100 年上限：再离谱就当第 1 天
         d = _load()
-        d["days"] = max(int(d.get("days") or 1), n)
-        _save(d)
-        return max(1, int(d["days"]))
+        if int(d.get("days") or 0) != n:
+            d["days"] = n
+            _save(d)
+        return n
     except Exception:
         return 1
 

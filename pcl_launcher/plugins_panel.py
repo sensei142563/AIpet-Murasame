@@ -328,6 +328,12 @@ class PCLPluginSettingsDialog(SiliconDialog):
             if itype == "checkbox":
                 w = QCheckBox()
                 w.setChecked(_bool_of(cfg.get(key), bool(item.get("default", True))))
+                # 原来这里不套样式：退回全局那套实心色块，浅色主题上看不出勾没勾
+                # （用户报「是否打勾的对比度太小，完全看不清」）→ 统一用带对勾的那套
+                try:
+                    w.setStyleSheet(enabled_check_qss(Color1.name()))
+                except Exception:
+                    pass
                 row.addWidget(w)
             elif itype == "spin":
                 w = QSpinBox()

@@ -527,9 +527,18 @@ class Murasame(QLabel):
             WS_EX_LAYERED = 0x00080000
             ex = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
             if enabled:
+                # 第一次开启时把原始 ex-style 存下来，关掉时整份还回去 ——
+                # 原来只清 WS_EX_TRANSPARENT，会把我们加上去的 WS_EX_LAYERED 留在窗口上
+                if getattr(self, "_ex_style_before", None) is None:
+                    self._ex_style_before = ex
                 user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex | WS_EX_TRANSPARENT | WS_EX_LAYERED)
             else:
-                user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex & ~WS_EX_TRANSPARENT)
+                _before = getattr(self, "_ex_style_before", None)
+                if _before is not None:
+                    user32.SetWindowLongW(hwnd, GWL_EXSTYLE, _before)
+                    self._ex_style_before = None
+                else:
+                    user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex & ~WS_EX_TRANSPARENT)
             self._overlay_click_through = enabled
         except Exception as e:
             print(f"[AIpet] 设置文字层点击穿透失败: {e}")
@@ -899,6 +908,16 @@ class Murasame(QLabel):
 
         # ====== 进入 Live2D 模式 ======
         self._saved_portrait_info = self.portrait_history[-1] if self.portrait_history else None
+        # 记下 2D 时的窗口几何与字号缩放：_ensure_live2d_overlay() 会把本窗口撑成
+        # "与模型同位置同尺寸"（通常接近全屏）并重算字号，退出时必须原样恢复，
+        # 否则会留下一个全屏大小的透明文字层 —— 用户报「从 live2D 切回 2D 后桌宠
+        # 没显示，只留下一个不能交互的文本框」。
+        try:
+            self._saved_window_geo = (self.pos(), self.size())
+            self._saved_current_scale = float(self._current_scale)
+        except Exception:
+            self._saved_window_geo = None
+            self._saved_current_scale = None
         scr_idx = get_config("./config.json").get("screen_index", 0)
         self._live2d_widget.resize_to_screen(scr_idx)
         self._live2d_widget.move(self.pos())
@@ -923,6 +942,21 @@ class Murasame(QLabel):
         # 恢复点击穿透设置（回到 2D 模式，pet 窗口正常接收鼠标）
         self._set_overlay_click_through(False)
         self._overlay_visible = False
+        # ★ 先把窗口几何/字号恢复成 2D 的样子，再重画立绘：
+        #   Live2D 模式下本窗口被撑成模型那么大、文字按模型尺寸缩放；
+        #   不还原的话退出后就是一个全屏透明文字层（不能交互、也看不到立绘）。
+        try:
+            _geo = getattr(self, "_saved_window_geo", None)
+            if _geo:
+                self.move(_geo[0])
+                self.resize(_geo[1])
+            _sc = getattr(self, "_saved_current_scale", None)
+            if _sc:
+                self._current_scale = float(_sc)
+            self._update_text_scaling()
+            self._rewrap_current_text()
+        except Exception as _e:
+            print(f"[Live2D] 恢复 2D 窗口几何/字号失败: {_e}")
         # 恢复 pet 窗口和立绘
         self.show()
         try:
@@ -1928,6 +1962,18 @@ class Murasame(QLabel):
             # （用户报的"对话框不好点"）；没有换装素材的角色（例如诺瓦）右键菜单原本还是空的。
             act_input = menu.addAction("💬 输入对话（打字）")
             act_input.triggered.connect(self._trigger_input_mode)
+            # 🎭 形象切换：Live2D ↔ 2D。功能一直在（长按 Shift 2 秒 / 启动器按钮），
+            # 但菜单里没有入口（用户报「右键的更换为 live2D/2D 形象不见了」）。
+            # 回调由 main.py 挂在 pet 上，和 Shift 长按走同一个函数，行为一致。
+            _toggle_form = getattr(self, "toggle_live2d_form", None)
+            if callable(_toggle_form):
+                try:
+                    _in_l2d = bool(self.is_live2d_mode())
+                except Exception:
+                    _in_l2d = False
+                act_form = menu.addAction("🎭 换回 2D 立绘" if _in_l2d
+                                          else "🎭 换成 Live2D 形象")
+                act_form.triggered.connect(lambda checked=False: _toggle_form())
             menu.addSeparator()
             if cloths:
                 title = menu.addAction(f"👗 切换服装（{cur_set} 立绘 · 当前：{cur_name}）")

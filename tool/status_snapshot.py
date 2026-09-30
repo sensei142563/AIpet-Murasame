@@ -259,7 +259,7 @@ def section_memory() -> dict:
     cards.append(_card("今天的日记", v if v else "今天还没写日记%s" % _why(why), []))
     ex = _mod("experience")
     v, why = _call(ex, "summary_text")
-    cards.append(_card("任务经验（下次先查这个）", v if v else "还没有经验%s" % _why(why), [],
+    cards.append(_card("任务经验", v if v else "还没有经验%s" % _why(why), [],
                        error=bool(why)))
     return {"key": "memory", "title": "记忆", "tags": [], "cards": cards}
 

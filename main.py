@@ -453,6 +453,11 @@ if __name__ == "__main__":
                 pet._toggle_live2d_mode()
 
     _shift_hold_timer.timeout.connect(_on_shift_held)
+    # 右键菜单也用这个回调做「换成 Live2D / 2D 形象」（见 murasame_class._show_outfit_menu）
+    try:
+        pet.toggle_live2d_form = _on_shift_held
+    except Exception as _e:
+        print(f"[AIpet] 挂形象切换回调失败: {_e}")
 
     # 保存原始按键事件（避免递归）
     _orig_key_press = pet.keyPressEvent
