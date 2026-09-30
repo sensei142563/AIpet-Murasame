@@ -32,6 +32,9 @@ DEFAULT_LONG_AUDIO = os.path.join(BASE_DIR, "reference_voices", "long_chinese", 
 DEFAULT_LONG_TEXT = "能和老师在一起，我真的，好高兴！"
 
 
+_registry_warned = False        # 安全阀诊断只打一次（现场日志里它一次回复刷了 17 行）
+
+
 def _load_json(path, default=None):
     try:
         # 先用 utf-8-sig（自动去除 BOM），失败则用纯 utf-8
@@ -61,17 +64,41 @@ def load_pet_list() -> dict:
     每次加载时用各角色 pet.json 的最新 name/display_name/intro/avatar 刷新注册表条目。"""
     registry = _load_json(REGISTRY_JSON, None)
     if registry is None:
-        registry = scan_pets()
+        # 读失败先**重试一次**：2026-09-30 现场日志里这条路径被瞬时抖动触发过（主人桌宠
+        # 在跑、我同时在 git/测试里折腾同一个文件）→ 重试一次基本就能拿到。
+        import time as _t
+        for _ in range(2):
+            _t.sleep(0.05)
+            registry = _load_json(REGISTRY_JSON, None)
+            if registry is not None:
+                break
+    if registry is None:
+        scanned = scan_pets()
         # ⚠ 安全阀（2026-09-30 真丢过一次数据）：注册表**读失败**时这里会重扫并**覆盖**文件；
         #   万一那次扫描也恰好为空（目录抖动 / 一次性读取失败 / 并发写），主人的桌宠列表就被
         #   一个空清单覆盖掉了 —— 实测发生过：pets/pet_list.json 从
         #   [丛雨/诺瓦/夏目 + active=murasame] 变成 {"pets": [], "active": null}。
         #   所以：磁盘上文件还在、而扫描结果为空时，**绝不动盘**，只在内存里返回空。
-        if not (registry or {}).get("pets") and os.path.exists(REGISTRY_JSON):
-            print("[PetRegistry] ⚠ 注册表读取失败且扫描结果为空 → 保留磁盘上的原文件，"
-                  "不用空清单覆盖（想重建请删掉 pets/pet_list.json 再启动）")
+        if not (scanned or {}).get("pets") and os.path.exists(REGISTRY_JSON):
+            # ⚠ 这条诊断只报一次（现场日志里它一次回复刷了 17 行）：把"为什么失败"说清楚，
+            #   下次再出现就能直接定位（是目录不对、还是每个 pet.json 都读不出来）。
+            global _registry_warned
+            if not _registry_warned:
+                _registry_warned = True
+                _n_dirs = 0
+                try:
+                    _n_dirs = len(os.listdir(PETS_DIR)) if os.path.isdir(PETS_DIR) else -1
+                except Exception:
+                    _n_dirs = -2
+                print("[PetRegistry] ⚠ 注册表读取失败且扫描结果为空 → 保留磁盘上的原文件，"
+                      "不用空清单覆盖（想重建请删掉 pets/pet_list.json 再启动）\n"
+                      "            诊断：PETS_DIR=%s 存在=%s 子项=%s 文件=%s 大小=%s"
+                      % (PETS_DIR, os.path.isdir(PETS_DIR), _n_dirs, REGISTRY_JSON,
+                         (os.path.getsize(REGISTRY_JSON)
+                          if os.path.exists(REGISTRY_JSON) else -1)))
             return {"pets": [], "active": None}
-        _save_json(REGISTRY_JSON, registry)
+        _save_json(REGISTRY_JSON, scanned)
+        registry = scanned
     else:
         _sync_registry_from_pet_json(registry)
         _merge_scanned_pets(registry)

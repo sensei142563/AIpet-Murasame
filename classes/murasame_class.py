@@ -2270,6 +2270,13 @@ class Murasame(QLabel):
             except Exception:
                 pass
             self._display_set = new_set
+            # ⚠ 2026-09-30：**自动过渡**这里原来漏了同步 config.json 的 portrait ——
+            #   worker 建立绘提示词时读的是 config.portrait（见 Worker_class.current_portrait_type），
+            #   不同步就会出现「显示 a 套、提示词还写着 b 套」→ 模型永远按 b 套选层 →
+            #   每次回复都要走有损的跨套翻译 → 组合表情（如「驚きbベースe上目使いm」）翻不过去，
+            #   直接兜底成平脸 1292 = 用户看到的「这个表情没有」。
+            #   手动切换（_switch_portrait_type）和初始化那两处本来就调了，只有这条自动路径漏了。
+            self._sync_config_portrait(new_set)
             self.portrait_target = target
             self.first_portrait = self._first_portrait_for(new_set)
             print(f"[桌宠] 🧩 立绘类型切换 → {new_set} 套（透明过渡）")

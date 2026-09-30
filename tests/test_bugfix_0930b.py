@@ -581,6 +581,30 @@ except Exception as e:
     traceback.print_exc()
     check("注册表安全阀可测", False, "%s: %s" % (type(e).__name__, e))
 
+print("== 表情丢失的真根因：自动过渡后 config.portrait 必须与显示同套 ==")
+try:
+    import classes.murasame_class as MC5                              # noqa: E402
+    from classes.Worker_class import current_portrait_type as _cpt    # noqa: E402
+    _cfg_p = os.path.join(REPO, "config.json")
+    _orig_cfg = io.open(_cfg_p, encoding="utf-8").read()
+    try:
+        _pet5 = MC5.Murasame()
+        _other = "b" if _pet5._current_set() == "a" else "a"
+        _pet5._crossfade_to(_other)
+        _now = json.loads(io.open(_cfg_p, encoding="utf-8").read()).get("portrait")
+        check("★ 自动过渡切换后 config.portrait 跟着变（worker 提示词才会同套）",
+              str(_now) == str(_pet5._current_set()) == str(_cpt()),
+              "config=%s display=%s worker=%s" % (_now, _pet5._current_set(), _cpt()))
+        check("源码守卫：_crossfade_to 里调了 _sync_config_portrait",
+              "_sync_config_portrait(new_set)" in read("classes/murasame_class.py"))
+    finally:
+        io.open(_cfg_p, "w", encoding="utf-8").write(_orig_cfg)   # 字节级还原
+    check("config.json 已还原", io.open(_cfg_p, encoding="utf-8").read() == _orig_cfg)
+except Exception as e:
+    import traceback
+    traceback.print_exc()
+    check("自动过渡同步可测", False, "%s: %s" % (type(e).__name__, e))
+
 print()
 if FAILS:
     print("FAILED %d 项：%s" % (len(FAILS), "、".join(FAILS)))
