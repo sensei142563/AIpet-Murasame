@@ -799,7 +799,11 @@ class PCLSettingsPanel(QWidget):
         combo.setEditable(True)
         combo.addItems(options)
         combo.setCurrentText(str(default))
-        combo.setFixedWidth(int(200 * S))
+        # ⚠ 原来是 setFixedWidth(200*S)：而「deepseek-flash」在这种字体下实测就占 168px，
+        #   只剩 2px 余量 —— 换个字体/DPI 就被截断（用户 2026-09-30 报「设置页里 DeepSeek
+        #   的选项显示不全」）。改成按内容自适应：最长选项 + 下拉箭头都放得下。
+        combo.setMinimumWidth(int(200 * S))
+        combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         combo.setStyleSheet(f"""
             QComboBox {{ border: 1px solid {Gray5.name()}; padding: {int(4*S)}px;
                 font-size: {int(12*S)}px; border-radius: {int(4*S)}px;

@@ -59,6 +59,7 @@
  "status_page_enabled": "true",
  "startup_greeting_mode": "voice",
  "startup_greeting_voice": "",
+ "text_font_native": "false",
  "vision_source": "cloud",
  "vision_local_url": "",
  "vision_local_command": "",

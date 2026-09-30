@@ -35,6 +35,7 @@ def read(rel):
 
 
 print("== ⑧ 默认 2D：只有角色要求 / 没有 2D 立绘时才自动进 Live2D ==")
+from PyQt5.QtCore import Qt                # noqa: E402
 from PyQt5.QtWidgets import QApplication   # noqa: E402
 app = QApplication(sys.argv[:1])
 import classes.murasame_class as MC        # noqa: E402
@@ -159,6 +160,73 @@ try:
     _p.close()
 except Exception as e:
     check("状态页能构建并检查开关行", False, "%s: %s" % (type(e).__name__, e))
+
+print("== ③ 设置页模型下拉按内容自适应（不再固定 200px 被截断）==")
+_w_src = read("pcl_launcher/widgets.py")
+check("不再用 setFixedWidth 卡死下拉宽度",
+      "combo.setFixedWidth(int(200 * S))" not in _w_src)
+check("改用 setMinimumWidth + AdjustToContents",
+      "combo.setMinimumWidth(int(200 * S))" in _w_src
+      and "QComboBox.AdjustToContents" in _w_src)
+try:
+    import pcl_launcher.silicon_ui as SUI2      # noqa: E402
+    SUI2.install(app)
+    from pcl_launcher.widgets import PCLSettingsPanel   # noqa: E402
+    from PyQt5.QtWidgets import QComboBox               # noqa: E402
+    _panel = PCLSettingsPanel()
+    _panel.setAttribute(Qt.WA_DontShowOnScreen, True)
+    _panel.show()
+    app.processEvents()
+    _bad = []
+    for _c in _panel.findChildren(QComboBox):
+        _fm = _c.fontMetrics()
+        _need = max([_fm.horizontalAdvance(_c.itemText(i)) for i in range(_c.count())]
+                    + [_fm.horizontalAdvance(_c.currentText())] + [0])
+        if _need + 28 > _c.width():          # 留出内边距 + 下拉箭头
+            _bad.append((_c.currentText(), _c.width(), _need))
+    check("★ 每个下拉都放得下它最长的选项（含 deepseek-flash）", not _bad, str(_bad[:2]))
+    _panel.close()
+except Exception as e:
+    check("设置页能构建并检查下拉宽度", False, "%s: %s" % (type(e).__name__, e))
+
+print("== ④ 2D 立绘画布宽度：不再被小图层带偏 ==")
+from tool import portrait_geom as PG       # noqa: E402
+_w480 = PG.canvas_size_for("murasame", "b", 480)[0]
+_w900 = PG.canvas_size_for("murasame", "b", 900)[0]
+print("      canvas_size_for(b,480)=%d  (b,900)=%d（修前 1384 / 2596）" % (_w480, _w900))
+check("★ 画布宽度回到角色本体尺寸（≤700 / ≤1500）", _w480 <= 700 and _w900 <= 1500,
+      "%d / %d" % (_w480, _w900))
+check("同一套里稳定（连算两次一样）", PG.canvas_size_for("murasame", "b", 480)[0] == _w480)
+check("其它角色不受影响（没有索引时仍返回 0 → 原路径）",
+      PG.canvas_size_for("arona", "a", 900) == (0, 0))
+import classes.murasame_class as MC2       # noqa: E402
+_pet4 = MC2.Murasame()
+_pm4 = _pet4.pixmap()
+_img4 = _pm4.toImage()
+_op = _smp = 0
+for _x in range(0, _img4.width(), 5):
+    for _y in range(0, _img4.height(), 5):
+        _smp += 1
+        if _img4.pixelColor(_x, _y).alpha() > 200:
+            _op += 1
+_ratio = 100.0 * _op / max(1, _smp)
+check("★ 合成图里角色占比从 8.3%% 提到 >25%%（现在 %.1f%%）" % _ratio, _ratio > 25.0)
+check("画布是竖的（宽 < 高），不再是被撑宽的横条",
+      _pm4.width() < _pm4.height(), "%dx%d" % (_pm4.width(), _pm4.height()))
+
+print("== ⑤ 2D 文本框字号/位置回到 v1.16.1 口径 ==")
+_mc5 = read("classes/murasame_class.py")
+check("2D 字体按 v1.16.1 构造（QFont(字体名, 点数)）",
+      "self.text_font = QFont(self._font_family, max(8, int(scaled_font_size)))" in _mc5)
+check("留白在 2D 下就是 140×scale（20% 夹取只留给 Live2D）",
+      "self.text_x_offset = old_margin" in _mc5
+      and 'if getattr(self, "_live2d_mode", False):' in _mc5)
+check("想要新字体可以开 text_font_native（默认 false = 老样子）",
+      "text_font_native" in _mc5
+      and str(json.loads(read("config.example.json")).get("text_font_native")) == "false")
+check("★ text_x_offset = max(10, round(140×scale))（scale=%.3f）" % float(_pet4._current_scale),
+      int(_pet4.text_x_offset) == max(10, int(round(140 * float(_pet4._current_scale)))),
+      "实际 %s" % _pet4.text_x_offset)
 
 print()
 if FAILS:

@@ -2912,7 +2912,13 @@ class Murasame(QLabel):
         #    所以额外限一次「不超过窗口宽的 20%」（旧代码限的是 8%，等于把框放宽了，
         #    Live2D 下文本框因此比 1.16.1 宽一截）
         old_margin = max(10, int(round(self._base_text_x_offset * scale)))
-        self.text_x_offset = max(8, min(old_margin, max(10, int(round(self.width() * 0.20)))))
+        if getattr(self, "_live2d_mode", False):
+            # Live2D：窗口是整屏，再限一次「不超过窗口宽 20%」免得框被挤没
+            self.text_x_offset = max(8, min(old_margin, max(10, int(round(self.width() * 0.20)))))
+        else:
+            # 2D：完全按 v1.16.1（140 × scale）。那时窗口窄，硬套 20% 会把留白压小、
+            #     文本框整体左右偏移（用户 2026-09-30：「文本框位置…去看 1.16 甚至更早的版本」）
+            self.text_x_offset = old_margin
         # ② 文字区宽度（配了框的角色要用它算字号）
         try:
             area_w = max(60, int(self._text_rect().width()))
@@ -2938,15 +2944,32 @@ class Murasame(QLabel):
                 fscale_rel = (float(_live) if _live is not None
                               else float(getattr(self, "_text_font_scale_cfg", 1.0) or 1.0))
             scaled_font_size = max(8, int(round(self._base_font_size * scale * fscale_rel)))
-        # 用「像素字号 + 全提示 + 抗锯齿」：小字号下笔画更实，不会有糊边
-        _pt = max(6, int(round(scaled_font_size * 1.333)))     # pt → px（保持原有大小观感）
-        self.text_font = QFont(self._resolve_pet_font())
-        self.text_font.setPixelSize(_pt)
+        # 字体构造：**默认走 v1.16.1 的口径**（QFont(字体名, 点数)，交给系统兜底字体），
+        # 用户 2026-09-30 要求：「文本框位置还有文字大小之类的去看 1.16 甚至更之前的版本，
+        # 不知道什么时候开始这个字就不对了」—— 就是后来改成了"真加载思源黑体 + 像素字号"，
+        # 换字体后同样的点数看起来更粗更小。
+        #   · 想要现在的做法（真加载思源黑体 + 像素字号 + 全提示）：config 里
+        #     text_font_native = "true"
+        #   · 默认 false：与 v1.16.1 逐字一致
+        _native = False
         try:
-            self.text_font.setHintingPreference(QFont.PreferFullHinting)
-            self.text_font.setStyleStrategy(QFont.PreferAntialias)
+            from tool.config import as_bool as _ab_font, get_config as _gc_font
+            _native = _ab_font(_gc_font("./config.json").get("text_font_native", "false"), False)
         except Exception:
-            pass
+            _native = False
+        if _native:
+            # 用「像素字号 + 全提示 + 抗锯齿」：小字号下笔画更实，不会有糊边
+            _pt = max(6, int(round(scaled_font_size * 1.333)))     # pt → px（保持原有大小观感）
+            self.text_font = QFont(self._resolve_pet_font())
+            self.text_font.setPixelSize(_pt)
+            try:
+                self.text_font.setHintingPreference(QFont.PreferFullHinting)
+                self.text_font.setStyleStrategy(QFont.PreferAntialias)
+            except Exception:
+                pass
+        else:
+            self.text_font = QFont(self._font_family, max(8, int(scaled_font_size)))
+            _pt = max(6, int(round(scaled_font_size * 1.333)))
         self._font_px = _pt
 
         scaled_y = int(round(self._base_text_y_offset * scale))
