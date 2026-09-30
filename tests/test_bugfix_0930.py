@@ -394,6 +394,39 @@ try:
 finally:
     SW2._status_page_enabled = _orig_sp
 
+print("== ⑥b 状态页数字逐个核对：真的用真实数据 ==")
+print("   （查证：心情/关系来自 tool/state.py 的 state.json、想说/精力/无聊来自 tool/desire.py 的"
+      "desire.json，\n"
+      "     都是真的；但「上次说话」永远是「还没聊过」—— note_talk() 只在 chat.py 的 qwen3-lora"
+      " 分支里调过）")
+import tool.state as ST                            # noqa: E402
+
+_st_tmp = os.path.join(tempfile.mkdtemp(prefix="state_test_"), "state.json")
+_orig_st_path = ST._store_path
+ST._store_path = lambda: _st_tmp
+try:
+    check("隔离目录里一开始没有说话记录", ST.last_talk_ago() > 1e8,
+          "%.0f" % ST.last_talk_ago())
+    ST.note_talk()
+    check("★ note_talk() 之后 last_talk_ago() 立刻变小（这个口子是通的）",
+          ST.last_talk_ago() < 5, "%.2fs" % ST.last_talk_ago())
+    check("落盘里真有 last_talk",
+          "last_talk" in json.loads(io.open(_st_tmp, encoding="utf-8").read()))
+finally:
+    ST._store_path = _orig_st_path
+
+_mc_src = read("classes/murasame_class.py")
+_oreply = re.search(r"def on_reply.*?(?=\n    def )", _mc_src, re.S)
+check("★ on_reply（所有回复的汇聚点）里会记一次说话",
+      bool(_oreply) and "note_talk()" in _oreply.group(0))
+check("状态快照确实读这几个真实模块",
+      all(m in read("tool/status_snapshot.py") for m in ('_mod("desire")', '_mod("care")',
+                                                         '_mod("experience")', '"mood"',
+                                                         '"affinity"', '"last_talk_ago"')))
+_exp = json.loads(read("pets/murasame/memory/experience.json"))
+check("★ 主人的真实 memory 里没有测试残留（探针已隔离记忆目录）",
+      not [k for k in _exp if "测试" in str(k)], str(list(_exp)))
+
 print()
 if FAILS:
     print("FAILED %d 项：%s" % (len(FAILS), "、".join(FAILS)))

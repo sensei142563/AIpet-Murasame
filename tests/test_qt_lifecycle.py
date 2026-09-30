@@ -82,6 +82,15 @@ pidfile = os.path.join(tempfile.gettempdir(), "aipet_tests_agent_pid.txt")
 if os.path.exists(pidfile):
     os.remove(pidfile)
 
+# ⚠ 隔离记忆目录：这个探针会真的跑 AgentWorker（会写 experience/state/care），
+#   不隔离就会把「测试任务」写进主人的真实 memory（我自己踩过：experience.json 里
+#   多了一条 测试任务 fail=19）。
+import tempfile
+import pets.pet_registry as _pr
+_TMPMEM = tempfile.mkdtemp(prefix='aipet_test_mem_')
+_pr.get_memory_dir = lambda pet_id=None: _TMPMEM
+print('TMPMEM', _TMPMEM)
+
 import tool.agent_bridge as ab
 FAKE = [sys.executable, "-c",
         "import os,sys,time; open(sys.argv[1],'w').write(str(os.getpid())); time.sleep(30)",
@@ -127,6 +136,7 @@ print("SECOND_RETURNED", pet._run_agent_task("第二个任务"))
 _t = time.time()
 pet.stop_all_workers()
 print("STOPPED_IN", round(time.time() - _t, 2))
+print("TMPMEM_FILES", len(os.listdir(_TMPMEM)))
 print("REF_CLEARED", getattr(pet, "_agent_worker", None) is None)
 time.sleep(0.6)
 pid2 = int(open(pidfile).read().strip()) if os.path.exists(pidfile) else -1
@@ -160,6 +170,9 @@ m2 = re.search(r"STOPPED_IN ([0-9.]+)", outp)
 check("stop_all_workers 能在 3 秒内停掉 agent（改前会等满 3 秒）",
       bool(m2) and float(m2.group(1)) < 3.0, m2.group(0) if m2 else "没打印")
 check("停完引用清空", "REF_CLEARED True" in outp)
+_m3 = re.search(r"TMPMEM_FILES (\d+)", outp)
+check("★ 探针把记忆写进了临时目录（不再污染主人的真实 memory）",
+      bool(_m3) and int(_m3.group(1)) > 0, _m3.group(0) if _m3 else "没打印")
 check("★ 收尾后外部 agent 进程也没了", "AGENT2_ALIVE_AFTER_STOP False" in outp)
 check("没有 QThread 告警/abort", "QThread: Destroyed" not in outp and "Aborted" not in outp)
 

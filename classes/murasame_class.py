@@ -1718,6 +1718,17 @@ class Murasame(QLabel):
         except Exception as _e:
             print(f"[桌宠] ⚠ 空回复判定失败: {_e}")
 
+        # 长期状态：记一次「跟主人说过话」（「开口时机」要看沉默了多久）。
+        # ⚠ 原来只有 tool/chat.py 里 qwen3-lora 那一个模型分支会调 note_talk()，
+        #   走别的模型（deepseek / 云端 / qwen 其它档位）时永远不记 →
+        #   状态页一直显示「上次说话：还没聊过」（用户看到的就是这个）。
+        #   这里放在**所有回复都会经过**的汇聚点，任何模型 / 任何入口都算数。
+        try:
+            from tool import state as _st_talk2
+            _st_talk2.note_talk()
+        except Exception:
+            pass
+
         # ⚠ 每轮回复一个「代号」：新回复一出现，旧回复剩下的句子链立刻作废。
         #   以前旧链里的 QTimer 回调会继续 show_text，把新回复（比如第二次摸头/摸身体
         #   触发的回复）的文字盖掉 → 看起来像"只有第一次有反应，后面就不回复了"。
