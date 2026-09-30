@@ -1111,40 +1111,53 @@ class Murasame(QLabel):
                 import requests
                 import base64 as b64
                 cfg = get_config("./config.json")
-                # 视觉模型统一走 longtext.model_config（vision_model_name + 对应 API Key）
-                from longtext.model_config import get_vision_model_config
-                vcfg = get_vision_model_config()
-                if not vcfg:
-                    return
-
-                # AI 视觉描述
-                payload = {
-                    "messages": [{
-                        "role": "user",
-                        "content": [
-                            {"type": "image_url", "image_url": {"url": url}},
-                            {"type": "text", "text": "请用简短的中文描述这张照片中的场景、人物和主要活动，不超过50个字。"},
-                        ]
-                    }],
-                    "model": vcfg["model"],
-                    "max_tokens": 256,
-                    "stream": False,
-                }
-                headers = {
-                    "Accept": "application/json",
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {vcfg['api_key']}",
-                }
-                cloud_api_url = (cfg.get("local_api") or {}).get(
-            "cloud_api", "http://localhost:28565/cloudAPI")
-                resp = requests.post(cloud_api_url,
-                                     json={"payload": payload, "headers": headers}, timeout=30)
-                data = resp.json()
-                desc = data["choices"][0]["message"]["content"].strip() if "choices" in data else ""
-                if desc:
-                    print(f"[AIpet][camera] 常开摄像头识别结果: {desc}")
+                # 视觉来源：cloud（默认，走下面这条云端链路）/ local（用户自己接的本地模型，
+                # 接法与契约见 tool/vision_local.py —— 本项目不自带本地视觉模型）
+                from tool import vision_local as _vl
+                desc = ""
+                if _vl.source() == "local":
+                    _r = _vl.describe(url)
+                    desc = (_r.get("text") or "").strip()
+                    if not desc:
+                        print("[AIpet][camera] 本地视觉没给出描述：%s" % (_r.get("error") or "未知原因"))
+                        return
+                    print(f"[AIpet][camera] 本地视觉识别结果: {desc}")
                 else:
-                    return
+                    # 视觉模型统一走 longtext.model_config（vision_model_name + 对应 API Key）
+                    from longtext.model_config import get_vision_model_config
+                    vcfg = get_vision_model_config()
+                    if not vcfg:
+                        # ⚠ 以前这里是静默 return：摄像头每轮都白跑，用户不知道为什么"她不看"
+                        print("[AIpet][camera] 没配视觉模型（vision_model_name / APIKEY）→ 跳过这一轮")
+                        return
+
+                    # AI 视觉描述
+                    payload = {
+                        "messages": [{
+                            "role": "user",
+                            "content": [
+                                {"type": "image_url", "image_url": {"url": url}},
+                                {"type": "text", "text": "请用简短的中文描述这张照片中的场景、人物和主要活动，不超过50个字。"},
+                            ]
+                        }],
+                        "model": vcfg["model"],
+                        "max_tokens": 256,
+                        "stream": False,
+                    }
+                    headers = {
+                        "Accept": "application/json",
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {vcfg['api_key']}",
+                    }
+                    cloud_api_url = (cfg.get("local_api") or {}).get(
+                        "cloud_api", "http://localhost:28565/cloudAPI")
+                    resp = requests.post(cloud_api_url,
+                                         json={"payload": payload, "headers": headers}, timeout=30)
+                    data = resp.json()
+                    desc = data["choices"][0]["message"]["content"].strip() if "choices" in data else ""
+                    if not desc:
+                        return
+                    print(f"[AIpet][camera] 常开摄像头识别结果: {desc}")
 
                 # 人脸识别
                 face_result = ""

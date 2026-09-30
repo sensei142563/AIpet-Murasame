@@ -685,7 +685,7 @@ class PCLPluginsPanel(QScrollArea):
                 border: 1px solid {Color5.name()}; padding: {int(4*S)}px {int(8*S)}px;
                 font-size: {int(11*S)}px; border-radius: {int(4*S)}px;
                 font-family: 'Microsoft YaHei'; }}
-            QPushButton:hover {{ background: {Color4.name()}; color: white; }}
+            QPushButton:hover {{ background: {fill_for_text(Color4).name()}; color: white; }}
         """
         for b in (btn_cfg, btn_open):
             b.setStyleSheet(small_style)

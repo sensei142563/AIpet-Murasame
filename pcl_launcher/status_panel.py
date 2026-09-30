@@ -23,7 +23,7 @@ from PyQt5.QtWidgets import (QApplication, QFrame, QGroupBox, QHBoxLayout, QLabe
                              QPushButton, QScrollArea, QSizePolicy, QTabWidget,
                              QVBoxLayout, QWidget)
 
-from .colors import accent_text, ok_text, warn_text
+from .colors import accent_text, ok_text, warn_text, S
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -86,10 +86,15 @@ def _switches() -> list:
     except Exception:
         pass
     try:
-        from longtext.model_config import get_vision_model_config
-        v = get_vision_model_config()
-        out.append(("识图用的模型", (v or {}).get("model") or "**没配 Key**（识图会失败）",
-                    "启动器「设置」页"))
+        from tool import vision_local as _vl
+        if _vl.source() == "local":
+            out.append(("视觉来源", "本地（自己接的）" if _vl.available() else "本地（还没接）",
+                        _vl.status_text()))
+        else:
+            from longtext.model_config import get_vision_model_config
+            v = get_vision_model_config()
+            out.append(("识图用的模型", (v or {}).get("model") or "**没配 Key**（识图会失败）",
+                        "启动器「设置」页（想离线可把「视觉来源」切成本地）"))
     except Exception:
         pass
     return out
@@ -192,7 +197,7 @@ class PCLStatusPanel(QWidget):
             lb = QLabel(str(txt))
             lb.setObjectName("statusTag")
             color = warn_text().name() if style == "red" else accent_text().name()
-            lb.setStyleSheet("color: %s; font-size: 12px;" % color)
+            lb.setStyleSheet("color: %s; font-size: %dpx;" % (color, int(12 * S)))
             row.addWidget(lb)
         row.addStretch(1)
         return box
@@ -213,8 +218,8 @@ class PCLStatusPanel(QWidget):
             else:
                 mark = str(val)
                 color = accent_text().name()
-            lb.setText("%s　<b>%s</b>　<span style='font-size:11px'>（%s）</span>"
-                       % (mark, name, where))
+            lb.setText("%s　<b>%s</b>　<span style='font-size:%dpx'>（%s）</span>"
+                       % (mark, name, int(11 * S), where))
             lb.setStyleSheet("color: %s;" % color)
             self.lay_sw.addWidget(lb)
 
@@ -236,7 +241,7 @@ class PCLStatusPanel(QWidget):
                 txt = t[0] if isinstance(t, (list, tuple)) else t
                 lb = QLabel(str(txt))
                 lb.setObjectName("statusTag")
-                lb.setStyleSheet("color: %s; font-size: 11px;" % accent_text().name())
+                lb.setStyleSheet("color: %s; font-size: %dpx;" % (accent_text().name(), int(11 * S)))
                 row.addWidget(lb)
             row.addStretch(1)
             lay.addLayout(row)

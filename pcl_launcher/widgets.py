@@ -322,6 +322,17 @@ class PCLSettingsPanel(QWidget):
             hint="可编辑：QQ识图/摄像头/微信识图统一使用\n"
                  "（DeepSeek 现在对话与看图是同一个模型；旧 deepseek-v4-flash-vision-exp 已下线）"
         )
+        # 本地视觉模型：本项目**不自带**，只留接口给用户自己接（契约见 tool/vision_local.py）
+        self._add_choice("vision_source", "视觉来源", ["local", "cloud"], "cloud",
+                         display={"local": "本地（自己接）", "cloud": "云端（默认）"},
+                         hint="云端：用上面的「视觉识别模型名」+ API Key，开箱可用。\n"
+                              "本地：用你自己接的本地视觉模型（离线、不上云）——\n"
+                              "选了本地就要在下面填「本地视觉服务地址」或「本地视觉命令」；\n"
+                              "两个都留空会明确提示（不会静默不识别）。接口约定见 tool/vision_local.py。")
+        self._add_text_input("vision_local_url", "本地视觉服务地址", "",
+                             placeholder="http://127.0.0.1:11434/describe（留空 = 不用 HTTP）")
+        self._add_text_input("vision_local_command", "本地视觉命令", "",
+                             placeholder="例如 D:\\tools\\describe.exe（留空 = 不用命令）")
         self._add_slider("screen_type", "屏幕识别", ["false", "true"], "false")
         self._add_slider("voice_trigger", "语音识别", ["false", "true"], "false")
 
@@ -433,7 +444,7 @@ class PCLSettingsPanel(QWidget):
                 border: 1px solid {Color5.name()}; padding: {int(7*S)}px {int(14*S)}px;
                 font-size: {int(12*S)}px; border-radius: {btn_radius()}px;
                 font-family: 'Microsoft YaHei'; }}
-            QPushButton:hover {{ background: {Color4.name()}; color: white; }}
+            QPushButton:hover {{ background: {fill_for_text(Color4).name()}; color: white; }}
         """
         btn_view_log = QPushButton("  📖 查看日志")
         btn_export_log = QPushButton("  📤 导出日志")
@@ -469,7 +480,7 @@ class PCLSettingsPanel(QWidget):
                 border: 1px solid {Color5.name()}; padding: {int(6*S)}px {int(14*S)}px;
                 font-size: {int(12*S)}px; border-radius: {btn_radius()}px;
                 font-family: 'Microsoft YaHei'; }}
-            QPushButton:hover {{ background: {Color4.name()}; color: white; }}
+            QPushButton:hover {{ background: {fill_for_text(Color4).name()}; color: white; }}
         """)
         btn_restart.clicked.connect(self._restart_pet)
         bottom_row = QHBoxLayout()
@@ -823,6 +834,9 @@ class PCLSettingsPanel(QWidget):
             self._set_slider("longtext_model", cfg.get("longtext_model", "deepseek"))
             self._set_if("longtext_model_name", cfg.get("longtext_model_name", "deepseek-flash"))
             self._set_if("vision_model_name", cfg.get("vision_model_name", "deepseek-flash"))
+            self._set_slider("vision_source", cfg.get("vision_source", "cloud"))
+            self._set_if("vision_local_url", cfg.get("vision_local_url", ""))
+            self._set_if("vision_local_command", cfg.get("vision_local_command", ""))
             self._set_slider("reasoning_level", cfg.get("reasoning_level", "off"))
             self._set_if("qq_owner_id", cfg.get("qq_owner_id", ""))
             # 额外主人白名单：数组/字符串 → 逗号分隔文本
@@ -1093,10 +1107,10 @@ class PCLFaceManager(QScrollArea):
             btn_del = QPushButton("删除")
             btn_del.setFixedWidth(int(60 * S))
             btn_del.setStyleSheet(f"""
-                QPushButton {{ background: #e03030; color: white; border: none;
+                QPushButton {{ background: {fill_for_text(RedDark).name()}; color: white; border: none;
                     padding: {int(4*S)}px {int(8*S)}px; font-size: {int(11*S)}px;
                     border-radius: {int(4*S)}px; }}
-                QPushButton:hover {{ background: #f06060; }}
+                QPushButton:hover {{ background: {fill_for_text(RedLight).name()}; }}
             """)
             file_path = item.get("file", "")
             btn_del.clicked.connect(lambda checked, fp=file_path: self._delete_master(fp))
@@ -1121,10 +1135,10 @@ class PCLFaceManager(QScrollArea):
             btn_del = QPushButton("删除")
             btn_del.setFixedWidth(int(60 * S))
             btn_del.setStyleSheet(f"""
-                QPushButton {{ background: #e03030; color: white; border: none;
+                QPushButton {{ background: {fill_for_text(RedDark).name()}; color: white; border: none;
                     padding: {int(4*S)}px {int(8*S)}px; font-size: {int(11*S)}px;
                     border-radius: {int(4*S)}px; }}
-                QPushButton:hover {{ background: #f06060; }}
+                QPushButton:hover {{ background: {fill_for_text(RedLight).name()}; }}
             """)
             btn_del.clicked.connect(lambda checked, n=name: self._delete_other(n))
             row.addWidget(btn_del)
@@ -1812,9 +1826,9 @@ class PCLPetManager(QScrollArea):
             # 而且用**主题强调色**（和启动器里其它强调色元素一致），不再固定用绿。
             try:
                 from .colors import accent_hex as _accent_hex
-                _badge_bg = _accent_hex()
+                _badge_bg = fill_for_text(QColor(_accent_hex())).name()   # 白字要够对比
             except Exception:
-                _badge_bg = GreenDark.name()
+                _badge_bg = fill_for_text(GreenDark).name()
             badge.setStyleSheet(f"""
                 background: {_badge_bg}; color: white; border: none;
                 padding: {int(2*S)}px {int(8*S)}px; font-size: {int(10*S)}px;
@@ -2364,7 +2378,7 @@ class PCLLive2DTunePanel(QWidget):
                 QPushButton {{ background: {Color6.name()}; color: {Color1.name()};
                     border: 1px solid {Color5.name()}; padding: {int(8*S)}px {int(14*S)}px;
                     font-size: {int(12*S)}px; font-family: 'Microsoft YaHei'; border-radius: {btn_radius()}px; }}
-                QPushButton:hover {{ background: {Color4.name()}; color: white; border: 1px solid {Color3.name()}; }}
+                QPushButton:hover {{ background: {fill_for_text(Color4).name()}; color: white; border: 1px solid {Color3.name()}; }}
             """)
         btn_live.clicked.connect(self._load_from_live)
         btn_save.clicked.connect(self._save)
@@ -2629,9 +2643,11 @@ def show_save_toast(ok: bool, text: str = ""):
         lab.setAttribute(Qt.WA_TranslucentBackground)
         from PyQt5.QtGui import QColor
         from PyQt5.QtWidgets import QGraphicsDropShadowEffect
-        bg = "#2e7d32" if ok else "#c62828"   # 不透明深底，白字更清晰
+        bg = (fill_for_text(GreenDark).name() if ok else fill_for_text(RedDark).name())
+        # ↑ 深底 + 白字：走主题色并**用 fill_for_text 调过对比度**
+        #（原来写死 #2e7d32 / #c62828，换主题不跟随，白字对比度也没保证）
         lab.setStyleSheet(f"background:{bg};color:#ffffff;border-radius:12px;"
-                          "padding:14px 32px;font-size:18px;font-weight:bold;"
+                          f"padding:14px 32px;font-size:{int(18 * S)}px;font-weight:bold;"
                           "font-family:'Microsoft YaHei';")
         lab.setText(text or ("✅ 保存成功" if ok else "❌ 保存失败"))
         # 黑色投影，模拟描边，白字在任何背景下都清楚

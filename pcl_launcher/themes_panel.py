@@ -432,7 +432,7 @@ class PCLThemesPanel(QScrollArea):
         acc = THEME_COLORS.get(str(ACCENT_ID), {}).get("title_start", "#2f6fd0")
         btn_reset.setStyleSheet(f"""
             QPushButton {{ background: {acc}; color: white; border: none; border-radius: 8px;
-                padding: 6px 14px; font-size: 12px; }}
+                padding: 6px 14px; font-size: {int(12 * S)}px; }}
             QPushButton:hover {{ background: {QColor(acc).lighter(120).name()}; }}""")
 
         def _reset():
