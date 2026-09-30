@@ -56,6 +56,7 @@
  "longtext_model": "deepseek",
  "longtext_model_name": "deepseek-flash",
  "vision_model_name": "deepseek-flash",
+ "status_page_enabled": "true",
  "vision_source": "cloud",
  "vision_local_url": "",
  "vision_local_command": "",

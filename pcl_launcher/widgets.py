@@ -434,6 +434,11 @@ class PCLSettingsPanel(QWidget):
 
         # ===== 「其他」分类：更新日志（查看 / 导出 / 打开目录）=====
         self._open_box(("all", "other"))
+        # 状态页可关（用户："这个「状态」无法「不启用」这一点不好"）——
+        # 关掉后左侧栏不出现「状态」，桌宠右键菜单里的「🪟 她的状态」也一起收起来
+        self._add_slider("status_page_enabled", "「状态」页", ["false", "true"], "true",
+                         hint="关掉后左侧栏不再出现「状态」页，桌宠右键菜单里"
+                              "「🪟 她的状态」也不再显示。想看的时候打开即可。")
         log_label = QLabel("  📜 更新日志")
         log_label.setFont(QFont("Microsoft YaHei", int(13 * S), QFont.Bold))
         log_label.setStyleSheet(f"color: {Color1.name()}; margin-top: {int(16*S)}px;")
@@ -846,6 +851,8 @@ class PCLSettingsPanel(QWidget):
             else:
                 self._set_if("qq_master_ids_text", str(_masters_raw))
             self._set_slider("qq_enabled", cfg.get("qq_enabled", "false"))
+            self._set_slider("status_page_enabled",
+                             cfg.get("status_page_enabled", "true"))
             self._set_slider("qq_send_sticker", cfg.get("qq_send_sticker", "true"))
             self._set_slider("qq_send_voice", cfg.get("qq_send_voice", "false"))
             self._set_slider("qq_vision_enabled", cfg.get("qq_vision_enabled", "true"))

@@ -117,6 +117,19 @@ def _app_base_dir() -> str:
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+def _status_page_enabled() -> bool:
+    """「状态」页/窗口是否启用（config.json 的 status_page_enabled，默认开）。
+
+    用户报："这个「状态」无法「不启用」这一点不好，也应该做成可以选择是否开启的"。
+    """
+    try:
+        from tool.config import as_bool as _ab, get_config as _gc
+        return _ab(_gc(os.path.join(_app_base_dir(), "config.json"))
+                    .get("status_page_enabled"), True)
+    except Exception:
+        return True
+
+
 def _ensure_src_on_path():
     """把程序目录加入 sys.path（冻结版兜底）。
 
@@ -1279,6 +1292,9 @@ class SiliconLauncher(QWidget):
 
         self.nav_btns = {}
         for key, icon, title, sub in NAV:
+            # 「状态」页可以在设置里关掉（status_page_enabled=false）→ 侧栏就不建这一项
+            if key == "status" and not _status_page_enabled():
+                continue
             # 主题图标键：总览复用「模型」图标
             b = NavRailButton(icon, title, sub, icon_key=("model" if key == "home" else key))
             b.clicked.connect(lambda _=False, k=key: self._goto(k))
@@ -2077,8 +2093,10 @@ class SiliconLauncher(QWidget):
         # 之后点导航就是秒开（以前第一次点插件目录会卡一下 = 现建页面）
         if not getattr(self, "_prewarm_started", False):
             self._prewarm_started = True
-            self._prewarm_queue = ["plugins", "pets", "status", "memory", "settings", "prompt",
-                                   "themes"]
+            _q = ["plugins", "pets", "status", "memory", "settings", "prompt", "themes"]
+            if not _status_page_enabled():
+                _q = [k for k in _q if k != "status"]      # 关掉了就别预热它
+            self._prewarm_queue = _q
             QTimer.singleShot(1500, self._prewarm_next)
 
     def _prewarm_next(self):

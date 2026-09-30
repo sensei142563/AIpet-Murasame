@@ -357,6 +357,43 @@ try:
 except Exception as e:
     check("状态页能构建并检查卡片底色", False, "%s: %s" % (type(e).__name__, e))
 
+print("== ③ 「状态」页可以被关掉（status_page_enabled，默认开）==")
+print("   （用户：「这个「状态」无法「不启用」这一点不好，也应该做成可以选择是否开启的」）")
+import pcl_launcher.silicon_window as SW2            # noqa: E402
+
+check("示例配置里有 status_page_enabled 且默认 true",
+      str(json.loads(read("config.example.json")).get("status_page_enabled")).lower() == "true")
+check("设置页有这个开关（且能被载入）",
+      '"status_page_enabled", "「状态」页"' in read("pcl_launcher/widgets.py")
+      and '_set_slider("status_page_enabled"' in read("pcl_launcher/widgets.py"))
+check("右键菜单里的「她的状态」受同一个开关管",
+      "status_page_enabled" in read("classes/murasame_class.py"))
+
+_orig_sp = SW2._status_page_enabled
+try:
+    SW2._status_page_enabled = lambda: False
+    _w1 = SW2.SiliconLauncher()
+    _w1.setAttribute(Qt.WA_DontShowOnScreen, True)
+    _w1.show()
+    app.processEvents()
+    check("★ 关掉后侧栏不再有「状态」项",
+          "status" not in _w1.nav_btns, str(sorted(_w1.nav_btns)))
+    check("关掉后预热队列里也没有 status",
+          "status" not in getattr(_w1, "_prewarm_queue", []),
+          str(getattr(_w1, "_prewarm_queue", None)))
+    _w1.close()
+
+    SW2._status_page_enabled = lambda: True
+    _w2 = SW2.SiliconLauncher()
+    _w2.setAttribute(Qt.WA_DontShowOnScreen, True)
+    _w2.show()
+    app.processEvents()
+    check("★ 打开时侧栏有「状态」项（默认不影响老用户）", "status" in _w2.nav_btns,
+          str(sorted(_w2.nav_btns)))
+    _w2.close()
+finally:
+    SW2._status_page_enabled = _orig_sp
+
 print()
 if FAILS:
     print("FAILED %d 项：%s" % (len(FAILS), "、".join(FAILS)))

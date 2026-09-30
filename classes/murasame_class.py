@@ -2005,8 +2005,15 @@ class Murasame(QLabel):
                 _act_l.triggered.connect(self._toggle_learn)
                 _act_seen = menu.addAction("📔 看看她学了什么")
                 _act_seen.triggered.connect(self._show_learned)
-                _act_win = menu.addAction("🪟 她的状态（一页看完）")
-                _act_win.triggered.connect(self._show_status_window)
+                # 同一个开关管两处：设置里关掉「状态」后，右键菜单也不再出现这个入口
+                try:
+                    from tool.config import as_bool as _ab2, get_config as _gc2
+                    _show_st = _ab2(_gc2("./config.json").get("status_page_enabled"), True)
+                except Exception:
+                    _show_st = True
+                if _show_st:
+                    _act_win = menu.addAction("🪟 她的状态（一页看完）")
+                    _act_win.triggered.connect(self._show_status_window)
             except Exception as _e:
                 print(f"[桌宠] ⚠ 学习菜单失败: {_e}")
             # 插件：总开关 + 清单（清单只读，把"没加载起来"的原因也写在条目上）
