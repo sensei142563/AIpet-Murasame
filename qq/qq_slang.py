@@ -97,7 +97,14 @@ def _search_bing(term: str) -> str:
         )
         if resp.status_code != 200:
             return None
-        html = resp.text
+        # ⚠ 2026-09-30：原来直接 `resp.text` —— requests 按响应头猜编码，必应的中文页
+        #   会被猜成 Latin-1 → 查回来的梗解释整段乱码。统一走 qq_search.decode_response
+        #   （声明编码 → meta charset → UTF-8 → apparent），拿不到就退回原来的 resp.text。
+        try:
+            from qq.qq_search import decode_response as _dec
+            html = _dec(resp)
+        except Exception:
+            html = resp.text
         # 第一条搜索结果：<li class="b_algo"> ... <h2><a>标题</a></h2> ... <p>摘要</p>
         m = re.search(r'<li class="b_algo"[\s\S]*?<h2[^>]*><a[^>]*>([\s\S]*?)</a></h2>'
                       r'[\s\S]*?(?:<p[^>]*>([\s\S]*?)</p>)?', html)

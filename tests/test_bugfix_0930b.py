@@ -411,6 +411,35 @@ check("示例配置里也有这 6 个渠道键",
           ("learn_search_qq", "learn_search_wx", "learn_search_pet",
            "learn_slang_qq", "learn_slang_wx", "learn_slang_pet")))
 
+print("== ④b 联网结果的编码（冒烟时发现整段乱码）==")
+try:
+    from qq.qq_search import decode_response, _clean   # noqa: E402
+
+    class _Resp:
+        def __init__(self, body: bytes, enc="ISO-8859-1", app="ISO-8859-1"):
+            self.content = body
+            self.encoding = enc
+            self.apparent_encoding = app
+            self.text = body.decode(enc, "replace")
+
+    _cn = "yyds（网络流行语）_百度百科"
+    check("★ UTF-8 页面被误判成 Latin-1 时也要解对（原来整段乱码）",
+          decode_response(_Resp(_cn.encode("utf-8"))) == _cn)
+    _meta = '<meta charset="utf-8">中文测试'
+    check("正文 <meta charset> 生效",
+          decode_response(_Resp(_meta.encode("utf-8"))) == _meta)
+    check("声明编码正常时不乱动",
+          decode_response(_Resp("纯ASCII".encode("utf-8"), enc="utf-8")) == "纯ASCII")
+    # &#0183; 是十进制 183 → 中点「·」；&ensp; → 空格；&amp; → &（实测结果）
+    check("★ HTML 实体被还原（&ensp;/&#0183; 不再原样喂给模型）",
+          _clean("a&ensp;&#0183;&ensp;b &amp; c") == "a · b & c",
+          repr(_clean("a&ensp;&#0183;&ensp;b &amp; c")))
+    check("两个联网模块都用同一套解码",
+          "decode_response(r)" in read("qq/qq_search.py")
+          and "decode_response as _dec" in read("qq/qq_slang.py"))
+except Exception as e:
+    check("编码工具可用", False, "%s: %s" % (type(e).__name__, e))
+
 print()
 if FAILS:
     print("FAILED %d 项：%s" % (len(FAILS), "、".join(FAILS)))

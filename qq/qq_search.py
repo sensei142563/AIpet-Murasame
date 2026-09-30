@@ -26,6 +26,55 @@ _TIMEOUT = 8
 _session = requests.Session()
 
 
+def decode_response(r) -> str:
+    """把 requests 的响应解成文本：**优先声明/正文里的编码，其次 UTF-8**，最后才用 apparent_encoding。
+
+    ⚠ 2026-09-30 冒烟时发现（用户要求"三方共用联网学习"后第一次真跑）：
+    `r.encoding = r.apparent_encoding or "utf-8"` 会把百度/必应这类 **UTF-8 中文页面**
+    误判成 Latin-1/Windows-1252 → 查回来的资料整段乱码：
+        yyds（网络流行语）_百度百科  →  yydsï¼ˆç½‘ç»œæµ�è¡Œè¯­ï¼‰_ç™¾åº¦ç™¾ç§‘
+    中文站点绝大多数是 UTF-8，所以先按"声明编码 → meta charset → UTF-8 → apparent"的顺序试。
+    """
+    raw = getattr(r, "content", b"") or b""
+    if not raw:
+        try:
+            return r.text or ""
+        except Exception:
+            return ""
+    # 1) headers/requests 推断出的编码（可疑值跳过）
+    try:
+        decl = (getattr(r, "encoding", "") or "").strip().lower()
+    except Exception:
+        decl = ""
+    if decl and decl not in ("iso-8859-1", "latin-1", "latin1", "windows-1252",
+                             "cp1252", "ascii", "gb2312", "gbk"):
+        try:
+            return raw.decode(decl, errors="replace")
+        except Exception:
+            pass
+    # 2) 正文 <meta charset>
+    m = re.search(rb'charset=["\']?\s*([\w\-]+)', raw[:4096].lower())
+    if m:
+        try:
+            enc = m.group(1).decode("ascii", "ignore").strip()
+            if enc and enc not in ("iso-8859-1", "windows-1252", "ascii"):
+                return raw.decode(enc, errors="replace")
+        except Exception:
+            pass
+    # 3) UTF-8 优先（没有替换字符就算成功）
+    try:
+        txt = raw.decode("utf-8")
+        if "\ufffd" not in txt:
+            return txt
+    except Exception:
+        pass
+    # 4) 最后才信 apparent_encoding
+    try:
+        return raw.decode(getattr(r, "apparent_encoding", None) or "utf-8", errors="replace")
+    except Exception:
+        return raw.decode("utf-8", errors="replace")
+
+
 def _get(url, timeout=_TIMEOUT, headers=None, referer=None):
     try:
         h = dict(_UA)
@@ -34,13 +83,22 @@ def _get(url, timeout=_TIMEOUT, headers=None, referer=None):
         if referer:
             h["Referer"] = referer
         r = _session.get(url, headers=h, timeout=timeout)
-        r.encoding = r.apparent_encoding or "utf-8"
         return r
     except Exception:
         return None
 
 
 def _clean(s):
+    """去标签 + 还原 HTML 实体 + 压空白。
+
+    ⚠ 2026-09-30：原来只去标签，必应摘要里的 `&ensp;&#0183;&ensp;` 会原样喂给模型
+    （同一批冒烟发现）→ 这里补一次 html.unescape。
+    """
+    try:
+        import html as _h
+        s = _h.unescape(s or "")
+    except Exception:
+        pass
     s = re.sub(r"<[^>]+>", " ", s or "")
     return re.sub(r"\s+", " ", s).strip()
 
@@ -54,7 +112,7 @@ def search_web(query, num=3):
         r = _get(url, headers={"Referer": "https://cn.bing.com/"})
         if not r:
             return out
-        h = r.text
+        h = decode_response(r)
         blocks = re.findall(r'<li class="b_algo".*?(?=<li class="b_algo"|</ol>)', h, re.S)
         for b in blocks[:num]:
             m = re.search(r'<h2[^>]*><a[^>]*href="([^"]+)"[^>]*>(.*?)</a>', b, re.S)
@@ -77,7 +135,7 @@ def _page_summary(url):
         r = _get(url, timeout=10)
         if not r:
             return "", "", site
-        html = r.text
+        html = decode_response(r)
         title = ""
         mt = re.search(r"<title[^>]*>(.*?)</title>", html, re.S)
         if mt:
@@ -136,7 +194,7 @@ def search_images(query, num=3):
         r = _get(url, headers={"Referer": "https://cn.bing.com/"})
         if not r:
             return out
-        html = r.text
+        html = decode_response(r)
         # murl 原图地址
         murls = re.findall(r'&quot;murl&quot;:&quot;(.*?)&quot;', html)
         if not murls:
