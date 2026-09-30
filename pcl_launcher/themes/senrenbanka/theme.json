@@ -44,7 +44,8 @@
     "pets": "assets/nav/pets.png",
     "prompt": "assets/nav/prompt.png",
     "plugins": "assets/nav/plugins.png",
-    "themes": "assets/nav/themes.png"
+    "themes": "assets/nav/themes.png",
+    "status": "assets/nav/status.png"
   },
   "background": {
     "type": "image",

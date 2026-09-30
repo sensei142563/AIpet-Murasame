@@ -17,6 +17,8 @@
 
 用法：`python tests/test_frontend_style.py`
 """
+import glob
+import json
 import os
 import re
 import sys
@@ -129,6 +131,53 @@ for rel in ("pcl_launcher/plugins_panel.py", "pcl_launcher/status_panel.py",
             continue
         bad.append((i, ln.strip()[:66]))
     check("%-34s color:white 的底色都调过对比度" % rel, not bad, str(bad[:2]))
+
+print("== 5) 侧边栏图标：主题有图标就必须**每个**导航项都有（新加栏目最容易漏）==")
+SW = read("pcl_launcher/silicon_window.py")
+nav_block = re.search(r"^NAV = \[(.*?)^\]", SW, re.S | re.M)
+nav_keys = re.findall(r'\(\s*"([a-z_]+)"\s*,', nav_block.group(1)) if nav_block else []
+check("能从 silicon_window.py 解析出 NAV 列表", len(nav_keys) >= 6, str(nav_keys))
+# 总览复用 model 图标（源码里写死的映射）；改成别的写法时这里要跟着改，所以直接读源码判断
+home_uses_model = '"model" if key == "home"' in SW
+want_keys = {(("model" if home_uses_model else "home") if k == "home" else k) for k in nav_keys}
+want_keys |= set(re.findall(r'icon_key="([a-z_]+)"', SW))      # 如设置按钮 icon_key="settings"
+check("需要的图标键集合（含总览复用 model / 设置按钮）", len(want_keys) >= 8, str(sorted(want_keys)))
+
+for tp in sorted(glob.glob(os.path.join(REPO, "pcl_launcher", "themes", "*", "theme.json"))):
+    tdir = os.path.dirname(tp)
+    cfg = json.load(open(tp, encoding="utf-8"))
+    ni = cfg.get("nav_icons") or {}
+    tname = os.path.basename(tdir)
+    if not ni:
+        print("  [--]   %-20s 没声明 nav_icons → 全部用 emoji（纯符号主题，正常）" % tname)
+        continue
+    got = set(ni)
+    missing = sorted(want_keys - got)
+    extra = sorted(got - want_keys)
+    check("%-20s 图标键齐全（%d 个）" % (tname, len(got)), not missing, "缺：%s" % missing)
+    check("%-20s 没有没人用的死键" % tname, not extra, "多余：%s" % extra)
+    bad = [k for k, v in ni.items() if not os.path.isfile(os.path.join(tdir, v))]
+    check("%-20s 图标文件都在（%d 张）" % (tname, len(ni)), not bad, "缺文件：%s" % bad)
+
+print()
+print("== 6) 真加载：切到千恋万花主题后，每个导航键都能取到图 ==")
+from PyQt5.QtGui import QPixmap   # noqa: E402
+from PyQt5.QtWidgets import QApplication   # noqa: E402
+app = QApplication(sys.argv[:1])
+import pcl_launcher.colors as C   # noqa: E402
+_old = getattr(C, "_ACTIVE_THEME_ID", "")
+try:
+    C._ACTIVE_THEME_ID = "senrenbanka"
+    from pcl_launcher.colors import nav_icon_path   # noqa: E402
+    for k in sorted(want_keys):
+        p = nav_icon_path(k)
+        ok = bool(p) and os.path.isfile(p)
+        pm = QPixmap(p) if ok else QPixmap()
+        check("%-10s 有图且能解码（最宽缩到 40px 仍非空）" % k,
+              ok and not pm.isNull() and not pm.scaled(40, pm.height() or 40).isNull(),
+              os.path.basename(p) if p else "（空 → 会退回 emoji）")
+finally:
+    C._ACTIVE_THEME_ID = _old
 
 print()
 if FAILS:
