@@ -646,6 +646,36 @@ except Exception as e:
     traceback.print_exc()
     check("联网触发/查询清洗可测", False, "%s: %s" % (type(e).__name__, e))
 
+print("== 触摸互动不再每次同一句话（用户：摸脚每次回复都一样）==")
+try:
+    from tool.touch_areas import reaction as _react           # noqa: E402
+    _outs = {_react("foot_l", "tap", "murasame") for _ in range(200)}
+    check("★ 同一部位同一手势有大量不同说法（修前固定 1 种）",
+          len(_outs) >= 30, "%d 种" % len(_outs))
+    _one = _react("foot_l", "tap", "murasame")
+    check("★ 每次附「反应角度」+ 明确「别重复」指令",
+          "反应角度" in _one and "别和刚才几次重复" in _one)
+    _SV = ("摸了摸", "揉了揉", "轻轻抚过", "捏了捏", "拍了拍", "顺了顺",
+           "轻轻摩挲了一下", "用指腹按了按")
+    _TV = ("戳了戳", "轻轻戳了戳", "用指尖点了点", "挠了挠", "轻轻弹了一下",
+           "碰了碰", "按了按", "用指节轻敲了一下")
+    # ⚠ 注意：reaction() 每次调用都重新随机，必须**先取一次**再判定；
+    #   写成 any(v in _react(...) for v in _SV) 会每次比较都重抽一句 → 必然误报。
+    def _verbs_ok(_key, _gesture, _pool):
+        _t = _react(_key, _gesture, "murasame")
+        return any(v in _t for v in _pool)
+
+    check("抚摸只走抚摸动词、轻点只走轻点动词",
+          all(_verbs_ok("belly", "stroke", _SV) for _ in range(30))
+          and all(_verbs_ok("belly", "tap", _TV) for _ in range(30)))
+    check("特殊部位保留原本的体面措辞（不被动词池说成生硬说法）",
+          all("私密部位" in _react("privates", "tap", "murasame") for _ in range(20)))
+    check("自定义部位也能生成", bool(_react("custom_1", "tap", "murasame")))
+except Exception as e:
+    import traceback
+    traceback.print_exc()
+    check("触摸文案变化可测", False, "%s: %s" % (type(e).__name__, e))
+
 print()
 if FAILS:
     print("FAILED %d 项：%s" % (len(FAILS), "、".join(FAILS)))
