@@ -605,6 +605,43 @@ except Exception as e:
     traceback.print_exc()
     check("自动过渡同步可测", False, "%s: %s" % (type(e).__name__, e))
 
+print("== 联网搜索的触发词与查询词（用户问「你知道XX吗」查不查）==")
+try:
+    import qq.qq_search as Q5                                  # noqa: E402
+    check("★ 「你知道…吗？一款游戏」现在会触发联网",
+          Q5.query_trigger("你知道「魔法少女的魔女审判」吗？一款游戏") is True)
+    check("带书名号的专名一定触发", Q5.query_trigger("你知道「丛雨丸」吗") is True)
+    check("泛指问句不触发（免得白查一次）",
+          Q5.query_trigger("你知道这个游戏吗") is False
+          and Q5.query_trigger("你今天开心吗") is False)
+    check("原来的触发词没被弄坏",
+          Q5.query_trigger("这是什么梗") is True
+          and Q5.query_trigger("帮我查一下 丛雨丸 的出处") is True)
+
+    _cap = {}
+    _orig_sw = Q5.search_web
+    Q5.search_web = lambda q, num=4: (_cap.setdefault("q", q),
+                                     [("标题X", "摘要Y", "http://x")])[1]
+    try:
+        Q5.note_for_text("你知道「魔法少女的魔女审判」吗？一款游戏")
+        _q1 = _cap.get("q")
+        _cap.clear()
+        Q5.note_for_text("魔法少女的魔女审判 是什么游戏")
+        _q2 = _cap.get("q")
+        _note = Q5.note_for_text("这是什么梗") or ""
+    finally:
+        Q5.search_web = _orig_sw
+    print("      实际拿去搜的词：%r / %r" % (_q1, _q2))
+    check("★ 查询词剥掉「你知道…吗」外壳与补充说明，只留专名",
+          _q1 == "魔法少女的魔女审判", repr(_q1))
+    check("★ 「…是什么游戏」也剥成专名（否则必应只会拿「魔法」凑词）",
+          _q2 == "魔法少女的魔女审判", repr(_q2))
+    check("资料仍带「别照抄」的引导语", "不要逐字复述" in _note)
+except Exception as e:
+    import traceback
+    traceback.print_exc()
+    check("联网触发/查询清洗可测", False, "%s: %s" % (type(e).__name__, e))
+
 print()
 if FAILS:
     print("FAILED %d 项：%s" % (len(FAILS), "、".join(FAILS)))
