@@ -224,8 +224,12 @@ class PCLStatusPanel(QWidget):
             else:
                 mark = str(val)
                 color = accent_text().name()
-            lb.setText("%s　<b>%s</b>　<span style='font-size:%dpx'>（%s）</span>"
-                       % (mark, name, int(11 * S), where))
+            # ⚠ 别每行都写「（桌宠右键菜单）」：15 行全重复，界面糊成一片（用户指出来的）。
+            #   盒子标题已经写了"在桌宠右键菜单里改"，这里只在**不是默认位置**时才标注
+            #   （例如识图那行是「启动器『设置』页」）。
+            _hint = ("" if str(where) in ("", "桌宠右键菜单")
+                     else "　<span style='font-size:%dpx'>（%s）</span>" % (int(11 * S), where))
+            lb.setText("%s　<b>%s</b>%s" % (mark, name, _hint))
             lb.setStyleSheet("color: %s;" % color)
             self.lay_sw.addWidget(lb)
 

@@ -489,21 +489,19 @@ class Murasame(QLabel):
     def should_default_live2d(self) -> bool:
         """启动后是否自动进入 Live2D 模式。
 
-        ① 角色 pet.json 写了 model.default=live2d → 是
-        ② 设置里「启用 Live2D」(config.live2d_enabled=true) 且角色有模型 → 是
-           （用户打开总开关就是希望桌宠用 Live2D，不该被 pet.json 的 default=2d 挡住）
+        ⚠ 用户 2026-09-30 明确要求：**默认 2D，只有 2D 不可用（角色根本没有 2D 立绘）时
+        才自动用 Live2D**。判据只剩两条：
+          ① 角色自己的 pet.json 写了 model.default=live2d（角色的明确选择）；
+          ② 这个角色没有 2D 立绘（纯 Live2D 角色）→ 不自动进就是一片空白。
+        别再拿 config.live2d_enabled（总开关）当"自动进"的判据 —— 那会把「允许用 Live2D」
+        变成「每次启动都进 Live2D」（用户报的就是这个）。总开关只决定**能不能手动切**。
         """
         if self._default_display == "live2d":
             return True
         try:
-            if as_bool(CONFIG.get("live2d_enabled"), False):
-                from pets.pet_registry import get_live2d_model_json
-                if get_live2d_model_json():
-                    print("[Live2D] 设置里已启用 Live2D 且角色有模型 → 启动即进入 Live2D")
-                    return True
+            return not bool(getattr(self, "_has_fgimages", True))
         except Exception:
-            pass
-        return False
+            return False
 
     # =========================================================
     # Live2D 文字层（透明覆盖层，行为对齐 2D：文字常显、不挡模型交互）
@@ -897,9 +895,12 @@ class Murasame(QLabel):
         # ⚠ 个别机器上 Live2D 的 GL 初始化会直接把进程干掉（表现为「桌宠突然消失」）
         try:
             if not as_bool(get_config("./config.json").get("live2d_enabled"), False):
-                self.show_text(f"Live2D 已在设置里关闭（想用请到启动器「设置 → 桌宠配置」打开）", typing=False)
-                print("[Live2D] 配置 live2d_enabled=false → 拒绝切换（避免个别机器上 GL 初始化崩溃）")
-                return
+                # 纯 Live2D 角色（没有 2D 立绘）：关着总开关也得让它进，否则启动就是空白
+                if bool(getattr(self, "_has_fgimages", True)):
+                    self.show_text("Live2D 已在设置里关闭（想用请到启动器「设置 → 桌宠配置」打开）", typing=False)
+                    print("[Live2D] 配置 live2d_enabled=false → 拒绝切换（避免个别机器上 GL 初始化崩溃）")
+                    return
+                print("[Live2D] 该角色没有 2D 立绘 → 即使总开关关闭也允许进入 Live2D")
         except Exception:
             pass
         if not self._live2d_widget or not self._live2d_initialized:

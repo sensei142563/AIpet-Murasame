@@ -751,10 +751,29 @@ if __name__ == "__main__":
     try:
         from tool import care as _cr_start
         if _cr_start.enabled() and _cr_start.startup_greeting_enabled():
-            _line = _cr_start.startup_line()
-            if _line:
-                QTimer.singleShot(6000, lambda: pet.start_thread(_line, role="system", t=True))
-                print("[AIpet] 已排上开机问候（在一起第 %d 天）" % _cr_start.companion_days())
+            # 用户 2026-09-30：开机那一下 GPT-SoVITS 还没起来，让模型说一句必然失败
+            #   → 默认改成「播指定的一条语音」或「不播」（startup_greeting_mode）。
+            _mode = _cr_start.startup_greeting_mode()
+            if _mode == "off":
+                print("[AIpet] 开机问候：已按设置关闭（startup_greeting_mode=off）")
+            elif _mode == "voice":
+                _vp = _cr_start.startup_greeting_voice()
+                if _vp and os.path.exists(_vp):
+                    from classes.murasame_class import play_voice_wav as _play_wav
+                    QTimer.singleShot(3000, lambda p=_vp: _play_wav(p))
+                    print("[AIpet] 开机问候：播放指定语音 %s" % os.path.basename(_vp))
+                elif _vp:
+                    print("[AIpet] 开机问候：语音文件不存在（%s）→ 这次不播" % _vp)
+                else:
+                    print("[AIpet] 开机问候：没配 startup_greeting_voice → 不播"
+                          "（想让她开机说句话，就在设置里填一条语音路径；"
+                          "想恢复「模型自己说」，把 startup_greeting_mode 设成 chat）")
+            else:      # chat：老行为（需要 TTS 已就绪）
+                _line = _cr_start.startup_line()
+                if _line:
+                    QTimer.singleShot(6000,
+                                      lambda: pet.start_thread(_line, role="system", t=True))
+                    print("[AIpet] 已排上开机问候（在一起第 %d 天）" % _cr_start.companion_days())
     except Exception as _e:
         print(f"[AIpet] 开机问候跳过: {_e}")
 

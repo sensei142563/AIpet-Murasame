@@ -63,6 +63,30 @@ def startup_greeting_enabled() -> bool:
     return _cfg_bool("care_startup_greeting", True)
 
 
+def startup_greeting_mode() -> str:
+    """开机问候怎么出声（用户 2026-09-30：「播放指定的一条语音或者不播放」）。
+
+    voice = 播 startup_greeting_voice 指定的那条语音（**默认**，不需要 TTS 服务）
+    off   = 不播（只留启动日志）
+    chat  = 老行为：让模型自己说一句 —— ⚠ 需要短语音 TTS 服务已就绪，
+            而 GPT-SoVITS 启动要 1~2 分钟，所以开机那一下必然失败（用户报的就是这个）
+    """
+    try:
+        from tool.config import enum_of
+        return enum_of(_cfg("startup_greeting_mode", "voice"), ("voice", "off", "chat"),
+                       "voice", "startup_greeting_mode")
+    except Exception:
+        return "voice"
+
+
+def startup_greeting_voice() -> str:
+    """要播的那条语音文件（config：startup_greeting_voice；空 = 不播任何语音）"""
+    try:
+        return str(_cfg("startup_greeting_voice", "") or "").strip()
+    except Exception:
+        return ""
+
+
 def meeting_quiet_enabled() -> bool:
     return _cfg_bool("care_meeting_quiet", True)
 
