@@ -270,6 +270,19 @@ WIRING = (
      "控制台又不留了（子进程秒退时报错一闪就关，用户来不及看）"),
     ("pcl_launcher/silicon_window.py", "def _spawn_console_argv",
      "起控制台程序的共用方法没了（三处启动 + NapCat 的 bat 会各自裸 Popen）"),
+    # ── 仓库自带体检 tests/：别让它们悄悄消失或被清空（约定见 tests/README.md）──
+    ("tests/run_all.py", "TESTS_DIR = os.path.dirname(os.path.abspath(__file__))",
+     "tests/run_all.py 没了/被改成写死路径（体检必须路径无关、随时能跑）"),
+    ("tests/test_config_contracts.py", "字典字面量里的重复键",
+     "配置契约体检没了（重复键/真值/缺键/枚举这四类坑会重新没人管）"),
+    ("tests/test_bounds.py", "真实 [%s, %s] 落在夹取范围",
+     "边界体检丢了「真实数据不被改动」那条断言（加夹取时最容易改坏角色显示）"),
+    ("tests/test_plugin_markup.py", "绝不吃掉她自己的话",
+     "插件标记体检没了（清台词时又会把她的话删掉）"),
+    ("tests/test_qt_lifecycle.py", "外部 agent 进程真的被杀掉",
+     "线程收尾体检没了（关掉桌宠后 agent 还会继续操作电脑）"),
+    ("tests/README.md", "写新体检的约定",
+     "tests/README.md 的约定没了（新体检容易写出有副作用/写死路径的版本）"),
 )
 # 绝不能出现的（历史坑，回来就是 bug 复发）—— **正则**，只扫非注释行：
 #   注释里写着"原来写死了 infos[57:65]"是对的（解释历史），不能算复发（自测自己踩过这个误报）
