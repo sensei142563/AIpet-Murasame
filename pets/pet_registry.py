@@ -62,6 +62,15 @@ def load_pet_list() -> dict:
     registry = _load_json(REGISTRY_JSON, None)
     if registry is None:
         registry = scan_pets()
+        # ⚠ 安全阀（2026-09-30 真丢过一次数据）：注册表**读失败**时这里会重扫并**覆盖**文件；
+        #   万一那次扫描也恰好为空（目录抖动 / 一次性读取失败 / 并发写），主人的桌宠列表就被
+        #   一个空清单覆盖掉了 —— 实测发生过：pets/pet_list.json 从
+        #   [丛雨/诺瓦/夏目 + active=murasame] 变成 {"pets": [], "active": null}。
+        #   所以：磁盘上文件还在、而扫描结果为空时，**绝不动盘**，只在内存里返回空。
+        if not (registry or {}).get("pets") and os.path.exists(REGISTRY_JSON):
+            print("[PetRegistry] ⚠ 注册表读取失败且扫描结果为空 → 保留磁盘上的原文件，"
+                  "不用空清单覆盖（想重建请删掉 pets/pet_list.json 再启动）")
+            return {"pets": [], "active": None}
         _save_json(REGISTRY_JSON, registry)
     else:
         _sync_registry_from_pet_json(registry)

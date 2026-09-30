@@ -555,6 +555,32 @@ except Exception as e:
     traceback.print_exc()
     check("跨套表情映射可测", False, "%s: %s" % (type(e).__name__, e))
 
+print("== 数据安全：桌宠列表不会被空扫描覆盖（今晚真丢过一次）==")
+try:
+    import pets.pet_registry as PR4             # noqa: E402
+    _reg_before = io.open(PR4.REGISTRY_JSON, encoding="utf-8").read()
+    _rl4, _rs4 = PR4._load_json, PR4.scan_pets
+    try:
+        PR4._load_json = (lambda p, d=None: None
+                          if os.path.normcase(str(p)) == os.path.normcase(PR4.REGISTRY_JSON)
+                          else _rl4(p, d))
+        PR4.scan_pets = lambda: {"pets": [], "active": None}
+        _out4 = PR4.load_pet_list()
+    finally:
+        PR4._load_json, PR4.scan_pets = _rl4, _rs4
+    _reg_after = io.open(PR4.REGISTRY_JSON, encoding="utf-8").read()
+    print("      注册表现有 %d 个角色" % len(json.loads(_reg_before).get("pets", [])))
+    check("★ 读失败 + 扫描为空时：磁盘上的桌宠列表不被清空",
+          _reg_before == _reg_after, "文件长度 %d → %d" % (len(_reg_before), len(_reg_after)))
+    check("这种情况只在内存里返回空清单（不崩、不写盘）",
+          _out4 == {"pets": [], "active": None}, str(_out4))
+    check("守卫代码在位（load_pet_list 里的安全阀）",
+          "不用空清单覆盖" in read("pets/pet_registry.py"))
+except Exception as e:
+    import traceback
+    traceback.print_exc()
+    check("注册表安全阀可测", False, "%s: %s" % (type(e).__name__, e))
+
 print()
 if FAILS:
     print("FAILED %d 项：%s" % (len(FAILS), "、".join(FAILS)))
