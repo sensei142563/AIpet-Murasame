@@ -172,6 +172,18 @@ def qwen3_lora(history, user_input, role):
     except Exception:
         pass
 
+    # 1.75 联网学习（插件 auto_learning / slang_search）：问题自动联网搜索 + 网络用语查询。
+    #      ⚠ 2026-09-30：三条渠道（QQ/微信/桌宠）共用 tool/learn_hub —— 用户要求
+    #      「变成微信，QQ，桌宠都可以使用的东西」。QQ 在 qq/qq_chat.py 里调，
+    #      微信桥回复时用 learn_hub.channel("wx") 包住，这里默认渠道是桌宠。
+    try:
+        from tool import learn_hub as _lh_chat
+        _lh_prefix = _lh_chat.fact_prefix(user_input or "", _lh_chat.current_channel())
+        if _lh_prefix:
+            messages.append({"role": "system", "content": _lh_prefix.strip()})
+    except Exception:
+        pass
+
     # 1.8 提醒/待办语法（她能帮主人记事，见 tool/reminder 的 prompt_rules）
     try:
         from tool import reminder as _rm_rules

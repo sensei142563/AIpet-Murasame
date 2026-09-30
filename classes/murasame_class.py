@@ -908,7 +908,14 @@ class Murasame(QLabel):
             return
 
         # ====== 进入 Live2D 模式 ======
-        self._saved_portrait_info = self.portrait_history[-1] if self.portrait_history else None
+        # ⚠ 必须存**真实的 2D 图层**：Live2D 模式下 portrait_history 里存的是「表情词」
+        #   （"高兴"/"好奇" 这种字符串，见 on_reply 的 _reply_live2d 分支），原来直接存它
+        #   → 退出时把表情词当图层列表 → 合成出只有衣服、**没有脸**的立绘
+        #   （用户 2026-09-30：「切回 2D 后脸是空白的，聊天后才出现」）。
+        _saved_layers = list(getattr(self, "_last_portrait_layers", None)
+                             or self.first_portrait or [])
+        self._saved_portrait_info = ((self.portrait_target, _saved_layers)
+                                     if _saved_layers else None)
         # 记下 2D 时的窗口几何与字号缩放：_ensure_live2d_overlay() 会把本窗口撑成
         # "与模型同位置同尺寸"（通常接近全屏）并重算字号，退出时必须原样恢复，
         # 否则会留下一个全屏大小的透明文字层 —— 用户报「从 live2D 切回 2D 后桌宠
@@ -961,6 +968,7 @@ class Murasame(QLabel):
         # 恢复 pet 窗口和立绘
         self.show()
         try:
+            saved = None
             if self._saved_portrait_info:
                 saved = self._saved_portrait_info[1]
                 if isinstance(saved, str):
@@ -970,13 +978,40 @@ class Murasame(QLabel):
                         saved = ast.literal_eval(saved)
                     except Exception:
                         saved = None
-                if saved is None:
-                    saved = self.first_portrait
-                self.update_portrait(self.portrait_target, saved)
-            else:
-                self.update_portrait(self.portrait_target, self.first_portrait)
+            # ⚠ 只认整数图层 id：Live2D 期间存进来的可能是表情词（"高兴"）之类的字符串，
+            #   喂给合成器就会得到"只有衣服、没有脸"的空立绘（用户报的「脸是空白的」）。
+            _clean = []
+            for _x in (saved or []):
+                try:
+                    _clean.append(int(_x))
+                except Exception:
+                    continue
+            if not _clean:
+                _clean = list(self.first_portrait or [])
+                print("[Live2D] 退出：保存的图层不可用 → 回退默认立绘（first_portrait）")
+            # ⚠ 先结算可能还挂着的淡入动画：否则 update_portrait 只把新图挂到"渐显"阶段，
+            #   而淡入定时器在 Live2D 期间可能已经停了 → 立绘永远不落地（"聊天后才出现"）。
+            try:
+                self._fade_id += 1
+                self._fade_state = None
+            except Exception:
+                pass
+            self.update_portrait(self.portrait_target, _clean)
+            # 再按 2D 的字号缩放重排文字：聊天那次合成会按新画布重算 scale，
+            # 不重排就会出现「聊天后字号突然变小」（用户报的第二半）。
+            try:
+                _sc2 = getattr(self, "_saved_current_scale", None)
+                if _sc2:
+                    self._current_scale = float(_sc2)
+                self._update_text_scaling()
+                self._rewrap_current_text()
+            except Exception as _e2:
+                print(f"[Live2D] 恢复 2D 字号失败: {_e2}")
+            self.update()
+            self.repaint()
         except Exception:
             self.update_portrait(self.portrait_target, self.first_portrait)
+        self._saved_portrait_info = None
         self.raise_()
         self.activateWindow()
         print("[Live2D] 已退出 Live2D 模式")
@@ -1337,8 +1372,15 @@ class Murasame(QLabel):
 
         self._screenshot_executor.submit(task, image_path)
 
-    def pause_all_ai(self):
-        """用户输入/点击桌宠时：停止截图线程、中断语音播放，但不打断正在进行的对话"""
+    def pause_all_ai(self, stop_voice: bool = False):
+        """用户输入/点击桌宠时：暂停自动行为（截图线程），**默认不动语音**。
+
+        ⚠ 用户 2026-09-30：「2D 模式下中键拖动的时候似乎打断了语音，我认为不该这样，
+        正常播放即可」—— 真因是 `pause_all_ai()` 原本无条件调 `stop_voice_wav()`，
+        而它挂在 `focusInEvent`（点/拖桌宠 → 窗口获得焦点）上，于是**任何点击/拖动都会掐掉语音**。
+        现在默认保留语音（拖动、聚焦、勿扰都不再打断）；只有真正"用户主动输入"的地方
+        才显式传 stop_voice=True（那也是 `start_thread(t=False)` 本来就会打断的场景）。
+        """
         self.force_stop = True  # 启用软中断标记
 
         if self._screenshot_worker and self._screenshot_worker.isRunning():
@@ -1346,10 +1388,12 @@ class Murasame(QLabel):
             self.stop_screenshot_worker()
         # 不再中断 worker — 对话让它自然播完
         # 用户主动输入会通过 start_thread(t=False) 正常打断
-        try:
-            stop_voice_wav()
-        except Exception:
-            pass
+        if stop_voice:
+            try:
+                print("[AIpet] 用户主动输入 → 打断当前语音")
+                stop_voice_wav()
+            except Exception:
+                pass
 
     def resume_all_ai(self):
         """用户输入结束后：恢复截图线程与 AI 响应"""

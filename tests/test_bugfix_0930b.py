@@ -228,6 +228,184 @@ check("★ text_x_offset = max(10, round(140×scale))（scale=%.3f）" % float(_
       int(_pet4.text_x_offset) == max(10, int(round(140 * float(_pet4._current_scale)))),
       "实际 %s" % _pet4.text_x_offset)
 
+print("== ③ 中键拖动不再打断语音（pause_all_ai 默认不动语音）==")
+import inspect                             # noqa: E402
+import classes.murasame_class as MC3       # noqa: E402
+_pet3 = MC3.Murasame()
+try:
+    _sig = inspect.signature(_pet3.pause_all_ai)
+    check("pause_all_ai 有了 stop_voice 开关（默认 False）",
+          "stop_voice" in _sig.parameters
+          and _sig.parameters["stop_voice"].default is False, str(_sig))
+    _calls = {"n": 0}
+    _orig_stop = MC3.stop_voice_wav
+    MC3.stop_voice_wav = lambda: _calls.__setitem__("n", _calls["n"] + 1)
+    try:
+        _pet3.pause_all_ai()                       # 点/拖桌宠 → focusInEvent 走这条
+        check("★ 点击/拖动（默认路径）**不**停语音", _calls["n"] == 0,
+              "被调 %d 次" % _calls["n"])
+        _pet3.pause_all_ai(stop_voice=True)        # 用户主动输入才会走这条
+        check("用户主动输入时仍然会停语音", _calls["n"] == 1, "被调 %d 次" % _calls["n"])
+    finally:
+        MC3.stop_voice_wav = _orig_stop
+    check("focusInEvent 走的是默认路径（没传 stop_voice=True）",
+          "self.pause_all_ai()" in read("classes/murasame_class.py"))
+except Exception as e:
+    check("pause_all_ai 行为检查", False, "%s: %s" % (type(e).__name__, e))
+
+print("== ② 切回 2D：不进表情词、脸不丢、字号不跳 ==")
+check("★ 进入 Live2D 时存的是真实图层（_last_portrait_layers），不是 portrait_history 的表情词",
+      "_saved_layers = list(getattr(self, \"_last_portrait_layers\", None)" in
+      read("classes/murasame_class.py"))
+_pet2 = MC3.Murasame()
+_pet2.update_portrait(_pet2.portrait_target, _pet2.first_portrait)
+_font_before = getattr(_pet2, "_font_px", None)
+_x_before = getattr(_pet2, "text_x_offset", None)
+_layers_before = list(getattr(_pet2, "_last_portrait_layers", []) or [])
+
+
+def _opaque(pet):
+    pm = pet.pixmap()
+    if pm.isNull():
+        return 0.0, (0, 0)
+    img = pm.toImage()
+    op = smp = 0
+    for x in range(0, img.width(), 4):
+        for y in range(0, img.height(), 4):
+            smp += 1
+            if img.pixelColor(x, y).alpha() > 200:
+                op += 1
+    return 100.0 * op / max(1, smp), (pm.width(), pm.height())
+
+
+_r_before, _sz_before = _opaque(_pet2)
+
+
+class _FakeL2D:
+    def stop_live2d(self):
+        pass
+
+    def hide(self):
+        pass
+
+
+try:
+    # 模拟"在 Live2D 里聊过天"：保存信息被写成了表情词 + 还挂着淡入状态
+    _pet2._saved_portrait_info = (_pet2.portrait_target, ["高兴", "好奇"])
+    _pet2._saved_current_scale = float(getattr(_pet2, "_current_scale", 0.2))
+    _pet2._live2d_widget = _FakeL2D()
+    _pet2._live2d_mode = True
+    _pet2._fade_state = {"id": _pet2._fade_id, "target": _pet2.portrait_target}
+    _pet2._exit_live2d_mode()
+    _after = list(getattr(_pet2, "_last_portrait_layers", []) or [])
+    check("★ 退出后图层全是整数 id（表情词被挡掉）",
+          bool(_after) and all(isinstance(x, int) for x in _after), str(_after))
+    check("退出后没有淡入残影（_fade_state 清空）", getattr(_pet2, "_fade_state", None) is None)
+    _r_after, _sz_after = _opaque(_pet2)
+    check("★ 脸没丢：不透明占比与切之前一致（%.1f%% vs %.1f%%）" % (_r_after, _r_before),
+          abs(_r_after - _r_before) < 3.0 and _r_after > 25.0)
+    check("尺寸没变（%s vs %s）" % (_sz_after, _sz_before), _sz_after == _sz_before)
+    check("★ 字号没跳（%s → %s）" % (_font_before, getattr(_pet2, "_font_px", None)),
+          getattr(_pet2, "_font_px", None) == _font_before)
+    check("留白也没跳（%s → %s）" % (_x_before, getattr(_pet2, "text_x_offset", None)),
+          getattr(_pet2, "text_x_offset", None) == _x_before)
+    check("保存的图层与进入前一致", _after == _layers_before, "%s vs %s" % (_after, _layers_before))
+except Exception as e:
+    import traceback
+    traceback.print_exc()
+    check("Live2D 退出路径能跑通", False, "%s: %s" % (type(e).__name__, e))
+
+print("== ① 换装复核：四套衣服合成结果确实不同 ==")
+try:
+    import json as _json                    # noqa: E402
+    from tool import portrait_outfit as PO2  # noqa: E402
+    _pc = os.path.join(REPO, "data", "portrait_choice.json")
+    _orig_pc = io.open(_pc, encoding="utf-8").read()
+    _ratios = {}
+    try:
+        for _c in ("制服", "睡衣", "私服", "刀服"):
+            _d = _json.loads(_orig_pc)
+            _d["b"]["cloth"] = _c
+            io.open(_pc, "w", encoding="utf-8").write(_json.dumps(_d, ensure_ascii=False))
+            if hasattr(PO2, "reset_cache"):
+                PO2.reset_cache()
+            _pet2.update_portrait(_pet2.portrait_target, _pet2.first_portrait)
+            _ratios[_c] = _opaque(_pet2)[0]
+    finally:
+        io.open(_pc, "w", encoding="utf-8").write(_orig_pc)
+        if hasattr(PO2, "reset_cache"):
+            PO2.reset_cache()
+    print("      四套衣服的不透明占比：%s" % {k: round(v, 1) for k, v in _ratios.items()})
+    check("★ 四套衣服画出来各不相同（换装确实生效）",
+          len(set(round(v, 1) for v in _ratios.values())) >= 3, str(_ratios))
+except Exception as e:
+    check("换装复核", False, "%s: %s" % (type(e).__name__, e))
+
+print("== ④ 联网学习三方共用（tool/learn_hub.py）==")
+try:
+    import tool.learn_hub as LH               # noqa: E402
+    check("中枢有 qq/wx/pet 三个渠道", tuple(LH.CHANNELS) == ("qq", "wx", "pet"),
+          str(LH.CHANNELS))
+    check("默认渠道是桌宠", LH.current_channel() == "pet", LH.current_channel())
+    with LH.channel("wx"):
+        check("with channel('wx') 里能读到微信", LH.current_channel() == "wx")
+        check("qq_chat 用的 current_channel_or('qq') 也认这个标记",
+              LH.current_channel_or("qq") == "wx")
+    check("with 结束后回到桌宠", LH.current_channel() == "pet")
+    check("未标记时 current_channel_or('qq') 给 qq（QQ 桥没打标记）",
+          LH.current_channel_or("qq") == "qq")
+
+    _fake = {"qq_auto_learn_enable": True, "qq_auto_learn_search": True,
+             "qq_slang_enable": True}
+    _orig_bool = LH._bool
+    LH._bool = lambda k, d=False: bool(_fake.get(k, d))
+    try:
+        check("★ 插件开关一开 → 三个渠道都能联网搜索",
+              all(LH.search_enabled(c) for c in LH.CHANNELS),
+              str({c: LH.search_enabled(c) for c in LH.CHANNELS}))
+        check("★ 插件开关一开 → 三个渠道都能查网络用语",
+              all(LH.slang_enabled(c) for c in LH.CHANNELS))
+        _fake["learn_search_wx"] = False
+        check("关掉微信渠道后：只有微信不查，QQ/桌宠照旧",
+              (not LH.search_enabled("wx")) and LH.search_enabled("qq")
+              and LH.search_enabled("pet"))
+        _fake["qq_auto_learn_search"] = False
+        check("子开关一关 → 三个渠道全不查（旧键仍然管全局）",
+              not any(LH.search_enabled(c) for c in LH.CHANNELS))
+    finally:
+        LH._bool = _orig_bool
+    check("查不到时静默返回空串（不抛异常）",
+          LH.fact_prefix("", "pet") == "" and LH.learn_notes("x", gid=None) == [])
+except Exception as e:
+    check("learn_hub 可用", False, "%s: %s" % (type(e).__name__, e))
+
+check("★ QQ 侧改走中枢（qq_chat.py 调 learn_hub.fact_prefix）",
+      "learn_hub as _lh" in read("qq/qq_chat.py")
+      and "_lh.fact_prefix(user_text, _lh.current_channel_or(\"qq\")" in read("qq/qq_chat.py"))
+check("★ QQ 的网络用语也走中枢",
+      "_lh_slang.slang_enabled(_ch_slang)" in read("qq/qq_chat.py"))
+check("★ 微信桥把自己标成 wx 渠道",
+      'with _lh_wx.channel("wx")' in read("wechat/wechat_bridge.py"))
+check("★ 桌宠本地链路接上中枢（tool/chat.py）",
+      "learn_hub as _lh_chat" in read("tool/chat.py"))
+check("★ 桌宠云端链路接上中枢（tool/cloud_API_chat.py）",
+      "learn_hub as _lh_chat" in read("tool/cloud_API_chat.py"))
+_pj1 = json.loads(read("plugins/auto_learning/plugin.json"))
+_pj2 = json.loads(read("plugins/slang_search/plugin.json"))
+_keys1 = [s.get("key") for s in _pj1["settings"] if s.get("type") == "checkbox"]
+_keys2 = [s.get("key") for s in _pj2["settings"] if s.get("type") == "checkbox"]
+check("★ 插件页出现三个渠道开关（问题联网搜索）",
+      all(k in _keys1 for k in ("learn_search_qq", "learn_search_wx", "learn_search_pet")),
+      str(_keys1))
+check("★ 插件页出现三个渠道开关（网络用语）",
+      all(k in _keys2 for k in ("learn_slang_qq", "learn_slang_wx", "learn_slang_pet")),
+      str(_keys2))
+_ex4 = json.loads(read("config.example.json"))
+check("示例配置里也有这 6 个渠道键",
+      all(str(_ex4.get(k)) == "true" for k in
+          ("learn_search_qq", "learn_search_wx", "learn_search_pet",
+           "learn_slang_qq", "learn_slang_wx", "learn_slang_pet")))
+
 print()
 if FAILS:
     print("FAILED %d 项：%s" % (len(FAILS), "、".join(FAILS)))
