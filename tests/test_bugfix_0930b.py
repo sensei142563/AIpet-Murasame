@@ -528,6 +528,33 @@ except Exception as e:
     traceback.print_exc()
     check("codex 复审回归项可跑", False, "%s: %s" % (type(e).__name__, e))
 
+print("== 跨套翻译的表情映射（用户 2026-09-30 报「这个表情没有」）==")
+try:
+    from tool import portrait_outfit as PO3                  # noqa: E402
+    from qq.qq_portrait import expression_choices as _ec3     # noqa: E402
+    _ea = {str(n): int(i) for n, i in _ec3("a") if i}
+    _eb = {str(n): int(i) for n, i in _ec3("b") if i}
+    _same = sorted(set(_ea) & set(_eb))
+    _bad_ba = [n for n in _same if PO3._trans_table("b", "a").get(_eb[n]) != _ea[n]]
+    _bad_ab = [n for n in _same if PO3._trans_table("a", "b").get(_ea[n]) != _eb[n]]
+    print("      两套同名中文情绪 %d 个" % len(_same))
+    check("★ b→a 每个同名情绪都映射到正确 id（修前漏 11 个）", not _bad_ba, str(_bad_ba[:6]))
+    check("★ a→b 同样不漏", not _bad_ab, str(_bad_ab[:6]))
+    check("害羞 1406(b) → 1480(a)（用户日志里丢的就是这条）",
+          PO3._trans_table("b", "a").get(1406) == 1480,
+          str(PO3._trans_table("b", "a").get(1406)))
+    _n1 = PO3.normalize_layers([1718, 1406, 1719, 1261], "a")
+    check("★ 日志原列表翻成 a 套后带「害羞」而不是兜底「平静」",
+          1480 in _n1 and 1292 not in _n1, str(_n1))
+    _n2 = PO3.normalize_layers([1718, 1376, 1261], "a")
+    check("惊讶 1376 → 1368 仍正确（这条以前就对）", 1368 in _n2, str(_n2))
+    check("权威映射来源是 expression_choices（不是索引里的日文名）",
+          "expression_choices" in read("tool/portrait_outfit.py"))
+except Exception as e:
+    import traceback
+    traceback.print_exc()
+    check("跨套表情映射可测", False, "%s: %s" % (type(e).__name__, e))
+
 print()
 if FAILS:
     print("FAILED %d 项：%s" % (len(FAILS), "、".join(FAILS)))

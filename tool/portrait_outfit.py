@@ -406,6 +406,28 @@ def _trans_table(src, dst):
                 for i, n in src_rows.items():
                     if n == dn and sn in dst_by_name:
                         tbl[i] = dst_by_name[sn]
+        # 2.5) 表情的**权威**映射（2026-09-30 修：「表情没生效」）
+        #   上面两步只按**索引文件里的图层名**做同名匹配，而那里面是日文/中英混排
+        #   （恥ずかしい、笑顔2、達観…）；模型和 QQ 立绘用的却是
+        #   `qq_portrait.expression_choices()` 给的**中文情绪名**（它自己按 EMOTION_MAP
+        #   换算到该套，再补日文原名）。两边对不上就会漏 —— 实测两套共 16 个同名中文表情
+        #   里**漏了 11 个**（害羞/生气/不满/严肃/叹气/嘿嘿/孩子气/寂寞/愣住/窃笑，
+        #   外加「思考」映射到了错的 id），跨套时全兜底成"平静"基准脸 →
+        #   用户看到的就是「表情没有 / 一直是同一张脸」。
+        #   这里最后覆盖一次：中文情绪名相同的，直接按 expression_choices 的 id 直连。
+        try:
+            from qq.qq_portrait import expression_choices as _ec
+            _src_expr = {str(n): int(i) for n, i in _ec(src) if i}
+            _dst_expr = {str(n): int(i) for n, i in _ec(dst) if i}
+            _fixed = 0
+            for _n, _i in _src_expr.items():
+                if _n in _dst_expr and tbl.get(_i) != _dst_expr[_n]:
+                    tbl[_i] = _dst_expr[_n]
+                    _fixed += 1
+            if _fixed:
+                print("[PortraitOutfit] 🔧 %s→%s 表情权威映射修正 %d 项" % (src, dst, _fixed))
+        except Exception as _e_ec:
+            print(f"[PortraitOutfit] ⚠ 表情权威映射不可用（退回按索引名匹配）: {_e_ec}")
         # 3) 服装 / 发型 / 装饰（按名字/顺序对应）
         for n in CLOTH_ORDER:
             ca, ha = CLOTHES_BY_SET[src].get(n, (0, 0))
