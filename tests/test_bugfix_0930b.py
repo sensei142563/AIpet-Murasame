@@ -572,8 +572,12 @@ try:
     print("      注册表现有 %d 个角色" % len(json.loads(_reg_before).get("pets", [])))
     check("★ 读失败 + 扫描为空时：磁盘上的桌宠列表不被清空",
           _reg_before == _reg_after, "文件长度 %d → %d" % (len(_reg_before), len(_reg_after)))
-    check("这种情况只在内存里返回空清单（不崩、不写盘）",
-          _out4 == {"pets": [], "active": None}, str(_out4))
+    # 三层保护第 3 层：读失败时返回**本进程上次成功读到**的清单（绝不返回空清单）
+    _r_ok = PR4.load_pet_list()
+    _n_ok = len(_r_ok.get("pets", []))
+    check("★ 读失败时返回上次成功的清单（%d 个），不是空清单" % _n_ok,
+          _n_ok > 0 and len(_out4.get("pets", [])) == _n_ok,
+          "正常 %d → 失败时 %d" % (_n_ok, len(_out4.get("pets", []))))
     check("守卫代码在位（load_pet_list 里的安全阀）",
           "不用空清单覆盖" in read("pets/pet_registry.py"))
 except Exception as e:
