@@ -386,6 +386,11 @@ check("★ QQ 的网络用语也走中枢",
       "_lh_slang.slang_enabled(_ch_slang)" in read("qq/qq_chat.py"))
 check("★ 微信桥把自己标成 wx 渠道",
       'with _lh_wx.channel("wx")' in read("wechat/wechat_bridge.py"))
+check("★ 微信桥对中枢 import 单独容错（中枢坏了也不至于完全不回复）",
+      "except Exception as _e_lh:" in read("wechat/wechat_bridge.py")
+      and "_lh_wx = None" in read("wechat/wechat_bridge.py"))
+check("★ 勿扰模式仍然会停语音（语义没被顺手改掉）",
+      "self.pause_all_ai(stop_voice=True)" in read("classes/murasame_class.py"))
 check("★ 桌宠本地链路接上中枢（tool/chat.py）",
       "learn_hub as _lh_chat" in read("tool/chat.py"))
 check("★ 桌宠云端链路接上中枢（tool/cloud_API_chat.py）",

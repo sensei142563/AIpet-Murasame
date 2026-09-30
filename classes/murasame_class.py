@@ -1296,8 +1296,10 @@ class Murasame(QLabel):
         self._dnd_enabled = bool(enabled)
         if self._dnd_enabled:
             print("[AIpet] 启用勿扰模式")
-            # 停止一切自动行为
-            self.pause_all_ai()
+            # 停止一切自动行为。
+            # ⚠ 勿扰 = 主人要安静 → 这里**显式**要求停语音（stop_voice=True，自审时补的：
+            #   默认路径已经改成不停语音了，那是对"点/拖桌宠"而言；勿扰语义不同）。
+            self.pause_all_ai(stop_voice=True)
             if self.idle_timer.isActive():
                 self.idle_timer.stop()
             # 重置空闲状态，避免退出勿扰后立刻触发
