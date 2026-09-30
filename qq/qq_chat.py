@@ -426,17 +426,10 @@ def chat_once(user_text: str, use_sticker: bool = True, vision_desc: str = None,
     except Exception:
         pass
 
-    # 2d. 网络用语/梗 自动查询（短黑话或"什么意思"式提问时联网查词义，失败静默）
-    # ⚠ 2026-09-30：改走 tool/learn_hub（微信/桌宠现在也吃这一套，见 learn_hub 的说明）
-    try:
-        from tool import learn_hub as _lh_slang
-        _ch_slang = _lh_slang.current_channel_or("qq")
-        if _lh_slang.slang_enabled(_ch_slang):
-            _slang_note = _lh_slang.slang_note(user_text)
-            if _slang_note:
-                messages.append({"role": "system", "content": _slang_note})
-    except Exception:
-        pass
+    # 2d. 网络用语/梗 自动查询 —— ⚠ codex 复审 P3：这一段**已删除**。
+    #   它原本往 messages 里插一条 system 提示，但同一函数的 `_fact_prefix` 现在也包含
+    #   网络用语（`learn_hub.fact_prefix` 里的 slang 分支）→ 插件打开时模型会收到**同一份**
+    #   「【网络用语参考】…」两次（system 一条 + 用户前缀一条）。统一由 learn_hub 出，别重复。
 
     # 2e. Galgame 模式（群聊好感度玩法；主人本人不参与好感度系统）
     _galgame_ctx = None  # (gid, uin_str)；供回复解析好感度标记用

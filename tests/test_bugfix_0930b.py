@@ -133,13 +133,38 @@ finally:
         from tool import care as _c3
         _c3.companion_days = _o_days
 
-ST.reset_cache()
-_aff = ST.affinity()
-check("★ 真实数据下关系不再是 20.4（现在是 %.1f / %s）" % (_aff, ST.affinity_label()),
-      _aff > 30.0)
-check("落盘的 affinity 与读出来的一致（不会两处显示不同数）",
-      abs(float(json.loads(read("pets/murasame/memory/state.json")).get("affinity")) - _aff) < 0.01,
-      read("pets/murasame/memory/state.json")[:80])
+# ⚠ 这一步会**落盘**（affinity() 把抬起来的下限写回 state.json）。
+#   为了不污染主人的真实记忆（我自己踩过：探针把 20.4 改成 79 写进了她的存档），
+#   这里把 state 的存储路径指到临时目录，并用真值预置一份，再验证下限逻辑。
+_st_dir = tempfile.mkdtemp(prefix="state_test2_")
+_st_file = os.path.join(_st_dir, "state.json")
+_orig_st_path2 = ST._store_path
+ST._store_path = lambda: _st_file
+try:
+    _raw_real = read("pets/murasame/memory/state.json")
+    try:
+        _seed = json.loads(_raw_real)
+    except Exception:
+        _seed = {}
+    _seed.setdefault("mood", 60.0)
+    _seed["affinity"] = 20.4
+    io.open(_st_file, "w", encoding="utf-8").write(json.dumps(_seed, ensure_ascii=False))
+    ST.reset_cache()
+    _aff = ST.affinity()
+    check("★ 真实证据下关系不再是 20.4（现在是 %.1f / %s）" % (_aff, ST.affinity_label()),
+          _aff > 30.0)
+    _persisted = json.loads(io.open(_st_file, encoding="utf-8").read()).get("affinity")
+    check("落盘的 affinity 与读出来的一致（不会两处显示不同数）",
+          abs(float(_persisted) - _aff) < 0.01, "落盘 %.1f / 读出 %.1f" % (float(_persisted), _aff))
+    check("★ 抬起来的数只写进临时文件（主人真实存档没被试写）",
+          os.path.isfile(_st_file)
+          and abs(float(json.loads(io.open(_st_file, encoding="utf-8").read())
+                        .get("affinity")) - _aff) < 0.01
+          and ST._store_path() == _st_file,
+          "临时文件 %s" % os.path.basename(_st_file))
+finally:
+    ST._store_path = _orig_st_path2
+    ST.reset_cache()
 check("提示词侧用的是同一个 affinity()", "affinity()" in read("tool/state.py"))
 
 print("== ① 状态页开关行不再每行重复「（桌宠右键菜单）」==")
@@ -382,8 +407,9 @@ except Exception as e:
 check("★ QQ 侧改走中枢（qq_chat.py 调 learn_hub.fact_prefix）",
       "learn_hub as _lh" in read("qq/qq_chat.py")
       and "_lh.fact_prefix(user_text, _lh.current_channel_or(\"qq\")" in read("qq/qq_chat.py"))
-check("★ QQ 的网络用语也走中枢",
-      "_lh_slang.slang_enabled(_ch_slang)" in read("qq/qq_chat.py"))
+check("★ 网络用语统一由 learn_hub 出（不再在 qq_chat 里重复注入）",
+      "_lh_slang.slang_enabled(_ch_slang)" not in read("qq/qq_chat.py")
+      and "learn_hub as _lh" in read("qq/qq_chat.py"))
 check("★ 微信桥把自己标成 wx 渠道",
       'with _lh_wx.channel("wx")' in read("wechat/wechat_bridge.py"))
 check("★ 微信桥对中枢 import 单独容错（中枢坏了也不至于完全不回复）",
@@ -439,6 +465,68 @@ try:
           and "decode_response as _dec" in read("qq/qq_slang.py"))
 except Exception as e:
     check("编码工具可用", False, "%s: %s" % (type(e).__name__, e))
+
+print("== ⑤ codex 复审的 4×P2 + 1×P3 回归 ==")
+try:
+    # P2-1：plugins_panel 里必须真的 import 到 enabled_check_qss（原来 NameError 被吞掉）
+    _pp_src = read("pcl_launcher/plugins_panel.py")
+    check("★ 插件页勾选框样式真的套上了（原来 NameError 被 except 吞掉）",
+          "from .silicon_ui import enabled_check_qss as _ecq" in _pp_src
+          and "_ecq(Color1.name())" in _pp_src)
+    from pcl_launcher.plugins_panel import PCLPluginsPanel       # noqa: E402
+    from PyQt5.QtWidgets import QCheckBox                        # noqa: E402
+    _pp = PCLPluginsPanel()
+    _pp.setAttribute(Qt.WA_DontShowOnScreen, True)
+    _pp.show()
+    app.processEvents()
+    _styled = 0
+    _total = 0
+    for _cb in _pp.findChildren(QCheckBox):
+        _total += 1
+        _ss = _cb.styleSheet() or ""
+        if "image:" in _ss and "indicator" in _ss:
+            _styled += 1
+    check("★ 插件设置项里有勾选框带上了对勾图样式（%d/%d）" % (_styled, _total), _styled > 0)
+    _pp.close()
+
+    # P2-2：对勾 PNG 的文件名必须带颜色（否则换主题后缓存指向错的图）
+    import pcl_launcher.silicon_ui as SUI3                       # noqa: E402
+    _f1 = SUI3._check_png("#ffffff")
+    _f2 = SUI3._check_png("#2b3245")
+    check("★ 深浅两色的对勾图是两个不同文件（%s / %s）"
+          % (os.path.basename(_f1), os.path.basename(_f2)),
+          bool(_f1) and bool(_f2) and _f1 != _f2)
+    check("再取一次 #ffffff 仍然指向同一个文件（缓存没被冲掉）",
+          SUI3._check_png("#ffffff") == _f1)
+    check("两个文件都真的存在", os.path.exists(_f1) and os.path.exists(_f2))
+
+    # P2-3：真实对话条数要读现役角色的 memory/history.json
+    import tool.state as ST3                                     # noqa: E402
+    from pets.pet_registry import get_memory_dir as _gmd3        # noqa: E402
+    _live = os.path.join(_gmd3(), "history.json")
+    _n_live = 0
+    if os.path.isfile(_live):
+        _dd = json.loads(io.open(_live, encoding="utf-8").read())
+        _hh = _dd.get("history") if isinstance(_dd, dict) else _dd
+        _n_live = len(_hh) if isinstance(_hh, list) else 0
+    print("      现役 %s 条 / _talk_count()=%d" % (_n_live or "（没有该文件）", ST3._talk_count()))
+    check("★ _talk_count() 读的是现役角色历史（不再是只写一次的 data/history.json）",
+          ST3._talk_count() == _n_live if _n_live else ST3._talk_count() >= 0,
+          "live=%d count=%d" % (_n_live, ST3._talk_count()))
+
+    # P2-4：群学习检索必须过插件总开关
+    import tool.learn_hub as LH3                                 # noqa: E402
+    _orig_b3 = LH3._bool
+    LH3._bool = lambda k, d=False: False if k == "qq_auto_learn_enable" else True
+    try:
+        check("★ 插件总开关关着时，群学习检索直接返回空（不再注入）",
+              LH3.learn_notes("随便什么问题", gid="12345") == [])
+    finally:
+        LH3._bool = _orig_b3
+except Exception as e:
+    import traceback
+    traceback.print_exc()
+    check("codex 复审回归项可跑", False, "%s: %s" % (type(e).__name__, e))
 
 print()
 if FAILS:

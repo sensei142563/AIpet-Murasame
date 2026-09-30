@@ -95,7 +95,10 @@ check("全局 QSS 的勾选态带对勾图", "QCheckBox::indicator:checked" in q
       and "image: url(" in qss.split("QCheckBox::indicator:checked")[1][:220])
 src_pp = read("pcl_launcher/plugins_panel.py")
 check("插件页设置项勾选框套了 enabled_check_qss",
-      'w.setStyleSheet(enabled_check_qss(Color1.name()))' in src_pp)
+      # ⚠ codex 复审 P2 后改成局部导入（原来这个作用域里没 import → NameError 被 except
+      #   吞掉、样式其实从没生效），所以断言改成"导入了 + 用上了"两件事。
+      "from .silicon_ui import enabled_check_qss" in src_pp
+      and "_ecq(Color1.name())" in src_pp)
 check("enabled_check_qss 用主题感知勾色（不再是写死白）",
       "img = _check_png(_check_color())" in read("pcl_launcher/silicon_ui.py"))
 

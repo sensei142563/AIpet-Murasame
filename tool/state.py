@@ -160,18 +160,34 @@ def mood() -> float:
 
 
 def _talk_count() -> int:
-    """真实对话条数（data/history.json 的 history 列表）。读不到就 0。"""
+    """真实对话条数（**现役**角色的 memory/history.json 里的 history 列表）。读不到就 0。
+
+    ⚠ codex 复审 P2：原来读的是 `data/history.json` —— 那是**旧版遗留**文件（迁移时写过一次，
+    见 classes/murasame_class.py 的迁移段），现役记录在 `pets/<角色>/memory/history.json`。
+    读错文件会让 affinity_floor() 的「真实对话条数」项对老用户偏小、对新装恒为 0，
+    与 docstring 说的"按真实相处证据"不符。现在优先读现役文件，读不到才退回旧文件。
+    """
+    import json as _json
+    import os as _os
+    cands = []
     try:
-        import json as _json
-        import os as _os
-        p = _os.path.join(os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
-                          "data", "history.json")
-        with open(p, encoding="utf-8") as f:
-            d = _json.load(f)
-        h = d.get("history") if isinstance(d, dict) else d
-        return int(len(h)) if isinstance(h, list) else 0
+        from pets.pet_registry import get_memory_dir
+        cands.append(_os.path.join(get_memory_dir(), "history.json"))
     except Exception:
-        return 0
+        pass
+    cands.append(_os.path.join(
+        _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+        "data", "history.json"))          # 旧版遗留，仅兜底
+    for p in cands:
+        try:
+            with open(p, encoding="utf-8") as f:
+                d = _json.load(f)
+            h = d.get("history") if isinstance(d, dict) else d
+            if isinstance(h, list) and h:
+                return int(len(h))
+        except Exception:
+            continue
+    return 0
 
 
 def affinity_floor() -> float:

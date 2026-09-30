@@ -330,10 +330,14 @@ class PCLPluginSettingsDialog(SiliconDialog):
                 w.setChecked(_bool_of(cfg.get(key), bool(item.get("default", True))))
                 # 原来这里不套样式：退回全局那套实心色块，浅色主题上看不出勾没勾
                 # （用户报「是否打勾的对比度太小，完全看不清」）→ 统一用带对勾的那套
+                # ⚠ codex 复审 P2：这个作用域里**没有** enabled_check_qss（它定义在
+                #   silicon_ui.py，本模块只 `from .colors import *`）→ 原来抛 NameError 被
+                #   下面的 except 静默吞掉，等于**样式从来没生效过**。补局部导入。
                 try:
-                    w.setStyleSheet(enabled_check_qss(Color1.name()))
-                except Exception:
-                    pass
+                    from .silicon_ui import enabled_check_qss as _ecq
+                    w.setStyleSheet(_ecq(Color1.name()))
+                except Exception as _e_ck:
+                    print(f"[PluginsPanel] ⚠ 勾选框样式套用失败: {_e_ck}")
                 row.addWidget(w)
             elif itype == "spin":
                 w = QSpinBox()

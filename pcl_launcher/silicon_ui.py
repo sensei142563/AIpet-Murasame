@@ -651,7 +651,11 @@ def _check_png(color="#ffffff") -> str:
         p.end()
         d = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tmp")
         os.makedirs(d, exist_ok=True)
-        f = os.path.join(d, "silicon_check.png")
+        # ⚠ 文件名必须带颜色（codex 复审 P2）：缓存是按颜色存的，文件却只有一个固定名字 ——
+        #   同一进程里换主题（深→浅→深）时，`#ffffff` 的缓存会指向"最后一次写给浅色主题"的那个
+        #   文件，深色主题就又变回低对比对勾（正是 ⑤ 修掉的那个回归）。
+        _tag = "".join(ch for ch in str(color).lstrip("#") if ch.isalnum())[:8] or "default"
+        f = os.path.join(d, "silicon_check_%s.png" % _tag)
         pm.save(f, "PNG")
         _check_png_cache[color] = f
         return f

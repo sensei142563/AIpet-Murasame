@@ -167,7 +167,15 @@ def slang_note(user_text: str) -> str:
 
 
 def learn_notes(user_text: str, gid=None) -> list:
-    """群学习库检索（只有 QQ 群聊有库；其它渠道 gid=None → 返回空）"""
+    """群学习库检索（只有 QQ 群聊有库；其它渠道 gid=None → 返回空）。
+
+    ⚠ codex 复审 P2：这里必须和「问题联网搜索」一样先过**插件总开关**
+    （`qq_auto_learn_enable`）。重构前这段检索整个包在 `if auto_learn_enable:` 里，
+    重构后只由 gid 决定 —— 插件关掉但子开关还开着时，QQ 回复仍会注入本地群学习内容，
+    与该模块声明的"总开关"语义矛盾。
+    """
+    if not _bool("qq_auto_learn_enable", False):
+        return []
     if gid is None or not user_text or len(user_text) > 120:
         return []
     try:
