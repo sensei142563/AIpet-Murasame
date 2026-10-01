@@ -1089,33 +1089,19 @@ def _pet_pid_alive() -> bool:
 
     为什么要它：桌宠启动要三十秒，这期间端口探测必然失败 → 会被当成"没在跑"，
     于是又拉一只起来（用户反馈"会启动多个桌宠"）。
+
+    ⚠ 2026-10-01：Windows 会复用 PID（旧锁文件里的 PID 可能已经被别的程序占用）
+    → 交给 tool/pet_lock.py 判断"它是否就是写锁那一刻那个进程"，过期锁就地清掉。
     """
     try:
-        import ctypes
-        pf = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "pet.pid")
-        if not os.path.exists(pf):
-            return False
-        with open(pf, encoding="utf-8") as f:
-            pid = int((f.read() or "0").strip() or 0)
-        if pid <= 0:
-            return False
-        k32 = ctypes.windll.kernel32
-        k32.OpenProcess.restype = ctypes.c_void_p
-        k32.OpenProcess.argtypes = [ctypes.c_uint, ctypes.c_int, ctypes.c_uint]
-        k32.GetExitCodeProcess.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
-        h = k32.OpenProcess(0x1000, False, pid)          # PROCESS_QUERY_LIMITED_INFORMATION
-        if not h:
-            return False
-        try:
-            code = ctypes.c_ulong(0)
-            ok = k32.GetExitCodeProcess(ctypes.c_void_p(h), ctypes.byref(code))
-            return bool(ok) and code.value == 259        # STILL_ACTIVE
-        finally:
-            try:
-                k32.CloseHandle(ctypes.c_void_p(h))
-            except Exception:
-                pass
-    except Exception:
+        import sys as _sys
+        _base = os.path.dirname(os.path.abspath(__file__))
+        if _base not in _sys.path:
+            _sys.path.insert(0, _base)
+        from tool.pet_lock import alive as _petlock_alive
+        return _petlock_alive(os.path.join(_base, "data", "pet.pid"))
+    except Exception as e:
+        print(f"[AIpet] ⚠ 进程锁判断失败（按未运行处理）: {e}")
         return False
 
 

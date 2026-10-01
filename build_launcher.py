@@ -117,6 +117,12 @@ cmd = [
     "--hidden-import", "pcl_launcher.silicon_ui",
     "--hidden-import", "pcl_launcher.live2d_preview",
     "--hidden-import", "pcl_launcher.safety",
+    # ★ 2026-10-01：同步上游时新加进来的页面/模块（启动器日志里那条
+    #   「页面 status 加载失败: No module named 'pcl_launcher.status_panel'」就是漏了它）
+    "--hidden-import", "pcl_launcher.status_panel",
+    "--hidden-import", "tool.status_snapshot",
+    "--hidden-import", "tool.vision_local",
+    "--hidden-import", "tool.pet_lock",
     "--hidden-import", "story",
     "--hidden-import", "story.store",
     "--hidden-import", "story.plot",

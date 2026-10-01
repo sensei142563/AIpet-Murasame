@@ -308,33 +308,18 @@ def _pet_pid_alive() -> bool:
     用户反馈："启动时按钮有时候会变回启动桌宠，点了就开第二只" ——
     根因就是这里以前只探测 HTTP 端口，而桌宠启动要三十秒，
     期间端口探测失败 → 按钮变回「启动桌宠」→ 再点就拉起第二个。
+
+    ⚠ 2026-10-01 再修一次：Windows 会**复用 PID**。11:28 那次桌宠留下的锁文件里写着 26224，
+      13:11 这个 PID 被别的程序占了 → 旧实现（只问"这个 PID 的进程还在吗"）返回 True →
+      启动器坚信「桌宠正在启动中」，点几次都不给开。
+      现在交给 tool/pet_lock.py：除了"活着"，还要证明它是**写锁那一刻**启动的那个进程
+      （镜像名是 python/pythonw + 创建时间与锁文件写入时间吻合），过期锁就地清掉。
     """
     try:
-        import ctypes
-        pf = os.path.join(_app_base_dir(), "data", "pet.pid")
-        if not os.path.exists(pf):
-            return False
-        with open(pf, encoding="utf-8") as f:
-            pid = int((f.read() or "0").strip() or 0)
-        if pid <= 0:
-            return False
-        k32 = ctypes.windll.kernel32
-        k32.OpenProcess.restype = ctypes.c_void_p
-        k32.OpenProcess.argtypes = [ctypes.c_uint, ctypes.c_int, ctypes.c_uint]
-        k32.GetExitCodeProcess.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
-        h = k32.OpenProcess(0x1000, False, pid)
-        if not h:
-            return False
-        try:
-            code = ctypes.c_ulong(0)
-            ok = k32.GetExitCodeProcess(ctypes.c_void_p(h), ctypes.byref(code))
-            return bool(ok) and code.value == 259
-        finally:
-            try:
-                k32.CloseHandle(ctypes.c_void_p(h))
-            except Exception:
-                pass
-    except Exception:
+        from tool.pet_lock import alive as _petlock_alive
+        return _petlock_alive(os.path.join(_app_base_dir(), "data", "pet.pid"))
+    except Exception as e:
+        print(f"[NewUI] ⚠ 进程锁判断失败（按未运行处理）: {e}")
         return False
 
 
