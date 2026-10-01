@@ -20,6 +20,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QFont
 
 from .colors import *
+from .colors import ui_font_family
 from .colors import _list_themes  # 下划线名不随 * 导出，需显式导入
 
 
@@ -55,7 +56,7 @@ class PCLThemeBgDialog(SiliconDialog):
         cur = QLabel("当前背景：" + ("图片" if btype == "image" else
                                      ("视频" if btype == "video" else "无（纯色底）")))
         cur.setStyleSheet(f"color: {Color1.name()}; font-size: {int(13*S)}px;"
-                          f"font-family: 'Microsoft YaHei';")
+                          f"font-family: '{ui_font_family()}';")
         lay.addWidget(cur)
 
         info = QLabel("选择后立即应用到该主题并实时生效。\n"
@@ -188,7 +189,7 @@ class PCLThemesPanel(QScrollArea):
         self.setWidget(self._container)
 
         title = QLabel("主题目录")
-        title.setFont(QFont("Microsoft YaHei", int(16 * S), QFont.Bold))
+        title.setFont(QFont(ui_font_family(), int(16 * S), QFont.Bold))
         title.setStyleSheet(f"color: {Color1.name()};")
         self._layout.addWidget(title)
 
@@ -204,7 +205,7 @@ class PCLThemesPanel(QScrollArea):
 
         # ===== 主题色（强调色）选择：与主题一体管理 =====
         acc_label = QLabel("主题色（强调色，点击即时预览切换）")
-        acc_label.setFont(QFont("Microsoft YaHei", int(13 * S), QFont.Bold))
+        acc_label.setFont(QFont(ui_font_family(), int(13 * S), QFont.Bold))
         acc_label.setStyleSheet(
             f"color: {Color3.name()}; margin-top: {int(8*S)}px;"
             f"padding: {int(5*S)}px {int(10*S)}px;"
@@ -234,7 +235,7 @@ class PCLThemesPanel(QScrollArea):
             b.setStyleSheet(f"""
                 QPushButton {{ background: {Color3.name()}; color: white; border: none;
                     padding: {int(8*S)}px {int(16*S)}px; font-size: {int(13*S)}px;
-                    border-radius: {btn_radius()}px; font-family: 'Microsoft YaHei'; }}
+                    border-radius: {btn_radius()}px; font-family: '{ui_font_family()}'; }}
                 QPushButton:hover {{ background: {Color4.name()}; }}
             """)
         btn_import.clicked.connect(self._import_theme)
@@ -766,9 +767,9 @@ class PCLThemesPanel(QScrollArea):
                     print(f"[Themes] ⚠ 字体 {_fid} 没加载成功（文件缺失？）")
                 try:
                     from . import silicon_ui as _sui
-                    _sui.set_ui_font(_fam or "Microsoft YaHei UI")
+                    _sui.set_ui_font(_fam or f"{ui_font_family()} UI")
                     print("[Themes] 界面字体 → %s（Qt 族名 %s）"
-                          % (_fid or "默认思源黑体", _fam or "Microsoft YaHei UI"))
+                          % (_fid or "默认思源黑体", _fam or f"{ui_font_family()} UI"))
                 except Exception as _e4:
                     print(f"[Themes] ⚠ 应用界面字体失败: {_e4}")
                 try:
@@ -818,7 +819,7 @@ class PCLThemesPanel(QScrollArea):
     def _section_label(self, text, count):
         lbl = QLabel(f"  {text}  <span style='color:{Gray2.name()};font-size:{int(11*S)}px;'>"
                      f"共 {count} 个</span>")
-        lbl.setFont(QFont("Microsoft YaHei", int(13 * S), QFont.Bold))
+        lbl.setFont(QFont(ui_font_family(), int(13 * S), QFont.Bold))
         lbl.setStyleSheet(f"color: {Color1.name()}; margin-top: {int(8*S)}px;"
                           f"background: transparent; border: none;")
         return lbl
@@ -873,7 +874,7 @@ class PCLThemesPanel(QScrollArea):
         if is_cur:
             name += "当前使用"
         name_lbl = QLabel(name)
-        name_lbl.setFont(QFont("Microsoft YaHei", int(14*S), QFont.Bold))
+        name_lbl.setFont(QFont(ui_font_family(), int(14*S), QFont.Bold))
         name_lbl.setStyleSheet(f"color: {Color3.name() if is_cur else Color1.name()}; "
                                f"background: transparent; border: none;")
         left.addWidget(name_lbl)
@@ -913,7 +914,7 @@ class PCLThemesPanel(QScrollArea):
             QPushButton {{ background: {Color6.name()}; color: {Color1.name()};
                 border: 1px solid {Color5.name()}; padding: {int(4*S)}px {int(8*S)}px;
                 font-size: {int(11*S)}px; border-radius: {int(4*S)}px;
-                font-family: 'Microsoft YaHei'; }}
+                font-family: '{ui_font_family()}'; }}
             QPushButton:hover {{ background: {Color4.name()}; color: white; }}
             QPushButton:disabled {{ color: {Gray4.name()}; }}
         """

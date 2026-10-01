@@ -15,6 +15,7 @@ from PyQt5.QtWidgets import (
 )
 
 from .colors import *
+from .colors import ui_font_family
 from .colors import _app_base_dir
 # 页面卡片与区块标题：和「设置」「记忆」页用同一套（外观统一，别再各写一份 QSS）
 from .silicon_ui import card_qss, section_title
@@ -82,7 +83,7 @@ class BoolSwitch(QAbstractButton):
         p.drawEllipse(x, int(2 * S), knob, knob)
         # 状态字放在旋钮另一边，避免和旋钮重叠
         p.setPen(QColor(255, 255, 255))
-        p.setFont(QFont("Microsoft YaHei", int(9 * S), QFont.Bold))
+        p.setFont(QFont(ui_font_family(), int(9 * S), QFont.Bold))
         free = self.rect().adjusted(0, 0, -(knob + int(4 * S)), 0) if on \
             else self.rect().adjusted(knob + int(4 * S), 0, 0, 0)
         p.drawText(free, Qt.AlignCenter, "开" if on else "关")
@@ -201,7 +202,7 @@ class PCLSettingsPanel(QWidget):
         self._scroll.setWidget(container)
 
         title = QLabel("设置")
-        title.setFont(QFont("Microsoft YaHei", int(16 * S), QFont.Bold))
+        title.setFont(QFont(ui_font_family(), int(16 * S), QFont.Bold))
         title.setStyleSheet(f"color: {Color1.name()};")
         self._layout.addWidget(title)
 
@@ -213,7 +214,7 @@ class PCLSettingsPanel(QWidget):
             QPushButton {{ background: {surface_fill()}; color: {Color1.name()};
                 border: 1px solid {Gray5.name()}; padding: {int(5*S)}px {int(14*S)}px;
                 font-size: {int(12*S)}px; border-radius: {btn_radius()}px;
-                font-family: 'Microsoft YaHei'; }}
+                font-family: '{ui_font_family()}'; }}
             QPushButton:hover {{ background: {surface_fill(220, 44)}; }}
             QPushButton:checked {{ background: {Color3.name()}; color: white;
                 border-color: {Color3.name()}; font-weight: bold; }}
@@ -387,7 +388,7 @@ class PCLSettingsPanel(QWidget):
 
         # ===== 对话调节 =====
         cap_lbl = QLabel("对话调节")
-        cap_lbl.setFont(QFont("Microsoft YaHei", int(12 * S), QFont.Bold))
+        cap_lbl.setFont(QFont(ui_font_family(), int(12 * S), QFont.Bold))
         cap_lbl.setStyleSheet(f"color: {Color1.name()}; margin-top: {int(14*S)}px;")
         self._cur_layout.addWidget(cap_lbl)
         self._add_spin("qq_max_reply_chars", "单条回复最多字数（0=不限）", 0, 2000, 0,
@@ -401,7 +402,7 @@ class PCLSettingsPanel(QWidget):
 
         # ===== 私信回复范围 =====
         pm_lbl = QLabel("私信回复范围")
-        pm_lbl.setFont(QFont("Microsoft YaHei", int(12 * S), QFont.Bold))
+        pm_lbl.setFont(QFont(ui_font_family(), int(12 * S), QFont.Bold))
         pm_lbl.setStyleSheet(f"color: {Color1.name()}; margin-top: {int(14*S)}px;")
         self._cur_layout.addWidget(pm_lbl)
         self._add_slider("qq_private_enable", "允许回复私信（总开关）", ["false", "true"], "true",
@@ -471,7 +472,7 @@ class PCLSettingsPanel(QWidget):
                         hint="开：启动桌宠 / 语音服务时不再弹出黑色终端窗口，界面干净。\n"
                              "关：保留终端窗口，排查问题能看到详细日志。")
         log_label = QLabel("更新日志")
-        log_label.setFont(QFont("Microsoft YaHei", int(13 * S), QFont.Bold))
+        log_label.setFont(QFont(ui_font_family(), int(13 * S), QFont.Bold))
         log_label.setStyleSheet(f"color: {Color1.name()}; margin-top: {int(16*S)}px;")
         self._cur_layout.addWidget(log_label)
         log_row = QHBoxLayout(); log_row.setSpacing(int(8 * S))
@@ -479,7 +480,7 @@ class PCLSettingsPanel(QWidget):
             QPushButton {{ background: {Color6.name()}; color: {Color1.name()};
                 border: 1px solid {Color5.name()}; padding: {int(7*S)}px {int(14*S)}px;
                 font-size: {int(12*S)}px; border-radius: {btn_radius()}px;
-                font-family: 'Microsoft YaHei'; }}
+                font-family: '{ui_font_family()}'; }}
             QPushButton:hover {{ background: {fill_for_text(Color4).name()}; color: white; }}
         """
         btn_view_log = QPushButton("查看日志")
@@ -515,7 +516,7 @@ class PCLSettingsPanel(QWidget):
             QPushButton {{ background: {Color6.name()}; color: {Color1.name()};
                 border: 1px solid {Color5.name()}; padding: {int(6*S)}px {int(14*S)}px;
                 font-size: {int(12*S)}px; border-radius: {btn_radius()}px;
-                font-family: 'Microsoft YaHei'; }}
+                font-family: '{ui_font_family()}'; }}
             QPushButton:hover {{ background: {fill_for_text(Color4).name()}; color: white; }}
         """)
         btn_restart.clicked.connect(self._restart_pet)
@@ -677,7 +678,7 @@ class PCLSettingsPanel(QWidget):
     def _section(self, text, icon=""):
         """设置页分区标题（左侧主题色条 + 半透明底，视觉上把功能归类）"""
         lbl = QLabel(f"  {icon} {text}")
-        lbl.setFont(QFont("Microsoft YaHei", int(13 * S), QFont.Bold))
+        lbl.setFont(QFont(ui_font_family(), int(13 * S), QFont.Bold))
         lbl.setStyleSheet(
             f"color: {Color3.name()}; margin-top: {int(18*S)}px;"
             f"padding: {int(5*S)}px {int(10*S)}px;"
@@ -698,7 +699,7 @@ class PCLSettingsPanel(QWidget):
         inp.setStyleSheet(f"""
             QLineEdit {{ border: 1px solid {Gray5.name()}; padding: {int(6*S)}px;
                 font-size: {int(12*S)}px; border-radius: {int(4*S)}px;
-                background: {surface_fill(190, 26)}; font-family: 'Microsoft YaHei'; }}
+                background: {surface_fill(190, 26)}; font-family: '{ui_font_family()}'; }}
             QLineEdit:focus {{ border: 1px solid {Color3.name()}; }}
         """)
         if not secure:
@@ -718,7 +719,7 @@ class PCLSettingsPanel(QWidget):
                 QPushButton {{ background: {surface_fill(170, 24)}; color: {Gray1.name()};
                     border: 1px solid {Gray5.name()}; padding: {int(6*S)}px 0;
                     font-size: {int(12*S)}px; border-radius: {int(4*S)}px;
-                    font-family: 'Microsoft YaHei'; }}
+                    font-family: '{ui_font_family()}'; }}
                 QPushButton:hover {{ background: {surface_fill(235, 40)}; }}
                 QPushButton:checked {{ background: {Color3.name()}; color: white;
                     border-color: {Color3.name()}; }}
@@ -841,7 +842,7 @@ class PCLSettingsPanel(QWidget):
         combo.setStyleSheet(f"""
             QComboBox {{ border: 1px solid {Gray5.name()}; padding: {int(4*S)}px;
                 font-size: {int(12*S)}px; border-radius: {int(4*S)}px;
-                background: {surface_fill(190, 26)}; font-family: 'Microsoft YaHei'; }}
+                background: {surface_fill(190, 26)}; font-family: '{ui_font_family()}'; }}
             QComboBox:focus {{ border: 1px solid {Color3.name()}; }}
             QComboBox QAbstractItemView {{ background: {surface_fill(190, 26)}; selection-background-color: {Color3.name()}; }}
         """)
@@ -1134,7 +1135,7 @@ class PCLFaceManager(QScrollArea):
         self.setWidget(container)
 
         title = QLabel("人脸管理")
-        title.setFont(QFont("Microsoft YaHei", int(16 * S), QFont.Bold))
+        title.setFont(QFont(ui_font_family(), int(16 * S), QFont.Bold))
         title.setStyleSheet(f"color: {Color1.name()};")
         self._layout.addWidget(title)
 
@@ -1154,7 +1155,7 @@ class PCLFaceManager(QScrollArea):
         btn_add_master.setStyleSheet(f"""
             QPushButton {{ background: {Color3.name()}; color: white; border: none;
                 padding: {int(8*S)}px {int(16*S)}px; font-size: {int(13*S)}px;
-                border-radius: {btn_radius()}px; font-family: 'Microsoft YaHei'; }}
+                border-radius: {btn_radius()}px; font-family: '{ui_font_family()}'; }}
             QPushButton:hover {{ background: {Color4.name()}; }}
         """)
         btn_add_master.clicked.connect(self._add_master_face)
@@ -1177,7 +1178,7 @@ class PCLFaceManager(QScrollArea):
         btn_add_other.setStyleSheet(f"""
             QPushButton {{ background: {Color3.name()}; color: white; border: none;
                 padding: {int(8*S)}px {int(16*S)}px; font-size: {int(13*S)}px;
-                border-radius: {btn_radius()}px; font-family: 'Microsoft YaHei'; }}
+                border-radius: {btn_radius()}px; font-family: '{ui_font_family()}'; }}
             QPushButton:hover {{ background: {Color4.name()}; }}
         """)
         btn_add_other.clicked.connect(self._add_other_face)
@@ -1318,7 +1319,7 @@ class PCLMemoryManager(QScrollArea):
         self.setWidget(container)
 
         title = QLabel("记忆管理")
-        title.setFont(QFont("Microsoft YaHei", int(16 * S), QFont.Bold))
+        title.setFont(QFont(ui_font_family(), int(16 * S), QFont.Bold))
         title.setStyleSheet(f"color: {Color1.name()};")
         self._layout.addWidget(title)
 
@@ -1361,7 +1362,7 @@ class PCLMemoryManager(QScrollArea):
 
         # ===== 记忆文件列表 =====
         list_title = QLabel("该角色记忆文件")
-        list_title.setFont(QFont("Microsoft YaHei", int(14 * S), QFont.Bold))
+        list_title.setFont(QFont(ui_font_family(), int(14 * S), QFont.Bold))
         list_title.setStyleSheet(f"color: {Color1.name()}; margin-top: {int(8*S)}px;")
         self._layout.addWidget(list_title)
 
@@ -1373,7 +1374,7 @@ class PCLMemoryManager(QScrollArea):
 
         # ===== 预览区 =====
         prev_title = QLabel("预览（最近 20 条）")
-        prev_title.setFont(QFont("Microsoft YaHei", int(14 * S), QFont.Bold))
+        prev_title.setFont(QFont(ui_font_family(), int(14 * S), QFont.Bold))
         prev_title.setStyleSheet(f"color: {Color1.name()}; margin-top: {int(8*S)}px;")
         self._layout.addWidget(prev_title)
 
@@ -1404,7 +1405,7 @@ class PCLMemoryManager(QScrollArea):
 
         # ===== QQ 离线补拉状态 =====
         off_title = QLabel("QQ 离线补拉状态")
-        off_title.setFont(QFont("Microsoft YaHei", int(14 * S), QFont.Bold))
+        off_title.setFont(QFont(ui_font_family(), int(14 * S), QFont.Bold))
         off_title.setStyleSheet(f"color: {Color1.name()}; margin-top: {int(12*S)}px;")
         self._layout.addWidget(off_title)
 
@@ -1437,7 +1438,7 @@ class PCLMemoryManager(QScrollArea):
 
         head = QHBoxLayout()
         head_title = QLabel("微信 ClawBot")
-        head_title.setFont(QFont("Microsoft YaHei", int(14 * S), QFont.Bold))
+        head_title.setFont(QFont(ui_font_family(), int(14 * S), QFont.Bold))
         head_title.setStyleSheet(f"color: {Color1.name()}; border: none; background: transparent;")
         head.addWidget(head_title)
         head.addStretch()
@@ -1533,7 +1534,7 @@ class PCLMemoryManager(QScrollArea):
         return f"""
             QPushButton {{ background: {bg}; color: white; border: none;
                 padding: {int(8*S)}px {int(16*S)}px; font-size: {int(13*S)}px;
-                border-radius: {btn_radius()}px; font-family: 'Microsoft YaHei'; }}
+                border-radius: {btn_radius()}px; font-family: '{ui_font_family()}'; }}
             QPushButton:hover {{ background: {bg}; opacity: 0.8; }}
         """
 
@@ -1786,7 +1787,7 @@ class PCLPetManager(QScrollArea):
         self.setWidget(container)
 
         title = QLabel("桌宠管理")
-        title.setFont(QFont("Microsoft YaHei", int(16 * S), QFont.Bold))
+        title.setFont(QFont(ui_font_family(), int(16 * S), QFont.Bold))
         title.setStyleSheet(f"color: {Color1.name()};")
         self._layout.addWidget(title)
 
@@ -1811,7 +1812,7 @@ class PCLPetManager(QScrollArea):
             self._slots_panel = None
 
         self._all_head = QLabel("全部桌宠（详细信息）")
-        self._all_head.setFont(QFont("Microsoft YaHei", int(14 * S), QFont.Bold))
+        self._all_head.setFont(QFont(ui_font_family(), int(14 * S), QFont.Bold))
         self._all_head.setStyleSheet(f"color: {Color1.name()};")
         self._layout.addWidget(self._all_head)
 
@@ -1827,7 +1828,7 @@ class PCLPetManager(QScrollArea):
         btn_add.setStyleSheet(f"""
             QPushButton {{ background: {Color3.name()}; color: white; border: none;
                 padding: {int(8*S)}px {int(16*S)}px; font-size: {int(13*S)}px;
-                border-radius: {btn_radius()}px; font-family: 'Microsoft YaHei'; }}
+                border-radius: {btn_radius()}px; font-family: '{ui_font_family()}'; }}
             QPushButton:hover {{ background: {Color4.name()}; }}
         """)
         btn_add.clicked.connect(self._add_pet)
@@ -1931,7 +1932,7 @@ class PCLPetManager(QScrollArea):
                 int(40 * S), int(40 * S), Qt.KeepAspectRatio, Qt.SmoothTransformation))
             hdr.addWidget(av)
         name = QLabel(p.get("display_name") or p.get("name", "?"))
-        name.setFont(QFont("Microsoft YaHei", int(14*S), QFont.Bold))
+        name.setFont(QFont(ui_font_family(), int(14*S), QFont.Bold))
         name.setStyleSheet(f"color: {Color1.name()}; border: none;")
         hdr.addWidget(name)
         # 槽位标记：这个角色当前被哪些槽在用（桌宠 / QQ / 微信）——
@@ -2181,7 +2182,7 @@ class PCLPetManager(QScrollArea):
         return f"""
             QPushButton {{ background: {bg}; color: white; border: none;
                 padding: {int(5*S)}px {int(12*S)}px; font-size: {int(11*S)}px;
-                border-radius: {int(5*S)}px; font-family: 'Microsoft YaHei'; }}
+                border-radius: {int(5*S)}px; font-family: '{ui_font_family()}'; }}
             QPushButton:hover {{ opacity: 0.85; }}
         """
 
@@ -2449,7 +2450,7 @@ class PCLLive2DTunePanel(QWidget):
         layout.setSpacing(int(10 * S))
 
         title = QLabel("Live2D 显示调参")
-        title.setFont(QFont("Microsoft YaHei", int(14 * S), QFont.Bold))
+        title.setFont(QFont(ui_font_family(), int(14 * S), QFont.Bold))
         title.setStyleSheet(f"color: {Color1.name()};")
         layout.addWidget(title)
         desc = QLabel("拖动滑块设置数值，点击「保存到角色」写入 pet.json（下次启动生效；桌宠运行中会同时实时应用）。")
@@ -2496,7 +2497,7 @@ class PCLLive2DTunePanel(QWidget):
             b.setStyleSheet(f"""
                 QPushButton {{ background: {Color6.name()}; color: {Color1.name()};
                     border: 1px solid {Color5.name()}; padding: {int(8*S)}px {int(14*S)}px;
-                    font-size: {int(12*S)}px; font-family: 'Microsoft YaHei'; border-radius: {btn_radius()}px; }}
+                    font-size: {int(12*S)}px; font-family: '{ui_font_family()}'; border-radius: {btn_radius()}px; }}
                 QPushButton:hover {{ background: {fill_for_text(Color4).name()}; color: white; border: 1px solid {Color3.name()}; }}
             """)
         btn_live.clicked.connect(self._load_from_live)
@@ -2634,7 +2635,7 @@ def outline_btn_qss(fg=None, pad_v: int = 8, pad_h: int = 16, font_size: int = 1
         QPushButton {{ background: {surface_fill(175, 24)}; color: {fg};
             border: 1px solid {Gray5.name()};
             padding: {pad_v}px {pad_h}px; font-size: {font_size}px;
-            border-radius: {r}px; font-family: 'Microsoft YaHei'; }}
+            border-radius: {r}px; font-family: '{ui_font_family()}'; }}
         QPushButton:hover {{ background: {surface_fill(240, 44)}; }}
     """
 
@@ -2650,7 +2651,7 @@ class PCLPromptEditor(QWidget):
         layout.setSpacing(int(12 * S))
 
         title = QLabel("提示词编辑器")
-        title.setFont(QFont("Microsoft YaHei", int(16 * S), QFont.Bold))
+        title.setFont(QFont(ui_font_family(), int(16 * S), QFont.Bold))
         title.setStyleSheet(f"color: {Color1.name()};")
         layout.addWidget(title)
         desc = QLabel("编辑各角色的人设提示词。短文本=桌面短句模式；长文本=长文本模式与 QQ 聊天。保存后下次对话生效。")
@@ -2694,7 +2695,7 @@ class PCLPromptEditor(QWidget):
             b.setStyleSheet(f"""
                 QPushButton {{ background: {Color3.name()}; color: white; border: none;
                     padding: {int(8*S)}px {int(16*S)}px; font-size: {int(13*S)}px;
-                    border-radius: {btn_radius()}px; font-family: 'Microsoft YaHei'; }}
+                    border-radius: {btn_radius()}px; font-family: '{ui_font_family()}'; }}
                 QPushButton:hover {{ background: {Color4.name()}; }}
             """)
         btn_save.clicked.connect(self._save)
@@ -2767,7 +2768,7 @@ def show_save_toast(ok: bool, text: str = ""):
         #（原来写死 #2e7d32 / #c62828，换主题不跟随，白字对比度也没保证）
         lab.setStyleSheet(f"background:{bg};color:#ffffff;border-radius:12px;"
                           f"padding:14px 32px;font-size:{int(18 * S)}px;font-weight:bold;"
-                          "font-family:'Microsoft YaHei';")
+                          f"font-family:'{ui_font_family()}';")
         lab.setText(text or ("保存成功"if ok else "保存失败"))
         # 黑色投影，模拟描边，白字在任何背景下都清楚
         _sh = QGraphicsDropShadowEffect(lab)

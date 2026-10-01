@@ -370,12 +370,19 @@ def set_ui_font(family: str) -> bool:
             for _w in app.allWidgets():
                 try:
                     _f = _w.font()
-                    if _f is None or _f.family() == _fam:
-                        continue
-                    _w.setFont(_QF(_fam, _f.pointSize() if _f.pointSize() > 0 else M.font_size,
-                                   _f.weight(), _f.italic()))
+                    if _f is not None and _f.family() != _fam:
+                        _w.setFont(_QF(_fam, _f.pointSize() if _f.pointSize() > 0 else M.font_size,
+                                       _f.weight(), _f.italic()))
                 except Exception:
-                    continue
+                    pass
+                # ★ 内联样式表里写死的 'Microsoft YaHei' 会压过 setFont（样式表优先级更高）
+                #   → 一并替换掉，否则那些控件的字永远不跟主题字体变（用户反馈"有的文字不变"）。
+                try:
+                    _css = _w.styleSheet()
+                    if _css and "Microsoft YaHei" in _css:
+                        _w.setStyleSheet(_css.replace("Microsoft YaHei", _fam))
+                except Exception:
+                    pass
         except Exception as _e:
             print(f"[SiliconUI] ⚠ 逐控件换字体失败（忽略）: {_e}")
         return bool(ok)

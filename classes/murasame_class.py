@@ -5594,7 +5594,10 @@ class Murasame(QLabel):
             except Exception:
                 pass
         else:
-            self.text_font = QFont(self._font_family, max(8, int(scaled_font_size)))
+            # ★ 2026-10-01 修复：这里以前用 self._font_family（初始值就是写死的
+            #   "思源黑体Bold.otf"），**根本没走 _resolve_pet_font()** ——
+            #   于是主题页里换了界面字体，桌宠对话框的字还是老样子（用户反馈"没变成"）。
+            self.text_font = QFont(self._resolve_pet_font(), max(8, int(scaled_font_size)))
             _pt = max(6, int(round(scaled_font_size * 1.333)))
         self._font_px = _pt
 

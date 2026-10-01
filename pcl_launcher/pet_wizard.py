@@ -32,6 +32,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QFont, QPainter, QColor, QPixmap, QPen, QBrush, QPainterPath
 
 from .colors import _app_base_dir  # noqa: F401  （打包时确保该模块被收集）
+from .colors import ui_font_family
 # 说明文字/状态字一律取主题色：写死的 #888 / #9a9aa8 / #8fd18f / #e07a90 / #7fc48f
 # 都是深色 UI 时代的值，浅色主题（经典 / 千恋万花）上就是"浅字压浅底"看不清。
 from .colors import Color1, Color7, Gray2, ok_text, warn_text  # noqa: F401  （底色跟随启动器底色）
@@ -473,9 +474,17 @@ def build_pet_json(spec: dict, existing: dict = None) -> dict:
     v["long_ref_text"] = spec.get("long_ref_text") or ""
     if spec.get("default_emotion"):
         v["default_emotion"] = spec["default_emotion"]
-    # 注：voices.gpt_weights / sovits_weights（角色专属语音模型）**不在向导里选** ——
-    # 桌宠运行时会按"当前角色"自动找它自己的模型（见 run.py::pet_voice_weights），
-    # 这里只是原样保留已有字段，不会被向导覆盖掉。
+    # ★ 2026-10-01：短语音用哪个模型（向导「语音」页里选的）
+    #   None=跟随角色（不动已配置的）/ "base"=基础模型（清掉专属）/ (gpt, sovits)=指定训练好的
+    _sm = spec.get("short_model")
+    if isinstance(_sm, (list, tuple)) and len(_sm) == 2 and _sm[0] and _sm[1]:
+        v["gpt_weights"] = str(_sm[0])
+        v["sovits_weights"] = str(_sm[1])
+        print(f"[Wizard] 短语音模型 -> {_sm[0]} / {_sm[1]}")
+    elif _sm == "base":
+        v.pop("gpt_weights", None)
+        v.pop("sovits_weights", None)
+        print("[Wizard] 短语音模型 -> 基础模型（已清掉专属权重）")
     cfg["voices"] = v
     if spec.get("portrait"):
         cfg["portrait"] = spec["portrait"]
@@ -1076,7 +1085,7 @@ class PCLPetWizard(SiliconDialog):
         root.setSpacing(8)
 
         head = QLabel("跟着向导走完这几步，就能拥有自己的桌宠")
-        head.setFont(QFont("Microsoft YaHei", 11, QFont.Bold))
+        head.setFont(QFont(ui_font_family(), 11, QFont.Bold))
         root.addWidget(head)
 
         body = QHBoxLayout()
@@ -2465,6 +2474,26 @@ class PCLPetWizard(SiliconDialog):
         self.ed_short_text = QLineEdit()
         self.ed_short_text.setPlaceholderText("参考音频对应文本（日语，如 はよう、いくぞ、ごしゅじん！；可留空）")
         l1.addWidget(self.ed_short_text)
+        # ★ 2026-10-01：短语音用哪个「模型」—— 训练好的角色模型直接在这里选
+        #   默认「跟随角色」= 训练过就用它自己的，没训练过就用基础模型（不选也不会哑）
+        _mrow = QHBoxLayout()
+        _mlab = QLabel("语音模型")
+        _mlab.setFixedWidth(int(64 * S))
+        _mrow.addWidget(_mlab)
+        self.cmb_short_model = QComboBox()
+        self.cmb_short_model.addItem("跟随角色（训练过就用专属模型）", None)
+        self.cmb_short_model.addItem("基础模型（零样本克隆）", "base")
+        try:
+            from tool.gsv_models import list_trained_models
+            for _k, _label, _g, _s in list_trained_models():
+                self.cmb_short_model.addItem("用训练好的：%s" % _label, (_g, _s))
+        except Exception as _em:
+            print(f"[Wizard] ⚠ 扫描训练好的语音模型失败: {_em}")
+        self.cmb_short_model.setToolTip(
+            "训练好的角色模型会自动列在这里（扫 GPT-SoVITS 的 GPT_weights* / SoVITS_weights*）。\n"
+            "选「跟随角色」= 用这个角色自己的模型（推荐，训练过就自动生效）。")
+        _mrow.addWidget(self.cmb_short_model, 1)
+        l1.addLayout(_mrow)
         l1.addWidget(QLabel("不填则使用角色自带/默认（无参考音频时不会发声，不影响文字聊天）"))
         lay.addWidget(g1)
 
@@ -2623,6 +2652,11 @@ class PCLPetWizard(SiliconDialog):
             s["touch_enabled"] = bool(self.chk_touch.isChecked())
         except Exception:
             pass
+        # ★ 短语音用哪个模型：None=跟随角色 / "base"=基础模型 / (gpt, sovits)=指定
+        try:
+            s["short_model"] = self.cmb_short_model.currentData()
+        except Exception as _esm:
+            print(f"[Wizard] ⚠ 读取短语音模型选择失败: {_esm}")
         # 显示与对话框（2D / Live2D 两套完全独立的设置）
         try:
             self._write_back_disp()
@@ -2877,6 +2911,24 @@ class PCLPetWizard(SiliconDialog):
             lr = os.path.join(pets_dir(), self.pet_id, str(v.get("long_ref_audio")))
             self.ed_long_ref.setText(lr if os.path.exists(lr) else "")
             self.ed_long_text.setText(str(v.get("long_ref_text") or ""))
+        # ★ 短语音模型：回填当前选择（配置里指定的权重 / 基础模型 / 跟随角色）
+        try:
+            _g0 = str(v.get("gpt_weights") or "")
+            _s0 = str(v.get("sovits_weights") or "")
+            _idx = 0
+            if _g0 and _s0:
+                for _i in range(self.cmb_short_model.count()):
+                    _d = self.cmb_short_model.itemData(_i)
+                    if isinstance(_d, (list, tuple)) and str(_d[0]) == _g0 and str(_d[1]) == _s0:
+                        _idx = _i
+                        break
+                else:
+                    self.cmb_short_model.addItem("用训练好的：%s + %s（配置里指定）" % (_g0, _s0), (_g0, _s0))
+                    _idx = self.cmb_short_model.count() - 1
+            self.cmb_short_model.setCurrentIndex(_idx)
+            print("[Wizard] ℹ 短语音模型回填：%s" % ("跟随角色" if not _g0 else "%s / %s" % (_g0, _s0)))
+        except Exception as _ev2:
+            print(f"[Wizard] ⚠ 回填短语音模型失败: {_ev2}")
         # 人设
         try:
             for kind, box in (("short", self.ed_p_short), ("long", self.ed_p_long)):

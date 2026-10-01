@@ -24,6 +24,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QFont
 
 from .colors import *
+from .colors import ui_font_family
 
 S = 1.0
 
@@ -322,7 +323,7 @@ class PCLPluginSettingsDialog(SiliconDialog):
             row = QHBoxLayout()
             cap = QLabel(f"  {label}")
             cap.setStyleSheet(f"color: {Color1.name()}; font-size: {int(13*S)}px;"
-                              f"font-family: 'Microsoft YaHei';")
+                              f"font-family: '{ui_font_family()}';")
             row.addWidget(cap)
             if itype == "checkbox":
                 w = QCheckBox()
@@ -382,7 +383,7 @@ class PCLPluginSettingsDialog(SiliconDialog):
             b.setStyleSheet(f"""
                 QPushButton {{ background: {Color3.name()}; color: white; border: none;
                     padding: {int(8*S)}px {int(18*S)}px; font-size: {int(13*S)}px;
-                    border-radius: {btn_radius()}px; font-family: 'Microsoft YaHei'; }}
+                    border-radius: {btn_radius()}px; font-family: '{ui_font_family()}'; }}
                 QPushButton:hover {{ background: {Color4.name()}; }}
             """)
         btn_cancel.setStyleSheet(btn_cancel.styleSheet() +
@@ -469,7 +470,7 @@ class PCLPluginsPanel(QScrollArea):
         self.setWidget(self._container)
 
         title = QLabel("插件管理")
-        title.setFont(QFont("Microsoft YaHei", int(16 * S), QFont.Bold))
+        title.setFont(QFont(ui_font_family(), int(16 * S), QFont.Bold))
         title.setStyleSheet(f"color: {Color1.name()};")
         self._layout.addWidget(title)
 
@@ -488,7 +489,7 @@ class PCLPluginsPanel(QScrollArea):
             QPushButton {{ background: {surface_fill()}; color: {Color1.name()};
                 border: 1px solid {Gray5.name()}; padding: {int(5*S)}px {int(14*S)}px;
                 font-size: {int(12*S)}px; border-radius: {btn_radius()}px;
-                font-family: 'Microsoft YaHei'; }}
+                font-family: '{ui_font_family()}'; }}
             QPushButton:hover {{ background: {surface_fill(220, 44)}; }}
             QPushButton:checked {{ background: {Color3.name()}; color: white;
                 border-color: {Color3.name()}; font-weight: bold; }}
@@ -520,7 +521,7 @@ class PCLPluginsPanel(QScrollArea):
             b.setStyleSheet(f"""
                 QPushButton {{ background: {Color3.name()}; color: white; border: none;
                     padding: {int(8*S)}px {int(16*S)}px; font-size: {int(13*S)}px;
-                    border-radius: {btn_radius()}px; font-family: 'Microsoft YaHei'; }}
+                    border-radius: {btn_radius()}px; font-family: '{ui_font_family()}'; }}
                 QPushButton:hover {{ background: {Color4.name()}; }}
             """)
         btn_import.clicked.connect(self._import_plugin)
@@ -646,7 +647,7 @@ class PCLPluginsPanel(QScrollArea):
         name_lbl = QLabel(f"{meta.get('name', meta['id'])}  {_tag}  "
                           f"<span style='color:{Gray2.name()};font-size:{int(10*S)}px;'>v{meta.get('version','1.0.0')}"
                           f" · {'功能' if meta.get('kind')=='feature' else '工具'}</span>")
-        name_lbl.setFont(QFont("Microsoft YaHei", int(14*S), QFont.Bold))
+        name_lbl.setFont(QFont(ui_font_family(), int(14*S), QFont.Bold))
         name_lbl.setStyleSheet(f"color: {Color1.name()}; background: transparent; border: none;")
         left.addWidget(name_lbl)
         desc_lbl = QLabel(meta.get("desc", ""))
@@ -681,7 +682,7 @@ class PCLPluginsPanel(QScrollArea):
             chk.setStyleSheet(enabled_check_qss(Color1.name()))
         except Exception:
             chk.setStyleSheet(f"QCheckBox {{ color: {Color1.name()}; font-size: {int(13*S)}px; "
-                              f"font-family: 'Microsoft YaHei'; }}")
+                              f"font-family: '{ui_font_family()}'; }}")
         chk.stateChanged.connect(lambda st, m=meta: self._on_toggle(m, st))
         right.addWidget(chk)
 
@@ -693,7 +694,7 @@ class PCLPluginsPanel(QScrollArea):
             QPushButton {{ background: {Color6.name()}; color: {Color1.name()};
                 border: 1px solid {Color5.name()}; padding: {int(4*S)}px {int(8*S)}px;
                 font-size: {int(11*S)}px; border-radius: {int(4*S)}px;
-                font-family: 'Microsoft YaHei'; }}
+                font-family: '{ui_font_family()}'; }}
             QPushButton:hover {{ background: {fill_for_text(Color4).name()}; color: white; }}
         """
         for b in (btn_cfg, btn_open):

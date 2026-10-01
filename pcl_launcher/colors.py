@@ -385,6 +385,19 @@ def background_info():
     return "", "", 1.0
 
 
+def ui_font_family() -> str:
+    """当前界面字体族名（跟随主题页「界面字体」选择）。
+
+    ⚠ colors.py 会被 silicon_ui 导入，不能反过来 import（循环）→ 延迟导入。
+    写死的 'Microsoft YaHei' 会让这些控件的字永远不跟主题字体变（用户反馈过）。
+    """
+    try:
+        from . import silicon_ui as _sui
+        return str(_sui.M.font)
+    except Exception:
+        return "Microsoft YaHei"
+
+
 def btn_radius() -> int:
     """主题按钮圆角（卡通化用）"""
     try:
@@ -405,7 +418,7 @@ def primary_btn_qss(pad_v: int = 8, pad_h: int = 18, font_size: int = 13,
     return f"""
         QPushButton {{ background: {bg}; color: white; border: 2px solid rgba(255,255,255,0.45);
             padding: {pad_v}px {pad_h}px; font-size: {font_size}px; font-weight: bold;
-            font-family: 'Microsoft YaHei'; border-radius: {r}px; }}
+            font-family: '{ui_font_family()}'; border-radius: {r}px; }}
         QPushButton:hover {{ border: 2px solid rgba(255,255,255,0.9);
             background: {Color4.name()}; }}
         QPushButton:pressed {{ background: {Color2.name()}; }}
@@ -428,7 +441,7 @@ def nav_btn_qss() -> str:
     return f"""
         QPushButton {{ background: transparent; color: white; border: none;
             padding: {int(6*S)}px {int(16*S)}px; font-size: {int(13*S)}px;
-            font-family: 'Microsoft YaHei'; border-radius: {int(16*S)}px; }}
+            font-family: '{ui_font_family()}'; border-radius: {int(16*S)}px; }}
         QPushButton:hover {{ background: rgba(255,255,255,0.20); }}
         QPushButton:checked {{ background: rgba(255,255,255,0.32);
             border: 1px solid rgba(255,255,255,0.6); }}
