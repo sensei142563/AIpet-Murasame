@@ -891,12 +891,17 @@ def start_tts_api():
         if _mv in ("v4", "finetuned", "auto"):
             # ★ 2026-10-01：finetuned / auto = 「用当前角色自己的模型」
             _pg, _ps, _pver, _pid = pet_voice_weights()
-            if _pg and _ps:
+            if _ps:
                 # 与 v2 基座走同一个 api.py（同一套 API，桌宠那边的请求参数不用改）
+                # ★ 2026-10-01：允许"只训了 SoVITS、没训 GPT"——音色由 SoVITS 决定，
+                #   GPT 用 v2 基座（角色先有声音，之后补训 GPT 再换成它自己的）。
+                _gpt_use = _pg or os.path.join(_pm, "gsv-v2final-pretrained",
+                                               "s1bert25hz-5kh-longer-epoch=12-step=369668.ckpt")
                 _script = os.path.join(_gsv, "api.py")
-                _extra = ["-s", _ps, "-g", _pg]
-                log("TTS 使用角色专属模型：%s → %s / %s"
-                    % (_pid or "?", os.path.basename(_pg), os.path.basename(_ps)), "INFO")
+                _extra = ["-s", _ps, "-g", _gpt_use]
+                log("TTS 使用角色专属模型：%s → %s / %s%s"
+                    % (_pid or "?", os.path.basename(_gpt_use), os.path.basename(_ps),
+                       "" if _pg else "（GPT 用 v2 基座：该角色只训了 SoVITS）"), "INFO")
             else:
                 log("当前角色没有专属语音模型 → 先用 v2 基座（训练好并写进 pet.json 的 "
                     "voices.gpt_weights / sovits_weights 后会自动用上）", "INFO")

@@ -441,11 +441,11 @@ class TouchControlPanel(QFrame):
         if ok:
             try:
                 import json as _json
-                import urllib.request as _u
-                req = _u.Request("http://127.0.0.1:28565/control/reload_touch",
-                                 data=_json.dumps({}).encode("utf-8"),
-                                 headers={"Content-Type": "application/json"})
-                _u.urlopen(req, timeout=1.5).read()
+                # ★ 2026-10-01：后台线程发送（原来同步 timeout=1.5 秒，桌宠没起来时卡 UI）
+                from .async_http import post_async as _pa
+                _pa("http://127.0.0.1:28565/control/reload_touch",
+                    data=_json.dumps({}).encode("utf-8"),
+                    headers={"Content-Type": "application/json"}, tag="通知桌宠刷新触摸")
             except Exception:
                 pass
 
@@ -664,11 +664,12 @@ class TouchAreaEditor(QWidget):
                 self._rebuild_area_combo(key)
                 self.overlay.update()
                 try:
-                    import json as _j, urllib.request as _u
-                    _u.urlopen(_u.Request("http://127.0.0.1:28565/control/reload_touch",
-                                          data=_j.dumps({}).encode("utf-8"),
-                                          headers={"Content-Type": "application/json"}),
-                               timeout=1.5).read()
+                    import json as _j
+                    # ★ 2026-10-01：后台线程发送，别卡 UI
+                    from .async_http import post_async as _pa2
+                    _pa2("http://127.0.0.1:28565/control/reload_touch",
+                         data=_j.dumps({}).encode("utf-8"),
+                         headers={"Content-Type": "application/json"}, tag="通知桌宠刷新触摸")
                 except Exception:
                     pass
         except Exception as e:
@@ -772,14 +773,13 @@ class TouchAreaEditor(QWidget):
             self.status.setText("保存失败，看控制台日志")
 
     def _notify_pet(self):
-        """通知正在运行的桌宠立刻刷新触摸区域（走它的 HTTP 接口）"""
+        """通知正在运行的桌宠立刻刷新触摸区域（走它的 HTTP 接口，后台线程不卡 UI）"""
         try:
             import json as _json
-            import urllib.request as _u
-            req = _u.Request("http://127.0.0.1:28565/control/reload_touch",
-                             data=_json.dumps({}).encode("utf-8"),
-                             headers={"Content-Type": "application/json"})
-            _u.urlopen(req, timeout=1.5).read()
+            from .async_http import post_async as _pa3
+            _pa3("http://127.0.0.1:28565/control/reload_touch",
+                 data=_json.dumps({}).encode("utf-8"),
+                 headers={"Content-Type": "application/json"}, tag="通知桌宠刷新触摸")
         except Exception:
             pass
 

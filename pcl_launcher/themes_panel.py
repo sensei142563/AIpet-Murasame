@@ -673,63 +673,9 @@ class PCLThemesPanel(QScrollArea):
             lay.addLayout(row_t)
         except Exception as _e:
             print(f"[Themes] ⚠ 文字颜色控件构建失败: {_e}")
-        # ── 对话框文字粗细（2026-10-01 用户要求：粗体字 / 细体字 可选）──
-        #    写 config.json 的 dialog_font_weight，再通知桌宠重读配置
-        #    （api.py 的 /control/reload_theme → main.py 轮询到后重新算对话框字体）→ 立即生效。
-        try:
-            row_w = QHBoxLayout()
-            lab_w = QLabel("对话框文字")
-            lab_w.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(12*S)}px;")
-            lab_w.setFixedWidth(int(84*S))
-            lab_w.setToolTip("桌宠对话框里文字的粗细：细体 / 常规 / 粗体")
-            row_w.addWidget(lab_w)
-            self._dlg_weight = QComboBox()
-            for _disp_w, _val_w in (("细体", "light"), ("常规", "normal"), ("粗体", "bold")):
-                self._dlg_weight.addItem(_disp_w, _val_w)
-            _cur_w = str((_load_config() or {}).get("dialog_font_weight") or "normal").lower()
-            _i_w = self._dlg_weight.findData(_cur_w)
-            self._dlg_weight.setCurrentIndex(_i_w if _i_w >= 0 else 1)
-            self._dlg_weight.setFixedHeight(int(24 * S))
-            self._dlg_weight.setToolTip("桌宠对话框里文字的粗细（改完立即生效，不用重启）")
-            self._dlg_weight.setStyleSheet(
-                f"QComboBox {{ background: rgba(255,255,255,0.10); color: {Color1.name()};"
-                f" border: 1px solid {Color5.name()}; border-radius: 6px; padding: 0 8px;"
-                f" font-size: {int(11*S)}px; }}"
-                f" QComboBox QAbstractItemView {{ background: {Color7.name()}; color: {Color1.name()}; }}")
-
-            def _save_dialog_weight(_i=None):
-                _v = str(self._dlg_weight.currentData() or "normal")
-                try:
-                    _cc = _load_config() or {}
-                    _cc["dialog_font_weight"] = _v
-                    _save_config(_cc)
-                    print(f"[Themes] 对话框文字粗细 → {_v}（已写入 config.json）")
-                except Exception as _e3:
-                    print(f"[Themes] ⚠ 写 dialog_font_weight 失败: {_e3}")
-                # 通知正在运行的桌宠重读配置（没开桌宠就静默跳过）
-                try:
-                    import urllib.request as _ur2
-                    _base2 = "http://127.0.0.1:28565/control"
-                    try:
-                        from .silicon_window import _CONTROL_BASE as _cb2
-                        _base2 = _cb2
-                    except Exception:
-                        pass
-                    _rq = _ur2.Request(_base2 + "/reload_theme", method="POST", data=b"")
-                    _ur2.urlopen(_rq, timeout=2).read()
-                    print("[Themes] 已通知桌宠重新应用字体")
-                except Exception:
-                    pass
-
-            self._dlg_weight.currentIndexChanged.connect(_save_dialog_weight)
-            row_w.addWidget(self._dlg_weight)
-            _hint_w = QLabel("只影响桌宠对话框里的字（细体省眼 / 粗体醒目）")
-            _hint_w.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(11*S)}px;")
-            row_w.addWidget(_hint_w)
-            row_w.addStretch()
-            lay.addLayout(row_w)
-        except Exception as _e:
-            print(f"[Themes] ⚠ 对话框文字控件构建失败: {_e}")
+        # 注：2026-10-01 曾按需求加过「对话框文字 粗细（细体/常规/粗体）」，
+        #     后用户要求删掉这个选项 → 已移除界面；桌宠那边仍按默认 normal 渲染
+        #     （murasame_class 读不到 config.json 的 dialog_font_weight 就用 normal，与旧版一致）。
         # ── 界面字体（五款自带中日文字体，启动器与桌宠一起换）──
         try:
             from tool import fonts as _fonts
@@ -773,16 +719,16 @@ class PCLThemesPanel(QScrollArea):
                 except Exception as _e4:
                     print(f"[Themes] ⚠ 应用界面字体失败: {_e4}")
                 try:
-                    import urllib.request as _ur3
+                    # ★ 2026-10-01：改为后台线程发送（原来同步 timeout=2 秒 ✗
+                    #   —— 桌宠没起来时切主题字体会卡 2 秒）
+                    from .async_http import post_async as _pa3
                     _base3 = "http://127.0.0.1:28565/control"
                     try:
                         from .silicon_window import _CONTROL_BASE as _cb3
                         _base3 = _cb3
                     except Exception:
                         pass
-                    _ur3.urlopen(_ur3.Request(_base3 + "/reload_theme", method="POST",
-                                              data=b""), timeout=2).read()
-                    print("[Themes] 已通知桌宠换字体")
+                    _pa3(_base3 + "/reload_theme", tag="通知桌宠换字体")
                 except Exception:
                     pass
 

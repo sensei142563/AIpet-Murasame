@@ -953,11 +953,9 @@ class PCLSettingsPanel(QWidget):
     def _restart_pet(self):
         """保存配置后，关闭当前运行中的桌宠进程（不重启）"""
         try:
-            # 通过 API 通知桌宠退出
-            import urllib.request
-            req = urllib.request.Request("http://localhost:28565/control/shutdown", method="POST", data=b"")
-            urllib.request.urlopen(req, timeout=3)
-            print("[PCL] 已通知桌宠关闭")
+            # 通过 API 通知桌宠退出（★ 2026-10-01 改后台线程：原来同步 timeout=3 秒会卡 UI）
+            from .async_http import post_async
+            post_async("http://localhost:28565/control/shutdown", tag="通知桌宠关闭")
         except Exception:
             pass
         # 同时通过 PCLMainWindow 的进程引用直接终止
@@ -2567,19 +2565,20 @@ class PCLLive2DTunePanel(QWidget):
             self.lbl_status.setText(f"读取失败: {e}")
 
     def _post(self, path, payload=None):
+        # ★ 2026-10-01：发完不管结果（后台线程），避免桌宠没起来时 UI 干等 2 秒
         try:
+            from .async_http import post_async
             data = json.dumps(payload).encode("utf-8") if payload is not None else b""
-            req = urllib.request.Request(
-                f"{self._BASE}{path}", data=data, method="POST",
-                headers={"Content-Type": "application/json"})
-            urllib.request.urlopen(req, timeout=2).read()
+            post_async(f"{self._BASE}{path}", data=data,
+                       headers={"Content-Type": "application/json"}, tag=f"POST {path}")
             return True
         except Exception:
             return False
 
     def _get(self, path):
         try:
-            with urllib.request.urlopen(f"{self._BASE}{path}", timeout=2) as r:
+            # ★ 短超时（原来是 2 秒 ✗；本地端口正常是毫秒级，连不上要尽快放弃）
+            with urllib.request.urlopen(f"{self._BASE}{path}", timeout=0.8) as r:
                 return json.loads(r.read().decode("utf-8"))
         except Exception:
             return None

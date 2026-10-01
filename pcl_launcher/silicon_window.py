@@ -324,21 +324,23 @@ def _pet_pid_alive() -> bool:
 
 
 def _pet_api_alive() -> bool:
+    # ★ 2026-10-01：以前在 UI 线程同步探测（桌宠没起来时连接不会快速失败，会一直等到
+    #   timeout=3 秒才返回 ✗）→ 每次进页面/刷新状态都顿一下。
+    #   改成"读缓存 + 后台刷新"（pcl_launcher/async_http.py），UI 永不等待。
     try:
-        req = urllib.request.Request(_CONTROL_BASE, method="GET")
-        with urllib.request.urlopen(req, timeout=3) as r:
-            return r.status == 200
+        from .async_http import api_alive
+        return api_alive(_CONTROL_BASE)
     except Exception:
         return False
 
 
 def _send_control(feature: str):
+    # ★ 2026-10-01：改成后台线程发送（原来 timeout=5 秒 ✗，桌宠没起来时正是它把 UI 冻住）
     try:
-        req = urllib.request.Request(f"{_CONTROL_BASE}/{feature}", method="POST", data=b"")
-        with urllib.request.urlopen(req, timeout=5) as r:
-            r.read()
+        from .async_http import post_async
+        post_async(f"{_CONTROL_BASE}/{feature}", tag=f"控制指令 {feature}")
     except Exception as e:
-        print(f"[NewUI] 控制指令 {feature} 失败: {e}")
+        print(f"[NewUI] 控制指令 {feature} 发送失败: {e}")
 
 
 # ══════════════════════ 小部件 ══════════════════════
