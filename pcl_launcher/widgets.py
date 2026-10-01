@@ -343,6 +343,34 @@ class PCLSettingsPanel(QWidget):
                          display={"local": "本地", "cloud": "云端"},
                          hint="本地：用项目里的 GPT-SoVITS 整合包合成（离线、不花钱、吃显存）；\n"
                               "云端：走在线语音接口（不需要整合包，需要联网）。")
+        # ★ 2026-10-01 新增：语音模型选择（以前**根本没有这个设置项** ——
+        #   `gsv_model_version` 只有 run.py 会读、界面里设不了，于是永远加载基础预训练模型，
+        #   用户辛苦训练好的角色专属模型（如夏目训练了两个多小时的 e10/s248）从没被用上，
+        #   听起来就是"别人的音色/发糊"。这里补上，并且预载按钮会在模型变化时自动重启语音服务。）
+        _w_hint = ("角色专属模型：用 pet.json 里 voices.gpt_weights / sovits_weights 指定的"
+                   "微调模型（每个角色自己的音色，推荐）。\n"
+                   "基础模型：GPT-SoVITS 官方预训练模型，靠参考音频做零样本克隆（角色没训练过时的兜底）。\n"
+                   "⚠ 改完请点上方「预载语音服务」让它生效（会自动重启语音服务换模型）。")
+        try:
+            from pets.pet_registry import get_active_pet_id
+            import json as _json_w
+            _gsv_dir = os.path.join(_app_base_dir(), "GPT-SoVITS")
+            _pj = os.path.join(_app_base_dir(), "pets", str(get_active_pet_id() or ""), "pet.json")
+            if os.path.isfile(_pj):
+                with open(_pj, encoding="utf-8") as _f:
+                    _vw = (_json_w.load(_f) or {}).get("voices") or {}
+                _g, _s = str(_vw.get("gpt_weights") or ""), str(_vw.get("sovits_weights") or "")
+                if _g and _s and os.path.isfile(os.path.join(_gsv_dir, _g)) \
+                        and os.path.isfile(os.path.join(_gsv_dir, _s)):
+                    _w_hint += "\n\n当前角色（%s）将使用：%s / %s" % (get_active_pet_id(), os.path.basename(_g), os.path.basename(_s))
+                else:
+                    _w_hint += ("\n\n当前角色（%s）还没配专属模型 → 会先用基础模型"
+                                "（训练好并写进 pet.json 后自动用上）" % get_active_pet_id())
+        except Exception as _ew:
+            print(f"[PCL] 读取当前角色语音权重失败: {_ew}")
+        self._add_choice("gsv_model_version", "语音模型", ["finetuned", "v2", "v4"], "finetuned",
+                         display={"finetuned": "角色专属模型", "v2": "基础模型 v2", "v4": "基础模型 v4"},
+                         hint=_w_hint)
         self._add_model_combo(
             "vision_model_name", "视觉识别模型名",
             ["deepseek-flash",

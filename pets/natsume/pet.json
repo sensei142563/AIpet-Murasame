@@ -314,8 +314,8 @@
   ],
   "text_font_scale": 1.0,
   "window_pos": [
-   944,
-   85
+   1192,
+   29
   ]
  },
  "touch": {
@@ -611,7 +611,10 @@
    "着急": 1.06
   },
   "long_speed": 1.0,
-  "default_emotion": "平静"
+  "default_emotion": "平静",
+  "gpt_weights": "GPT_weights_v2/natsume-e10.ckpt",
+  "sovits_weights": "SoVITS_weights_v2/natsume_e8_s248.pth",
+  "gsv_version": "v2"
  },
  "prompt": {
   "short": "prompt.txt",

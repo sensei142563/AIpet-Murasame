@@ -176,7 +176,10 @@
    "平静": 1.0
   },
   "long_speed": 1.06,
-  "default_emotion": "平静"
+  "default_emotion": "平静",
+  "gpt_weights": "GPT_weights/murasame-gpt.ckpt",
+  "sovits_weights": "SoVITS_weights/murasame-sovits.pth",
+  "gsv_version": "v2"
  },
  "sticker": {
   "dir": "biaoqingbao/"

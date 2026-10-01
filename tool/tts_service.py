@@ -63,10 +63,92 @@ def _say(text: str, times: int = 1) -> bool:
     return ok
 
 
+def _desired_model() -> dict:
+    """现在**应该**加载哪套模型（按 config.json 的 gsv_model_version + 当前角色权重算）
+
+    与 run.py 启动服务时的选择逻辑保持一致（它才是真正加载模型的地方）。
+    """
+    try:
+        import json
+        run = _load_run()
+        cfg = {}
+        try:
+            with open(os.path.join(BASE, "config.json"), encoding="utf-8") as f:
+                cfg = json.load(f) or {}
+        except Exception:
+            cfg = {}
+        mv = str(cfg.get("gsv_model_version", "v2")).strip().lower() or "v2"
+        g, s, ver, pid = run.pet_voice_weights()
+        if mv in ("finetuned", "auto") and g and s:
+            return {"model_version": mv, "pet": pid, "gpt": os.path.basename(g),
+                    "sovits": os.path.basename(s)}
+        return {"model_version": mv if mv in ("v2", "v4") else "v2", "pet": "", "gpt": "", "sovits": ""}
+    except Exception as e:
+        print(f"[预载] ⚠ 计算目标模型失败: {e}", flush=True)
+        return {}
+
+
+def _loaded_model() -> dict:
+    try:
+        import json
+        with open(os.path.join(BASE, "data", "tts_model.json"), encoding="utf-8") as f:
+            return json.load(f) or {}
+    except Exception:
+        return {}
+
+
+def _stop_running_service(marker: dict) -> None:
+    """停掉正在跑的语音服务（换模型时必须重启，否则设了也不生效）"""
+    pid = 0
+    try:
+        pid = int(marker.get("pid") or 0)
+    except Exception:
+        pid = 0
+    killed = False
+    if pid > 0:
+        try:
+            import subprocess as _sp
+            _sp.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                    stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
+                    creationflags=(_sp.CREATE_NO_WINDOW if os.name == "nt" else 0))
+            killed = True
+            print(f"[预载] 已停掉旧模型的语音服务（PID {pid}）", flush=True)
+        except Exception as e:
+            print(f"[预载] ⚠ 停止旧服务失败: {e}", flush=True)
+    if not killed:
+        # 拿不到 PID 时兜底：按命令行找（只杀 GPT-SoVITS 的 api 进程）
+        try:
+            import subprocess as _sp
+            _sp.run(["powershell", "-NoProfile", "-Command",
+                     "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | "
+                     "Where-Object { $_.CommandLine -match 'GPT-SoVITS\\\\api' } | "
+                     "ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"],
+                    stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
+                    creationflags=(_sp.CREATE_NO_WINDOW if os.name == "nt" else 0))
+            print("[预载] 已按进程名停掉旧的语音服务", flush=True)
+        except Exception as e:
+            print(f"[预载] ⚠ 兜底停止失败: {e}", flush=True)
+    time.sleep(2.0)
+
+
 def preload(wait_ready: int = 600) -> int:
-    """启动（如果需要）+ 预热。返回 0 表示可用。"""
+    """启动（如果需要）+ 预热。返回 0 表示可用。
+
+    ★ 2026-10-01：模型不一致时**必须重启服务** —— 以前 `is_ready()` 一为真就直接预热，
+      于是"在设置里换了语音模型（或刚训练好专属模型）"完全没效果：服务里还是旧模型。
+      现在先比对 data/tts_model.json（上次实际加载的）与当前应该加载的，不一致就重启。
+    """
+    want, have = _desired_model(), _loaded_model()
+    _diff = bool(want) and bool(have) and any(
+        str(want.get(k) or "") != str(have.get(k) or "") for k in ("model_version", "gpt", "sovits"))
+    if is_ready() and _diff:
+        print("[预载] 语音模型有变化：%s/%s → %s/%s，重启语音服务…"
+              % (have.get("gpt") or have.get("model_version") or "?",
+                 have.get("sovits") or "", want.get("gpt") or want.get("model_version") or "?",
+                 want.get("sovits") or ""), flush=True)
+        _stop_running_service(have)
     if is_ready():
-        print("[预载] 语音服务已在运行，直接预热…", flush=True)
+        print("[预载] 语音服务已在运行（模型一致），直接预热…", flush=True)
     else:
         print("[预载] 正在启动语音服务（首次加载模型约 1~2 分钟）…", flush=True)
         try:

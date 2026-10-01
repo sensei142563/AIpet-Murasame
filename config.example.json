@@ -20,6 +20,8 @@
   "model_type": "qwen",
   "short_model_name": "qwen-plus",
   "tts_type": "local",
+  "gsv_model_version": "finetuned",
+  "_note_gsv_model_version": "语音模型：finetuned=角色专属微调模型(推荐) / v2=基础模型(零样本) / v4=基础v4",
   "voice_synthesis_enable": "true",
   "force_gpu_check": "false",
   "screen_type": "false",

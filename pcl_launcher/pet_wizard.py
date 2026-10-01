@@ -52,6 +52,59 @@ def pets_dir() -> str:
     return os.path.join(_base_dir(), "pets")
 
 
+def find_voice_models() -> list:
+    """扫描 GPT-SoVITS 里**训练好的语音模型** → [(标签, gpt相对路径, sovits相对路径)]
+
+    ★ 2026-10-01 新增：向导里原本**没有**「语音模型」这个控件（文件开头的说明却写着
+      "语音…可选默认模型"），于是 `pet.json` 的 voices.gpt_weights / sovits_weights
+      永远是空的 → 桌宠永远加载基础预训练模型 → 用户训练好的角色模型（例如夏目
+      natsume-e10.ckpt + natsume_e8_s248.pth，训练了两个多小时）从来没被用上，
+      听起来就是"别人的音色 / 发糊"。
+
+    目录约定同 GPT-SoVITS 官方：`GPT_weights*/`、`SoVITS_weights*/`（含 _v2/_v2Pro/_v4 等）。
+    同一角色的两份权重按文件名前缀配对，各自取最新的一份。
+    """
+    out = []
+    try:
+        gsv = os.path.join(_app_base_dir(), "GPT-SoVITS")
+        if not os.path.isdir(gsv):
+            return out
+
+        def _scan(prefix, exts):
+            found = {}
+            for d in sorted(os.listdir(gsv)):
+                dp = os.path.join(gsv, d)
+                if not (d.startswith(prefix) and os.path.isdir(dp)) or d.endswith("pretrained"):
+                    continue
+                for f in os.listdir(dp):
+                    if not f.lower().endswith(exts):
+                        continue
+                    fp = os.path.join(dp, f)
+                    if not os.path.isfile(fp):
+                        continue
+                    key = f.split("-")[0].split("_")[0].split(".")[0].lower()
+                    if not key:
+                        continue
+                    rel = "%s/%s" % (d, f)
+                    try:
+                        mt = os.path.getmtime(fp)
+                    except Exception:
+                        mt = 0
+                    if key not in found or mt > found[key][2]:
+                        found[key] = (rel, f, mt)
+            return found
+
+        gpts = _scan("GPT_weights", (".ckpt",))
+        sov = _scan("SoVITS_weights", (".pth",))
+        for key in sorted(set(gpts) & set(sov)):
+            g, gn, _ = gpts[key]
+            s, sn, _ = sov[key]
+            out.append(("%s：%s + %s" % (key, gn, sn), g, s))
+    except Exception as e:
+        print(f"[Wizard] ⚠ 扫描语音模型失败: {e}")
+    return out
+
+
 # ══════════════════════ 纯逻辑部分（可单独测试）══════════════════════
 
 
@@ -473,6 +526,18 @@ def build_pet_json(spec: dict, existing: dict = None) -> dict:
     v["long_ref_text"] = spec.get("long_ref_text") or ""
     if spec.get("default_emotion"):
         v["default_emotion"] = spec["default_emotion"]
+    # ★ 2026-10-01：语音模型（微调权重）—— 向导里终于能选了。
+    #   以前没有这个控件 → 这两项永远是空的 → 训练好的角色模型从没被加载过。
+    _vm = spec.get("voice_model")
+    if isinstance(_vm, (list, tuple)) and len(_vm) == 2 and _vm[0] and _vm[1]:
+        v["gpt_weights"] = str(_vm[0])
+        v["sovits_weights"] = str(_vm[1])
+        v["gsv_version"] = str(v.get("gsv_version") or "v2")
+        print(f"[Wizard] 语音模型 -> {_vm[0]} / {_vm[1]}")
+    elif "voice_model" in spec:
+        # 选了「基础模型」→ 明确清掉，别让旧的专属权重继续生效
+        v.pop("gpt_weights", None)
+        v.pop("sovits_weights", None)
     cfg["voices"] = v
     if spec.get("portrait"):
         cfg["portrait"] = spec["portrait"]
@@ -2483,13 +2548,36 @@ class PCLPetWizard(SiliconDialog):
         l2.addWidget(self.ed_long_text)
         lay.addWidget(g2)
 
+        # ── 语音模型（角色专属微调权重）★ 2026-10-01 新增 ──
+        g3 = QGroupBox("语音模型（可选：这个角色自己的微调模型）")
+        l3 = QVBoxLayout(g3)
+        self.cmb_voice_model = QComboBox()
+        self.cmb_voice_model.addItem("（使用基础模型 · 零样本克隆）", None)
+        self._voice_models = find_voice_models()
+        for _label, _g, _s in self._voice_models:
+            self.cmb_voice_model.addItem(_label, (_g, _s))
+        self.cmb_voice_model.setToolTip(
+            "训练好的模型会自动列在这里（扫描 GPT-SoVITS 的 GPT_weights* / SoVITS_weights*）。\n"
+            "选「基础模型」= 官方预训练模型 + 参考音频克隆音色；\n"
+            "选具体模型 = 用这个角色自己的微调权重（音色最像、最稳）。")
+        l3.addWidget(self.cmb_voice_model)
+        _mhint = QLabel(
+            "找不到自己的模型？说明这个角色还没训练过 → 先用基础模型（零样本克隆）也不会哑。\n"
+            "换过模型后点启动器的「预载语音服务」即可生效（会自动重启语音服务换模型）。")
+        _mhint.setStyleSheet(f"color:{Gray2.name()};font-size:12px;")
+        l3.addWidget(_mhint)
+        if not self._voice_models:
+            _none = QLabel("（当前 GPT-SoVITS 里没有扫描到训练好的模型）")
+            _none.setStyleSheet(f"color:{Gray2.name()};font-size:12px;")
+            l3.addWidget(_none)
+        lay.addWidget(g3)
+
         tip = QLabel("说明：短语音合成的是【日语】（推理时用日语参考音频，情绪按台词语气切换）；\n"
                      "长语音合成的是【中文】（长文本模式整段朗读）。两者都可以不配，随时在设置里改。")
         tip.setStyleSheet(f"color:{Gray2.name()};font-size:12px;")
         lay.addWidget(tip)
         lay.addStretch()
         return w
-
     def _pick_dir(self, target_edit):
         d = QFileDialog.getExistingDirectory(self, "选择文件夹")
         if d:
@@ -2621,6 +2709,11 @@ class PCLPetWizard(SiliconDialog):
             s["touch_enabled"] = bool(self.chk_touch.isChecked())
         except Exception:
             pass
+        # ★ 语音模型（微调权重）：None = 用基础模型
+        try:
+            s["voice_model"] = self.cmb_voice_model.currentData()
+        except Exception as _evm:
+            print(f"[Wizard] ⚠ 读取语音模型选择失败: {_evm}")
         # 显示与对话框（2D / Live2D 两套完全独立的设置）
         try:
             self._write_back_disp()
@@ -2875,6 +2968,25 @@ class PCLPetWizard(SiliconDialog):
             lr = os.path.join(pets_dir(), self.pet_id, str(v.get("long_ref_audio")))
             self.ed_long_ref.setText(lr if os.path.exists(lr) else "")
             self.ed_long_text.setText(str(v.get("long_ref_text") or ""))
+        # ★ 2026-10-01：回填「语音模型」选择（编辑已有角色时能看到当前用的是哪套权重）
+        try:
+            _gcur = str(v.get("gpt_weights") or "")
+            _scur = str(v.get("sovits_weights") or "")
+            _idx = 0
+            if _gcur and _scur:
+                for _i in range(self.cmb_voice_model.count()):
+                    _d = self.cmb_voice_model.itemData(_i)
+                    if _d and str(_d[0]) == _gcur and str(_d[1]) == _scur:
+                        _idx = _i
+                        break
+                else:
+                    # 配置里的模型文件没被扫到（比如被删了/换了目录）→ 也显示出来，别让用户以为没设
+                    self.cmb_voice_model.addItem("%s + %s（配置里指定）" % (_gcur, _scur), (_gcur, _scur))
+                    _idx = self.cmb_voice_model.count() - 1
+            self.cmb_voice_model.setCurrentIndex(_idx)
+            print(f"[Wizard] ℹ 语音模型回填：{'基础模型' if not _gcur else _gcur + ' / ' + _scur}")
+        except Exception as _ev:
+            print(f"[Wizard] ⚠ 回填语音模型失败: {_ev}")
         # 人设
         try:
             for kind, box in (("short", self.ed_p_short), ("long", self.ed_p_long)):

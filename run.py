@@ -812,6 +812,39 @@ def pick_tts_env():
     return None, False
 
 
+def pet_voice_weights():
+    """当前角色 pet.json 里配的**专属语音权重** → (gpt_abs, sovits_abs, version, pet_id)
+
+    ★ 2026-10-01 修复：以前 `gsv_model_version=v2` 就固定加载**基础预训练模型**
+      （pretrained_models/gsv-v2final-pretrained/…），用户辛苦训练好的角色模型
+      （例如夏目：GPT_weights_v2/natsume-e10.ckpt + SoVITS_weights_v2/natsume_e8_s248.pth，
+      训练了两个多小时）**从来没被加载过** —— 听起来自然还是别人的音色 / 发糊。
+      现在按"当前角色"读它自己的权重，读不到（没训练过）才回退基座。
+    """
+    try:
+        from pets.pet_registry import get_pet_config, get_active_pet_id
+        v = (get_pet_config() or {}).get("voices") or {}
+        _base = os.path.abspath(os.path.join(".", "GPT-SoVITS"))
+
+        def _abs(rel):
+            rel = str(rel or "").strip()
+            if not rel:
+                return None
+            p = rel if os.path.isabs(rel) else os.path.join(_base, rel)
+            return p if os.path.isfile(p) else None
+
+        pid = ""
+        try:
+            pid = str(get_active_pet_id() or "")
+        except Exception:
+            pid = ""
+        return (_abs(v.get("gpt_weights")), _abs(v.get("sovits_weights")),
+                str(v.get("gsv_version") or "v2").strip().lower() or "v2", pid)
+    except Exception as e:
+        print(f"[TTS] ⚠ 读取角色语音权重失败: {e}")
+        return (None, None, "v2", "")
+
+
 def start_tts_api():
     """使用 GPT-SoVITS 自带解释器在新的控制台窗口中启动 TTS API。"""
     cfg = get_config("./config.json")
@@ -847,18 +880,32 @@ def start_tts_api():
                 "PYTORCH_HIP_ALLOC_CONF": "expandable_segments:True",
                 "HSA_ENABLE_SDMA": "0",
             }
-        if _mv in ("v4", "finetuned"):
-            _script = os.path.join(_gsv, "api_v2.py")
-            if _mv == "finetuned":
-                _extra = []
+        if _mv in ("v4", "finetuned", "auto"):
+            # ★ 2026-10-01：finetuned / auto = 「用当前角色自己的模型」
+            _pg, _ps, _pver, _pid = pet_voice_weights()
+            if _pg and _ps:
+                # 与 v2 基座走同一个 api.py（同一套 API，桌宠那边的请求参数不用改）
+                _script = os.path.join(_gsv, "api.py")
+                _extra = ["-s", _ps, "-g", _pg]
+                log("TTS 使用角色专属模型：%s → %s / %s"
+                    % (_pid or "?", os.path.basename(_pg), os.path.basename(_ps)), "INFO")
             else:
-                _extra = ["-s", os.path.join(_pm, "gsv-v4-pretrained", "s2Gv4.pth"),
-                          "-g", os.path.join(_pm, "s1v3.ckpt")]
+                log("当前角色没有专属语音模型 → 先用 v2 基座（训练好并写进 pet.json 的 "
+                    "voices.gpt_weights / sovits_weights 后会自动用上）", "INFO")
+                _script = os.path.join(_gsv, "api.py")
+                _extra = ["-s", os.path.join(_pm, "gsv-v2final-pretrained", "s2G2333k.pth"),
+                          "-g", os.path.join(_pm, "gsv-v2final-pretrained",
+                                             "s1bert25hz-5kh-longer-epoch=12-step=369668.ckpt")]
+        elif _mv == "v4":
+            _script = os.path.join(_gsv, "api_v2.py")
+            _extra = ["-s", os.path.join(_pm, "gsv-v4-pretrained", "s2Gv4.pth"),
+                      "-g", os.path.join(_pm, "s1v3.ckpt")]
         else:
             _script = os.path.join(_gsv, "api.py")
             _extra = ["-s", os.path.join(_pm, "gsv-v2final-pretrained", "s2G2333k.pth"),
                       "-g", os.path.join(_pm, "gsv-v2final-pretrained",
                                          "s1bert25hz-5kh-longer-epoch=12-step=369668.ckpt")]
+            log("TTS 使用 v2 基础模型（零样本克隆）", "INFO")
         script_path = _script
         work_dir = r".\GPT-SoVITS"
 
@@ -885,6 +932,26 @@ def start_tts_api():
                 env=_pop_env,
                 creationflags=_flags
             )
+            # ★ 2026-10-01：把「这次启动实际加载的模型」记下来 ——
+            #   设置界面里换了语音模型后，靠它判断正在跑的服务是不是旧模型，
+            #   是旧的就重启服务（否则设了也没用，听起来还是老音色）。
+            try:
+                import json as _json_m
+                _mk = {
+                    "pid": int(getattr(proc, "pid", 0) or 0),
+                    "script": os.path.basename(script_path),
+                    "extra": list(_extra),
+                    "model_version": _mv,
+                    "pet": str(locals().get("_pid", "") or ""),
+                    "gpt": os.path.basename(_extra[1]) if len(_extra) > 1 else "",
+                    "sovits": os.path.basename(_extra[3]) if len(_extra) > 3 else "",
+                    "python": os.path.basename(python_path or ""),
+                }
+                os.makedirs("data", exist_ok=True)
+                with open(os.path.join("data", "tts_model.json"), "w", encoding="utf-8") as _f:
+                    _json_m.dump(_mk, _f, ensure_ascii=False, indent=1)
+            except Exception as _em:
+                print(f"[TTS] ⚠ 记录当前模型失败: {_em}")
             time.sleep(1.5)
             log("TTS 服务已启动%s。" % ("" if quiet_mode() else "（新控制台）"))
 
