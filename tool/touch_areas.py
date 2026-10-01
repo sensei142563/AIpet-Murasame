@@ -64,6 +64,31 @@ _REACT = {k: (a, b) for k, _n, _d, a, b in AREAS}
 _GENERIC_STROKE = "主人摸了摸你的{label}"
 _GENERIC_TAP = "主人戳了戳你的{label}"
 
+# ── 触摸文案的"变化层"（2026-09-30 新增，见 reaction() 的说明）──
+# 抚摸 / 轻点各自的动词池（随机取一个 → 同一部位每次措辞都不同）
+_STROKE_VERBS = ("摸了摸", "揉了揉", "轻轻抚过", "捏了捏", "拍了拍", "顺了顺",
+                 "轻轻摩挲了一下", "用指腹按了按")
+_TAP_VERBS = ("戳了戳", "轻轻戳了戳", "用指尖点了点", "挠了挠", "轻轻弹了一下",
+              "碰了碰", "按了按", "用指节轻敲了一下")
+# 这几个部位保留原本更贴切的手写措辞（但仍会混入动词池）
+_HAND_WRITTEN = {"chest", "privates"}
+# 每次换一个"反应角度"：模型对逐字相同的输入会给出几乎相同的回答，
+# 所以真正的变化来自这里 —— 同一件事换个切入角度，回答就完全不同了。
+_ANGLES = (
+    "嘴上嫌弃、身体很诚实（嘴硬心软）",
+    "只哼一声、或只说半句，别长篇大论",
+    "小声撒娇，声音软下来",
+    "假装生气，但很快就破功",
+    "顺势调侃主人一句",
+    "先认真说一句你正在做什么，再随口回应",
+    "有点慌、语无伦次一点",
+    "故意端起长辈／刀魂的架子，然后自己先破功",
+    "先愣一下，再反应过来",
+    "用一声感叹或拟声词起头",
+    "别扭地关心一下主人（手怎么这么凉／是不是又熬夜）",
+    "嘴上说不要，但悄悄往主人那边靠了一点",
+)
+
 
 def labels(pet_id: str = None) -> dict:
     """部位显示名（默认 14 个 + 该角色自己加的自定义部位）"""
@@ -120,17 +145,45 @@ def reaction(key: str, gesture: str = "stroke", pet_id: str = None) -> str:
     """区域 + 手势 → 送去给模型的一句"发生的事情"。
 
     gesture: "stroke" 抚摸（按住拖动）/ "tap" 轻点（按下就松开）
+
+    ⚠ 2026-09-30（用户："像这种摸脚等等的，每次的回复都是一样的"）：
+    原来每个部位、每种手势都只有**一句固定文案**（如 tap 永远是"主人戳了戳你的左脚"）→
+    模型拿到的是**逐字相同**的输入，同一句话自然生成同一句回答（左右脚也只用换一个词）。
+    现在改成三层变化：
+      ① 动词池随机（摸/揉/捏/点/挠/弹/碰…）；
+      ② 每次附一个**反应角度**（嘴硬心软 / 只哼一声 / 撒娇 / 装生气…）；
+      ③ 明确要求"别和刚才几次重复"。
+    这样即使采样温度很低，输入本身也不同了 → 回答自然不一样。
     """
+    import random
+    stroke = str(gesture) != "tap"
     pair = _REACT.get(str(key))
+    try:
+        nm = _short_label(key, pet_id)
+    except Exception:
+        nm = "身体"
     if not pair:
-        # 自定义部位：用通用文案 + 部位名（名字从角色配置里取）
-        try:
-            nm = labels(pet_id).get(str(key)) or "身体"
-        except Exception:
-            nm = "身体"
-        tpl = _GENERIC_STROKE if str(gesture) == "stroke" else _GENERIC_TAP
-        return tpl.format(label=nm)
-    return pair[0] if str(gesture) == "stroke" else pair[1]
+        # 自定义部位：通用文案 + 部位名（同样走动词池）
+        _pool = _STROKE_VERBS if stroke else _TAP_VERBS
+        base = "主人%s你的%s" % (random.choice(_pool), nm)
+    elif str(key) in _HAND_WRITTEN:
+        # 胸口 / 私密部位：措辞更讲究，**始终**用原本手写的那句（变化交给下面的角度层），
+        # 免得通用动词池把"私密部位"说成生硬的说法。
+        base = pair[0] if stroke else pair[1]
+    else:
+        _pool = _STROKE_VERBS if stroke else _TAP_VERBS
+        base = "主人%s你的%s" % (random.choice(_pool), nm)
+    return "%s（这次的反应角度：%s；换个说法，别和刚才几次重复）" % (base, random.choice(_ANGLES))
+
+
+def _short_label(key: str, pet_id: str = None) -> str:
+    """部位短名：「左脚（足部）」→「左脚」"""
+    import re as _re
+    try:
+        nm = labels(pet_id).get(str(key)) or "身体"
+    except Exception:
+        nm = "身体"
+    return _re.sub(r"[（(][^）)]*[）)]", "", str(nm)).strip() or str(nm)
 
 
 def _clamp01(v, fallback=0.0):

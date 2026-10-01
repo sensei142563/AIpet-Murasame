@@ -7,7 +7,7 @@ from datetime import datetime
 
 import requests
 
-from tool.config import get_config
+from tool.config import enum_of, get_config
 from tool.time_utils import build_time_context
 from pets.pet_registry import get_chat_pet_id, get_short_emotion_dirs, get_short_voices_dir, get_short_emotions
 
@@ -21,12 +21,16 @@ def now_time():
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     return now
 
-ollama_url = get_config("./config.json")["local_api"]["ollama"]
-qwen3_lora_url = get_config("./config.json")["local_api"]["qwen3_lora"]
-gpt_sovits_tts_url = get_config("./config.json")["local_api"]["gpt_sovits_tts"]
-_TTS_HINT_SHOWN = False
-_GSV_MODEL_OK = False   # 语音服务未就绪的提示只打一次（防刷屏）
-tts_type = get_config("./config.json")["tts_type"]
+# ⚠ 这里原来是 get_config(...)["local_api"]["ollama"] 这种双层下标，而且**在模块导入期**执行：
+#   配置存在但少键（老配置/手删键/精简配置）→ KeyError → tool.chat 导入失败 → 桌宠起不来。
+#   兜底值取 config.example.json 里的本地代理地址（见交接文档 §27.8）。
+_cfg0 = get_config("./config.json")
+_api = _cfg0.get("local_api") or {}
+ollama_url = _api.get("ollama", "http://localhost:28565/ollama")
+qwen3_lora_url = _api.get("qwen3_lora", "http://localhost:28565/qwen3-lora")
+gpt_sovits_tts_url = _api.get("gpt_sovits_tts", "http://localhost:28565/tts")
+_TTS_HINT_SHOWN = False   # 语音服务未就绪的提示只打一次（防刷屏）
+tts_type = enum_of(_cfg0.get("tts_type"), ("local", "cloud"), "local", "tts_type")
 
 
 def ollama_post(name: str, prompt: dict):
@@ -220,6 +224,23 @@ def qwen3_lora(history, user_input, role):
         _look = current_look_note()
         if _look:
             messages.append({"role": "system", "content": _look})
+    except Exception:
+        pass
+
+    # ★ 上游 cff71d0：联网学习三方共用（QQ / 微信 / 桌宠都走 tool/learn_hub）。
+    #   本地原来只有 QQ 那条链路会查，桌宠这边补上；失败静默（learn_hub 内部全懒加载 + try）。
+    try:
+        from tool import learn_hub as _lh_chat
+        _lh_prefix = _lh_chat.fact_prefix(user_input or "", _lh_chat.current_channel())
+        if _lh_prefix:
+            messages.append({"role": "system", "content": _lh_prefix.strip()})
+    except Exception:
+        pass
+
+    # ★ 上游：她的行动边界（哪些能自己做、哪些要主人开口、哪些永远不做）
+    try:
+        from tool import autonomy as _au_note
+        messages.append({"role": "system", "content": _au_note.note()})
     except Exception:
         pass
 

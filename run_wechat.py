@@ -43,7 +43,7 @@ try:
 except Exception:
     pass
 
-from tool.config import get_config
+from tool.config import as_bool, get_config
 from tool.paths import data_path
 
 F5TTS_PORT = 9881
@@ -260,7 +260,7 @@ def main():
     except Exception as _e:
         print(f"[WeChatBot] ⚠ 声明聊天频道失败（按桌宠角色继续）: {_e}")
     cfg = get_config("./config.json")
-    if str(cfg.get("wechat_enabled", "false")).lower() != "true":
+    if not as_bool(cfg.get("wechat_enabled"), False):
         print("[WeChatBot] wechat_enabled=false，微信桌宠未启用。可在 config.json 中开启。")
         return
 
@@ -276,7 +276,7 @@ def main():
             return
 
     from wechat.wechat_bridge import WeChatBridge
-    send_voice = str(cfg.get("wechat_send_voice", "false")).lower() == "true"
+    send_voice = as_bool(cfg.get("wechat_send_voice"), False)
     ensure_f5tts(send_voice)
 
     bridge = WeChatBridge(

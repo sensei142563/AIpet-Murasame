@@ -19,8 +19,67 @@ import time
 # 冷却（秒）
 NIGHT_COOLDOWN = 8 * 3600
 SIT_COOLDOWN = 2 * 3600
-NIGHT_HOURS = (23, 0, 1, 2, 3, 4)      # 23:30 ~ 04:59 算深夜
-_cfg = {"meeting_quiet": True}
+NIGHT_HOURS = (23, 0, 1, 2, 3, 4)      # 23:00 ~ 04:59 算深夜
+SIT_LIMIT_SEC = 2 * 3600
+
+
+def _say(msg: str) -> None:
+    try:
+        print(msg)
+    except Exception:
+        pass
+
+
+def _cfg(key, default):
+    try:
+        from tool.config import get_config
+        return get_config("./config.json").get(key, default)
+    except Exception:
+        return default
+
+
+def _cfg_bool(key, default=True) -> bool:
+    try:
+        from tool.config import as_bool
+        return as_bool(_cfg(key, default), default)
+    except Exception:
+        return bool(default)
+
+
+def enabled() -> bool:
+    return _cfg_bool("care_enabled", True)
+
+
+def startup_greeting_enabled() -> bool:
+    return _cfg_bool("care_startup_greeting", True)
+
+
+def startup_greeting_mode() -> str:
+    """开机问候怎么出声（用户 2026-09-30：「播放指定的一条语音或者不播放」）。
+
+    voice = 播 startup_greeting_voice 指定的那条语音（**默认**，不需要 TTS 服务）
+    off   = 不播（只留启动日志）
+    chat  = 老行为：让模型自己说一句 —— ⚠ 需要短语音 TTS 服务已就绪，
+            而 GPT-SoVITS 启动要 1~2 分钟，所以开机那一下必然失败（用户报的就是这个）
+    """
+    try:
+        from tool.config import enum_of
+        return enum_of(_cfg("startup_greeting_mode", "voice"), ("voice", "off", "chat"),
+                       "voice", "startup_greeting_mode")
+    except Exception:
+        return "voice"
+
+
+def startup_greeting_voice() -> str:
+    """要播的那条语音文件（config：startup_greeting_voice；空 = 不播任何语音）"""
+    try:
+        return str(_cfg("startup_greeting_voice", "") or "").strip()
+    except Exception:
+        return ""
+
+
+def meeting_quiet_enabled() -> bool:
+    return _cfg_bool("care_meeting_quiet", True)
 
 
 def _path() -> str:
@@ -31,6 +90,21 @@ def _path() -> str:
         d = "memory"
     os.makedirs(d, exist_ok=True)
     return os.path.join(d, "care.json")
+
+
+# 合理性下限：本项目 2026 年才有；比这更早的 first_seen 一定是脏数据
+# （真实案例：按「角色包里最老文件」回填时挑到从压缩包导入、mtime 停在 2021-12-10 的
+#   资源文件 → first_seen=2021 年 → 陪伴天数算出 1756 天，被 max() 固化后再也回不去）
+_FLOOR = time.mktime((2026, 1, 1, 0, 0, 0, 0, 0, -1))
+
+
+def _plausible(ts) -> bool:
+    """这个时间戳像不像「真的第一次见到主人」：不许早于 _FLOOR，也不许是未来。"""
+    try:
+        v = float(ts)
+    except Exception:
+        return False
+    return _FLOOR <= v <= time.time() + 86400
 
 
 def _load() -> dict:
@@ -60,6 +134,9 @@ def _touch_first_seen() -> float:
     这样"在一起第 N 天"从一开始就是准的，而不是从装这个功能那天算。
     """
     d = _load()
+    # 已有的值也不盲信：不合理的（2021 年那种）直接丢掉重算
+    if not _plausible(d.get("first_seen")):
+        d.pop("first_seen", None)
     if not d.get("first_seen"):
         first = time.time()
         try:
@@ -88,6 +165,7 @@ def _touch_first_seen() -> float:
                             pass
                     if len(ts) > 3000:
                         break
+            ts = [t for t in ts if _plausible(t)]      # 过滤掉导入资源那种远古 mtime
             if ts:
                 first = min(min(ts), first)
         except Exception:
@@ -99,14 +177,23 @@ def _touch_first_seen() -> float:
 
 
 def companion_days() -> int:
-    """在一起第几天（第一次记录的那天算第 1 天）"""
+    """在一起第几天（第一次记录的那天算第 1 天）
+
+    ⚠ 别再写回 max(旧值, 新值)：旧值一旦被错算（例如 2021 年那种 first_seen），
+    max() 会让它永远下不来（用户看到的 1756 天就是这么来的）。现在每次由 first_seen
+    现算，只有 first_seen 不合理时才回填重算。
+    """
     try:
         first = _touch_first_seen()
+        if not _plausible(first):
+            first = time.time()
         n = int((time.time() - first) // 86400) + 1
+        n = max(1, min(n, 36500))          # 100 年上限：再离谱就当第 1 天
         d = _load()
-        d["days"] = max(int(d.get("days") or 1), n)
-        _save(d)
-        return max(1, int(d["days"]))
+        if int(d.get("days") or 0) != n:
+            d["days"] = n
+            _save(d)
+        return n
     except Exception:
         return 1
 
@@ -143,7 +230,7 @@ def meeting_mode() -> bool:
 def quiet_now() -> bool:
     """现在该不该保持安静（会议/演示中）"""
     try:
-        return bool(_cfg.get("meeting_quiet", True)) and meeting_mode()
+        return bool(meeting_quiet_enabled()) and meeting_mode()
     except Exception:
         return False
 
@@ -196,7 +283,14 @@ def summary_text() -> str:
 
 
 def set_meeting_quiet(on: bool):
-    _cfg["meeting_quiet"] = bool(on)
+    """会议/演示时保持安静 —— ⚠ 本地原来是往内存字典 `_cfg` 里写（重启就没了，
+    而且现在 `_cfg` 已经是「读配置」的函数，按下标写会直接 TypeError）。
+    改成写 config.json 的 care_meeting_quiet（走上游的 set_key：只改一个键 + 原子替换）。"""
+    try:
+        from tool.config import set_key
+        set_key("./config.json", "care_meeting_quiet", "true" if on else "false")
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":

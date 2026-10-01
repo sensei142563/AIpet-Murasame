@@ -68,7 +68,7 @@ def stop_voice_wav() -> None:
             _qs.stop()
     except Exception:
         pass
-from tool.config import get_config
+from tool.config import as_bool, enum_of, get_config, num
 from tool.chat import (ollama_qwen25vl, describe_image,
                        vision_fast_size, vision_fast_tokens)
 from tool.cloud_API_chat import cloud_vl
@@ -90,12 +90,12 @@ def wrap_text(s, width=10):
 
 
 CONFIG = get_config("./config.json")
-portrait_type = CONFIG["portrait"]
-model_type = CONFIG["model_type"]
-screen_type = CONFIG.get("screen_type", "false")     # 默认值与 config.example.json / 设置页一致
+portrait_type = CONFIG.get("portrait", "b")
+model_type = enum_of(CONFIG.get("model_type"), ("local", "qwen", "deepseek"), "qwen", "model_type")
+screen_type = enum_of(CONFIG.get("screen_type"), ("true", "false"), "false", "screen_type")     # 默认值与 config.example.json / 设置页一致
 camera_type = CONFIG.get("camera_enabled", "false")
-camera_interval = CONFIG.get("camera_interval", 100)  # 同上：示例配置是 100 秒
-DEFAULT_PORTRAIT_SCREEN_RATIO = CONFIG["DEFAULT_PORTRAIT_SCREEN_RATIO"]
+camera_interval = int(num(CONFIG.get("camera_interval"), 100, 1, 86400))  # 同上：夹到 [1, 86400] 秒（写 0/负数会让摄像头线程忙循环）
+DEFAULT_PORTRAIT_SCREEN_RATIO = CONFIG.get("DEFAULT_PORTRAIT_SCREEN_RATIO", 0.8)
 IDLE_THINKING_MINUTES = CONFIG.get("idle_thinking_minutes")
 IDLE_AWAY_MINUTES = CONFIG.get("idle_away_minutes")
 
@@ -312,15 +312,15 @@ class Murasame(QLabel):
         self._has_fgimages = bool(get_fgimages_dir())
         # Live2D 文字层字号缩放（pet.json model.live2d_font_scale）
         try:
-            self._live2d_font_scale = float(_pet_cfg.get("model", {}).get("live2d_font_scale", 1.0) or 1.0)
+            self._live2d_font_scale = num(_pet_cfg.get("model", {}).get("live2d_font_scale"), 1.0, 0.10, 3.00)
         except (TypeError, ValueError):
             self._live2d_font_scale = 1.0
         # 文字区域位置（pet.json interaction.text_area：top 上半身 / bottom 下半身）
         self._text_area_bottom = str(_pet_cfg.get("interaction", {}).get("text_area", "top")).lower() == "bottom"
         # 文本框位置微调（pet.json interaction.text_offset_x/y，Shift+方向键调整，F5 保存）
         try:
-            self._text_offset_x = int(_pet_cfg.get("interaction", {}).get("text_offset_x", 0) or 0)
-            self._text_offset_y = int(_pet_cfg.get("interaction", {}).get("text_offset_y", 0) or 0)
+            self._text_offset_x = int(num(_pet_cfg.get("interaction", {}).get("text_offset_x"), 0, -10000, 10000))
+            self._text_offset_y = int(num(_pet_cfg.get("interaction", {}).get("text_offset_y"), 0, -10000, 10000))
         except (TypeError, ValueError):
             self._text_offset_x = 0
             self._text_offset_y = 0
@@ -350,7 +350,7 @@ class Murasame(QLabel):
         # 字体 = 文字区宽度 × 该比例（0.0295 ≈ 丛雨原值 12px/406px）→ 换角色不跑偏
         self._font_ratio = 0.0295
 
-        self.user_name = CONFIG["user_name"]  # 用户名字
+        self.user_name = CONFIG.get("user_name", "你的名字")  # 用户名字
         self.display_text = ""  # 将要展示的文字
         self._font_family = "思源黑体Bold.otf"
         self._base_font_size = 40
@@ -523,7 +523,7 @@ class Murasame(QLabel):
 
         # 线程
         self.worker = None
-        self.interval = CONFIG["screen_interval"]
+        self.interval = num(CONFIG.get("screen_interval"), 3.0, 1.0, 3600.0)   # 原来直接下标：缺键 KeyError；0/负数会让截图线程忙循环
         self._screenshot_worker = None
         self._screenshot_executor = ThreadPoolExecutor(
             max_workers=1
@@ -613,7 +613,7 @@ class Murasame(QLabel):
 
         # ===== 长文本模式 =====
         # config 总开关（关闭后禁止开启长文本模式）
-        self.long_text_mode_enabled = CONFIG.get("longtext_enabled", "true") == "true"
+        self.long_text_mode_enabled = as_bool(CONFIG.get("longtext_enabled"), True)
         # 当前是否处于长文本模式（false = 短文本模式）
         self.long_text_mode = False
 
@@ -649,21 +649,19 @@ class Murasame(QLabel):
     def should_default_live2d(self) -> bool:
         """启动后是否自动进入 Live2D 模式。
 
-        ① 角色 pet.json 写了 model.default=live2d → 是
-        ② 设置里「启用 Live2D」(config.live2d_enabled=true) 且角色有模型 → 是
-           （用户打开总开关就是希望桌宠用 Live2D，不该被 pet.json 的 default=2d 挡住）
+        ⚠ 用户 2026-09-30 明确要求：**默认 2D，只有 2D 不可用（角色根本没有 2D 立绘）时
+        才自动用 Live2D**。判据只剩两条：
+          ① 角色自己的 pet.json 写了 model.default=live2d（角色的明确选择）；
+          ② 这个角色没有 2D 立绘（纯 Live2D 角色）→ 不自动进就是一片空白。
+        别再拿 config.live2d_enabled（总开关）当"自动进"的判据 —— 那会把「允许用 Live2D」
+        变成「每次启动都进 Live2D」（用户报的就是这个）。总开关只决定**能不能手动切**。
         """
         if self._default_display == "live2d":
             return True
         try:
-            if str(CONFIG.get("live2d_enabled", "false")).lower() == "true":
-                from pets.pet_registry import get_live2d_model_json
-                if get_live2d_model_json():
-                    print("[Live2D] 设置里已启用 Live2D 且角色有模型 → 启动即进入 Live2D")
-                    return True
+            return not bool(getattr(self, "_has_fgimages", True))
         except Exception:
-            pass
-        return False
+            return False
 
     # =========================================================
     # Live2D 文字层（透明覆盖层，行为对齐 2D：文字常显、不挡模型交互）
@@ -694,9 +692,18 @@ class Murasame(QLabel):
             WS_EX_LAYERED = 0x00080000
             ex = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
             if enabled:
+                # 第一次开启时把原始 ex-style 存下来，关掉时整份还回去 ——
+                # 原来只清 WS_EX_TRANSPARENT，会把我们加上去的 WS_EX_LAYERED 留在窗口上
+                if getattr(self, "_ex_style_before", None) is None:
+                    self._ex_style_before = ex
                 user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex | WS_EX_TRANSPARENT | WS_EX_LAYERED)
             else:
-                user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex & ~WS_EX_TRANSPARENT)
+                _before = getattr(self, "_ex_style_before", None)
+                if _before is not None:
+                    user32.SetWindowLongW(hwnd, GWL_EXSTYLE, _before)
+                    self._ex_style_before = None
+                else:
+                    user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex & ~WS_EX_TRANSPARENT)
             self._overlay_click_through = enabled
         except Exception as e:
             print(f"[AIpet] 设置文字层点击穿透失败: {e}")
@@ -1072,10 +1079,13 @@ class Murasame(QLabel):
         # 配置里关掉 Live2D 时，任何入口（快捷键/AI 指令/启动器按钮）都不许打开：
         # ⚠ 个别机器上 Live2D 的 GL 初始化会直接把进程干掉（表现为「桌宠突然消失」）
         try:
-            if str(get_config("./config.json").get("live2d_enabled", "false")).lower() != "true":
-                self.show_text(f"Live2D 已在设置里关闭（想用请到启动器「设置 → 桌宠配置」打开）", typing=False)
-                print("[Live2D] 配置 live2d_enabled=false → 拒绝切换（避免个别机器上 GL 初始化崩溃）")
-                return
+            if not as_bool(get_config("./config.json").get("live2d_enabled"), False):
+                # 纯 Live2D 角色（没有 2D 立绘）：关着总开关也得让它进，否则启动就是空白
+                if bool(getattr(self, "_has_fgimages", True)):
+                    self.show_text("Live2D 已在设置里关闭（想用请到启动器「设置 → 桌宠配置」打开）", typing=False)
+                    print("[Live2D] 配置 live2d_enabled=false → 拒绝切换（避免个别机器上 GL 初始化崩溃）")
+                    return
+                print("[Live2D] 该角色没有 2D 立绘 → 即使总开关关闭也允许进入 Live2D")
         except Exception:
             pass
         if not self._live2d_widget or not self._live2d_initialized:
@@ -1083,7 +1093,24 @@ class Murasame(QLabel):
             return
 
         # ====== 进入 Live2D 模式 ======
-        self._saved_portrait_info = self.portrait_history[-1] if self.portrait_history else None
+        # ⚠ 必须存**真实的 2D 图层**：Live2D 模式下 portrait_history 里存的是「表情词」
+        #   （"高兴"/"好奇" 这种字符串，见 on_reply 的 _reply_live2d 分支），原来直接存它
+        #   → 退出时把表情词当图层列表 → 合成出只有衣服、**没有脸**的立绘
+        #   （用户 2026-09-30：「切回 2D 后脸是空白的，聊天后才出现」）。
+        _saved_layers = list(getattr(self, "_last_portrait_layers", None)
+                             or self.first_portrait or [])
+        self._saved_portrait_info = ((self.portrait_target, _saved_layers)
+                                     if _saved_layers else None)
+        # 记下 2D 时的窗口几何与字号缩放：_ensure_live2d_overlay() 会把本窗口撑成
+        # "与模型同位置同尺寸"（通常接近全屏）并重算字号，退出时必须原样恢复，
+        # 否则会留下一个全屏大小的透明文字层 —— 用户报「从 live2D 切回 2D 后桌宠
+        # 没显示，只留下一个不能交互的文本框」。
+        try:
+            self._saved_window_geo = (self.pos(), self.size())
+            self._saved_current_scale = float(self._current_scale)
+        except Exception:
+            self._saved_window_geo = None
+            self._saved_current_scale = None
         scr_idx = get_config("./config.json").get("screen_index", 0)
         self._live2d_widget.resize_to_screen(scr_idx)
         self._live2d_widget.move(self.pos())
@@ -1108,9 +1135,25 @@ class Murasame(QLabel):
         # 恢复点击穿透设置（回到 2D 模式，pet 窗口正常接收鼠标）
         self._set_overlay_click_through(False)
         self._overlay_visible = False
+        # ★ 先把窗口几何/字号恢复成 2D 的样子，再重画立绘：
+        #   Live2D 模式下本窗口被撑成模型那么大、文字按模型尺寸缩放；
+        #   不还原的话退出后就是一个全屏透明文字层（不能交互、也看不到立绘）。
+        try:
+            _geo = getattr(self, "_saved_window_geo", None)
+            if _geo:
+                self.move(_geo[0])
+                self.resize(_geo[1])
+            _sc = getattr(self, "_saved_current_scale", None)
+            if _sc:
+                self._current_scale = float(_sc)
+            self._update_text_scaling()
+            self._rewrap_current_text()
+        except Exception as _e:
+            print(f"[Live2D] 恢复 2D 窗口几何/字号失败: {_e}")
         # 恢复 pet 窗口和立绘
         self.show()
         try:
+            saved = None
             if self._saved_portrait_info:
                 saved = self._saved_portrait_info[1]
                 if isinstance(saved, str):
@@ -1120,13 +1163,40 @@ class Murasame(QLabel):
                         saved = ast.literal_eval(saved)
                     except Exception:
                         saved = None
-                if saved is None:
-                    saved = self.first_portrait
-                self.update_portrait(self.portrait_target, saved)
-            else:
-                self.update_portrait(self.portrait_target, self.first_portrait)
+            # ⚠ 只认整数图层 id：Live2D 期间存进来的可能是表情词（"高兴"）之类的字符串，
+            #   喂给合成器就会得到"只有衣服、没有脸"的空立绘（用户报的「脸是空白的」）。
+            _clean = []
+            for _x in (saved or []):
+                try:
+                    _clean.append(int(_x))
+                except Exception:
+                    continue
+            if not _clean:
+                _clean = list(self.first_portrait or [])
+                print("[Live2D] 退出：保存的图层不可用 → 回退默认立绘（first_portrait）")
+            # ⚠ 先结算可能还挂着的淡入动画：否则 update_portrait 只把新图挂到"渐显"阶段，
+            #   而淡入定时器在 Live2D 期间可能已经停了 → 立绘永远不落地（"聊天后才出现"）。
+            try:
+                self._fade_id += 1
+                self._fade_state = None
+            except Exception:
+                pass
+            self.update_portrait(self.portrait_target, _clean)
+            # 再按 2D 的字号缩放重排文字：聊天那次合成会按新画布重算 scale，
+            # 不重排就会出现「聊天后字号突然变小」（用户报的第二半）。
+            try:
+                _sc2 = getattr(self, "_saved_current_scale", None)
+                if _sc2:
+                    self._current_scale = float(_sc2)
+                self._update_text_scaling()
+                self._rewrap_current_text()
+            except Exception as _e2:
+                print(f"[Live2D] 恢复 2D 字号失败: {_e2}")
+            self.update()
+            self.repaint()
         except Exception:
             self.update_portrait(self.portrait_target, self.first_portrait)
+        self._saved_portrait_info = None
         self.raise_()
         self.activateWindow()
         print("[Live2D] 已退出 Live2D 模式")
@@ -1168,10 +1238,9 @@ class Murasame(QLabel):
         screen_type = "true" if enabled else "false"
         # 持久化当前开关状态，保证即使直接关闭命令行也能保留设置
         try:
-            config = get_config("./config.json")
-            config["screen_type"] = screen_type
-            with open("./config.json", "w", encoding="utf-8") as f:
-                json.dump(config, f, ensure_ascii=False, indent=2)
+            from tool.config import set_key as _set_key
+            if not _set_key("./config.json", "screen_type", screen_type):
+                print("[AIpet] ⚠ 保存 screen_type 失败（原因见上一行的 [Config] 提示）")
         except Exception as e:
             print(f"[AIpet] 保存 screen_type 失败: {e}")
 
@@ -1220,10 +1289,9 @@ class Murasame(QLabel):
         global camera_type
         camera_type = "true" if enabled else "false"
         try:
-            config = get_config("./config.json")
-            config["camera_enabled"] = camera_type
-            with open("./config.json", "w", encoding="utf-8") as f:
-                json.dump(config, f, ensure_ascii=False, indent=2)
+            from tool.config import set_key as _set_key
+            if not _set_key("./config.json", "camera_enabled", camera_type):
+                print("[AIpet] ⚠ 保存 camera_enabled 失败（原因见上一行的 [Config] 提示）")
         except Exception as e:
             print(f"[AIpet] 保存 camera_enabled 失败: {e}")
 
@@ -1239,11 +1307,56 @@ class Murasame(QLabel):
     def is_camera_enabled(self) -> bool:
         return camera_type == "true"
 
+    def stop_agent_worker(self):
+        """停掉正在跑的 agent 任务。
+
+        ⚠ 为什么必须有：agent 会**以主人的身份操作电脑**（`tool/agent_bridge` 起外部进程，
+          自带超时 + 杀进程树）。但以前 `self._agent_worker` 只被赋值、**没有任何人能停**：
+          关掉桌宠时它还在跑，最长能把主人的电脑继续操作到超时（默认 600 秒）。
+          这里和截图线程一个口径：请求中断 → quit → wait，然后清掉引用。
+        """
+        w = getattr(self, "_agent_worker", None)
+        if w is None:
+            return
+        try:
+            if w.isRunning():
+                w.requestInterruption()
+                w.quit()
+                if not w.wait(3000):
+                    print("[AIpet] ⚠ agent 任务 3 秒内没停下来（它可能卡在外部进程上，超时后会自己收）")
+        except Exception as e:
+            print(f"[AIpet] 停 agent 任务时出错（忽略，继续退出）: {e}")
+        finally:
+            self._agent_worker = None
+
+    def stop_all_workers(self):
+        """退出前把所有后台线程收干净（截图 / 摄像头 / agent / 聊天）。
+
+        ⚠ 以前**没人调用任何 stop_**：`app.aboutToQuit` 只保存了屏幕类型和窗口位置，
+          Qt 退出时线程还活着 → 轻则告警、重则 "QThread: Destroyed while thread is still
+          running" 直接把进程 abort；agent 那种还会让外部进程继续动主人的电脑。
+        """
+        for name in ("stop_screenshot_worker", "stop_camera_worker", "stop_agent_worker"):
+            try:
+                fn = getattr(self, name, None)
+                if callable(fn):
+                    fn()
+            except Exception as e:
+                print(f"[AIpet] 退出收尾：{name}() 出错（忽略）: {e}")
+        w = getattr(self, "worker", None)
+        if w is not None:
+            try:
+                if w.isRunning():
+                    w.stop_all()          # 通知线程中断（和起新请求前的处理一致）
+                    w.wait(1000)
+            except Exception as e:
+                print(f"[AIpet] 退出收尾：聊天线程出错（忽略）: {e}")
+
     def on_camera_captured(self, img_url: str):
         """常开摄像头回调 — 通过 AI 识别后触发对话"""
         if self.is_dnd_enabled():
             return
-        model_type = get_config("./config.json")["model_type"]
+        model_type = enum_of(get_config("./config.json").get("model_type"), ("local", "qwen", "deepseek"), "qwen", "model_type")
 
         def task(url):
             try:
@@ -1254,43 +1367,59 @@ class Murasame(QLabel):
                 import requests
                 import base64 as b64
                 cfg = get_config("./config.json")
-                # 视觉模型统一走 longtext.model_config（vision_model_name + 对应 API Key）
-                from longtext.model_config import get_vision_model_config
-                vcfg = get_vision_model_config()
-                if not vcfg:
-                    return
-
-                # AI 视觉描述
-                payload = {
-                    "messages": [{
-                        "role": "user",
-                        "content": [
-                            {"type": "image_url", "image_url": {"url": url}},
-                            {"type": "text", "text": "请用简短的中文描述这张照片中的场景、人物和主要活动，不超过50个字。"},
-                        ]
-                    }],
-                    "model": vcfg["model"],
-                    "max_tokens": 256,
-                    "stream": False,
-                }
-                headers = {
-                    "Accept": "application/json",
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {vcfg['api_key']}",
-                }
-                cloud_api_url = cfg["local_api"]["cloud_api"]
-                resp = requests.post(cloud_api_url,
-                                     json={"payload": payload, "headers": headers}, timeout=30)
-                data = resp.json()
-                desc = data["choices"][0]["message"]["content"].strip() if "choices" in data else ""
-                if desc:
-                    print(f"[AIpet][camera] 常开摄像头识别结果: {desc}")
+                # ★ 本地这条线自带本地视觉服务（tool/vision_service.py + tool/chat.describe_image）；
+                #   上游 vision_local.py 是另一套语义（vision_source 默认 "cloud"、要用户自接模型，
+                #   而本地默认 "local"）—— 同一个键两种含义，照抄会把本地视觉静默降级成云端。
+                #   所以这里保留本地路线，上游那个分支不启用（代码留作参考）。
+                # from tool import vision_local as _vl
+                desc = ""
+                if False:
+                    _r = _vl.describe(url)
+                    desc = (_r.get("text") or "").strip()
+                    if not desc:
+                        print("[AIpet][camera] 本地视觉没给出描述：%s" % (_r.get("error") or "未知原因"))
+                        return
+                    print(f"[AIpet][camera] 本地视觉识别结果: {desc}")
                 else:
-                    return
+                    # 视觉模型统一走 longtext.model_config（vision_model_name + 对应 API Key）
+                    from longtext.model_config import get_vision_model_config
+                    vcfg = get_vision_model_config()
+                    if not vcfg:
+                        # ⚠ 以前这里是静默 return：摄像头每轮都白跑，用户不知道为什么"她不看"
+                        print("[AIpet][camera] 没配视觉模型（vision_model_name / APIKEY）→ 跳过这一轮")
+                        return
+
+                    # AI 视觉描述
+                    payload = {
+                        "messages": [{
+                            "role": "user",
+                            "content": [
+                                {"type": "image_url", "image_url": {"url": url}},
+                                {"type": "text", "text": "请用简短的中文描述这张照片中的场景、人物和主要活动，不超过50个字。"},
+                            ]
+                        }],
+                        "model": vcfg["model"],
+                        "max_tokens": 256,
+                        "stream": False,
+                    }
+                    headers = {
+                        "Accept": "application/json",
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {vcfg['api_key']}",
+                    }
+                    cloud_api_url = (cfg.get("local_api") or {}).get(
+                        "cloud_api", "http://localhost:28565/cloudAPI")
+                    resp = requests.post(cloud_api_url,
+                                         json={"payload": payload, "headers": headers}, timeout=30)
+                    data = resp.json()
+                    desc = data["choices"][0]["message"]["content"].strip() if "choices" in data else ""
+                    if not desc:
+                        return
+                    print(f"[AIpet][camera] 常开摄像头识别结果: {desc}")
 
                 # 人脸识别
                 face_result = ""
-                if cfg.get("face_recognition_enabled") == "true":
+                if as_bool(cfg.get("face_recognition_enabled"), False):
                     try:
                         import numpy as np
                         import cv2 as cv
@@ -1355,8 +1484,10 @@ class Murasame(QLabel):
         self._dnd_enabled = bool(enabled)
         if self._dnd_enabled:
             print("[AIpet] 启用勿扰模式")
-            # 停止一切自动行为
-            self.pause_all_ai()
+            # 停止一切自动行为。
+            # ⚠ 勿扰 = 主人要安静 → 这里**显式**要求停语音（stop_voice=True，自审时补的：
+            #   默认路径已经改成不停语音了，那是对"点/拖桌宠"而言；勿扰语义不同）。
+            self.pause_all_ai(stop_voice=True)
             if self.idle_timer.isActive():
                 self.idle_timer.stop()
             # 重置空闲状态，避免退出勿扰后立刻触发
@@ -1383,7 +1514,7 @@ class Murasame(QLabel):
             except Exception:
                 pass
             return
-        model_type = get_config("./config.json")["model_type"]
+        model_type = enum_of(get_config("./config.json").get("model_type"), ("local", "qwen", "deepseek"), "qwen", "model_type")
 
         def task(path, _hash):
             def _emit_reply(desc, reused: bool = False):
@@ -1519,7 +1650,8 @@ class Murasame(QLabel):
         # 用户主动输入会通过 start_thread(t=False) 正常打断
         if stop_voice:
             try:
-                QSound.stop()
+                print("[AIpet] 用户主动输入 → 打断当前语音")
+                stop_voice_wav()
             except Exception:
                 pass
 
@@ -2347,6 +2479,17 @@ class Murasame(QLabel):
                 return
         except Exception as _e:
             print(f"[桌宠] ⚠ 空回复判定失败: {_e}")
+
+        # 长期状态：记一次「跟主人说过话」（「开口时机」要看沉默了多久）。
+        # ⚠ 原来只有 tool/chat.py 里 qwen3-lora 那一个模型分支会调 note_talk()，
+        #   走别的模型（deepseek / 云端 / qwen 其它档位）时永远不记 →
+        #   状态页一直显示「上次说话：还没聊过」（用户看到的就是这个）。
+        #   这里放在**所有回复都会经过**的汇聚点，任何模型 / 任何入口都算数。
+        try:
+            from tool import state as _st_talk2
+            _st_talk2.note_talk()
+        except Exception:
+            pass
 
         # ⚠ 每轮回复一个「代号」：新回复一出现，旧回复剩下的句子链立刻作废。
         #   以前旧链里的 QTimer 回调会继续 show_text，把新回复（比如第二次摸头/摸身体
@@ -3624,16 +3767,14 @@ class Murasame(QLabel):
     def _toggle_auto_switch(self, checked=None):
         """右键菜单：切换「自动切换立绘类型」并写入 config.json（立即生效）"""
         try:
-            import json as _json
-            from tool.config import get_config
-            cfg = get_config("./config.json")
+            from tool.config import set_key as _set_key
             if checked is None:
                 val = "false" if self._auto_switch_enabled() else "true"
             else:
                 val = "true" if checked else "false"
-            cfg["portrait_auto_switch"] = val
-            with open("./config.json", "w", encoding="utf-8") as f:
-                _json.dump(cfg, f, ensure_ascii=False, indent=2)
+            if not _set_key("./config.json", "portrait_auto_switch", val):
+                print("[桌宠] ⚠ 保存自动切换开关失败（原因见上一行的 [Config] 提示）")
+                return
             print(f"[桌宠] 🔁 自动切换立绘类型已{'开启' if val == 'true' else '关闭'}（已写入 config.json）")
         except Exception as e:
             print(f"[桌宠] ⚠ 保存自动切换开关失败: {e}")
@@ -3813,6 +3954,13 @@ class Murasame(QLabel):
             except Exception:
                 pass
             self._display_set = new_set
+            # ⚠ 2026-09-30：**自动过渡**这里原来漏了同步 config.json 的 portrait ——
+            #   worker 建立绘提示词时读的是 config.portrait（见 Worker_class.current_portrait_type），
+            #   不同步就会出现「显示 a 套、提示词还写着 b 套」→ 模型永远按 b 套选层 →
+            #   每次回复都要走有损的跨套翻译 → 组合表情（如「驚きbベースe上目使いm」）翻不过去，
+            #   直接兜底成平脸 1292 = 用户看到的「这个表情没有」。
+            #   手动切换（_switch_portrait_type）和初始化那两处本来就调了，只有这条自动路径漏了。
+            self._sync_config_portrait(new_set)
             self.portrait_target = target
             self._last_portrait_layers = list(_layers)
             self.first_portrait = self._first_portrait_for(new_set)
@@ -4087,7 +4235,7 @@ class Murasame(QLabel):
           用户反馈「从没见过 a/b 自动切换」就是这个。
           不想要这个效果：设置里关掉，或右键菜单取消勾选「自动切换立绘类型」。"""
         try:
-            from tool.config import get_config
+            from tool.config import as_bool, enum_of, get_config, num
             v = get_config("./config.json").get("portrait_auto_switch", "true")
             return str(v).strip().lower() in ("true", "1", "on", "yes")
         except Exception:
@@ -5010,7 +5158,7 @@ class Murasame(QLabel):
         """
 
         # 读取配置中的屏幕编号（默认 0 = 主屏）
-        screen_index = get_config("./config.json")["screen_index"]
+        screen_index = get_config("./config.json").get("screen_index", 0)
 
         # 获取所有屏幕
         screens = QGuiApplication.screens()
@@ -5036,8 +5184,8 @@ class Murasame(QLabel):
             _ratio = None
         if _ratio is None:
             try:
-                _ratio = float(_pet_cfg.get("model", {}).get("portrait_height_ratio")
-                               or DEFAULT_PORTRAIT_SCREEN_RATIO)
+                _ratio = num(_pet_cfg.get("model", {}).get("portrait_height_ratio"),
+                               DEFAULT_PORTRAIT_SCREEN_RATIO, 0.10, 0.95)
             except Exception:
                 _ratio = DEFAULT_PORTRAIT_SCREEN_RATIO
 
@@ -5244,6 +5392,48 @@ class Murasame(QLabel):
         self._font_family_ok = fam
         return fam
 
+
+    def _habits_poll(self) -> None:
+        """采集「主人的习惯」（前台窗口轮询；开关 habits_enabled，默认开）
+
+        ⚠ 合并说明：合并时这一段（上游的_habits_poll 主体）被拼到了
+          `_resolve_pet_font` 的后面、缺了自己的 def/try 头 → 直接 IndentationError。
+          这里补回方法头，语义与上游一致。
+        """
+        try:
+            from tool import habits as _hb
+            if not _hb.enabled():
+                return
+            _hb.poll_foreground()
+        except Exception:
+            pass
+
+    def _perf_guard_enabled(self) -> bool:
+        """性能守卫开关（config.json: perf_guard_enabled，默认开）"""
+        try:
+            from tool.config import as_bool, enum_of, get_config, num
+            return as_bool(get_config("./config.json").get("perf_guard_enabled", "true"), True)
+        except Exception:
+            return True
+
+    def _perf_tick(self):
+        """每 3 秒看一次是不是在全屏游戏/演示 → 切换进程优先级。
+
+        游戏里降到 Idle（然后调度器永远优先伺候游戏），结束回到 BelowNormal；
+        只在状态变化时写一行日志。按主人要求：识别与主动搭话都不暂停。
+        """
+        try:
+            from tool import perf_guard as _pg
+            if not self._perf_guard_enabled():
+                return
+            g = bool(_pg.game_mode())
+            if g != getattr(self, "_game_mode", None):
+                self._game_mode = g
+                _pg.set_process_priority(g)
+                _pg.note_state(g)
+        except Exception:
+            pass
+
     def _display_cfg_2d(self) -> dict:
         """2D 立绘的显示设置（pet.json model.display_2d；兼容旧的 display.* 键）。
 
@@ -5297,8 +5487,14 @@ class Murasame(QLabel):
         scale = max(self._current_scale, 0.1)
         # ① 先定左右留白（按窗口宽度比例，且不超过旧算法给的宽度）
         old_margin = max(10, int(round(self._base_text_x_offset * scale)))
-        self.text_x_offset = max(8, min(old_margin, max(10, int(round(self.width() * 0.08)))))
-        # ② 用新留白算文字区宽度 → 字号（保证任何窗口尺寸都能显示完整）
+        if getattr(self, "_live2d_mode", False):
+            # Live2D：窗口是整屏，再限一次「不超过窗口宽 20%」免得框被挤没
+            self.text_x_offset = max(8, min(old_margin, max(10, int(round(self.width() * 0.20)))))
+        else:
+            # 2D：完全按 v1.16.1（140 × scale）。那时窗口窄，硬套 20% 会把留白压小、
+            #     文本框整体左右偏移（用户 2026-09-30：「文本框位置…去看 1.16 甚至更早的版本」）
+            self.text_x_offset = old_margin
+        # ② 文字区宽度（配了框的角色要用它算字号）
         try:
             area_w = max(60, int(self._text_rect().width()))
         except Exception:
@@ -5308,17 +5504,47 @@ class Murasame(QLabel):
             # Live2D 且没配置对话框区域：沿用原算法（窗口高度 × font_scale），保持老角色现状
             scaled_font_size = max(8, int(round(self._base_font_size * scale * fscale)))
         else:
-            # 按文字区宽度定字号：430px → 12px（丛雨原值），窄立绘自动变小 → 显示完整
-            scaled_font_size = max(9, int(round(area_w * self._font_ratio * fscale)))
-        # 用「像素字号 + 全提示 + 抗锯齿」：小字号下笔画更实，不会有糊边
-        _pt = max(6, int(round(scaled_font_size * 1.333)))     # pt → px（保持原有大小观感）
-        self.text_font = QFont(self._resolve_pet_font())
-        self.text_font.setPixelSize(_pt)
+            # 没配框：v1.16.1 的算法 = 40 × scale。
+            # ⚠ scale（_current_scale）里**已经含过一次**角色的 live2d_font_scale，
+            #   所以这里绝对不能再乘一次 fscale：丛雨 0.35 会被乘成 0.1225，
+            #   再被 max(8,…) 卡住 → Live2D 下字号常年钉在 11px（用户报的"文字显示太小"）。
+            #   用户没拖过字号时用「角色原值」（Live2D 已经乘进 scale，故取 1.0；
+            #   2D 用配置里的 text_font_scale_2d）；拖过才按"相对角色默认值的倍数"缩放。
+            _live = getattr(self, "_font_scale_live", None)
+            if getattr(self, "_live2d_mode", False):
+                _role_fs = float(getattr(self, "_live2d_font_scale", 1.0) or 1.0) or 1.0
+                _eff = float(_live) if _live is not None else _role_fs
+                fscale_rel = _eff / _role_fs
+            else:
+                fscale_rel = (float(_live) if _live is not None
+                              else float(getattr(self, "_text_font_scale_cfg", 1.0) or 1.0))
+            scaled_font_size = max(8, int(round(self._base_font_size * scale * fscale_rel)))
+        # 字体构造：**默认走 v1.16.1 的口径**（QFont(字体名, 点数)，交给系统兜底字体），
+        # 用户 2026-09-30 要求：「文本框位置还有文字大小之类的去看 1.16 甚至更之前的版本，
+        # 不知道什么时候开始这个字就不对了」—— 就是后来改成了"真加载思源黑体 + 像素字号"，
+        # 换字体后同样的点数看起来更粗更小。
+        #   · 想要现在的做法（真加载思源黑体 + 像素字号 + 全提示）：config 里
+        #     text_font_native = "true"
+        #   · 默认 false：与 v1.16.1 逐字一致
+        _native = False
         try:
-            self.text_font.setHintingPreference(QFont.PreferFullHinting)
-            self.text_font.setStyleStrategy(QFont.PreferAntialias)
+            from tool.config import as_bool as _ab_font, get_config as _gc_font
+            _native = _ab_font(_gc_font("./config.json").get("text_font_native", "false"), False)
         except Exception:
-            pass
+            _native = False
+        if _native:
+            # 用「像素字号 + 全提示 + 抗锯齿」：小字号下笔画更实，不会有糊边
+            _pt = max(6, int(round(scaled_font_size * 1.333)))     # pt → px（保持原有大小观感）
+            self.text_font = QFont(self._resolve_pet_font())
+            self.text_font.setPixelSize(_pt)
+            try:
+                self.text_font.setHintingPreference(QFont.PreferFullHinting)
+                self.text_font.setStyleStrategy(QFont.PreferAntialias)
+            except Exception:
+                pass
+        else:
+            self.text_font = QFont(self._font_family, max(8, int(scaled_font_size)))
+            _pt = max(6, int(round(scaled_font_size * 1.333)))
         self._font_px = _pt
 
         scaled_y = int(round(self._base_text_y_offset * scale))

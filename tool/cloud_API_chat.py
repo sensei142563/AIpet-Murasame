@@ -9,7 +9,8 @@ from tool.config import get_config
 from tool.time_utils import build_time_context
 from pets.pet_registry import get_chat_pet_id, get_prompt_path, get_short_emotion_dirs
 
-url = get_config("./config.json")["local_api"]["cloud_api"]
+url = (get_config("./config.json").get("local_api") or {}).get(
+    "cloud_api", "http://localhost:28565/cloudAPI")
 
 
 def now_time():
@@ -147,6 +148,21 @@ def cloud_talk(history: list, user_input: str, role: str):
         pass
 
     # 允许操控电脑时，把键鼠操作说明也交给她（菜单里可开关）
+
+
+    # 1.75 联网学习（插件 auto_learning / slang_search）：问题自动联网搜索 + 网络用语查询。
+    #      ⚠ 2026-09-30：三条渠道（QQ/微信/桌宠）共用 tool/learn_hub —— 用户要求
+    #      「变成微信，QQ，桌宠都可以使用的东西」。QQ 在 qq/qq_chat.py 里调，
+    #      微信桥回复时用 learn_hub.channel("wx") 包住，这里默认渠道是桌宠。
+    try:
+        from tool import learn_hub as _lh_chat
+        _lh_prefix = _lh_chat.fact_prefix(user_input or "", _lh_chat.current_channel())
+        if _lh_prefix:
+            messages.append({"role": "system", "content": _lh_prefix.strip()})
+    except Exception:
+        pass
+
+    # 1.8 提醒/待办语法（她能帮主人记事，见 tool/reminder 的 prompt_rules）
     try:
         from tool import pc_control as _pc2
         _rules = _pc2.prompt_rules()      # 含「自主行动」说明（开了自主操作才会有）

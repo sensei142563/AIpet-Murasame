@@ -426,16 +426,10 @@ def chat_once(user_text: str, use_sticker: bool = True, vision_desc: str = None,
     except Exception:
         pass
 
-    # 2d. 网络用语/梗 自动查询（短黑话或"什么意思"式提问时联网查词义，失败静默）
-    try:
-        from qq.qq_config import get_qq_config as _gq_slang
-        if _gq_slang().get("slang_allowed", True):
-            from qq.qq_slang import lookup as _slang_lookup
-            _slang_note = _slang_lookup(user_text)
-            if _slang_note:
-                messages.append({"role": "system", "content": _slang_note})
-    except Exception:
-        pass
+    # 2d. 网络用语/梗 自动查询 —— ⚠ codex 复审 P3：这一段**已删除**。
+    #   它原本往 messages 里插一条 system 提示，但同一函数的 `_fact_prefix` 现在也包含
+    #   网络用语（`learn_hub.fact_prefix` 里的 slang 分支）→ 插件打开时模型会收到**同一份**
+    #   「【网络用语参考】…」两次（system 一条 + 用户前缀一条）。统一由 learn_hub 出，别重复。
 
     # 2e. Galgame 模式（群聊好感度玩法；主人本人不参与好感度系统）
     _galgame_ctx = None  # (gid, uin_str)；供回复解析好感度标记用
@@ -569,37 +563,23 @@ def chat_once(user_text: str, use_sticker: bool = True, vision_desc: str = None,
         _fact_prefix = ""
 
     # 自主学习（官方插件，可在启动器插件页调开关）：问题联网搜索 + 群学习库检索
+    # ⚠ 2026-09-30：这段实现搬到 tool/learn_hub.py 了 —— 微信和桌宠现在共用同一套
+    #   （用户要求「变成微信，QQ，桌宠都可以使用的东西」）。这里只负责把渠道标成 qq。
     try:
+        from tool import learn_hub as _lh
         from qq.qq_config import get_qq_config as _alcfg
         _alc = _alcfg()
-        if _alc.get("auto_learn_enable"):
-            if _alc.get("auto_learn_search"):
-                from qq.qq_search import note_for_text as _nft2
-                _web_note = _nft2(user_text, img_desc=(vision_desc or ""))
-                if _web_note:
-                    _fact_prefix += _web_note + chr(10)
-                else:
-                    from qq.qq_search import is_link as _il2
-                    if _il2(user_text):
-                        _fact_prefix += ("【链接提示】系统已尝试代为打开该链接但未能提取到内容"
-                                         "（网站可能要登录或开启了反爬）。你不需要打开任何网页，"
-                                         "请如实说暂时没看到内容并请对方直接说说大概是什么，不要编造。"
-                                         + chr(10))
-            # 群学习库检索：问题相关(图/视频/链接/群聊内容)作为参考
-            if _alc.get("auto_learn_media") or _alc.get("auto_learn_links")                     or _alc.get("auto_learn_chats"):
-                import re as _re3
-                _gid3 = None
-                try:
-                    _mm3 = _re3.match(r"^(?:private_|group_)(\d+)", str(session_key or ""))
-                    if _mm3:
-                        _gid3 = _mm3.group(1)
-                except Exception:
-                    pass
-                if user_text and len(user_text) <= 120:
-                    from qq.qq_learnstore import retrieve as _lr
-                    _notes = _lr(user_text, gid=_gid3)
-                    if _notes:
-                        _fact_prefix += "【群学习参考】" + chr(10).join(_notes) + chr(10)
+        _gid3 = None
+        if _alc.get("auto_learn_media") or _alc.get("auto_learn_links") or _alc.get("auto_learn_chats"):
+            import re as _re3
+            try:
+                _mm3 = _re3.match(r"^(?:private_|group_)(\d+)", str(session_key or ""))
+                if _mm3:
+                    _gid3 = _mm3.group(1)
+            except Exception:
+                pass
+        _fact_prefix += _lh.fact_prefix(user_text, _lh.current_channel_or("qq"),
+                                        img_desc=(vision_desc or ""), gid=_gid3)
     except Exception:
         pass
 

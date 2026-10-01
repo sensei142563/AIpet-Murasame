@@ -547,6 +547,55 @@ def ok_text():
     """成功 / 已生效的状态字（跟着主题自动压暗或提亮）"""
     return readable_on(GreenDark)
 
+# ===== 上游 V1.18 之后的对比度 API（widgets / plugins_panel / status_panel 在用）=====
+# 本地原来只有 surface_fill/readable_on，缺这两个 + 常量；上游那些页面直接用了它们，
+# 不补就是 NameError（widgets/plugins_panel 是 `from .colors import *`，编译期看不出来）。
+ACTION_GREEN = QColor("#1e7a33")
+
+# 浅色主题下「窗口底 = 渐变底板 + 6% 蒙版/磨砂」的最坏合成色（上游探针实测值）
+_FILM_LIGHT_BG = QColor("#cfd7e4")
+
+
+def fill_for_text(fill, text="#ffffff", target: float = 4.8):
+    """**填色 + 固定文字** 这类配对的保险：把填色压暗/提亮到与文字达到 target。
+
+    为什么需要它（上游实测的用户反馈「彩色徽章/按钮上的白字看不清」）：
+      琥珀徽章 #d4a020 + 白字 = 2.37:1；绿徽章 #30a030 + 白字 = 3.39:1；
+      绿按钮 #21aa11 + 白字 = 3.08:1；强调色当底 #4c8dff + 白字 = 3.20:1。
+    target 默认 4.8（留余量：实际渲染还会叠 6% 白膜，会把底色抬亮约 0.2:1）。
+    """
+    f = QColor(fill)
+    t = QColor(text)
+    if contrast_ratio(f, t) >= target:
+        return f
+    # 文字亮 → 底要压暗；文字暗 → 底要提亮
+    toward_black = rel_luminance(t) > 0.5
+    out = QColor(f)
+    for _ in range(60):
+        out = out.darker(110) if toward_black else out.lighter(110)
+        if contrast_ratio(out, t) >= target:
+            return out
+    return QColor("#000000") if toward_black else QColor("#ffffff")
+
+
+def blend_over(fg, alpha_0_255, bg) -> QColor:
+    """把 fg 以 alpha（0–255）叠在 bg 上，返回**合成后的实色**（算半透明底上的文字色要用）。"""
+    a = max(0, min(255, int(alpha_0_255))) / 255.0
+    f, b = QColor(fg), QColor(bg)
+    return QColor(int(f.red() * a + b.red() * (1 - a) + 0.5),
+                  int(f.green() * a + b.green() * (1 - a) + 0.5),
+                  int(f.blue() * a + b.blue() * (1 - a) + 0.5))
+
+
+def accent_text() -> QColor:
+    """强调色当**文字**用时的可读版本（浅色主题下自动压深；深色主题保持鲜亮）。"""
+    try:
+        if rel_luminance(QColor(Color8)) < 0.25:      # 深色主题：强调色本来就鲜亮够用
+            return QColor(Color3)
+        return readable_on(Color3, _FILM_LIGHT_BG, 4.5)
+    except Exception:
+        return QColor(Color3)
+
 def warn_text():
     """警告 / 失败的状态字"""
     return readable_on(RedDark)

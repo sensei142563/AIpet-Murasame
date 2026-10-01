@@ -114,8 +114,15 @@ def weather_city() -> str:
 
 
 def weather_enabled() -> bool:
+    """天气功能开不开（config.json 的 weather_enable，默认开）
+
+    ⚠ 这里原来是 `str(...).lower() != "false"` —— **方向写反了**：只有恰好写成 "false" 才算关，
+      于是 `"0"` / `"no"` / `"off"` / `"关"` **全都算开**（实测表见 _audit 的 audit_truthiness）。
+      仓库里已有权威实现 `tool.config.as_bool`（1/true/yes/y/on/开/开启 → 真），统一用它。
+    """
     try:
-        return str(_read_cfg().get("weather_enable", "true")).lower() != "false"
+        from tool.config import as_bool
+        return as_bool(_read_cfg().get("weather_enable", "true"), True)
     except Exception:
         return True
 

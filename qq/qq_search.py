@@ -26,6 +26,55 @@ _TIMEOUT = 8
 _session = requests.Session()
 
 
+def decode_response(r) -> str:
+    """把 requests 的响应解成文本：**优先声明/正文里的编码，其次 UTF-8**，最后才用 apparent_encoding。
+
+    ⚠ 2026-09-30 冒烟时发现（用户要求"三方共用联网学习"后第一次真跑）：
+    `r.encoding = r.apparent_encoding or "utf-8"` 会把百度/必应这类 **UTF-8 中文页面**
+    误判成 Latin-1/Windows-1252 → 查回来的资料整段乱码：
+        yyds（网络流行语）_百度百科  →  yydsï¼ˆç½‘ç»œæµ�è¡Œè¯­ï¼‰_ç™¾åº¦ç™¾ç§‘
+    中文站点绝大多数是 UTF-8，所以先按"声明编码 → meta charset → UTF-8 → apparent"的顺序试。
+    """
+    raw = getattr(r, "content", b"") or b""
+    if not raw:
+        try:
+            return r.text or ""
+        except Exception:
+            return ""
+    # 1) headers/requests 推断出的编码（可疑值跳过）
+    try:
+        decl = (getattr(r, "encoding", "") or "").strip().lower()
+    except Exception:
+        decl = ""
+    if decl and decl not in ("iso-8859-1", "latin-1", "latin1", "windows-1252",
+                             "cp1252", "ascii", "gb2312", "gbk"):
+        try:
+            return raw.decode(decl, errors="replace")
+        except Exception:
+            pass
+    # 2) 正文 <meta charset>
+    m = re.search(rb'charset=["\']?\s*([\w\-]+)', raw[:4096].lower())
+    if m:
+        try:
+            enc = m.group(1).decode("ascii", "ignore").strip()
+            if enc and enc not in ("iso-8859-1", "windows-1252", "ascii"):
+                return raw.decode(enc, errors="replace")
+        except Exception:
+            pass
+    # 3) UTF-8 优先（没有替换字符就算成功）
+    try:
+        txt = raw.decode("utf-8")
+        if "\ufffd" not in txt:
+            return txt
+    except Exception:
+        pass
+    # 4) 最后才信 apparent_encoding
+    try:
+        return raw.decode(getattr(r, "apparent_encoding", None) or "utf-8", errors="replace")
+    except Exception:
+        return raw.decode("utf-8", errors="replace")
+
+
 def _get(url, timeout=_TIMEOUT, headers=None, referer=None):
     try:
         h = dict(_UA)
@@ -34,13 +83,22 @@ def _get(url, timeout=_TIMEOUT, headers=None, referer=None):
         if referer:
             h["Referer"] = referer
         r = _session.get(url, headers=h, timeout=timeout)
-        r.encoding = r.apparent_encoding or "utf-8"
         return r
     except Exception:
         return None
 
 
 def _clean(s):
+    """去标签 + 还原 HTML 实体 + 压空白。
+
+    ⚠ 2026-09-30：原来只去标签，必应摘要里的 `&ensp;&#0183;&ensp;` 会原样喂给模型
+    （同一批冒烟发现）→ 这里补一次 html.unescape。
+    """
+    try:
+        import html as _h
+        s = _h.unescape(s or "")
+    except Exception:
+        pass
     s = re.sub(r"<[^>]+>", " ", s or "")
     return re.sub(r"\s+", " ", s).strip()
 
@@ -54,7 +112,7 @@ def search_web(query, num=3):
         r = _get(url, headers={"Referer": "https://cn.bing.com/"})
         if not r:
             return out
-        h = r.text
+        h = decode_response(r)
         blocks = re.findall(r'<li class="b_algo".*?(?=<li class="b_algo"|</ol>)', h, re.S)
         for b in blocks[:num]:
             m = re.search(r'<h2[^>]*><a[^>]*href="([^"]+)"[^>]*>(.*?)</a>', b, re.S)
@@ -77,7 +135,7 @@ def _page_summary(url):
         r = _get(url, timeout=10)
         if not r:
             return "", "", site
-        html = r.text
+        html = decode_response(r)
         title = ""
         mt = re.search(r"<title[^>]*>(.*?)</title>", html, re.S)
         if mt:
@@ -136,7 +194,7 @@ def search_images(query, num=3):
         r = _get(url, headers={"Referer": "https://cn.bing.com/"})
         if not r:
             return out
-        html = r.text
+        html = decode_response(r)
         # murl 原图地址
         murls = re.findall(r'&quot;murl&quot;:&quot;(.*?)&quot;', html)
         if not murls:
@@ -384,6 +442,16 @@ def query_trigger(text) -> bool:
               "是谁", "怎么分辨", "区别是什么", "介绍下", "讲讲", "给我讲讲"):
         if w in t:
             return True
+    # ⚠ 2026-09-30（用户实测）：问「你知道「魔法少女的魔女审判」吗？一款游戏」时**不触发**，
+    #   而这恰恰是最该查的一类问法。补上"你知道 / 听说过"这一族，但要和「你知道这个游戏吗」
+    #   这种泛指区分开：带书名号/引号的专名直接算；否则要求够长且不是"这个/那个+泛称"。
+    if any(w in t for w in ("你知道", "知不知道", "听说过", "有没有听过", "了解吗", "熟悉吗",
+                            "玩过吗", "看过吗", "听过吗")):
+        if re.search(r"[「『\"“][^」』\"”]{2,}[」』\"”]", t):
+            return True
+        _t = re.sub(r"\s+", "", t)
+        if len(_t) >= 10 and not re.search(r"(这个|那个)(游戏|东西|人|梗|歌|片|书)", _t):
+            return True
     return False
 
 
@@ -406,6 +474,18 @@ def note_for_text(user_text, img_desc=""):
         # 查询清洗：去标点/语气词开头，搜索词更精准，结果更相关
         q = re.sub(r"[?？!！。，,、：:；;]+", " ", q).strip()
         q = re.sub(r"^(?:请问|帮我|请问一下|你好|那个|这个|就是|然后|咦|诶)\s*", "", q).strip()
+        # ⚠ 2026-09-30（用户实测）：整句丢给搜索引擎会被"降级" ——
+        #   「魔法少女的魔女审判 是什么游戏」返回的全是"魔法"词条（必应凑词），
+        #   于是模型拿着无关资料乱答。这里去掉书名号/引号外壳 + 疑问尾巴，
+        #   只留"被问的那个东西"再搜（专名越干净，结果越准）。
+        q = re.sub(r"[「『\"“]([^」』\"”]+)[」』\"”]", r"\1", q).strip()
+        # 只取问句本身：一句话里"吗/呢/吧"之后多半是补充说明（"…吗？一款游戏"），丢掉更准
+        q = re.split(r"[吗呢吧？?]", q)[0].strip()
+        q = re.sub(r"^(?:你知道|知不知道|听说过|有没有听过|了解|熟悉|玩过|看过)+", "", q).strip()
+        q = re.sub(r"(?:是什么游戏|是什么东西|是什么|是啥|啥意思|什么意思|怎么样|怎么玩|"
+                   r"怎么用|怎么弄|怎么做|介绍一下|介绍下|给我讲讲|讲讲|出自哪里|出自|"
+                   r"什么梗|是哪部|是哪个|的吗|吗|呢|吧|啊|呀|哦|嘛|的)+$", "", q).strip()
+        q = re.sub(r"\s+", " ", q).strip()
         if len(q) < 2:
             return None
         res = search_web(q, num=4)

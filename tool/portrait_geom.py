@@ -50,23 +50,35 @@ def canvas_size_for(pet_id: str, set_name: str, target_height: float, extra_ids=
         except Exception:
             pass
         if not cands:
-            return (0, 0)
-        _extra = [int(x) for x in (extra_ids or []) if str(x).strip().isdigit()]
-        best_w, best_h = 0, 0
-        for lid in sorted(set(cands)):
-            sel = [int(lid)] + _extra
-            geo = [idx[i] for i in sel if i in idx]
-            if not geo:
+            return result
+
+        # ⚠ 每个图层必须用**同一个缩放**（按最高的那个图层算），不能各自按自己的高度归一：
+        #   丛雨 b 套的发型层 bbox 只有 424x147（一小条刘海），单独按目标高度归一后
+        #   宽度会被放大 3.3 倍 → 画布被撑到 1384px，而角色本体层只有 209~258px，
+        #   于是 2D 桌宠变成「巨大透明窗中央一个小人」（用户 2026-09-30 报「2D 模型还是坏的」）。
+        # ★ 本地保留 extra_ids（本地立绘修复传进来的额外图层，例如表情/衣服层）：
+        #   它们同样**共用上面这一个缩放**，不会被各自归一。
+        _extra = []
+        try:
+            _extra = [int(x) for x in (extra_ids or []) if str(x).strip().isdigit()]
+        except Exception:
+            _extra = []
+        boxes = []
+        for lid in sorted(set(list(cands) + _extra)):
+            g = idx.get(lid)
+            if not g:
                 continue
-            x0 = min(g[0] for g in geo)
-            x1 = max(g[0] + g[2] for g in geo)
-            y0 = min(g[1] for g in geo)
-            y1 = max(g[1] + g[3] for g in geo)
-            if y1 <= y0 or target_height <= 0:
+            x0, y0, w, h = g[0], g[1], g[2], g[3]
+            if h <= 0:
                 continue
-            sw = int(round((x1 - x0) * (float(target_height) / (y1 - y0))))
-            if sw > best_w:
-                best_w, best_h = sw, int(round(target_height))
-        return (best_w, best_h)
+            boxes.append((x0, y0, x0 + w, y0 + h))
+        if not boxes:
+            result = (0, 0)
+        else:
+            max_h = max(b[3] - b[1] for b in boxes)
+            scale = float(th) / float(max_h) if max_h > 0 else 0.0
+            best_w = max(int(round((b[2] - b[0]) * scale)) for b in boxes)
+            best_h = int(round(th))
+        result = (best_w, best_h)
     except Exception:
         return (0, 0)

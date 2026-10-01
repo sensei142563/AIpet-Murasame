@@ -20,6 +20,12 @@ except Exception:
 
 def _ensure_project_python():
     try:
+        # ⚠ **只有直接跑这个脚本时才换解释器**（`python run.py`）。被 `import run` 时绝不
+        #   拉新进程 —— 实测有探针为测一个纯函数 `import run`，于是这里起了第二个解释器，
+        #   真桌宠（连带 GPT-SoVITS）在主人不在电脑前自己跑了起来。
+        #   入口脚本被 import 本来就不该有"启动程序"的副作用。
+        if __name__ != "__main__":
+            return
         if os.environ.get("AIPET_REEXEC") == "1":
             return
         _base = os.path.dirname(os.path.abspath(__file__))
@@ -44,7 +50,7 @@ def _ensure_project_python():
 
 _ensure_project_python()
 
-from tool.config import get_config
+from tool.config import as_bool, enum_of, get_config
 
 TORCH_OK = False        # 是否成功加载了 torch（云端模式不加载也能跑）
 
@@ -58,7 +64,7 @@ def _live2d_enabled_in_cfg() -> bool:
     try:
         import json as _j
         with open("./config.json", "r", encoding="utf-8") as f:
-            return str((_j.load(f) or {}).get("live2d_enabled", "false")).lower() == "true"
+            return as_bool((_j.load(f) or {}).get("live2d_enabled"), False)
     except Exception:
         return False
 
@@ -482,7 +488,7 @@ def setup_runtime_and_pytorch(config_path="config.json", cfg=None, hardware_type
     return model_type
 
 def run_download():
-    tts_type = get_config("./config.json")["tts_type"]
+    tts_type = enum_of(get_config("./config.json").get("tts_type"), ("local", "cloud"), "local", "tts_type")
     if tts_type == "local":
         log("检测到 tts_type = local", "INFO")
         script_path = os.path.abspath(r".\download.py")
@@ -540,6 +546,89 @@ def _console_flags(quiet: bool = None) -> int:
     return 0x08000000 if quiet else 0x00000010
 
 
+def _f5tts_python_candidates():
+    """F5-TTS 解释器候选：runtime\\venv → 当前解释器 → PATH 上的 python → py 启动器。
+
+    ⚠ 2026-09-30 用户报「明明装了 f5_tts，日志却说没装」：他装在**系统 Python** 里
+    （…\\Python310\\Lib\\site-packages\\f5_tts），而 run.py 启动时被自动切到 runtime\\venv
+    （sys.executable 也跟着变成 venv）→ 原候选只有 [venv, sys.executable]，
+    **系统 Python 从来没被探测过**，于是永远报"没装"。把 PATH 上的 python / py 也加进来。
+    """
+    cands = []
+    try:
+        from tool.paths import venv_python
+        p = venv_python()
+        if p and p not in cands:
+            cands.append(p)
+    except Exception:
+        pass
+    if sys.executable not in cands:
+        cands.append(sys.executable)
+    try:
+        import shutil as _sh
+        for _name in ("python", "python3"):
+            _p = _sh.which(_name)
+            if _p and _p not in cands:
+                cands.append(_p)
+    except Exception:
+        pass
+    try:
+        if os.name == "nt":
+            _r = subprocess.run(["py", "-3", "-c", "import sys;print(sys.executable)"],
+                                capture_output=True, text=True, timeout=15,
+                                encoding="utf-8", errors="replace")
+            _out = (_r.stdout or "").strip().splitlines()
+            _p = _out[-1].strip() if (_r.returncode == 0 and _out) else ""
+            if _p and os.path.exists(_p) and _p not in cands:
+                cands.append(_p)
+    except Exception:
+        pass
+    return cands
+
+
+_F5_NOTES = []          # 每个候选的探测说明（给日志用，见 _probe_f5tts）
+
+
+def _probe_f5tts(py):
+    """返回 (能不能用, 一句说明)。
+
+    ⚠ 用户 2026-09-30 报：明明装了 f5_tts，日志却说「未检测到 f5_tts 库」。
+    真因：以前只看 `python -c "import f5_tts"` 的**返回码**，任何 ImportError（比如它自己的
+    依赖 torchaudio 没装、或者和 numpy 版本不兼容）都被当成"没装" → 结论是错的、也没法排查。
+    现在把「模块本身不存在」和「模块在、import 时炸了」分开说，并把真正的报错尾巴带出来。
+    """
+    try:
+        r = subprocess.run([py, "-c", "import f5_tts"], capture_output=True, timeout=30,
+                           text=True, encoding="utf-8", errors="replace")
+    except Exception as e:
+        return False, "探测失败：%s" % e
+    if r.returncode == 0:
+        return True, ""
+    err = r.stderr or ""
+    tail = err.strip().splitlines()[-1].strip() if err.strip() else ""
+    if "No module named 'f5_tts'" in err or 'No module named "f5_tts"' in err:
+        return False, "没装 f5_tts"
+    if "ModuleNotFoundError" in err or "ImportError" in err:
+        return False, "f5_tts 在，但它自己的依赖缺（%s）" % (tail[:110] or "?")
+    return False, (tail[:110] or "import 失败")
+
+
+def _find_f5tts_python():
+    """多候选探测：谁装了 f5_tts 用谁（N 卡调试 §3.5）。
+
+    只按"venv 目录存在"选解释器，会在 venv 缺可选库时架空已装好库的系统 Python。
+    这里逐个候选跑 `import f5_tts`，返回第一个可用的解释器；都没有返回 None。
+    每个候选的失败原因记进 _F5_NOTES（日志里逐条打出来，别再让人猜）。
+    """
+    _F5_NOTES.clear()
+    for cand in _f5tts_python_candidates():
+        ok, why = _probe_f5tts(cand)
+        if ok:
+            return cand
+        _F5_NOTES.append("%s → %s" % (cand, why))
+    return None
+
+
 def start_f5tts_api():
     """启动 F5-TTS HTTP 服务（端口 9881，长文本模式中文语音合成）"""
     cfg = get_config("./config.json")
@@ -547,12 +636,14 @@ def start_f5tts_api():
         log("长文本模式已关闭，跳过 F5-TTS 服务启动。", "INFO")
         return None
 
-    # F5-TTS 为可选语音库，缺失时仅提示，不阻塞程序
-    try:
-        import f5_tts  # noqa: F401
-    except ImportError:
-        log("未检测到 f5_tts 库，长文本语音不可用。", "WARN")
-        log("如需语音功能，请参考 README 安装 F5-TTS。", "INFO")
+    # F5-TTS 为可选语音库：多候选探测（runtime\venv → 系统 Python），谁有 f5_tts 用谁。
+    f5_py = _find_f5tts_python()
+    if f5_py is None:
+        log("长文本语音不可用：所有候选解释器都没能 import f5_tts。", "WARN")
+        for _n in _F5_NOTES:
+            log("   · %s" % _n, "INFO")
+        log("如需语音功能：按上面的原因处理（没装就装 f5-tts；装了但报依赖缺，就补那个依赖）。",
+            "INFO")
         return None
 
     log("检测到长文本模式已开启，启动 F5-TTS 服务%s..." % ("" if quiet_mode() else "（新控制台）"), "INFO")
@@ -723,7 +814,8 @@ def pick_tts_env():
 
 def start_tts_api():
     """使用 GPT-SoVITS 自带解释器在新的控制台窗口中启动 TTS API。"""
-    tts_type = get_config("./config.json")["tts_type"]
+    cfg = get_config("./config.json")
+    tts_type = enum_of(cfg.get("tts_type"), ("local", "cloud"), "local", "tts_type")
     if tts_type == "local":
         log("检测到 tts_type = local", "INFO")
         # 用哪个 Python 环境跑 TTS 交给 pick_tts_env()：

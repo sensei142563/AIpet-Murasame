@@ -260,12 +260,28 @@ class WeChatBridge:
             return
 
         # 复用 QQ 的对话封装（活动角色人设 + 分仓记忆 + 表情包选择）
+        # ⚠ 2026-09-30：标记成微信渠道 —— 这样 tool/learn_hub 的联网学习（问题搜索 /
+        #   网络用语）会按"微信"那组开关走，而不是算到 QQ 头上（用户要求三方共用）。
+        #   ⚠ 中枢 import 单独容错：它只负责"标记渠道"，万一坏了不该让微信**完全不能回复**
+        #     （把 import 和对话塞在同一个 try 里时，任何 import 失败都会掉进兜底回复）。
+        try:
+            from tool import learn_hub as _lh_wx
+        except Exception as _e_lh:
+            _lh_wx = None
+            print(f"[WeChatBot] ⚠ 联网学习中枢不可用（渠道按 QQ 计）: {_e_lh}")
         try:
             from qq.qq_chat import chat_once
-            reply, stickers, _portrait_emo = chat_once(
-                text, use_sticker=True, vision_desc=vision_desc,
-                session_key=session_key,
-            )
+            if _lh_wx is not None:
+                with _lh_wx.channel("wx"):
+                    reply, stickers, _portrait_emo = chat_once(
+                        text, use_sticker=True, vision_desc=vision_desc,
+                        session_key=session_key,
+                    )
+            else:
+                reply, stickers, _portrait_emo = chat_once(
+                    text, use_sticker=True, vision_desc=vision_desc,
+                    session_key=session_key,
+                )
         except Exception as e:
             print(f"[WeChatBot] ⚠ 对话失败: {e}")
             reply, stickers = "（呜……刚刚走神了，请再说一次？）", []

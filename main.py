@@ -71,7 +71,7 @@ from classes.murasame_class import Murasame
 from api import app as api_app
 import uvicorn
 
-from tool.config import get_config
+from tool.config import as_bool, get_config
 from pets.pet_registry import get_live2d_dir, get_live2d_model_json, get_active_pet_id, detect_capabilities
 
 # Live2D 导入（延迟，仅在 Live2D 模式下激活）
@@ -86,7 +86,7 @@ try:
             _l2d_cfg = _json_l2d.load(_f) or {}
     except Exception:
         _l2d_cfg = {}
-    if str(_l2d_cfg.get("live2d_enabled", "false")).lower() != "true":
+    if not as_bool(_l2d_cfg.get("live2d_enabled"), False):
         print("[AIpet] 配置 live2d_enabled=false → 不加载 Live2D 引擎（更稳，也更快）")
     else:
         from Live2d.live2d_ui import Live2DWidget
@@ -98,8 +98,8 @@ except Exception as _e:
 
 
 CONFIG = get_config("./config.json")
-screen_index = CONFIG["screen_index"]
-VOICE_TRIGGER_ENABLED = CONFIG.get("voice_trigger")
+screen_index = CONFIG.get("screen_index", 0)
+VOICE_TRIGGER_ENABLED = as_bool(CONFIG.get("voice_trigger"), False)
 
 
 class VoiceBridge(QObject):
@@ -307,6 +307,14 @@ if __name__ == "__main__":
         app.aboutToQuit.connect(_remove_pid_file)   # 正常退出时清掉进程锁
     except Exception:
         pass
+    # ★ 上游 2b07fba：退出前把后台线程收干净（截图 / 摄像头 / 聊天）。
+    #   以前没有任何 stop_ 被调用，线程还活着就退出 → 轻则 Qt 告警，重则
+    #   "QThread: Destroyed while thread is still running" 直接 abort。
+    #   放在保存之后：先落盘状态，再停线程（停线程可能等几秒）。
+    try:
+        app.aboutToQuit.connect(lambda: pet.stop_all_workers())
+    except Exception:
+        pass
     # 显示窗口：等第一帧立绘（服装）合成好再显示，避免先露出"没穿好衣服"的样子；
     # 最多等 5 秒（合成失败/纯 Live2D 时也要把窗口显示出来）
     def _show_when_ready(waited=0):
@@ -321,7 +329,9 @@ if __name__ == "__main__":
                     pass
                 if waited >= 5000:
                     print("[桌宠] ⚠ 立绘合成较慢，先显示窗口（稍后会自行补上）")
-                # ★ 启动问候：在一起第几天 + 今天挂着的提醒（参考 HealthMate/PetAI 的开机问候）
+                # ★ 启动问候（上游 9fa6515 的修法：开机那一下 GPT-SoVITS 还没起来，
+                #   让模型说一句必然失败）→ 默认改成「播指定的一条语音」或「不播」。
+                #   config.json → care_startup_greeting / startup_greeting_mode / startup_greeting_voice
                 try:
                     if not getattr(pet, "_startup_greeted", False):
                         pet._startup_greeted = True
@@ -329,10 +339,28 @@ if __name__ == "__main__":
                         def _say_hello():
                             try:
                                 from tool import care as _care
-                                _p = _care.startup_line(getattr(pet, "pet_name", "我"))
-                                if _p:
-                                    # no_act=True：开机问候只是打个招呼，不许动手
-                                    pet.start_thread(_p, role="system", t=True, no_act=True)
+                                if not (_care.enabled() and _care.startup_greeting_enabled()):
+                                    print("[AIpet] 开机问候：已关闭（care_startup_greeting=false）")
+                                    return
+                                _mode = _care.startup_greeting_mode()
+                                if _mode == "off":
+                                    print("[AIpet] 开机问候：已按设置关闭（startup_greeting_mode=off）")
+                                elif _mode == "voice":
+                                    _vp = _care.startup_greeting_voice()
+                                    if _vp and os.path.exists(_vp):
+                                        from classes.murasame_class import play_voice_wav as _play_wav
+                                        _play_wav(_vp)
+                                        print("[AIpet] 开机问候：播放指定语音 %s" % os.path.basename(_vp))
+                                    elif _vp:
+                                        print("[AIpet] 开机问候：语音文件不存在（%s）→ 这次不播" % _vp)
+                                    else:
+                                        print("[AIpet] 开机问候：没配 startup_greeting_voice → 不播"
+                                              "（想让她开机说句话就在设置里填一条语音；"
+                                              "想恢复「模型自己说」把 startup_greeting_mode 设成 chat）")
+                                else:      # chat：老行为（需要短语音 TTS 已就绪）
+                                    _p = _care.startup_line(getattr(pet, "pet_name", "我"))
+                                    if _p:
+                                        pet.start_thread(_p, role="system", t=True, no_act=True)
                             except Exception as _e:
                                 print(f"[AIpet] ⚠ 启动问候失败: {_e}")
 
@@ -352,7 +380,7 @@ if __name__ == "__main__":
     # 默认值必须是 "false"，并且要忽略大小写：文件顶部（_LIVE2D_AVAILABLE）、run.py、
     # config.example.json、设置页面板全都是 false，这里写 "true" 会让"键缺失"时
     # 桌面端以为该进 Live2D，而引擎其实根本没加载（显示与真实状态不一致）。
-    _LIVE2D_CONFIG_ENABLED = str(CONFIG.get("live2d_enabled", "false")).lower() == "true"
+    _LIVE2D_CONFIG_ENABLED = as_bool(CONFIG.get("live2d_enabled"), False)
 
     # ===== Live2D 崩溃自学习 =====
     # 上次进 Live2D 留下的标记还在 → 说明那次进程被崩掉了（原生崩溃，抓不到异常）
@@ -362,11 +390,9 @@ if __name__ == "__main__":
             print("[Live2D] ⚠ 检测到上次进入 Live2D 后进程异常退出 → 本次不再自动进入 Live2D，"
                   "并把兼容性探测结果记为失败（可在设置里改回来）")
             try:
-                with open("./config.json", "r", encoding="utf-8") as _f:
-                    _c = json.load(_f)
-                _c["live2d_probe_ok"] = "false"
-                with open("./config.json", "w", encoding="utf-8") as _f:
-                    json.dump(_c, _f, ensure_ascii=False, indent=2)
+                from tool.config import set_key as _set_key
+                if not _set_key("./config.json", "live2d_probe_ok", "false"):
+                    print("[Live2D] ⚠ 写入探测结果失败（原因见上一行的 [Config] 提示）")
             except Exception as _e:
                 print(f"[Live2D] ⚠ 写入探测结果失败: {_e}")
             os.remove(_L2D_FLAG)
@@ -416,13 +442,14 @@ if __name__ == "__main__":
                 _ok = _probe_live2d()
                 _LIVE2D_AVAILABLE = _ok
                 try:
-                    with open("./config.json", "r", encoding="utf-8") as _f:
-                        _c = json.load(_f)
-                    _c["live2d_probe_ok"] = "true" if _ok else "false"
-                    with open("./config.json", "w", encoding="utf-8") as _f:
-                        json.dump(_c, _f, ensure_ascii=False, indent=2)
-                except Exception:
-                    pass
+                    from tool.config import set_key as _set_key
+                    # ⚠ 这里原来是 `except Exception: pass` —— 配置写不进去**一声不吭**，
+                    #   表现为"探测结果明明记下来了，下次还是老样子"。
+                    if not _set_key("./config.json", "live2d_probe_ok",
+                                    "true" if _ok else "false"):
+                        print("[Live2D] ⚠ 写入探测结果失败（原因见上一行的 [Config] 提示）")
+                except Exception as _e:
+                    print(f"[Live2D] ⚠ 写入探测结果失败: {_e}")
         except Exception as _e:
             print(f"[Live2D] ⚠ 探测流程异常: {_e}")
 
@@ -546,6 +573,11 @@ if __name__ == "__main__":
                 pet._toggle_live2d_mode()
 
     _shift_hold_timer.timeout.connect(_on_shift_held)
+    # 右键菜单也用这个回调做「换成 Live2D / 2D 形象」（见 murasame_class._show_outfit_menu）
+    try:
+        pet.toggle_live2d_form = _on_shift_held
+    except Exception as _e:
+        print(f"[AIpet] 挂形象切换回调失败: {_e}")
 
     # 保存原始按键事件（避免递归）
     _orig_key_press = pet.keyPressEvent
@@ -585,7 +617,7 @@ if __name__ == "__main__":
 
                 # 人脸识别
                 face_result = ""
-                if CONFIG.get("face_recognition_enabled") == "true":
+                if as_bool(CONFIG.get("face_recognition_enabled"), False):
                     try:
                         from tool.face_recognition import recognize_faces_in_frame
                         frame = get_camera_frame()
@@ -1046,7 +1078,7 @@ if __name__ == "__main__":
 
         # PCL 按钮语音识别（长按录音 → 识别 → 对话，等同 CapsLock 逻辑）
         if check_voice_start():
-            if VOICE_TRIGGER_ENABLED == "true":
+            if VOICE_TRIGGER_ENABLED:
                 try:
                     from tool.voice_trigger import AudioRecorder
                     if _pcl_voice_recorder is None:
@@ -1101,9 +1133,9 @@ if __name__ == "__main__":
         # 语音识别切换（旧逻辑保留，兼容之前的使用方式）
         if check_flag("voice"):
             try:
-                from tool.config import get_config as _get_cfg
+                from tool.config import get_config as _get_cfg   # as_bool 已在上方模块级导入
                 cfg = _get_cfg("./config.json")
-                if cfg.get("voice_trigger") == "true":
+                if as_bool(cfg.get("voice_trigger"), False):
                     print("[API Control] 切换语音识别")
                     pet.show_text("语音识别功能已触发~", typing=True)
                     set_feature_status("voice", "on")
@@ -1164,7 +1196,7 @@ if __name__ == "__main__":
 
                     # 人脸识别
                     face_result = ""
-                    if CONFIG.get("face_recognition_enabled") == "true":
+                    if as_bool(CONFIG.get("face_recognition_enabled"), False):
                         try:
                             from tool.face_recognition import recognize_faces_in_frame
                             frame = get_camera_frame()
@@ -1318,7 +1350,7 @@ if __name__ == "__main__":
     tray_icon.show()
 
     # ===== CapsLock 语音触发 =====
-    if VOICE_TRIGGER_ENABLED == "true":
+    if VOICE_TRIGGER_ENABLED:
         from tool.voice_trigger import CapslockVoiceTrigger
         bridge = VoiceBridge()
 

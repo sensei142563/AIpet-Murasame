@@ -38,7 +38,14 @@ import threading
 import time
 
 PLUGIN_MARK_PREFIX = "【插件:"
-_MARK_RE = re.compile("[【\\[]\\s*插件\\s*[:：]\\s*([^】\\]]+)[】\\]]\\s*([^\"\\]\\n]{0,80})")
+# ★ 上游 923ca3e 的修法：把「标记本身」和「标记 + 同行参数」拆成两个正则。
+#   以前一个正则走天下，parse 和 clean 共用 → 清理时把她自己的话一起吃掉了：
+#     '【插件:系统信息】内存用了 8.5G。' → 空串；'我帮你点一首【插件:点歌】夜曲' → '我帮你点一首'（"夜曲"被吃）
+#     parse('【插件:A】a【插件:B】b【插件:C】c') → 旧版只出 1 条、参数里含其余全部
+_MARK_RE = re.compile("[【\\[]\\s*插件\\s*[:：]\\s*([^】\\]]+)[】\\]]")
+_MARK_ARG_RE = re.compile("[【\\[]\\s*插件\\s*[:：]\\s*([^】\\]]+)[】\\]][ \\t]*"
+                          "([^\\n【\\[]{0,60})")
+MAX_MARKS_PER_REPLY = 2          # 一句回复最多触发两个插件（不然会连锁喊一串）
 
 _loaded = {}          # name -> {"meta":…, "mod":…, "dir":…}
 _load_ts = [0.0]
@@ -193,22 +200,41 @@ def rules_text() -> str:
 
 
 def parse(text: str) -> list:
-    """从回复里解析【插件:标记】参数 → [(标记, 参数)]"""
+    """从回复里解析【插件:标记】→ [(标记, 参数)]（最多 MAX_MARKS_PER_REPLY 个）
+
+    参数 = 标记后面**同一行的尾巴**（上限 60 字，两端标点剥掉）。这是 rules_text() 给她的
+    写法「【插件:标记】参数」；夹在句中写也一样认（`我帮你点一首【插件:点歌】夜曲`）。
+    """
     out = []
-    for m in _MARK_RE.finditer(str(text or "")):
+    src = str(text or "")
+    args = {}
+    for m in _MARK_ARG_RE.finditer(src):
         mk = str(m.group(1)).strip()
-        arg = str(m.group(2)).strip("：:，,。\"'「」")
+        if mk and mk not in args:
+            args[mk] = str(m.group(2)).strip("：:，,。\"'「」 \t")
+    for m in _MARK_RE.finditer(src):
+        mk = str(m.group(1)).strip()
         if mk:
-            out.append((mk, arg))
-    return out[:2]
+            out.append((mk, args.get(mk, "")))
+    return out[:MAX_MARKS_PER_REPLY]
 
 
 def clean_for_speech(text: str) -> str:
+    """把标记（那一行）去掉再念（不然她会把「【插件:天气】北京」当台词念出来）
+
+    **判据**：整行 `fullmatch` 到"标记(+短参数)"才整行不念 —— 那行是给插件的指令；
+    否则只挖掉标记本身，**她的话一个字都不许少**（上游 923ca3e 修的真 bug）。
+    """
     src = str(text or "")
     try:
         if not _MARK_RE.search(src):
             return src
-        return re.sub("\\n{2,}", chr(10), _MARK_RE.sub("", src)).strip()
+        out = []
+        for line in src.splitlines():
+            if _MARK_ARG_RE.fullmatch(line.strip()):
+                continue                       # 整行就是"标记（+短参数）" → 这行不念
+            out.append(_MARK_RE.sub("", line))  # 其它情况：只挖掉标记，话全留下
+        return re.sub("\\n{2,}", "\n", "\n".join(out)).strip()
     except Exception:
         return src
 

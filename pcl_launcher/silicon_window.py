@@ -35,6 +35,24 @@ from .colors import (ACCENT_ID, THEME_COLORS, background_info, btn_radius)
 _CONTROL_BASE = "http://localhost:28565/control"
 
 # 导航项（key, 图标, 标题, 副标题）
+def _spawn_blocked() -> bool:
+    """自动化/自测里**禁止真的拉起外部程序**（桌宠 / QQ / 微信 / NapCat）。
+
+    为什么要有这道闸门：自测与截图脚本会构造**完整外壳**（SiliconLauncher + HomePage）
+    来验界面，而外壳里几条路径会真的 `subprocess.Popen` 起进程 —— 实测某次自测把
+    `run.py` → `runtime\\venv` 的 `main.py` → GPT-SoVITS 运行时全带起来了，而主人不在电脑前，
+    桌宠就那么自己跑着（还是他自己回来才发现的）。
+
+    对**用户**没有任何影响：只有自测/自动化显式把 AIPET_NO_SPAWN=1 放进环境时才生效
+    （见 `_audit_fish9269/run_tests_progress.py`）。行为类断言请自己打桩 Popen 覆盖，
+    别依赖这里（参考 test_napcat_autostart.py）。
+    """
+    try:
+        return str(os.environ.get("AIPET_NO_SPAWN", "")).strip().lower() in ("1", "true", "yes")
+    except Exception:
+        return False
+
+
 NAV = [
     ("home",    "", "总览",  "启动与状态"),
     ("pets",    "", "桌宠",  "角色与立绘"),
@@ -103,6 +121,19 @@ def _app_base_dir() -> str:
     if getattr(sys, "frozen", False):
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _status_page_enabled() -> bool:
+    """「状态」页/窗口是否启用（config.json 的 status_page_enabled，默认开）。
+
+    用户报："这个「状态」无法「不启用」这一点不好，也应该做成可以选择是否开启的"。
+    """
+    try:
+        from tool.config import as_bool as _ab, get_config as _gc
+        return _ab(_gc(os.path.join(_app_base_dir(), "config.json"))
+                    .get("status_page_enabled"), True)
+    except Exception:
+        return True
 
 
 def _ensure_src_on_path():
@@ -1292,6 +1323,57 @@ class HomePage(QWidget):
         except Exception:
             pass
 
+    # ── 起子进程：控制台留得住 + "秒退"要在界面上说话 ──────────────────
+    def _spawn_console_argv(self, argv, base: str):
+        """按给好的 argv 起一个带控制台的子进程（`_spawn_console` 的下层，`.bat` 也用这个）。"""
+        argv = list(argv)
+        if os.name == "nt":
+            argv = ["cmd", "/k"] + argv          # 退出后控制台不关，报错留在屏幕上
+        return subprocess.Popen(argv, cwd=base, creationflags=subprocess.CREATE_NEW_CONSOLE)
+
+    def _spawn_console(self, py: str, script: str, base: str):
+        """起一个带控制台的子进程（桌宠 / 微信 / QQ 三处共用）。
+
+        ⚠ 这正是用户报过的「点启动微信秒卡退，界面上什么都没说」：
+          ① 原来直接 `Popen([py, script], creationflags=CREATE_NEW_CONSOLE)` —— 子进程一崩，
+             控制台**一闪就关**，报错根本来不及看；
+          ② 起完**没有任何人回查它是不是立刻死了**，界面上一个字都没有。
+        这里 ① 在 Windows 上套一层 `cmd /k`：进程退出后控制台**留在屏幕上**，报错看得清；
+        ② 由 `_watch_child()` 在 1.8 秒后回查，死了就在启动器里说清楚。
+        """
+        return self._spawn_console_argv([py, script], base)
+
+    def _watch_child(self, proc, name: str, hints: str, btn=None, delay_ms: int = 1800):
+        """子进程"秒退"时在界面上说清楚（而不是只闪一下控制台）。
+
+        delay 之后回查：还在跑就什么也不做（不打扰）；已经退出就把**退出码 + 常见原因**
+        摆出来，并说明报错在哪儿看。按钮的 busy 状态也顺手恢复（不然要白等 12 秒）。
+        """
+        def _check():
+            try:
+                rc = proc.poll()
+            except Exception:
+                return
+            if rc is None:
+                return                            # 还在跑 = 正常，什么都不做
+            try:
+                if btn is not None:
+                    btn.setEnabled(True)
+            except Exception:
+                pass
+            try:
+                self._msg("%s 启动后立刻退出了" % name,
+                          "它在 %.1f 秒内就退出了（退出码 %s）。" % (delay_ms / 1000.0, rc),
+                          hints + "\n\n那个控制台窗口**留在屏幕上了**，里面的报错就是原因；"
+                                  "也可以到「状态」页点「复制全部」，把诊断信息发给我。")
+            except Exception as e:
+                print(f"[NewUI] ⚠ 秒退提示失败（忽略）: {e}")
+            try:
+                self.refresh_status()
+            except Exception:
+                pass
+        QTimer.singleShot(delay_ms, _check)
+
     def toggle_pet(self):
         _running = _pet_api_alive()
         if not _running:
@@ -1527,8 +1609,14 @@ class HomePage(QWidget):
             print(f"[NewUI] ⚠ 读取微信开关失败（继续尝试启动）: {e}")
         self._busy_btn(self.btn_wx, "正在启动微信…", 12000)
         try:
-            self.shell._wx_proc = subprocess.Popen([py, os.path.join(base, "run_wechat.py")], cwd=base,
-                                                   creationflags=subprocess.CREATE_NEW_CONSOLE)
+            self.shell._wx_proc = self._spawn_console(py, os.path.join(base, "run_wechat.py"), base)
+            self._watch_child(self.shell._wx_proc, "微信桥接",
+                              "常见原因：\n"
+                              "· config.json 里 wechat_enabled 还是 false\n"
+                              "· 微信客户端没装 / 没登录 / 版本不被支持\n"
+                              "· 缺微信桥接的依赖（先跑 install.bat）",
+                              btn=self.btn_wx)
+            self.refresh_status()
         except Exception as e:
             self._msg("启动失败", "微信桥接没能启动。", str(e))
 
@@ -1571,9 +1659,16 @@ class HomePage(QWidget):
         """强制拉起 NapCat 重新扫码（跟「启动 QQ」用的是同一条脚本）。"""
         bat = _napcat_launcher_bat()
         if os.path.exists(bat):
+            if _spawn_blocked():
+                print("[NewUI] 自测模式（AIPET_NO_SPAWN=1）：不真的拉起 NapCat 扫码")
+                return
             try:
-                subprocess.Popen([bat], cwd=os.path.dirname(bat),
-                                 creationflags=subprocess.CREATE_NEW_CONSOLE)
+                self._watch_child(
+                    self._spawn_console_argv([bat], os.path.dirname(bat)), "NapCat 登录窗口",
+                    "常见原因：\n"
+                    "· NapCat 目录不完整（重新跑一遍一键安装器）\n"
+                    "· 杀软拦下了 NapCat 的可执行文件\n"
+                    "· 端口 6099 被占用")
                 self._msg("重新扫码登录",
                           "已打开 NapCat 登录窗口，请用手机 QQ 扫描窗口里的二维码。",
                           "二维码也保存在：" + os.path.join(
@@ -1618,8 +1713,13 @@ class HomePage(QWidget):
             return
         self._busy_btn(self.btn_qq, "正在启动 QQ…", 12000)
         try:
-            self.shell._qq_proc = subprocess.Popen([py, os.path.join(base, "run_qq.py")], cwd=base,
-                                                   creationflags=subprocess.CREATE_NEW_CONSOLE)
+            self.shell._qq_proc = self._spawn_console(py, os.path.join(base, "run_qq.py"), base)
+            self._watch_child(self.shell._qq_proc, "QQ 桥接",
+                              "常见原因：\n"
+                              "· NapCat 没起来（先在启动器里点「打开 NapCat WebUI」拉起来）\n"
+                              "· qq_napcat_token 不对（NapCat 开了 token 就必须填一致）\n"
+                              "· 缺 QQ 模块（精简安装时把 qq 目录补回来）",
+                              btn=self.btn_qq)
             self.status_lbl.setText("QQ AIpet 已启动；未登录时会在 NapCat 窗口里显示二维码。")
             QTimer.singleShot(12000, self.refresh_status)
         except Exception as e:
@@ -1686,8 +1786,13 @@ class HomePage(QWidget):
                         action)
                     return
                 try:
-                    subprocess.Popen([bat], cwd=os.path.dirname(bat),
-                                     creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
+                    if _spawn_blocked():
+                        self._napcat_done.emit(False, "自测模式（AIPET_NO_SPAWN=1）："
+                                                      "不真的拉起 NapCat", action)
+                        return
+                    # 这里在后台线程里：只用"起进程"那一层（不碰 QTimer）；
+                    # 拉起成功与否由外面的"等端口"逻辑回报（已经有可读提示）
+                    self._spawn_console_argv([bat], os.path.dirname(bat))
                 except Exception as e:
                     self._napcat_done.emit(False, "拉起 NapCat 失败：" + str(e), action)
                     return
@@ -1881,6 +1986,9 @@ class SiliconLauncher(QWidget):
 
         self.nav_btns = {}
         for key, icon, title, sub in NAV:
+            # 「状态」页可以在设置里关掉（status_page_enabled=false）→ 侧栏就不建这一项
+            if key == "status" and not _status_page_enabled():
+                continue
             # 主题图标键：总览复用「模型」图标
             b = NavRailButton(icon, title, sub, icon_key=("model" if key == "home" else key))
             b.clicked.connect(lambda _=False, k=key: self._goto(k))
@@ -1941,6 +2049,7 @@ class SiliconLauncher(QWidget):
             return _f
 
         self._host_page("pets", _mk("pcl_launcher.widgets", "PCLPetManager"))
+        self._host_page("status", _mk("pcl_launcher.status_panel", "PCLStatusPanel"))
         self._host_page("settings", _mk("pcl_launcher.widgets", "PCLSettingsPanel"))
         self._host_page("memory", _mk("pcl_launcher.widgets", "PCLMemoryManager"))
         self._host_page("prompt", _mk("pcl_launcher.widgets", "PCLPromptEditor"))
@@ -2702,7 +2811,10 @@ class SiliconLauncher(QWidget):
         # 之后点导航就是秒开（以前第一次点插件目录会卡一下 = 现建页面）
         if not getattr(self, "_prewarm_started", False):
             self._prewarm_started = True
-            self._prewarm_queue = ["plugins", "pets", "memory", "settings", "prompt", "themes"]
+            _q = ["plugins", "pets", "status", "memory", "settings", "prompt", "themes"]
+            if not _status_page_enabled():
+                _q = [k for k in _q if k != "status"]      # 关掉了就别预热它
+            self._prewarm_queue = _q
             QTimer.singleShot(1500, self._prewarm_next)
 
     def _prewarm_next(self):

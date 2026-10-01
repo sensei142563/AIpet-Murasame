@@ -129,8 +129,79 @@ def mood() -> float:
     return float(_load().get("mood", MOOD_BASE))
 
 
+def _talk_count() -> int:
+    """真实对话条数（**现役**角色的 memory/history.json 里的 history 列表）。读不到就 0。
+
+    ⚠ codex 复审 P2：原来读的是 `data/history.json` —— 那是**旧版遗留**文件（迁移时写过一次，
+    见 classes/murasame_class.py 的迁移段），现役记录在 `pets/<角色>/memory/history.json`。
+    读错文件会让 affinity_floor() 的「真实对话条数」项对老用户偏小、对新装恒为 0，
+    与 docstring 说的"按真实相处证据"不符。现在优先读现役文件，读不到才退回旧文件。
+    """
+    import json as _json
+    import os as _os
+    cands = []
+    try:
+        from pets.pet_registry import get_memory_dir
+        cands.append(_os.path.join(get_memory_dir(), "history.json"))
+    except Exception:
+        pass
+    cands.append(_os.path.join(
+        _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+        "data", "history.json"))          # 旧版遗留，仅兜底
+    for p in cands:
+        try:
+            with open(p, encoding="utf-8") as f:
+                d = _json.load(f)
+            h = d.get("history") if isinstance(d, dict) else d
+            if isinstance(h, list) and h:
+                return int(len(h))
+        except Exception:
+            continue
+    return 0
+
+
+def affinity_floor() -> float:
+    """按**真实相处证据**给关系一个下限。
+
+    用户 2026-09-30：提示词里早就是老夫老妻了（甚至多次亲密），状态却写「关系 20.4 / 还不太熟」——
+    因为 AFFINITY_BASE=20、每次互动只 +0.4、还会随时间回落，100 天也涨不上去。
+    提示词不动（用户要求），那就让**状态**去对齐事实：
+      · 在一起天数 × 0.7（100 天 → 70）
+      · 真实对话条数 × 0.03（封顶 2000 条 → 最多 +60）
+      · 合计夹在 [20, 88]：新用户（1 天、没聊过）仍是 20，体感不变；
+        老用户能到「很亲近」档（75+），但"离不开你"（90+）仍要靠真实互动攒
+    """
+    try:
+        days = 1
+        try:
+            from tool import care as _care
+            days = max(1, int(_care.companion_days()))
+        except Exception:
+            pass
+        msgs = _talk_count()
+        return max(AFFINITY_BASE, min(88.0, days * 0.75 + min(2000, msgs) * 0.03))
+    except Exception:
+        return AFFINITY_BASE
+
+
 def affinity() -> float:
-    return float(_load().get("affinity", AFFINITY_BASE))
+    """当前关系值。**读的时候不低于 affinity_floor()**，并把抬上去的值落盘，
+
+    这样状态窗/摘要/提示词看到的是同一个数（不会这处显示 20、那处显示 79）。
+    """
+    try:
+        d = _load()
+        cur = float(d.get("affinity", AFFINITY_BASE))
+        floor = affinity_floor()
+        if floor > cur:
+            d["affinity"] = floor
+            _save(d)
+            _say("[状态] 关系下限生效：%.1f → %.1f（按在一起天数与真实对话条数）"
+                 % (cur, floor))
+            return floor
+        return cur
+    except Exception:
+        return float(_load().get("affinity", AFFINITY_BASE))
 
 
 def mood_label() -> str:

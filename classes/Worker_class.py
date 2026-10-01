@@ -10,10 +10,11 @@ from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtGui import QGuiApplication
 
 from tool.cloud_API_chat import cloud_portrait, cloud_translate, cloud_talk, cloud_emotion
-from tool.config import as_bool, get_config
+from tool.config import as_bool, enum_of, get_config, num
 from tool.chat import qwen3_lora, ollama_qwen3_sentence, ollama_qwen3_portrait, gpt_sovits_tts, ollama_qwen3_emotion, ollama_qwen3_translate, strip_self_dialogue
 
-portrait_type = get_config("./config.json")['portrait']
+portrait_type = enum_of(get_config("./config.json").get('portrait'),
+                                    ("a", "b"), "b", "portrait")
 
 # 句内情绪标签（只覆盖「显示用情绪」= 表情/动作，语音不受影响）。
 # ⚠ 人设里写的标签是**全角**【白】（见 pets/noir/prompt.txt、longtext_prompt.txt），
@@ -733,14 +734,17 @@ class cloud_API_Worker(QThread):
         self.finished.emit(reply_list, portrait_list, history, portrait_history, voices, emotion_list)
 
 
-screen_index = get_config("./config.json")["screen_index"]
+# ⚠ 屏幕索引：原来是**直接下标** `get_config(...)["screen_index"]` —— 配置里没这个键就
+#   KeyError（而且是在模块导入期），写成 "abc" 也直接抛。越界/负数在截图线程里的后果
+#   见 ScreenWorker.run() 的注释（线程静默死掉 / 静默抓错屏）。
+screen_index = int(num(get_config("./config.json").get("screen_index"), 0, 0, 15))
 
 
 def shot_is_blank(pixmap) -> bool:
     """截到的画面是不是黑的/一片纯色（等于没截到东西）。
 
-    ⚠ 现在统一走 tool.screen_capture.is_blank（兼容 QImage 与 QPixmap）。
-      历史背景：锁屏、显示器休眠、独占全屏（游戏/播放器）时抓屏会得到全黑图，
+    ⚠ 统一走 tool.screen_capture.is_blank（兼容 QImage 与 QPixmap）。
+      锁屏、显示器休眠、独占全屏（游戏/播放器）时抓屏会得到全黑图，
       送给视觉模型只能得到「看不到内容」，她就跟着说「我看不到你的屏幕」。
     """
     try:
@@ -756,10 +760,10 @@ class ScreenWorker(QThread):
 
     def __init__(self, interval_sec=3.0, parent=None):
         super().__init__(parent)
-        self.interval = interval_sec
-        # 被"唤醒"的信号：桌宠发现她在忙、这轮识别没做成时，用它让截图线程提前重来
-        self._wake = threading.Event()
-        self._wake_delay = 0.0
+        # ⚠ 间隔必须是**正数**（见 tool/config.py::num 的说明）：写成 0/负数会让下面
+        #   `for _ in range(int(self.interval * 10))` 一次都不睡 → 满速抓屏，
+        #   而且每轮都写一个临时 PNG（磁盘会被塞满）。这里夹到 [1, 3600] 秒。
+        self.interval = num(interval_sec, 3.0, 1.0, 3600.0)
         os.makedirs("tmp", exist_ok=True)
 
     def wake(self, delay: float = 8.0):
@@ -771,20 +775,30 @@ class ScreenWorker(QThread):
             pass
 
     def run(self):
-        from tool.screen_capture import capture_qimage, is_blank as _is_blank_img, quick_hash as _qhash
+        # ⚠ 屏幕索引夹取（上游 38c7cdf）：越界 → 线程里 IndexError（静默死掉）；
+        #   负数 → Python 负索引会**静默选到另一块屏**（用户设的屏幕和实际抓的不是同一个）。
+        #   ★ 抓屏仍然走本地自研的 Win32 BitBlt（tool.screen_capture.capture_qimage）：
+        #     QScreen.grabWindow 是 GUI 线程专用 API，在 QThread 里调用会崩掉整个进程。
+        _screens = QGuiApplication.screens()
+        if not _screens:
+            print("[截图线程] ⚠ 没有可用屏幕，截图线程退出")
+            return
+        _idx = int(num(screen_index, 0, 0, max(0, len(_screens) - 1)))
+        from tool.screen_capture import (capture_qimage, is_blank as _is_blank_img,
+                                        quick_hash as _qhash)
         while not self.isInterruptionRequested():
             # 抓屏（Win32 BitBlt：任何线程都能调，毫秒级）
             # ⚠ 以前这里用 QScreen.grabWindow()——那是 GUI 线程专用的 API，
             #   在 QThread 里调用会直接把进程搞崩（实测：日志无报错、桌宠凭空消失，
             #   残留的服务还占着显存）；全屏游戏下更慢更不稳。
-            img = capture_qimage(screen_index)
+            img = capture_qimage(_idx)
             if img is None or _is_blank_img(img):
                 # 偶尔会抓到全黑（锁屏 / 显示器休眠 / 独占全屏）→ 等一下重抓一次；
                 # 还是黑就安静跳过这轮：不调用视觉模型，也不让她说"看不到"
                 time.sleep(1.5)
                 if self.isInterruptionRequested():
                     break
-                img = capture_qimage(screen_index)
+                img = capture_qimage(_idx)
                 if img is None or _is_blank_img(img):
                     print("[vision] ⚠ 两次抓屏都是黑的（锁屏 / 显示器休眠 / 独占全屏）→ 跳过本轮屏幕识别")
                     for _ in range(int(self.interval * 10)):
@@ -810,7 +824,9 @@ class ScreenWorker(QThread):
             # sleep 可被 requestInterruption() 打断（间隔相对宽松）
             # 另外：桌宠发现"她在忙、这轮识别没做成"时会调 wake()，让我们早点重来
             self._wake.clear()
-            for _ in range(int(self.interval * 10)):
+            # ⚠ max(1, ...)：哪怕 interval 被人从外面改成 0/负数，也保证每轮至少睡一次，
+            #   不会变成忙循环（这一层是兜底，__init__ 里已经夹过一次）
+            for _ in range(max(1, int(self.interval * 10))):
                 if self.isInterruptionRequested():
                     break
                 if self._wake.is_set():
@@ -833,8 +849,11 @@ class CameraWorker(QThread):
 
     def __init__(self, interval_sec=300.0, camera_id=0, parent=None):
         super().__init__(parent)
-        self.interval = interval_sec
-        self.camera_id = camera_id
+        # ⚠ 同 ScreenWorker：间隔写 0/负数 → 忙循环满速抓帧（还带 JPEG 编码）；
+        #   写成字符串 → 下面 int() 当场抛异常、线程静默死掉。夹到 [1, 86400] 秒。
+        self.interval = num(interval_sec, 300.0, 1.0, 86400.0)
+        # 摄像头编号同理：越界只会让"初始化失败"（有提示），负数会被 OpenCV 当成别的设备
+        self.camera_id = int(num(camera_id, 0, 0, 63))
         self._cap = None
 
     def _init_camera(self):
@@ -861,7 +880,9 @@ class CameraWorker(QThread):
                 img_url = f"data:image/jpeg;base64,{img_b64}"
                 self.camera_captured.emit(img_url)
             # 按间隔 sleep
-            for _ in range(int(self.interval * 10)):
+            # ⚠ max(1, ...)：哪怕 interval 被人从外面改成 0/负数，也保证每轮至少睡一次，
+            #   不会变成忙循环（__init__ 里已夹过一次，这里是兜底 —— 两个 worker 都要有）
+            for _ in range(max(1, int(self.interval * 10))):
                 if self.isInterruptionRequested():
                     break
                 time.sleep(0.1)
@@ -873,3 +894,5 @@ class CameraWorker(QThread):
             except Exception:
                 pass
             self._cap = None
+
+

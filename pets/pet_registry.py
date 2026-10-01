@@ -17,6 +17,7 @@ import os
 import json
 
 from tool.paths import app_base_dir
+from tool.config import num   # 数值参数的兜底 + 夹取（权威实现，见 tool/config.py::num）
 
 # ============ 目录基准 ============
 # 必须用 app_base_dir()：exe 模式（PyInstaller onedir 壳）下 __file__ 位于 _internal/，
@@ -29,6 +30,10 @@ REGISTRY_JSON = os.path.join(PETS_DIR, "pet_list.json")
 # ============ 全局默认值（无语音包时的兜底） ============
 DEFAULT_LONG_AUDIO = os.path.join(BASE_DIR, "reference_voices", "long_chinese", "953244.wav")
 DEFAULT_LONG_TEXT = "能和老师在一起，我真的，好高兴！"
+
+
+_registry_warned = False        # 安全阀诊断只打一次（现场日志里它一次回复刷了 17 行）
+_last_good_registry = None      # 本进程上次成功读到的清单（读失败时兜底，绝不返回空）
 
 
 def _load_json(path, default=None):
@@ -58,14 +63,67 @@ def load_pet_list() -> dict:
     - 本地自用角色（未登记）在本机 PCL 正常显示、可用；
     - pet_list.json 始终保持「分发清单」，仓库/绿色版只含登记过的角色。
     每次加载时用各角色 pet.json 的最新 name/display_name/intro/avatar 刷新注册表条目。"""
+    global _registry_warned, _last_good_registry
     registry = _load_json(REGISTRY_JSON, None)
     if registry is None:
-        registry = scan_pets()
-        _save_json(REGISTRY_JSON, registry)
+        # 读失败先**重试一次**：2026-09-30 现场日志里这条路径被瞬时抖动触发过（主人桌宠
+        # 在跑、我同时在 git/测试里折腾同一个文件）→ 重试一次基本就能拿到。
+        import time as _t
+        for _ in range(2):
+            _t.sleep(0.05)
+            registry = _load_json(REGISTRY_JSON, None)
+            if registry is not None:
+                break
+    if registry is None:
+        scanned = scan_pets()
+        # ⚠ 安全阀（2026-09-30 真丢过一次数据）：注册表**读失败**时这里会重扫并**覆盖**文件；
+        #   万一那次扫描也恰好为空（目录抖动 / 一次性读取失败 / 并发写），主人的桌宠列表就被
+        #   一个空清单覆盖掉了 —— 实测发生过：pets/pet_list.json 从
+        #   [丛雨/诺瓦/夏目 + active=murasame] 变成 {"pets": [], "active": null}。
+        #   所以：磁盘上文件还在、而扫描结果为空时，**绝不动盘**，只在内存里返回空。
+        if not (scanned or {}).get("pets") and os.path.exists(REGISTRY_JSON):
+            # ⚠ 这条诊断只报一次（现场日志里它一次回复刷了 17 行）：把"为什么失败"说清楚，
+            #   下次再出现就能直接定位（是目录不对、还是每个 pet.json 都读不出来）。
+            if not _registry_warned:
+                _registry_warned = True
+                _n_dirs = 0
+                try:
+                    _n_dirs = len(os.listdir(PETS_DIR)) if os.path.isdir(PETS_DIR) else -1
+                except Exception:
+                    _n_dirs = -2
+                print("[PetRegistry] ⚠ 注册表读取失败且扫描结果为空 → 保留磁盘上的原文件，"
+                      "不用空清单覆盖（想重建请删掉 pets/pet_list.json 再启动）\n"
+                      "            诊断：PETS_DIR=%s 存在=%s 子项=%s 文件=%s 大小=%s"
+                      % (PETS_DIR, os.path.isdir(PETS_DIR), _n_dirs, REGISTRY_JSON,
+                         (os.path.getsize(REGISTRY_JSON)
+                          if os.path.exists(REGISTRY_JSON) else -1)))
+            # ⚠ 再兜一层：这一进程之前**读到过**清单的话，就把它还回去 ——
+            #   瞬时抖动绝不能让调用方（启动器列表 / 桌宠）以为"一个角色都没有"。
+            if _last_good_registry:
+                print("[PetRegistry] ℹ 本次读取失败 → 返回本进程上次成功读到的清单（%d 个角色）"
+                      % len(_last_good_registry.get("pets", [])))
+                return _copy_registry(_last_good_registry)
+            return {"pets": [], "active": None}
+        _save_json(REGISTRY_JSON, scanned)
+        registry = scanned
     else:
         _sync_registry_from_pet_json(registry)
         _merge_scanned_pets(registry)
+    # 读到就留个底：这一进程内后续万一再读失败，用它兜底（见上面的安全阀）
+    try:
+        _last_good_registry = _copy_registry(registry)
+    except Exception:
+        pass
     return registry
+
+
+def _copy_registry(reg: dict) -> dict:
+    """注册表的深拷贝（免得调用方改到我们缓存的那份）"""
+    try:
+        import copy as _c
+        return _c.deepcopy(reg)
+    except Exception:
+        return {"pets": list((reg or {}).get("pets", [])), "active": (reg or {}).get("active")}
 
 
 def _sync_registry_from_pet_json(registry: dict) -> bool:
@@ -610,17 +668,44 @@ def get_live2d_display(pet_id: str = None) -> dict:
     m = cfg.get("model", {})
     inter = cfg.get("interaction", {}) or {}
 
+    # 每个显示参数的合法范围 —— 依据是**启动器向导里那些控件的取值范围**（不自己拍）：
+    #   height_ratio 滑块 10~95 → 0.10~0.95；scale 滑块 30~200 → 0.30~2.00；
+    #   Live2D 偏移输入框 ±800；font_scale 向导里本来就夹 0.40~3.00。
+    # 为什么要夹：`pet.json` 会被手改（第三方角色包也可能写坏），而 _f/_fi 原来只兜
+    # "读不懂"（→ 默认值），**读得懂但离谱**的值会原样传下去 → 模型缩成看不见、
+    # 交互区（摸头/对话）跑到屏幕外、字号变 0……界面上没有任何提示，只能靠猜。
+    # ⚠ 表的键必须是 **pet.json 里的源键名**（`live2d_scale`／`head_bottom`…），
+    #   不是下面返回字典的键名（`scale`／`head_bottom`）—— 我第一版按返回字典的键名写，
+    #   结果 _f 收到的是 live2d_*，一个都没匹配上，**模型那 6 个参数全没夹住**。
+    RANGES = {
+        # model 段（桌宠渲染用）
+        "live2d_window_ratio": (0.2, 3.0),
+        "live2d_window_height_ratio": (0.10, 0.95),
+        "live2d_scale": (0.30, 2.00),
+        "live2d_offset_x": (-800.0, 800.0),
+        "live2d_offset_y": (-800.0, 800.0),
+        # ⚠ 下界取 0.10 而不是向导滑块的 0.40：真实角色 pet.json 里 live2d_font_scale
+        #   最小就是 **0.35**（arona/hiyori/murasame），按 0.40 夹会**改掉角色的显示**。
+        #   夹取范围以真实数据为准（见 _audit_fish9269/scan_display_ranges.py）。
+        "live2d_font_scale": (0.10, 3.00),
+        # interaction 段（摸头/对话交互区，都是相对窗口的比例）
+        "head_top": (0.0, 1.0),
+        "head_bottom": (0.0, 1.0),
+        "talk_top": (0.0, 1.0),
+        "talk_bottom": (0.0, 1.0),
+        "edge_margin_x": (0.0, 0.5),
+        # 文本框微调（Shift+方向键，单位是像素）—— 只挡"明显写疯了的"值
+        "text_offset_x": (-10000.0, 10000.0),
+        "text_offset_y": (-10000.0, 10000.0),
+    }
+
     def _f(key, default):
-        try:
-            return float(m.get(key, default))
-        except (TypeError, ValueError):
-            return default
+        lo, hi = RANGES.get(key, (None, None))
+        return num(m.get(key, default), default, lo, hi)
 
     def _fi(key, default):
-        try:
-            return float(inter.get(key, default))
-        except (TypeError, ValueError):
-            return default
+        lo, hi = RANGES.get(key, (None, None))
+        return num(inter.get(key, default), default, lo, hi)
 
     return {
         "window_ratio": _f("live2d_window_ratio", 0.67),

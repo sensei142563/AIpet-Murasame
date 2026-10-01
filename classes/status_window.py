@@ -195,6 +195,23 @@ class _Card(QFrame):
         lay.addWidget(lab)
 
 
+def _tag_row(tags) -> QWidget:
+    """一排彩色小标签（页级那些"一眼要看到的数"）"""
+    box = QWidget()
+    row = QHBoxLayout(box)
+    row.setContentsMargins(2, 2, 2, 0)
+    row.setSpacing(6)
+    for t in tags:
+        if isinstance(t, (list, tuple)):
+            txt = t[0]
+            style = t[1] if len(t) > 1 else SS.TAG_PLAIN
+        else:
+            txt, style = t, SS.TAG_PLAIN
+        row.addWidget(_tag_label(str(txt), style))
+    row.addStretch(1)
+    return box
+
+
 class StatusWindow(QDialog):
     """她的状态 / 习惯 / 记忆 / 提醒（剧情模式风格的独立窗口 + 顶部分类页）。"""
 

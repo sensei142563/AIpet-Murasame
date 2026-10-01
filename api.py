@@ -11,7 +11,7 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
 
-from tool.config import get_config
+from tool.config import enum_of, get_config
 from pets.pet_registry import get_prompt_path
 
 # ============== App ==============
@@ -84,7 +84,7 @@ async def qwen3_lora(req: Qwen3LoraRequest):
     global model, tokenizer
     history = req.history
 
-    model_type = get_config("./config.json")["model_type"]
+    model_type = enum_of(get_config("./config.json").get("model_type"), ("local", "qwen", "deepseek"), "qwen", "model_type")
     if model_type != "local":
         return {"error": "qwen3-lora 不可用：当前为云端模式"}
 
