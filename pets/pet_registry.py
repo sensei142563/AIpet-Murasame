@@ -17,7 +17,29 @@ import os
 import json
 
 from tool.paths import app_base_dir
-from tool.config import num   # 数值参数的兜底 + 夹取（权威实现，见 tool/config.py::num）
+try:
+    from tool.config import num   # 数值参数的兜底 + 夹取（权威实现，见 tool/config.py::num）
+except Exception:                 # pragma: no cover - 兼容「打包版 exe + 新源码 pets/」混用
+    # ★ 2026-10-01 真事故：PCL 打包版（AIpet-Murasame.exe）里 tool/ 是**构建时烘进 exe 的旧代码**，
+    #   而 pets/ 是从程序目录实时读的源码。同步上游后 pets/pet_registry.py 要 tool.config.num，
+    #   旧 exe 里的 tool/config.py 没有它 → ImportError → 启动器「桌宠列表 / 当前使用」整块加载失败
+    #   （用户看到的就是"设置页 / 立绘工坊里的角色信息消失"）。
+    #   这里做个等价兜底：函数在就用权威实现，不在就用这份（语义与 tool/config.py::num 一致）。
+    def num(value, default: float, lo: float = None, hi: float = None) -> float:
+        """数值兜底 + 夹取（与 tool/config.py::num 同语义；仅在旧打包版里生效）"""
+        try:
+            if isinstance(value, bool):
+                return default
+            v = float(value)
+            if v != v:                     # NaN
+                return default
+        except (TypeError, ValueError):
+            return default
+        if lo is not None and v < lo:
+            v = lo
+        if hi is not None and v > hi:
+            v = hi
+        return v
 
 # ============ 目录基准 ============
 # 必须用 app_base_dir()：exe 模式（PyInstaller onedir 壳）下 __file__ 位于 _internal/，
