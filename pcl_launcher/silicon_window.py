@@ -136,6 +136,66 @@ def _status_page_enabled() -> bool:
         return True
 
 
+def _runtime_missing_api() -> list:
+    """检查「程序目录里的源码包」和「烘进 exe 的模块」是不是同一版本。
+
+    为什么要有它（2026-10-01 真事故）：打包版把 tool/ classes/ pcl_launcher/ 等**烘进 exe**，
+    而 pets/ 是**从程序目录实时读的源码**。同步上游之后 pets/pet_registry.py 要 tool.config.num，
+    旧 exe 里那份没有 → ImportError → 启动器的「当前使用」面板和桌宠列表**整块**没建出来，
+    界面上却是"信息凭空消失"，什么提示都没有（用户报「桌宠信息怎么消失了」）。
+    这里把"缺哪个模块的哪个函数"提前查出来，直接写给人看，别再让它静默消失。
+    """
+    bad = []
+    # ① 源码包能不能加载（最容易断的一环）
+    try:
+        import pets.pet_registry          # noqa: F401
+    except Exception as e:
+        bad.append("pets.pet_registry 导入失败：%s: %s" % (type(e).__name__, e))
+    # ② 源码包用到的「新函数」在打包版里是否齐全
+    need = {
+        "tool.config": ("num", "enum_of", "as_bool", "set_key"),
+        "tool.paths": ("app_base_dir",),
+    }
+    for mod, names in need.items():
+        try:
+            m = __import__(mod, fromlist=["*"])
+        except Exception as e:
+            bad.append("%s 无法导入：%s: %s" % (mod, type(e).__name__, e))
+            continue
+        miss = [n for n in names if not hasattr(m, n)]
+        if miss:
+            bad.append("%s 里没有 %s" % (mod, "、".join(miss)))
+    return bad
+
+
+def _warn_if_runtime_mismatch(parent=None) -> bool:
+    """"源码新 / 打包旧"时给出人话提示（顺带写日志）。返回 True = 确实不一致。"""
+    try:
+        bad = _runtime_missing_api()
+    except Exception as e:
+        print(f"[PCL] ⚠ 版本一致性检查本身失败（忽略）: {e}")
+        return False
+    if not bad:
+        return False
+    print("[PCL] ⚠ 程序内代码版本不一致（exe 里烘进去的模块比程序目录里的源码旧）：")
+    for b in bad:
+        print("      · " + b)
+    try:
+        from . import silicon_dialog as _sd
+        _sd.message(
+            parent,
+            "程序内代码版本不一致",
+            "启动器里烘进去的模块比程序目录里的源码旧 —— 部分功能会**整块**消失"
+            "（例如桌宠列表 / 当前使用 / 立绘工坊里的角色信息）。",
+            detail="缺的东西：\n  · " + "\n  · ".join(bad) +
+                   "\n\n两种处理办法（任选其一）：\n"
+                   "  1) 重新打包启动器：python build_launcher.py\n"
+                   "  2) 先用「启动启动器.bat」—— 它直接跑源码，不需要打包")
+    except Exception as e:
+        print(f"[PCL] ⚠ 版本不一致提示弹窗失败: {e}")
+    return True
+
+
 def _ensure_src_on_path():
     """把程序目录加入 sys.path（冻结版兜底）。
 
@@ -3426,6 +3486,8 @@ def launch() -> int:
             win.show()
             QTimer.singleShot(160, lambda: splash.fade(0.0, 260, splash.close))
             QTimer.singleShot(120, lambda: _fade_window_in(win))
+            # 「源码新 / 打包旧」时别让功能静默消失：查一遍并弹窗说清楚（详见 _runtime_missing_api）
+            QTimer.singleShot(500, lambda: _warn_if_runtime_mismatch(win))
         except Exception as e:
             print(f"[NewUI] ⚠ 开屏收尾失败: {e}")
             try:
