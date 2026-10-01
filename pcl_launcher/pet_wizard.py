@@ -474,6 +474,8 @@ def build_pet_json(spec: dict, existing: dict = None) -> dict:
     v["long_ref_text"] = spec.get("long_ref_text") or ""
     if spec.get("default_emotion"):
         v["default_emotion"] = spec["default_emotion"]
+    # 注：voices.gpt_weights / sovits_weights 由**训练脚本**在训练完成后自动同步进语音包
+    # （见 训练脚本/train_character.py::sync_to_pet），向导不涉及，也不会覆盖。
     cfg["voices"] = v
     if spec.get("portrait"):
         cfg["portrait"] = spec["portrait"]

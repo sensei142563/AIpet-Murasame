@@ -840,45 +840,16 @@ def pet_voice_weights():
             rel = str(rel or "").strip()
             if not rel:
                 return None
-            p = rel if os.path.isabs(rel) else os.path.join(_base, rel)
-            return p if os.path.isfile(p) else None
+            # 允许写相对**项目根目录**的路径（角色语音包里的模型就放这儿）
+            for cand in (rel, os.path.join(_base, rel)):
+                p = cand if os.path.isabs(cand) else os.path.abspath(cand)
+                if os.path.isfile(p):
+                    return p
+            return None
 
-        g, s = _abs(v.get("gpt_weights")), _abs(v.get("sovits_weights"))
-        if g and s:
-            return (g, s, ver, pid)
-
-        def _find(prefixes, exts):
-            best = (None, 0)
-            if not pid or not os.path.isdir(_base):
-                return None
-            key = pid.lower()
-            for d in sorted(os.listdir(_base)):
-                dp = os.path.join(_base, d)
-                if not os.path.isdir(dp) or d.endswith("pretrained"):
-                    continue
-                if not any(d.startswith(p) for p in prefixes):
-                    continue
-                for f in os.listdir(dp):
-                    if not f.lower().endswith(exts) or key not in f.lower():
-                        continue
-                    fp = os.path.join(dp, f)
-                    try:
-                        mt = os.path.getmtime(fp)
-                    except Exception:
-                        mt = 0
-                    if mt > best[1]:
-                        best = (fp, mt)
-            return best[0]
-
-        g = _find(("GPT_weights",), (".ckpt",))
-        s = _find(("SoVITS_weights",), (".pth",))
-        if g and s:
-            print("[TTS] 按角色自动匹配到语音模型：%s → %s / %s"
-                  % (pid, os.path.basename(g), os.path.basename(s)))
-            return (g, s, ver, pid)
-        return (None, None, ver, pid)
+        return (_abs(v.get("gpt_weights")), _abs(v.get("sovits_weights")), ver, pid)
     except Exception as e:
-        print(f"[TTS] ⚠ 读取角色语音权重失败: {e}")
+        print(f"[TTS] ⚠ 读取角色语音包里的权重失败: {e}")
         return (None, None, "v2", "")
 
 
