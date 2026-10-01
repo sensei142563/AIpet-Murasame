@@ -1373,13 +1373,8 @@ class Murasame(QLabel):
                 #   所以这里保留本地路线，上游那个分支不启用（代码留作参考）。
                 # from tool import vision_local as _vl
                 desc = ""
-                if False:
-                    _r = _vl.describe(url)
-                    desc = (_r.get("text") or "").strip()
-                    if not desc:
-                        print("[AIpet][camera] 本地视觉没给出描述：%s" % (_r.get("error") or "未知原因"))
-                        return
-                    print(f"[AIpet][camera] 本地视觉识别结果: {desc}")
+                if False:      # ← 上游那套「用户自接本地视觉」不启用（原因见上），保留结构但不执行
+                    pass
                 else:
                     # 视觉模型统一走 longtext.model_config（vision_model_name + 对应 API Key）
                     from longtext.model_config import get_vision_model_config
@@ -5184,7 +5179,11 @@ class Murasame(QLabel):
             _ratio = None
         if _ratio is None:
             try:
-                _ratio = num(_pet_cfg.get("model", {}).get("portrait_height_ratio"),
+                # ★ 2026-10-01 修复：这里原来写的是裸 `_pet_cfg`（只在 __init__ 的参数里存在，
+                #   别的方格里根本没有这个变量）→ NameError → 被 except 吞掉 →
+                #   立绘高度比例**掉回全局默认 0.8**。pet.json 里没写 display_2d.height_ratio
+                #   的角色（例如刚用向导建的角色）会因此比设定的大一圈 —— "调了立绘大小不对劲"。
+                _ratio = num(self._pet_cfg.get("model", {}).get("portrait_height_ratio"),
                                DEFAULT_PORTRAIT_SCREEN_RATIO, 0.10, 0.95)
             except Exception:
                 _ratio = DEFAULT_PORTRAIT_SCREEN_RATIO
@@ -5230,6 +5229,18 @@ class Murasame(QLabel):
         #   窗口要是跟着缩，对话框（按窗口宽高归一化）就会忽大忽小 ——
         #   用户看到的"说话时对话框变小"就是它。固定画布后窗口尺寸不变，文字框也就稳了。
         try:
+            # ★ 2026-10-01 修复：目标高度（= 立绘大小）一变，"只增不减"的窗口宽度记忆必须一起清掉。
+            #   以前 _portrait_max_w 是**进程级最大宽度**：把立绘调小之后，窗口仍被旧的
+            #   最大值撑着 → 小立绘 + 大空窗（用户报："调了桌宠立绘大小后立绘显示不正常"）。
+            _prev_h = int(getattr(self, "_canvas_floor_h", 0) or 0)
+            if _prev_h and _prev_h != int(target_height):
+                self._portrait_max_w = 0
+                self._canvas_floor = 0
+                self._canvas_floor_h = 0
+                self._canvas_locked = False
+                self._stable_canvas = {}
+                print("[桌宠] 📐 立绘大小 %dpx → %dpx：画布与窗口按新尺寸重新量"
+                      % (_prev_h, int(target_height)))
             # ★ 画布在 a/b 两套之间共用（只按目标高度记一份）：
             #   两套的立绘宽高比略有差异，各存一份的话切换类型时窗口尺寸会变
             #   → 对话框位置/字号跟着跳，文字还可能被挤出去（用户反馈）。

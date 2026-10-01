@@ -123,6 +123,43 @@ def _app_base_dir() -> str:
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+def _launcher_version_stamp() -> str:
+    """启动器版本戳（"我打开的到底是不是新程序"用）：返回 "MM-DD HH:MM"。
+
+    ⚠ 2026-10-01 修复：打包版里 `__file__` 是 PyInstaller 的**虚拟路径**
+    （`_internal\\pcl_launcher\\silicon_window.py`，磁盘上并不存在）→ `os.path.getmtime(__file__)`
+    抛错 → 侧栏左下角一直显示「?」，日志里也在刷
+    「[PCL] ⚠ 版本戳打印失败: [WinError 2] ...」。
+    这里按顺序挑一个**真实存在**的文件取时间：本文件 →（冻结版）exe 自己 → 程序目录里的源码。
+    """
+    import time as _t
+    cands = []
+    try:
+        cands.append(__file__)
+    except Exception:
+        pass
+    try:
+        if getattr(sys, "frozen", False):
+            cands.append(sys.executable)          # 冻结版：exe 的修改时间＝构建时间
+    except Exception:
+        pass
+    try:
+        cands.append(os.path.join(_app_base_dir(), "pcl_launcher", "silicon_window.py"))
+    except Exception:
+        pass
+    try:
+        cands.append(sys.executable)
+    except Exception:
+        pass
+    for p in cands:
+        try:
+            if p and os.path.exists(p):
+                return _t.strftime("%m-%d %H:%M", _t.localtime(os.path.getmtime(p)))
+        except Exception:
+            continue
+    return "未知"
+
+
 def _status_page_enabled() -> bool:
     """「状态」页/窗口是否启用（config.json 的 status_page_enabled，默认开）。
 
@@ -2067,11 +2104,8 @@ class SiliconLauncher(QWidget):
         lay.addWidget(b_set)
         # 版本戳：把这份 silicon_window.py 的修改时间显示出来 ——
         # 排查"我换了新 exe 怎么没变化"时，页面右下角这行就能证明跑的是哪一版
-        try:
-            import time as _tmv
-            _stamp = _tmv.strftime("%m-%d %H:%M", _tmv.localtime(os.path.getmtime(__file__)))
-        except Exception:
-            _stamp = "?"
+        # （打包版取 exe 的时间，源码版取本文件的时间；见 _launcher_version_stamp）
+        _stamp = _launcher_version_stamp()
         ver = QLabel("Silicon UI · 新版 · " + _stamp)
         # ⚠ 以前用 Gray3：浅色主题下这条页脚压在侧栏的浅色面上只有 1.6:1（实测），
         #   基本看不见；换成主题的次级文字色（浅色主题 5.2:1 / 深色主题 9.9:1）。
@@ -3432,10 +3466,9 @@ def launch() -> int:
     # 打印**这份 silicon_window.py 的修改时间** + 程序目录 + 生效的启动器底色。
     # 换了新 exe 但看着没变化时，先看这一行：时间不对就是还在跑旧进程。
     try:
-        import time as _tm
         from .colors import base_bg_color as _bbc, current_theme_id as _ctid0
         print("[PCL] 版本戳 %s｜程序目录 %s｜主题 %s｜启动器底色 %s"
-              % (_tm.strftime("%m-%d %H:%M", _tm.localtime(os.path.getmtime(__file__))),
+              % (_launcher_version_stamp(),
                  _app_base_dir(), _ctid0(), _bbc().name()))
     except Exception as _e:
         print(f"[PCL] ⚠ 版本戳打印失败: {_e}")

@@ -42,7 +42,10 @@ def canvas_size_for(pet_id: str, set_name: str, target_height: float, extra_ids=
             return (0, 0)
         cands = []
         for _n, c, _h in clothes_of(s):
-            cands.append(int(c))
+            try:
+                cands.append(int(c))
+            except Exception:
+                continue
         try:
             for _n, a, _o in (actions_of(s, pet_id) or []):
                 if a:
@@ -50,7 +53,15 @@ def canvas_size_for(pet_id: str, set_name: str, target_height: float, extra_ids=
         except Exception:
             pass
         if not cands:
-            return result
+            return (0, 0)
+
+        # ★ 2026-10-01 修复：这一行（上游原版有）在增量合并时丢了 →
+        #   下面 `float(th)` 抛 NameError，被最外层 except 吞掉，
+        #   于是这个函数**永远返回 (0,0)**：立绘画布预量失效、
+        #   调了「立绘大小」之后窗口/画布算不出来，看起来就是立绘显示不正常。
+        th = float(target_height or 0)
+        if th <= 0:
+            return (0, 0)
 
         # ⚠ 每个图层必须用**同一个缩放**（按最高的那个图层算），不能各自按自己的高度归一：
         #   丛雨 b 套的发型层 bbox 只有 424x147（一小条刘海），单独按目标高度归一后
@@ -73,12 +84,10 @@ def canvas_size_for(pet_id: str, set_name: str, target_height: float, extra_ids=
                 continue
             boxes.append((x0, y0, x0 + w, y0 + h))
         if not boxes:
-            result = (0, 0)
-        else:
-            max_h = max(b[3] - b[1] for b in boxes)
-            scale = float(th) / float(max_h) if max_h > 0 else 0.0
-            best_w = max(int(round((b[2] - b[0]) * scale)) for b in boxes)
-            best_h = int(round(th))
-        result = (best_w, best_h)
+            return (0, 0)
+        max_h = max(b[3] - b[1] for b in boxes)
+        scale = th / float(max_h) if max_h > 0 else 0.0
+        best_w = max(int(round((b[2] - b[0]) * scale)) for b in boxes)
+        return (best_w, int(round(th)))
     except Exception:
         return (0, 0)

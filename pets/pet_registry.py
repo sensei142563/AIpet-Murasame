@@ -703,13 +703,14 @@ def get_live2d_display(pet_id: str = None) -> dict:
         # model 段（桌宠渲染用）
         "live2d_window_ratio": (0.2, 3.0),
         "live2d_window_height_ratio": (0.10, 0.95),
-        "live2d_scale": (0.30, 2.00),
+        # ★ 2026-10-01：范围必须**覆盖启动器滑块能设出来的值**（见 widgets.PCLLive2DTunePanel：
+        #   模型缩放 0.1~4.0、字号缩放 0.05~1.5）。以前这里写 (0.30, 2.00) / (0.10, 3.00)，
+        #   用户在设置界面把缩放拉到 2.5 会被**静默夹成 2.0** —— "调了立绘大小却和设的不一样"。
+        #   夹取只用来挡手改 pet.json 写疯的值（负数/NaN/离谱），不该拦界面本身允许的范围。
+        "live2d_scale": (0.10, 4.00),
         "live2d_offset_x": (-800.0, 800.0),
         "live2d_offset_y": (-800.0, 800.0),
-        # ⚠ 下界取 0.10 而不是向导滑块的 0.40：真实角色 pet.json 里 live2d_font_scale
-        #   最小就是 **0.35**（arona/hiyori/murasame），按 0.40 夹会**改掉角色的显示**。
-        #   夹取范围以真实数据为准（见 _audit_fish9269/scan_display_ranges.py）。
-        "live2d_font_scale": (0.10, 3.00),
+        "live2d_font_scale": (0.05, 3.00),
         # interaction 段（摸头/对话交互区，都是相对窗口的比例）
         "head_top": (0.0, 1.0),
         "head_bottom": (0.0, 1.0),

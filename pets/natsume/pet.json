@@ -9,12 +9,10 @@
   "has_live2d": false,
   "fgimages_prefix": "ナツメ",
   "fgimages_sets": [
-   "a",
-   "b"
+   "a"
   ],
   "sets_available": [
-   "a",
-   "b"
+   "a"
   ],
   "display": "2d",
   "default": "2d",
@@ -131,8 +129,7 @@
     "decors": {
      "脸红（强）": 4563,
      "脸红（弱）": 4122
-    },
-    "decor_rules": []
+    }
    },
    "b": {
     "clothes": {
@@ -252,13 +249,7 @@
      "嫌弃阴影": 3333,
      "脸红（强）": 3236,
      "脸红（弱）": 2680
-    },
-    "decor_rules": [
-     {
-      "decor": "嫌弃阴影",
-      "emotion": "嫌弃"
-     }
-    ]
+    }
    }
   },
   "emotions": {
@@ -321,8 +312,8 @@
   ],
   "text_font_scale": 1.0,
   "window_pos": [
-   1518,
-   251
+   1154,
+   179
   ]
  },
  "touch": {

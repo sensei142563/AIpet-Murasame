@@ -395,7 +395,17 @@ def action_of_cloth(name_or_id, set_name=None, pet_id=None):
     try:
         cloth_id = int(name_or_id)
     except Exception:
-        cloth_id = cloth_id_for(name_or_id, s) if name_or_id else None
+        # ★ 2026-10-01 修复：这里原来调用的是**不存在的** `cloth_id_for(...)`（上游也带着这个
+        #   名字 bug，而且和下面的 cloth_id() 撞名）→ 传衣服名字进来时直接 NameError。
+        #   改成走 clothes_of() 按名字查（它认角色自己的表，比内置表准）。
+        if name_or_id:
+            try:
+                for _nm, _cid, _h in clothes_of(s, pet_id):
+                    if str(_nm) == str(name_or_id):
+                        cloth_id = int(_cid)
+                        break
+            except Exception:
+                cloth_id = None
     for nm, aid, base in actions_of(s, pet_id):
         if cloth_id and base == cloth_id:
             return nm, aid
@@ -1303,6 +1313,51 @@ def _name2id(tbl: dict, name: str) -> int:
     return 0
 
 
+def _align_layers_to_set(layers, set_name, pet_id=None) -> list:
+    """把一组图层 id 按「本套索引里的图层名」校正到指定套（2026-10-01 修复）。
+
+    为什么不能只看"索引里有没有这个 id"：a / b 两套索引的 id 会**重叠但含义不同** ——
+    实测 natsume：a 索引里 4114 = 便服（身体层），b 索引里 4114 = 一条组合表情。
+    存档按 a 表解析出 4114，而当前套是 b 时就会拿那条表情当身体 → 立绘只剩一小块
+    （用户报："调了桌宠立绘大小后立绘显示不正常"）。
+    判据：同一个 id 在**另一套**里的名字若能**在本套索引里找到同名层** → 换成那一层。
+    """
+    try:
+        s = set_name if set_name in SETS else active_set()
+        names_t = _index_names(s, pet_id) or {}
+        if not names_t:
+            return list(layers or [])
+        other = "b" if s == "a" else "a"
+        try:
+            names_o = _index_names(other, pet_id) or {}
+        except Exception:
+            names_o = {}
+        name2id = {}
+        for i, nm in names_t.items():
+            name2id.setdefault(str(nm), int(i))
+        out, fixed = [], []
+        for lid in (layers or []):
+            try:
+                i = int(lid)
+            except Exception:
+                continue
+            nm_t, nm_o = names_t.get(i), names_o.get(i)
+            if nm_o and str(nm_o) != str(nm_t) and str(nm_o) in name2id:
+                j = int(name2id[str(nm_o)])
+                if j not in out:
+                    out.append(j)
+                    fixed.append((i, j))
+                    continue
+            if i not in out:
+                out.append(i)
+        if fixed:
+            print("[PortraitOutfit] 🔧 保存的装扮按 %s 套校正（名字对不上）: %s" % (s, fixed))
+        return out
+    except Exception as e:
+        print(f"[PortraitOutfit] ⚠ 校正图层所属套失败（照用）: {e}")
+        return list(layers or [])
+
+
 def saved_layer_list(set_name, pet_id=None, like_layers=None) -> list:
     """"这套保存的装扮"对应的图层列表：身体（动作或服装）+ 表情 + 发型 + 装饰。
 
@@ -1349,7 +1404,9 @@ def saved_layer_list(set_name, pet_id=None, like_layers=None) -> list:
         for d in (of.get("decor") or []):
             if int(d) not in out:
                 out.append(int(d))
-        return out
+        # ★ 2026-10-01：按本套索引里的名字核对一遍（a/b 的 id 会重叠但含义不同），
+        #   否则存档里 a 套的身体层 id 会被当成本套的表情层 → 立绘只剩一小块。
+        return _align_layers_to_set(out, s, pet_id)
     except Exception as e:
         print(f"[PortraitOutfit] ⚠ 生成默认立绘失败: {e}")
         return []

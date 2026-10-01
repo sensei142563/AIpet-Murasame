@@ -438,9 +438,13 @@ def build_pet_json(spec: dict, existing: dict = None) -> dict:
     # 触摸互动开关（九个部位的「范围」由「触摸互动」页的编辑器单独保存到 touch.areas）
     try:
         t = dict(cfg.get("touch") or {})
-        chk = getattr(self, "chk_touch", None)
-        if chk is not None:
-            t["enabled"] = bool(chk.isChecked())
+        # ★ 2026-10-01 修复：这里原来是 getattr(self, "chk_touch", None)，而 build_pet_json 是
+        #   **模块级函数**（没有 self）→ NameError 被下面的 except 吞掉 →
+        #   每导向导保存都会打印「写入触摸设置失败」，触摸开关与默认范围永远写不进 pet.json。
+        #   改为由向导在 spec 里带 touch_enabled（见 _collect）。
+        chk_state = spec.get("touch_enabled")
+        if chk_state is not None:
+            t["enabled"] = bool(chk_state)
         # ⚠ 只在"确实要开触摸"（勾了开关）或"本来就配过区域"时才补默认范围。
         #   以前这里无条件给每个角色塞一套 14 个通用框 → 等于"没做过的角色也开了触摸"，
         #   而且通用框对 Live2D 全身模型位置全是错的（用户要的是：没做的不开）。
@@ -2580,6 +2584,14 @@ class PCLPetWizard(SiliconDialog):
             "prompt_short": self.ed_p_short.toPlainText(),
             "prompt_long": self.ed_p_long.toPlainText(),
         })
+        # ★ 触摸互动开关：以前 build_pet_json 里用 getattr(self, "chk_touch") 去拿 —— 但它是
+        #   **模块级函数**，没有 self → NameError 被吞 → 每次保存都打印
+        #   「[Wizard] ⚠ 写入触摸设置失败: name 'self' is not defined」，开关/默认范围永远写不进去。
+        #   现在由这里显式带上（2026-10-01 修复）。
+        try:
+            s["touch_enabled"] = bool(self.chk_touch.isChecked())
+        except Exception:
+            pass
         # 显示与对话框（2D / Live2D 两套完全独立的设置）
         try:
             self._write_back_disp()
@@ -2664,6 +2676,40 @@ class PCLPetWizard(SiliconDialog):
                     pt["decors"][dname] = int(v)
             if not pt["emotions"].get("平静"):
                 pt["emotions"]["平静"] = d or 0
+            # ★ 2026-10-01 修复：既有 portrait.sets 是 **dict**（a/b 两套表）时绝不能拍平。
+            #   真事故：向导保存一次，natsume 的 a/b 两张表（各 6 件衣服 + 56/59 个表情）
+            #   被写成 {"sets": ["a"], ...}（只剩 a 套）→ 桌宠按 b 套取层时拿到 a 套的 id
+            #   （b 索引里那个 id 只是一小块表情）→ 立绘只剩一小块、而且没有脸。
+            #   策略：保持 dict 结构，只把本次编辑的内容更新到**当前那套**，其余原样保留。
+            try:
+                from pets.pet_registry import get_pet_config as _gpc
+                _old = dict((_gpc(s.get("id")) or {}).get("portrait") or {})
+            except Exception:
+                _old = {}
+            _old_sets = _old.get("sets")
+            if isinstance(_old_sets, dict) and _old_sets:
+                _cur = None
+                try:
+                    from tool.portrait_outfit import active_set as _as
+                    _cur = _as()
+                except Exception:
+                    _cur = None
+                if _cur not in _old_sets:
+                    _cur = sorted(_old_sets.keys())[0]
+                _merged = {k: dict(v or {}) for k, v in _old_sets.items()}
+                _blk = dict(_merged.get(_cur) or {})
+                for _k in ("emotions", "clothes", "decors"):
+                    if pt.get(_k):
+                        _blk[_k] = dict(pt[_k])
+                if pt.get("default_emotion"):
+                    _blk["default_emotion"] = pt["default_emotion"]
+                _merged[_cur] = _blk
+                pt["sets"] = _merged                     # 保持 dict：运行时优先用它
+                # 顶层兼容表也用原来那份，避免 a/b 混在一张表里
+                for _k in ("clothes", "emotions", "decors"):
+                    if _old.get(_k):
+                        pt[_k] = dict(_old[_k])
+                print(f"[Wizard] ℹ 保留多套立绘表（只更新 {_cur} 套，其余原样）")
             s["portrait"] = pt
         # 单一音色 → 情绪列表
         if s.get("short_voice_single"):
@@ -2839,6 +2885,26 @@ class PCLPetWizard(SiliconDialog):
         """编辑模式：把 pet.json 里的 portrait 映射回填到界面"""
         try:
             pt = pt or {}
+            # ★ 2026-10-01：多套角色（portrait.sets 是 dict）要显示**当前那套**的表；
+            #   以前只读顶层那张拍平表 → 编辑 b 套却看到 a 套的数据，保存时还会把两套拍平。
+            _sets = pt.get("sets")
+            if isinstance(_sets, dict) and _sets:
+                _cur = None
+                try:
+                    from tool.portrait_outfit import active_set as _as
+                    _cur = _as()
+                except Exception:
+                    _cur = None
+                if _cur not in _sets:
+                    _cur = sorted(_sets.keys())[0]
+                _blk = dict(_sets.get(_cur) or {})
+                if _blk:
+                    pt = {"emotions": dict(_blk.get("emotions") or {}),
+                          "clothes": dict(_blk.get("clothes") or {}),
+                          "decors": dict(_blk.get("decors") or {}),
+                          "default_emotion": (_blk.get("default_emotion")
+                                              or pt.get("default_emotion") or "平静")}
+                    print(f"[Wizard] ℹ 立绘表按 {_cur} 套回填界面（多套角色）")
             d = int(pt.get("emotions", {}).get("平静") or 0)
             if d:
                 for i in range(self.cb_emo_default.count()):

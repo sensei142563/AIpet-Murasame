@@ -764,6 +764,12 @@ class ScreenWorker(QThread):
         #   `for _ in range(int(self.interval * 10))` 一次都不睡 → 满速抓屏，
         #   而且每轮都写一个临时 PNG（磁盘会被塞满）。这里夹到 [1, 3600] 秒。
         self.interval = num(interval_sec, 3.0, 1.0, 3600.0)
+        # ★ 2026-10-01 修复：这两行在增量合并时丢了（上游那侧只做了 interval 夹取）→
+        #   run() 里的 self._wake.clear() 直接 AttributeError，**截图线程一起来就死**
+        #   （日志原文：AttributeError: 'ScreenWorker' object has no attribute '_wake'）。
+        #   被"唤醒"的信号：桌宠发现她在忙、这轮识别没做成时，用它让截图线程提前重来
+        self._wake = threading.Event()
+        self._wake_delay = 0.0
         os.makedirs("tmp", exist_ok=True)
 
     def wake(self, delay: float = 8.0):
