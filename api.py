@@ -265,7 +265,9 @@ def check_shutdown() -> bool:
 async def control_feature(feature: str):
     mapping = {"voice": "语音识别", "screenshot": "屏幕识别", "camera": "摄像头", "live2d": "Live2D",
                "longtext": "长文本模式切换", "reset_position": "重置桌宠位置（回到屏幕中央）",
-               "reload_touch": "重新读取触摸区域（全身触摸范围）"}
+               "reload_touch": "重新读取触摸区域（全身触摸范围）",
+               # ★ 2026-10-01：主题页改了「对话框文字粗细」这类显示设置后，让桌宠重读配置
+               "reload_theme": "重新应用主题/字体设置（对话框文字粗细等）"}
     if feature not in mapping:
         return {"error": f"不支持的功能: {feature}"}
     with _control_lock:

@@ -5558,6 +5558,25 @@ class Murasame(QLabel):
             _pt = max(6, int(round(scaled_font_size * 1.333)))
         self._font_px = _pt
 
+        # ★ 2026-10-01：对话框文字粗细（主题页里选「细体 / 常规 / 粗体」。
+        #   默认 normal = 与以前逐像素一致；写的是 config.json 的 dialog_font_weight，
+        #   主题页改完会 POST /control/reload_theme，桌宠重算这里 → 立即生效不用重启。）
+        try:
+            from tool.config import enum_of as _eo_fw, get_config as _gc_fw
+            _fw = _eo_fw(_gc_fw("./config.json").get("dialog_font_weight"),
+                         ("light", "normal", "bold"), "normal", "dialog_font_weight")
+        except Exception:
+            _fw = "normal"
+        try:
+            if _fw == "bold":
+                self.text_font.setWeight(QFont.Bold)
+            elif _fw == "light":
+                self.text_font.setWeight(QFont.Light)      # 系统没有细体字重时会自动回退
+            else:
+                self.text_font.setWeight(QFont.Normal)
+        except Exception as _efw:
+            print(f"[桌宠] ⚠ 应用对话框文字粗细失败: {_efw}")
+
         scaled_y = int(round(self._base_text_y_offset * scale))
         self.text_y_offset = scaled_y if scaled_y < -10 else -10
 

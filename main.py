@@ -376,16 +376,29 @@ if __name__ == "__main__":
                                 _p = _care.startup_line(getattr(pet, "pet_name", "我"))
                                 if not _p:
                                     return
+                                # 等语音服务就绪再开口。默认最多等 300 秒（可在 config.json 用
+                                # startup_greeting_wait_sec 调）；启动器里有「预载语音」按钮，
+                                # 提前预载过的话这里第一次探测就通过 → 立刻打招呼，不会拖。
+                                _wait_s = 300
+                                try:
+                                    from tool.config import num as _num_w
+                                    _wait_s = int(_num_w(
+                                        __import__("tool.config", fromlist=["get_config"])
+                                        .get_config("./config.json").get("startup_greeting_wait_sec"),
+                                        300, 0, 3600))
+                                except Exception:
+                                    _wait_s = 300
+                                _max_tries = max(1, int(round(_wait_s / 3.0)))
                                 _tries = {"n": 0}
 
                                 def _try_greet():
                                     try:
                                         _tries["n"] += 1
                                         if not _tts_ready_now():
-                                            if _tries["n"] <= 50:          # 3 秒一次，最多等 150 秒
-                                                if _tries["n"] in (1, 5, 20, 40):
-                                                    print("[AIpet] 开机问候：等语音服务就绪…（第 %d 次探测）"
-                                                          % _tries["n"])
+                                            if _tries["n"] <= _max_tries:
+                                                if _tries["n"] in (1, 5, 20, 40) or _tries["n"] % 40 == 0:
+                                                    print("[AIpet] 开机问候：等语音服务就绪…（第 %d 次探测，"
+                                                          "最多等 %d 秒）" % (_tries["n"], _wait_s))
                                                 QTimer.singleShot(3000, _try_greet)
                                             else:
                                                 print("[AIpet] 开机问候：语音服务一直没就绪 → "
@@ -1103,6 +1116,19 @@ if __name__ == "__main__":
                 pass
             QTimer.singleShot(400, app.quit)
             return
+
+        # ===== 启动器主题页改了显示设置（对话框文字粗细等）→ 重读配置并重新应用 =====
+        if check_flag("reload_theme"):
+            try:
+                pet._update_text_scaling()
+                try:
+                    pet._rewrap_current_text()
+                except Exception:
+                    pass
+                pet.update()
+                print("[API Control] 已重新应用主题/字体设置（对话框文字粗细等）")
+            except Exception as _rterr:
+                print(f"[API] 重新应用主题设置失败: {_rterr}")
 
         # ===== PCL 图形化调参请求（应用/保存/重置）=====
         _disp_req = consume_live2d_request()

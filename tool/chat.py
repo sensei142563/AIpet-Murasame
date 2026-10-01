@@ -30,6 +30,13 @@ ollama_url = _api.get("ollama", "http://localhost:28565/ollama")
 qwen3_lora_url = _api.get("qwen3_lora", "http://localhost:28565/qwen3-lora")
 gpt_sovits_tts_url = _api.get("gpt_sovits_tts", "http://localhost:28565/tts")
 _TTS_HINT_SHOWN = False   # 语音服务未就绪的提示只打一次（防刷屏）
+# ★ 2026-10-01 修复：这个模块级标志在增量合并时丢了定义，而 `_gsv_ensure_pet_model()`
+#   里既读它、又在末尾写它（`global _GSV_MODEL_OK`）→ 第一次进 TTS 就
+#   NameError: name '_GSV_MODEL_OK' is not defined → 整轮回复被丢弃 →
+#   桌宠只能显示兜底话术「唔……信号好像不太好」。
+#   （上游 tool/chat.py 里没有这套"直连本机 GPT-SoVITS / 她的微调权重"逻辑，
+#     它是本地功能，合并时只把函数搬了进来、漏了这一行。）
+_GSV_MODEL_OK = False     # 语音服务（她的微调权重）已就绪，只提示一次
 tts_type = enum_of(_cfg0.get("tts_type"), ("local", "cloud"), "local", "tts_type")
 
 
