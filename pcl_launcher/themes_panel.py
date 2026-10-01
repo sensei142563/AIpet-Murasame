@@ -729,6 +729,71 @@ class PCLThemesPanel(QScrollArea):
             lay.addLayout(row_w)
         except Exception as _e:
             print(f"[Themes] ⚠ 对话框文字控件构建失败: {_e}")
+        # ── 界面字体（五款自带中日文字体，启动器与桌宠一起换）──
+        try:
+            from tool import fonts as _fonts
+            row_f = QHBoxLayout()
+            lab_f = QLabel("界面字体")
+            lab_f.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(12*S)}px;")
+            lab_f.setFixedWidth(int(84*S))
+            lab_f.setToolTip("启动器与桌宠对话框一起换（切完立即生效，不用重启）")
+            row_f.addWidget(lab_f)
+            self._ui_font = QComboBox()
+            self._ui_font.addItem("默认（自带思源黑体 Bold）", "")
+            for _it in _fonts.list_fonts():
+                self._ui_font.addItem("%s" % (_it.get("label") or _it.get("id")),
+                                      str(_it.get("id")))
+            _curf = _fonts.current_font_id()
+            _if = self._ui_font.findData(_curf)
+            self._ui_font.setCurrentIndex(_if if _if >= 0 else 0)
+            self._ui_font.setFixedHeight(int(24 * S))
+            self._ui_font.setStyleSheet(
+                f"QComboBox {{ background: rgba(255,255,255,0.10); color: {Color1.name()};"
+                f" border: 1px solid {Color5.name()}; border-radius: 6px; padding: 0 8px;"
+                f" font-size: {int(11*S)}px; }}"
+                f" QComboBox QAbstractItemView {{ background: {Color7.name()}; color: {Color1.name()}; }}")
+
+            def _save_ui_font(_i=None):
+                _fid = str(self._ui_font.currentData() or "")
+                try:
+                    _cc = _load_config() or {}
+                    _cc["ui_font"] = _fid
+                    _save_config(_cc)
+                except Exception as _e3:
+                    print(f"[Themes] ⚠ 写 ui_font 失败: {_e3}")
+                _fam = _fonts.ensure_loaded(_fid)
+                if _fid and not _fam:
+                    print(f"[Themes] ⚠ 字体 {_fid} 没加载成功（文件缺失？）")
+                try:
+                    from . import silicon_ui as _sui
+                    _sui.set_ui_font(_fam or "Microsoft YaHei UI")
+                    print("[Themes] 界面字体 → %s（Qt 族名 %s）"
+                          % (_fid or "默认思源黑体", _fam or "Microsoft YaHei UI"))
+                except Exception as _e4:
+                    print(f"[Themes] ⚠ 应用界面字体失败: {_e4}")
+                try:
+                    import urllib.request as _ur3
+                    _base3 = "http://127.0.0.1:28565/control"
+                    try:
+                        from .silicon_window import _CONTROL_BASE as _cb3
+                        _base3 = _cb3
+                    except Exception:
+                        pass
+                    _ur3.urlopen(_ur3.Request(_base3 + "/reload_theme", method="POST",
+                                              data=b""), timeout=2).read()
+                    print("[Themes] 已通知桌宠换字体")
+                except Exception:
+                    pass
+
+            self._ui_font.currentIndexChanged.connect(_save_ui_font)
+            row_f.addWidget(self._ui_font)
+            _fhint = QLabel("启动器和桌宠对话框一起换（改完立即生效）")
+            _fhint.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(11*S)}px;")
+            row_f.addWidget(_fhint)
+            row_f.addStretch()
+            lay.addLayout(row_f)
+        except Exception as _e:
+            print(f"[Themes] ⚠ 界面字体控件构建失败: {_e}")
         self._bg_blur_slider = _mk("背景模糊度", "ui_bg_blur", 0)
 
         btn_reset = QPushButton("恢复默认（100% / 55% / 0%）")

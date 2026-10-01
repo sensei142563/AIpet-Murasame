@@ -342,35 +342,9 @@ class PCLSettingsPanel(QWidget):
         self._add_choice("tts_type", "TTS 语音合成", ["local", "cloud"], "local",
                          display={"local": "本地", "cloud": "云端"},
                          hint="本地：用项目里的 GPT-SoVITS 整合包合成（离线、不花钱、吃显存）；\n"
-                              "云端：走在线语音接口（不需要整合包，需要联网）。")
-        # ★ 2026-10-01 新增：语音模型选择（以前**根本没有这个设置项** ——
-        #   `gsv_model_version` 只有 run.py 会读、界面里设不了，于是永远加载基础预训练模型，
-        #   用户辛苦训练好的角色专属模型（如夏目训练了两个多小时的 e10/s248）从没被用上，
-        #   听起来就是"别人的音色/发糊"。这里补上，并且预载按钮会在模型变化时自动重启语音服务。）
-        _w_hint = ("角色专属模型：用 pet.json 里 voices.gpt_weights / sovits_weights 指定的"
-                   "微调模型（每个角色自己的音色，推荐）。\n"
-                   "基础模型：GPT-SoVITS 官方预训练模型，靠参考音频做零样本克隆（角色没训练过时的兜底）。\n"
-                   "⚠ 改完请点上方「预载语音服务」让它生效（会自动重启语音服务换模型）。")
-        try:
-            from pets.pet_registry import get_active_pet_id
-            import json as _json_w
-            _gsv_dir = os.path.join(_app_base_dir(), "GPT-SoVITS")
-            _pj = os.path.join(_app_base_dir(), "pets", str(get_active_pet_id() or ""), "pet.json")
-            if os.path.isfile(_pj):
-                with open(_pj, encoding="utf-8") as _f:
-                    _vw = (_json_w.load(_f) or {}).get("voices") or {}
-                _g, _s = str(_vw.get("gpt_weights") or ""), str(_vw.get("sovits_weights") or "")
-                if _g and _s and os.path.isfile(os.path.join(_gsv_dir, _g)) \
-                        and os.path.isfile(os.path.join(_gsv_dir, _s)):
-                    _w_hint += "\n\n当前角色（%s）将使用：%s / %s" % (get_active_pet_id(), os.path.basename(_g), os.path.basename(_s))
-                else:
-                    _w_hint += ("\n\n当前角色（%s）还没配专属模型 → 会先用基础模型"
-                                "（训练好并写进 pet.json 后自动用上）" % get_active_pet_id())
-        except Exception as _ew:
-            print(f"[PCL] 读取当前角色语音权重失败: {_ew}")
-        self._add_choice("gsv_model_version", "语音模型", ["finetuned", "v2", "v4"], "finetuned",
-                         display={"finetuned": "角色专属模型", "v2": "基础模型 v2", "v4": "基础模型 v4"},
-                         hint=_w_hint)
+                              "云端：走在线语音接口（不需要整合包，需要联网）。\n"
+                              "⚠ 语音模型不用在这里选：桌宠会按「当前角色」自动用它自己的模型"
+                              "（训练过就用专属权重，没训练过就用基础模型 + 参考音频）。")
         self._add_model_combo(
             "vision_model_name", "视觉识别模型名",
             ["deepseek-flash",
@@ -474,24 +448,13 @@ class PCLSettingsPanel(QWidget):
         self._add_spin("idle_away_minutes", "空闲离屏阈值 (分钟)", 2, 120, 10)
         self._add_double_spin("DEFAULT_PORTRAIT_SCREEN_RATIO", "立绘高度比例", 0.1, 1.0, 0.8, 0.05)
 
-        # ── 开机问候（2026-10-01 用户要求做成可选项）──
-        #    config.json：care_startup_greeting / startup_greeting_mode / startup_greeting_voice
+        # ── 开机问候（2026-10-01：按用户意见只留一个开关）──
+        #   开 = 启动后让角色自己打招呼；关 = 启动时完全安静。
+        #   （语音模型不用在这里选：桌宠会按"当前角色"自动用它自己的模型/参考音频。）
         self._section("开机问候", "")
         self._add_switch("care_startup_greeting", "开机时打招呼", "true",
-                         hint="开：桌宠启动后主动跟主人说一句。\n"
-                              "关：启动后完全安静（等价于把下面「问候方式」选成「不说话」）。")
-        self._add_choice("startup_greeting_mode", "问候方式", ["chat", "voice", "off"], "voice",
-                         hint="让角色自己说：模型生成一句 + 语音念出来（要等语音服务；"
-                              "启动器里有「预载语音」按钮，提前预载就不用等）。\n"
-                              "播放指定语音：只播下面填的那一条音频，不调用模型。\n"
-                              "不说话：启动时不出声。",
-                         display={"chat": "让角色自己说", "voice": "播放指定语音", "off": "不说话"})
-        self._add_file_input("startup_greeting_voice", "指定语音文件", "",
-                             placeholder="留空 = 不播音频（「让角色自己说」时不用填）",
-                             filt="音频 (*.wav *.mp3 *.flac *.ogg *.m4a)")
-        self._add_spin("startup_greeting_wait_sec", "等语音服务上限 (秒)", 0, 3600, 300,
-                       hint="开机问候要出声得等语音服务加载完，这里是最多等多久（到点还没就绪就跳过）。\n"
-                            "0 = 不等，立刻就问候（语音没起来时这一句可能没声音）。")
+                         hint="开：桌宠启动后主动跟主人说一句（她自己想一句 + 说出来）。\n"
+                              "关：启动时完全安静，不打招呼。")
 
         # 通用区（Live2D 调参面板）：全部与桌宠分类可见
         self._open_box(("all", "pet"))
@@ -772,51 +735,6 @@ class PCLSettingsPanel(QWidget):
             row.addWidget(eye)
             self._cur_layout.addLayout(row)
         self._widgets[key] = inp
-
-    def _add_file_input(self, key, label, default="", placeholder="",
-                        filt="音频 (*.wav *.mp3 *.flac *.ogg *.m4a)"):
-        """带「选择…」按钮的路径输入（2026-10-01 为「开机问候语音」加的）"""
-        lbl = QLabel(f"  {label}")
-        lbl.setStyleSheet(f"color: {Gray2.name()}; font-size: {int(12*S)}px;")
-        self._cur_layout.addWidget(lbl)
-        row = QHBoxLayout()
-        row.setSpacing(int(6 * S))
-        inp = QLineEdit()
-        inp.setText(str(default))
-        inp.setPlaceholderText(placeholder)
-        inp.setStyleSheet(f"""
-            QLineEdit {{ border: 1px solid {Gray5.name()}; padding: {int(6*S)}px;
-                font-size: {int(12*S)}px; border-radius: {int(4*S)}px;
-                background: {surface_fill(190, 26)}; font-family: 'Microsoft YaHei'; }}
-            QLineEdit:focus {{ border: 1px solid {Color3.name()}; }}
-        """)
-        btn = QPushButton("选择…")
-        btn.setCursor(Qt.PointingHandCursor)
-        btn.setFixedWidth(int(76 * S))
-        btn.setStyleSheet(f"""
-            QPushButton {{ background: {surface_fill(170, 24)}; color: {Gray1.name()};
-                border: 1px solid {Gray5.name()}; padding: {int(6*S)}px 0;
-                font-size: {int(12*S)}px; border-radius: {int(4*S)}px;
-                font-family: 'Microsoft YaHei'; }}
-            QPushButton:hover {{ background: {surface_fill(235, 40)}; }}
-        """)
-
-        def _pick(_=False, _k=key, _i=inp):
-            try:
-                p, _sel = QFileDialog.getOpenFileName(self.window() or self, "选择文件", "", filt)
-            except Exception as _e:
-                print(f"[PCL] 选择文件失败: {_e}")
-                return
-            if p:
-                _i.setText(os.path.normpath(p))
-                self._auto_persist(_k, _i.text().strip())
-
-        btn.clicked.connect(_pick)
-        row.addWidget(inp, 1)
-        row.addWidget(btn)
-        self._cur_layout.addLayout(row)
-        self._widgets[key] = inp
-        return inp
 
     def _block_wheel(self, obj):
         obj.setFocusPolicy(Qt.StrongFocus)

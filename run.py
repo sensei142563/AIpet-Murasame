@@ -813,18 +813,28 @@ def pick_tts_env():
 
 
 def pet_voice_weights():
-    """当前角色 pet.json 里配的**专属语音权重** → (gpt_abs, sovits_abs, version, pet_id)
+    """当前角色该用哪套语音权重 → (gpt_abs, sovits_abs, version, pet_id)
 
-    ★ 2026-10-01 修复：以前 `gsv_model_version=v2` 就固定加载**基础预训练模型**
-      （pretrained_models/gsv-v2final-pretrained/…），用户辛苦训练好的角色模型
-      （例如夏目：GPT_weights_v2/natsume-e10.ckpt + SoVITS_weights_v2/natsume_e8_s248.pth，
-      训练了两个多小时）**从来没被加载过** —— 听起来自然还是别人的音色 / 发糊。
-      现在按"当前角色"读它自己的权重，读不到（没训练过）才回退基座。
+    ★ 2026-10-01：**不需要任何设置项**，跟着"当前角色"走：
+      1) pet.json 的 voices.gpt_weights / sovits_weights 写了 → 用它；
+      2) 没写 → 在 GPT-SoVITS 的 GPT_weights*/ 与 SoVITS_weights*/ 里按**角色 ID** 找
+         （`natsume-e10.ckpt` / `natsume_e8_s248.pth` 这种命名），各取最新的一份；
+      3) 都没有 → 返回空（调用方回退基础预训练模型，角色照样能出声）。
+    背景：以前固定加载基础预训练模型，用户训练好的角色模型从没被用上（夏目发糊的真因）。
     """
     try:
         from pets.pet_registry import get_pet_config, get_active_pet_id
-        v = (get_pet_config() or {}).get("voices") or {}
+        cfg = get_pet_config() or {}
+        pid = ""
+        try:
+            pid = str(get_active_pet_id() or "")
+        except Exception:
+            pid = ""
+        if not pid:
+            pid = str(cfg.get("id") or "")
+        v = cfg.get("voices") or {}
         _base = os.path.abspath(os.path.join(".", "GPT-SoVITS"))
+        ver = str(v.get("gsv_version") or "v2").strip().lower() or "v2"
 
         def _abs(rel):
             rel = str(rel or "").strip()
@@ -833,13 +843,40 @@ def pet_voice_weights():
             p = rel if os.path.isabs(rel) else os.path.join(_base, rel)
             return p if os.path.isfile(p) else None
 
-        pid = ""
-        try:
-            pid = str(get_active_pet_id() or "")
-        except Exception:
-            pid = ""
-        return (_abs(v.get("gpt_weights")), _abs(v.get("sovits_weights")),
-                str(v.get("gsv_version") or "v2").strip().lower() or "v2", pid)
+        g, s = _abs(v.get("gpt_weights")), _abs(v.get("sovits_weights"))
+        if g and s:
+            return (g, s, ver, pid)
+
+        def _find(prefixes, exts):
+            best = (None, 0)
+            if not pid or not os.path.isdir(_base):
+                return None
+            key = pid.lower()
+            for d in sorted(os.listdir(_base)):
+                dp = os.path.join(_base, d)
+                if not os.path.isdir(dp) or d.endswith("pretrained"):
+                    continue
+                if not any(d.startswith(p) for p in prefixes):
+                    continue
+                for f in os.listdir(dp):
+                    if not f.lower().endswith(exts) or key not in f.lower():
+                        continue
+                    fp = os.path.join(dp, f)
+                    try:
+                        mt = os.path.getmtime(fp)
+                    except Exception:
+                        mt = 0
+                    if mt > best[1]:
+                        best = (fp, mt)
+            return best[0]
+
+        g = _find(("GPT_weights",), (".ckpt",))
+        s = _find(("SoVITS_weights",), (".pth",))
+        if g and s:
+            print("[TTS] 按角色自动匹配到语音模型：%s → %s / %s"
+                  % (pid, os.path.basename(g), os.path.basename(s)))
+            return (g, s, ver, pid)
+        return (None, None, ver, pid)
     except Exception as e:
         print(f"[TTS] ⚠ 读取角色语音权重失败: {e}")
         return (None, None, "v2", "")
@@ -863,7 +900,7 @@ def start_tts_api():
         #   v4 基座 → 约 60 秒；v4 微调（桌宠本人权重）→ 约 100 秒
         # 用 config.json 的 gsv_model_version 切换：v2 / v4 / finetuned
         try:
-            _mv = str(get_config("./config.json").get("gsv_model_version", "v2")).strip().lower()
+            _mv = str(get_config("./config.json").get("gsv_model_version", "auto")).strip().lower()
         except Exception:
             _mv = "v2"
         _gsv = os.path.abspath(r".\GPT-SoVITS")

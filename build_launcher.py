@@ -304,6 +304,7 @@ if files is None:
         "prompt.txt", "README.md", "requirements.txt", "重启长语音服务.bat",
         "run.py", "run_launcher.py", "run_qq.py",
         "思源黑体Bold.otf", "启动QQ.bat", "启动桌宠.bat", "启动微信.bat",
+        "fonts",   # ★ 五款中日文字体（主题页可切换；启动器 + 桌宠共用）
         "time_sync_guard.py", "time_sync_guard_runner.bat",
         "安装时间同步守护【管理员】.bat", "修复系统时间同步【管理员】.bat",
         "biaoqingbao", "classes", "fgimages", "Live2d", "longtext",

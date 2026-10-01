@@ -5380,9 +5380,29 @@ class Murasame(QLabel):
         """加载项目自带「思源黑体Bold.otf」并返回真实字体族名。
 
         ⚠ 以前只是把字体文件名当 family 传给 QFont，从没真正加载字体文件 →
-        Qt 落到系统兜底字体，小字号下笔画发虚、边缘发糊。"""
+        Qt 落到系统兜底字体，小字号下笔画发虚、边缘发糊。
+
+        ★ 2026-10-01：主题页里选的**界面字体**（fonts/ 里五款中日文字体）优先。
+          缓存必须带"字体 id"，否则换字体后这里会一直返回旧族名（换了没效果）。
+        """
         cached = getattr(self, "_font_family_ok", None)
-        if cached:
+        _want_id = ""
+        try:
+            from tool import fonts as _fonts
+            _want_id = _fonts.current_font_id()
+            if _want_id:
+                if cached and getattr(self, "_font_id_ok", None) == _want_id:
+                    return cached
+                _fam = _fonts.ensure_loaded(_want_id)
+                if _fam:
+                    self._font_id_ok = _want_id
+                    self._font_family_ok = _fam
+                    print(f"[桌宠] 已加载界面字体: {_want_id} → {_fam}")
+                    return _fam
+                print(f"[桌宠] ⚠ 界面字体 {_want_id} 加载失败 → 回退自带思源黑体")
+        except Exception as _ef:
+            print(f"[桌宠] ⚠ 读取界面字体失败（用自带字体）: {_ef}")
+        if cached and not _want_id and not getattr(self, "_font_id_ok", ""):
             return cached
         fam = self._font_family
         try:
@@ -5468,9 +5488,29 @@ class Murasame(QLabel):
         """加载项目自带「思源黑体Bold.otf」并返回真实字体族名。
 
         ⚠ 以前只是把字体文件名当 family 传给 QFont，从没真正加载字体文件 →
-        Qt 落到系统兜底字体，小字号下笔画发虚、边缘发糊。"""
+        Qt 落到系统兜底字体，小字号下笔画发虚、边缘发糊。
+
+        ★ 2026-10-01：主题页里选的**界面字体**（fonts/ 里五款中日文字体）优先。
+          缓存必须带"字体 id"，否则换字体后这里会一直返回旧族名（换了没效果）。
+        """
         cached = getattr(self, "_font_family_ok", None)
-        if cached:
+        _want_id = ""
+        try:
+            from tool import fonts as _fonts
+            _want_id = _fonts.current_font_id()
+            if _want_id:
+                if cached and getattr(self, "_font_id_ok", None) == _want_id:
+                    return cached
+                _fam = _fonts.ensure_loaded(_want_id)
+                if _fam:
+                    self._font_id_ok = _want_id
+                    self._font_family_ok = _fam
+                    print(f"[桌宠] 已加载界面字体: {_want_id} → {_fam}")
+                    return _fam
+                print(f"[桌宠] ⚠ 界面字体 {_want_id} 加载失败 → 回退自带思源黑体")
+        except Exception as _ef:
+            print(f"[桌宠] ⚠ 读取界面字体失败（用自带字体）: {_ef}")
+        if cached and not _want_id and not getattr(self, "_font_id_ok", ""):
             return cached
         fam = self._font_family
         try:

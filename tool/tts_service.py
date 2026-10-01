@@ -77,7 +77,7 @@ def _desired_model() -> dict:
                 cfg = json.load(f) or {}
         except Exception:
             cfg = {}
-        mv = str(cfg.get("gsv_model_version", "v2")).strip().lower() or "v2"
+        mv = str(cfg.get("gsv_model_version", "auto")).strip().lower() or "v2"
         g, s, ver, pid = run.pet_voice_weights()
         if mv in ("finetuned", "auto") and g and s:
             return {"model_version": mv, "pet": pid, "gpt": os.path.basename(g),

@@ -351,6 +351,39 @@ def dark_palette(accent="#4c8dff"):
     return p
 
 
+def set_ui_font(family: str) -> bool:
+    """切换启动器全局字体（主题页里选的五款中日文字体之一）。
+
+    ★ 2026-10-01：改 M.font 后立刻重装样式表 + 逐控件覆盖已有字体，
+      界面即时换字、不用重启；桌宠那边由主题页 POST /control/reload_theme 通知。
+    """
+    try:
+        if family:
+            M.font = str(family)
+        app = QApplication.instance()
+        if app is None:
+            return False
+        ok = install(app)
+        try:
+            from PyQt5.QtGui import QFont as _QF
+            _fam = M.font
+            for _w in app.allWidgets():
+                try:
+                    _f = _w.font()
+                    if _f is None or _f.family() == _fam:
+                        continue
+                    _w.setFont(_QF(_fam, _f.pointSize() if _f.pointSize() > 0 else M.font_size,
+                                   _f.weight(), _f.italic()))
+                except Exception:
+                    continue
+        except Exception as _e:
+            print(f"[SiliconUI] ⚠ 逐控件换字体失败（忽略）: {_e}")
+        return bool(ok)
+    except Exception as e:
+        print(f"[SiliconUI] 切换字体失败: {e}")
+        return False
+
+
 def install(app: QApplication = None, accent="#4c8dff"):
     """安装全局 QSS + 深色调色板（幂等）。应在创建主窗口前调用。"""
     global _installed

@@ -1,0 +1,39 @@
+{
+  "fonts": [
+    {
+      "id": "noto_sans_sc",
+      "label": "思源黑体（现代黑体）",
+      "file": "NotoSansCJKsc-Regular.otf",
+      "desc": "干净利落的无衬线，默认观感，中日文都全",
+      "license": "SIL OFL 1.1"
+    },
+    {
+      "id": "noto_sans_jp",
+      "label": "思源黑体·日文（Noto Sans JP）",
+      "file": "NotoSansCJKjp-Regular.otf",
+      "desc": "日文原生字形（假名/汉字更贴合日语台词）",
+      "license": "SIL OFL 1.1"
+    },
+    {
+      "id": "lxgw_wenkai",
+      "label": "霞鹜文楷（手写楷体·温柔）",
+      "file": "LXGWWenKaiLite-Regular.ttf",
+      "desc": "基于 Klee One 的楷体，笔画舒缓，适合陪伴感",
+      "license": "SIL OFL 1.1"
+    },
+    {
+      "id": "zcool_xiaowei",
+      "label": "站酷小薇（清秀宋体）",
+      "file": "ZCOOLXiaoWei-Regular.ttf",
+      "desc": "细宋风格，文雅、字面偏小，适合大字号对话框",
+      "license": "SIL OFL 1.1"
+    },
+    {
+      "id": "ma_shan_zheng",
+      "label": "马善政（毛笔行楷）",
+      "file": "MaShanZheng-Regular.ttf",
+      "desc": "毛笔手写感，标题/台词都很有味道",
+      "license": "SIL OFL 1.1"
+    }
+  ]
+}
