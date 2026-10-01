@@ -1408,8 +1408,31 @@ class PCLPetWizard(SiliconDialog):
         if not idxs:
             self.lbl_layers.setText("这个文件夹里没找到图层索引 txt（应形如 <前缀>a.txt）")
             return
+        # ★ 2026-10-01 修复：以前只读 idxs[0]（排序后就是 a 套）→ 服装/表情下拉框里**只有 a 套层号**。
+        #   多套角色保存时，界面回填的 b 套层号在下拉框里根本选不中 → 落到「（不使用）」= 0
+        #   → 保存时把 pet.json 里 b 套的有效层号覆盖成 0
+        #   （真事故：natsume 的 b 套六件衣服全变 0 → b 套算不出衣服 → 退回角色包默认立绘
+        #    → 用户看到「a/b 两套立绘衣服不一样」）。
+        #   现在把该目录下所有索引都读进来，每项标注属于哪一套，任何合法层号都能被选中。
+        layers, seen, per_set = [], set(), {}
+        for _p in idxs:
+            _b = os.path.basename(_p)
+            _stem = _b[:-4] if _b.lower().endswith(".txt") else _b
+            _s = _stem[-1].lower() if _stem and _stem[-1].lower() in ("a", "b") else ""
+            try:
+                _ls = parse_layer_index(_p) or []
+            except Exception:
+                _ls = []
+            per_set[_s] = per_set.get(_s, 0) + len(_ls)
+            for _l in _ls:
+                _lid = _l.get("id")
+                if _lid in seen:
+                    continue
+                seen.add(_lid)
+                _l2 = dict(_l)
+                _l2["set"] = _s
+                layers.append(_l2)
         idx = idxs[0]
-        layers = parse_layer_index(idx)
         self._layers = layers
         if not layers:
             self.lbl_layers.setText(f"索引读取失败或没有图层：{os.path.basename(idx)}")
@@ -1417,8 +1440,14 @@ class PCLPetWizard(SiliconDialog):
         base = os.path.basename(idx)
         if not self.ed_prefix.text().strip():
             self.ed_prefix.setText(base[:-5] if base.endswith("a.txt") else os.path.splitext(base)[0])
-        self.lbl_layers.setText(f"{base}：共 {len(layers)} 个图层")
-        names = [f"{l['name']}（ID {l['id']}）" for l in layers]
+        _multi = len([k for k, v in per_set.items() if v]) > 1
+        self.lbl_layers.setText("%s：共 %d 个图层（%s）"
+                                % (base, len(layers),
+                                   "｜".join("%s 套 %d 个" % (k or "?", v)
+                                             for k, v in sorted(per_set.items()))))
+        names = [("%s%s（ID %s）" % ("[%s] " % l.get("set") if _multi and l.get("set") else "",
+                                     l.get("name") or "未命名", l["id"]))
+                 for l in layers]
         for cb in [self.cb_emo_default] + list(self._emo_combos.values()):
             cb.clear()
             cb.addItem("（不使用）", 0)
@@ -2698,18 +2727,58 @@ class PCLPetWizard(SiliconDialog):
                     _cur = sorted(_old_sets.keys())[0]
                 _merged = {k: dict(v or {}) for k, v in _old_sets.items()}
                 _blk = dict(_merged.get(_cur) or {})
-                for _k in ("emotions", "clothes", "decors"):
-                    if pt.get(_k):
-                        _blk[_k] = dict(pt[_k])
-                if pt.get("default_emotion"):
-                    _blk["default_emotion"] = pt["default_emotion"]
+                # ★ 2026-10-01：只接受**有效**的新值 —— 0 / 空 / 本套索引里根本没有的层号，
+                #   一律保留旧值。真事故：界面下拉框只有 a 套层号时，回填 b 套的 4132 选不中
+                #   → 变成 0 → 保存时 b 套六件衣服的层号全被写成 0 → 立绘退回默认。
+                try:
+                    from tool.portrait_outfit import _index_names as _inames
+                    _valid = {int(_k2) for _k2 in (_inames(_cur, s.get("id")) or {})}
+                except Exception:
+                    _valid = set()
+
+                def _ok_id(_v):
+                    try:
+                        _i = int(_v or 0)
+                    except Exception:
+                        return False
+                    if _i <= 0:
+                        return False
+                    return (not _valid) or (_i in _valid)
+
+                # 服装：逐件逐字段合并（新值有效才覆盖，旧名目一件不丢）
+                _old_cl = dict(_blk.get("clothes") or {})
+                _new_cl = {}
+                for _n2, _c2 in (pt.get("clothes") or {}).items():
+                    _c2 = dict(_c2 or {})
+                    _oc = dict(_old_cl.get(_n2) or {})
+                    for _k2 in ("cloth", "hair"):
+                        if not _ok_id(_c2.get(_k2)) and _ok_id(_oc.get(_k2)):
+                            _c2[_k2] = _oc[_k2]
+                    _new_cl[_n2] = _c2
+                for _n2, _oc in _old_cl.items():
+                    _new_cl.setdefault(_n2, dict(_oc or {}))
+                if _new_cl:
+                    _blk["clothes"] = _new_cl
+                # 表情 / 装饰：同样只接受有效值
+                for _kind in ("emotions", "decors"):
+                    _old_d = dict(_blk.get(_kind) or {})
+                    _new_d = {}
+                    for _n2, _v2 in (pt.get(_kind) or {}).items():
+                        _new_d[_n2] = int(_v2) if _ok_id(_v2) else int(_old_d.get(_n2) or 0)
+                    for _n2, _v2 in _old_d.items():
+                        _new_d.setdefault(_n2, int(_v2 or 0))
+                    if _new_d:
+                        _blk[_kind] = _new_d
+                _de = str(pt.get("default_emotion") or "")
+                if _de and _ok_id((_blk.get("emotions") or {}).get(_de)):
+                    _blk["default_emotion"] = _de
                 _merged[_cur] = _blk
                 pt["sets"] = _merged                     # 保持 dict：运行时优先用它
                 # 顶层兼容表也用原来那份，避免 a/b 混在一张表里
                 for _k in ("clothes", "emotions", "decors"):
                     if _old.get(_k):
                         pt[_k] = dict(_old[_k])
-                print(f"[Wizard] ℹ 保留多套立绘表（只更新 {_cur} 套，其余原样）")
+                print(f"[Wizard] ℹ 保留多套立绘表（只更新 {_cur} 套；0/非法层号不覆盖旧值）")
             s["portrait"] = pt
         # 单一音色 → 情绪列表
         if s.get("short_voice_single"):

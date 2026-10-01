@@ -336,6 +336,16 @@ if __name__ == "__main__":
                     if not getattr(pet, "_startup_greeted", False):
                         pet._startup_greeted = True
 
+                        def _tts_ready_now():
+                            """短语音 TTS 现在能出声吗（local 模式看 GPT-SoVITS 9880 是否在）"""
+                            for _mod in ("chat", "tool.chat"):
+                                try:
+                                    _m = __import__(_mod, fromlist=["_gpt_sovits_service_ready"])
+                                    return bool(_m._gpt_sovits_service_ready(timeout=1.0))
+                                except Exception:
+                                    continue
+                            return False
+
                         def _say_hello():
                             try:
                                 from tool import care as _care
@@ -345,22 +355,48 @@ if __name__ == "__main__":
                                 _mode = _care.startup_greeting_mode()
                                 if _mode == "off":
                                     print("[AIpet] 开机问候：已按设置关闭（startup_greeting_mode=off）")
-                                elif _mode == "voice":
+                                    return
+                                if _mode == "voice":
                                     _vp = _care.startup_greeting_voice()
                                     if _vp and os.path.exists(_vp):
                                         from classes.murasame_class import play_voice_wav as _play_wav
                                         _play_wav(_vp)
                                         print("[AIpet] 开机问候：播放指定语音 %s" % os.path.basename(_vp))
-                                    elif _vp:
-                                        print("[AIpet] 开机问候：语音文件不存在（%s）→ 这次不播" % _vp)
-                                    else:
-                                        print("[AIpet] 开机问候：没配 startup_greeting_voice → 不播"
-                                              "（想让她开机说句话就在设置里填一条语音；"
-                                              "想恢复「模型自己说」把 startup_greeting_mode 设成 chat）")
-                                else:      # chat：老行为（需要短语音 TTS 已就绪）
-                                    _p = _care.startup_line(getattr(pet, "pet_name", "我"))
-                                    if _p:
+                                        return
+                                    if _vp:
+                                        print("[AIpet] 开机问候：语音文件不存在（%s）" % _vp)
+                                    # ★ 2026-10-01 修复：以前这里"没配语音 = 什么都不播"，
+                                    #   用户感受就是"开机不打招呼"。改成**自动退回让模型自己说**
+                                    #   （想彻底关掉就把 startup_greeting_mode 设成 off）。
+                                    print("[AIpet] 开机问候：没配 startup_greeting_voice → "
+                                          "自动改用「模型自己说」（关掉请把 startup_greeting_mode 设为 off）")
+                                    _mode = "chat"
+                                # chat：⚠ 开机那几十秒 GPT-SoVITS 还在加载模型，这时候直接说
+                                #   必然失败（上游当初改成默认不说话就是这个原因）→ 先等语音服务就绪
+                                _p = _care.startup_line(getattr(pet, "pet_name", "我"))
+                                if not _p:
+                                    return
+                                _tries = {"n": 0}
+
+                                def _try_greet():
+                                    try:
+                                        _tries["n"] += 1
+                                        if not _tts_ready_now():
+                                            if _tries["n"] <= 50:          # 3 秒一次，最多等 150 秒
+                                                if _tries["n"] in (1, 5, 20, 40):
+                                                    print("[AIpet] 开机问候：等语音服务就绪…（第 %d 次探测）"
+                                                          % _tries["n"])
+                                                QTimer.singleShot(3000, _try_greet)
+                                            else:
+                                                print("[AIpet] 开机问候：语音服务一直没就绪 → "
+                                                      "这次跳过问候（不影响正常聊天）")
+                                            return
                                         pet.start_thread(_p, role="system", t=True, no_act=True)
+                                        print("[AIpet] 开机问候：已让角色打招呼")
+                                    except Exception as _e2:
+                                        print(f"[AIpet] ⚠ 开机问候失败: {_e2}")
+
+                                _try_greet()
                             except Exception as _e:
                                 print(f"[AIpet] ⚠ 启动问候失败: {_e}")
 
