@@ -697,3 +697,18 @@ def base_bg_color() -> QColor:
 # （用户报的「立绘工坊以及其连带的东西好多都出现了看不清字的阴间配色」）。
 # 这里不写死替换色，而是**按当前主题底板算对比度**，浅底自动压暗、深底自动提亮，
 # 用户自选「启动器底色」(ui_bg_color) 时也跟着对。
+
+
+
+
+def secondary_text() -> QColor:
+    """次级/提示文字的**可读**版本（浅色主题下会自动比 Gray2 更深）。
+
+    深色主题里 Gray2 本来就够（实测 6.6:1+）→ 原样返回，观感不变。
+    """
+    try:
+        if rel_luminance(QColor(Color8)) < 0.25:      # 深色主题：Gray2 已经够亮
+            return QColor(Gray2)
+        return readable_on(Gray2, _FILM_WORST_BG, 4.5)
+    except Exception:
+        return QColor(Gray2)
