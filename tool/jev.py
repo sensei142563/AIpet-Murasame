@@ -223,7 +223,12 @@ def score(state, instructions: str, levels, cfg=None, timeout=None, qkey: str = 
     lv = [str(x) for x in (levels or [])]
     if not lv:
         return None, 0.0
-    q = {"type": "score", "instructions": instructions, "criteria": lv}
+    # 后端形状不同：本地 NanoJev 的 score 要**有序数组**；云端官方要**映射**（等级 → 说明）
+    if is_local():
+        criteria = lv
+    else:
+        criteria = {x: ("等级「%s」" % x) for x in lv}
+    q = {"type": "score", "instructions": instructions, "criteria": criteria}
     ans = _first(_answers_map(_ask(state, qkey, q, cfg, timeout)), [qkey])
     if ans is None:
         return None, 0.0
@@ -242,6 +247,17 @@ def yes_no(state, instructions: str, cfg=None, timeout=None, qkey: str = "yn"):
         ans = _first(_answers_map(_ask(state, qkey, q, cfg, timeout)), [qkey])
         if ans is None:
             return None, 0.0
+        # 实测形状里常常只给 probabilities（没有 value/choice）→ 先按 true/false 比大小
+        probs = ans.get("probabilities") if isinstance(ans, dict) else None
+        if isinstance(probs, dict) and probs:
+            def _num(x):
+                try:
+                    return float(x)
+                except (TypeError, ValueError):
+                    return 0.0
+            t = _num(probs.get("true", probs.get("yes", 0.0)))
+            f = _num(probs.get("false", probs.get("no", 0.0)))
+            return ("yes" if t >= f else "no"), (t if t >= f else f)
         val, conf = _value_conf(ans)
         if val is None:
             return None, 0.0
