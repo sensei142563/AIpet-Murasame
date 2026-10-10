@@ -21,7 +21,7 @@ def now_time():
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     return now
 
-# ⚠ 这里原来是 get_config(...)["local_api"]["ollama"] 这种双层下标，而且**在模块导入期**执行：
+# ⚠ 这里原来是 get_config(...).get("local_api")["ollama"] 这种双层下标，而且**在模块导入期**执行：
 #   配置存在但少键（老配置/手删键/精简配置）→ KeyError → tool.chat 导入失败 → 桌宠起不来。
 #   兜底值取 config.example.json 里的本地代理地址（见交接文档 §27.8）。
 _cfg0 = get_config("./config.json")

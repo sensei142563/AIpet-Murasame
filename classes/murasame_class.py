@@ -5183,7 +5183,7 @@ class Murasame(QLabel):
                 #   别的方格里根本没有这个变量）→ NameError → 被 except 吞掉 →
                 #   立绘高度比例**掉回全局默认 0.8**。pet.json 里没写 display_2d.height_ratio
                 #   的角色（例如刚用向导建的角色）会因此比设定的大一圈 —— "调了立绘大小不对劲"。
-                _ratio = num(self._pet_cfg.get("model", {}).get("portrait_height_ratio"),
+                _ratio = num(_pet_cfg.get("model", {}).get("portrait_height_ratio"),
                                DEFAULT_PORTRAIT_SCREEN_RATIO, 0.10, 0.95)
             except Exception:
                 _ratio = DEFAULT_PORTRAIT_SCREEN_RATIO

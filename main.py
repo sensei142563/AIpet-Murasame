@@ -827,11 +827,11 @@ if __name__ == "__main__":
             print("[Live2D] 模型位置已重置 offset=(0,0)")
             return True
         elif key == QtKey.Key_Comma:
-            pet._live2d_font_scale = round(max(0.05, pet._live2d_font_scale - 0.05), 3); changed = True
+            pet._live2d_font_scale = round(max(0.10, pet._live2d_font_scale - 0.05), 3); changed = True
         elif key == QtKey.Key_Period:
             pet._live2d_font_scale = round(pet._live2d_font_scale + 0.05, 3); changed = True
         elif key == QtKey.Key_F10:
-            pet._live2d_font_scale = round(max(0.05, pet._live2d_font_scale - 0.05), 3); changed = True
+            pet._live2d_font_scale = round(max(0.10, pet._live2d_font_scale - 0.05), 3); changed = True
         elif key == QtKey.Key_F11:
             pet._live2d_font_scale = round(pet._live2d_font_scale + 0.05, 3); changed = True
         elif key == QtKey.Key_F5:

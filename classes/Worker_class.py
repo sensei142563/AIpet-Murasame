@@ -734,7 +734,7 @@ class cloud_API_Worker(QThread):
         self.finished.emit(reply_list, portrait_list, history, portrait_history, voices, emotion_list)
 
 
-# ⚠ 屏幕索引：原来是**直接下标** `get_config(...)["screen_index"]` —— 配置里没这个键就
+# ⚠ 屏幕索引：原来是**直接下标** `get_config(...).get("screen_index")` —— 配置里没这个键就
 #   KeyError（而且是在模块导入期），写成 "abc" 也直接抛。越界/负数在截图线程里的后果
 #   见 ScreenWorker.run() 的注释（线程静默死掉 / 静默抓错屏）。
 screen_index = int(num(get_config("./config.json").get("screen_index"), 0, 0, 15))

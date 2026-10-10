@@ -710,7 +710,7 @@ def get_live2d_display(pet_id: str = None) -> dict:
         "live2d_scale": (0.10, 4.00),
         "live2d_offset_x": (-800.0, 800.0),
         "live2d_offset_y": (-800.0, 800.0),
-        "live2d_font_scale": (0.05, 3.00),
+        "live2d_font_scale": (0.10, 3.00),
         # interaction 段（摸头/对话交互区，都是相对窗口的比例）
         "head_top": (0.0, 1.0),
         "head_bottom": (0.0, 1.0),

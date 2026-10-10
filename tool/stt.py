@@ -125,7 +125,7 @@ _HF_CACHE_READY = _prepare_hf_env(stt_model)
 from faster_whisper import WhisperModel
 from tool.config import get_config
 
-stt_model = get_config("./config.json")["stt_model"]
+stt_model = get_config("./config.json").get("stt_model")
 
 # ===== 模型单例缓存：一个进程只加载一次（large-v3 加载需数十秒 + 数 GB 内存，
 #       旧实现每次识别都新建模型，QQ 收到语音时会把收包线程卡死）=====
