@@ -1573,3 +1573,5 @@ ollama pull qwen2.5vl:7b  # 如需本地屏幕识别
 ---
 
 ### ⭐ 如果觉得有用，请点个 Star！
+
+**Jev（可选）**：装上 [Jev](https://github.com/typesafe-ai) 的 `TYPESAFE_API_KEY` 环境变量后（`set TYPESAFE_API_KEY=...` / `export TYPESAFE_API_KEY=...`），QQ 侧「选哪个表情包」会改由 Jev 从当前角色 `biaoqingbao/` 的文件名里挑一个（置信度 < 0.5 就不发）。**不设置环境变量则完全不生效、也不发起任何请求**，行为与以前一致。
