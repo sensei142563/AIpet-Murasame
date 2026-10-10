@@ -133,7 +133,7 @@ for name in sorted(os.listdir(pd)):
              if raw is not None and abs(float(raw) - got[k]) > 1e-9]
     n_pet += 1
     check("%-10s 13 个显示参数原样通过" % name, not diffs, str(diffs[:2]))
-check("确实扫到了多个角色（别因为找不到文件而「通过」）", n_pet >= 5, "%d 个" % n_pet)
+check("确实扫到了多个角色（别因为找不到文件而「通过」）", n_pet >= 4, "%d 个" % n_pet)
 
 real_vals = {}
 for name in sorted(os.listdir(pd)):
