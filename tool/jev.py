@@ -170,15 +170,16 @@ def _value_conf(ans):
         val = ans.get("chosen", ans.get("choice_id", ans.get("selection")))
     if isinstance(val, dict):
         val = val.get("choice", val.get("value", val.get("label"), val.get("id")))
-    conf = ans.get("confidence", ans.get("score", ans.get("probability", 0.0)))
+    # 置信度：优先显式字段；没有就用"被选中那一项的概率"（本地 NanoJev 实测就是这种形状）
+    conf = None
+    for _k in ("confidence", "score", "probability"):
+        if _k in ans and ans[_k] is not None:
+            conf = ans[_k]
+            break
     if conf is None:
-        # 有的实现只给完整分布：取被选中的那一项概率当置信度
         probs = ans.get("probabilities") or ans.get("distribution")
         if isinstance(probs, dict) and val is not None:
-            try:
-                conf = float(probs.get(str(val), 0.0))
-            except (TypeError, ValueError):
-                conf = 0.0
+            conf = probs.get(str(val), 0.0)
         else:
             conf = 0.0
     try:
