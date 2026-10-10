@@ -721,7 +721,7 @@ def chat_once(user_text: str, use_sticker: bool = True, vision_desc: str = None,
                 _state = (user_text or "") + "\n" + (reply_text or "")
                 _name, _conf = _jev_choose(
                     state=_state, options=stickers,
-                    question="这条回复最该配哪个表情包？只从给定文件名里选一个。",
+                    instructions="这条回复最该配哪个表情包？只从给定文件名里选一个。",
                     cfg=getattr(_cfgmod, "CONFIG", None), timeout=4.0)
                 if _name and _conf >= 0.5:      # 置信度不够就不发（宁可少发，也不乱发）
                     sticker = _name

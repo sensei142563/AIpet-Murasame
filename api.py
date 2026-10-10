@@ -32,7 +32,7 @@ def jev_choose_sync(state, options, question, timeout: float = 4.0):
         if not available(None):
             return {"name": None, "confidence": 0.0, "reason": "no key"}
         name, conf = choose(state=str(state), options=opts,
-                            question=str(question or "从给定选项里选一个。"),
+                            instructions=str(question or "从给定选项里选一个。"),
                             cfg=None, timeout=float(timeout or 4.0))
         return {"name": name, "confidence": float(conf or 0.0)}
     except Exception as e:
