@@ -299,11 +299,21 @@ class InferRequest(BaseModel):
     text: str
     ref_audio: str = None
     ref_text: str = None
+    pet: str = None
     speed: float = 1.0
 
 
 @app.post("/infer")
 async def infer(req: InferRequest):
+    # pet：由电脑侧按角色 pet.json 的 long_ref_audio/long_ref_text 解析（手机不猜电脑路径）
+    _pet = getattr(req, "pet", None)
+    if _pet:
+        try:
+            _pa, _pt = get_long_ref(_pet)
+            req.ref_audio = req.ref_audio or str(_pa)
+            req.ref_text = req.ref_text or _pt
+        except Exception as _e:
+            print("[F5TTS] pet 解析失败 " + str(_pet) + ": " + str(_e))
     """中文 TTS 合成，返回 wav 音频流"""
     try:
         if not req.text or not req.text.strip():
