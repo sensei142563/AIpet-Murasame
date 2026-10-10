@@ -9,13 +9,46 @@ from typing import List, Dict, Optional, TYPE_CHECKING
 import aiohttp
 import uvicorn
 from fastapi import FastAPI, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 
 from tool.config import enum_of, get_config
 from pets.pet_registry import get_prompt_path
 
 # ============== App ==============
 app = FastAPI()
+
+
+# ── Jev（TypeSafe "System One"）───────────────────────────────────────────────
+# 只服务**封闭、可验证**的判断（如"从角色 biaoqingbao/ 的文件名里挑一个"）。
+# 手机端通过 POST /jev/choose 调用本机这一层，因此手机侧不需要能访问 TypeSafe
+# （TypeSafe 对部分地区返回 HTTP 451，本机有代理即可）。
+def jev_choose_sync(state, options, question, timeout: float = 4.0):
+    """同步实现，便于离线单测。任何异常/无 key 都返回 name=None，调用方保持原行为。"""
+    try:
+        opts = [str(o) for o in (options or [])]
+        if not state or not opts:
+            return {"name": None, "confidence": 0.0, "reason": "no state/options"}
+        from tool.jev import available, choose
+        if not available(None):
+            return {"name": None, "confidence": 0.0, "reason": "no key"}
+        name, conf = choose(state=str(state), options=opts,
+                            question=str(question or "从给定选项里选一个。"),
+                            cfg=None, timeout=float(timeout or 4.0))
+        return {"name": name, "confidence": float(conf or 0.0)}
+    except Exception as e:
+        return {"name": None, "confidence": 0.0, "reason": type(e).__name__}
+
+
+@app.post("/jev/choose")
+async def jev_choose(request: Request):
+    """手机端调用：POST {state, options[], question?, timeout?} → {name, confidence, reason?}"""
+    try:
+        data = await request.json()
+    except Exception:
+        return JSONResponse({"name": None, "confidence": 0.0, "reason": "bad json"})
+    out = jev_choose_sync(data.get("state"), data.get("options"), data.get("question"),
+                          data.get("timeout", 4.0))
+    return JSONResponse(out)
 
 # Upstream service endpoints
 OLLAMA_UPSTREAM_URL = os.getenv("OLLAMA_UPSTREAM_URL", "http://localhost:11434/api/generate")
