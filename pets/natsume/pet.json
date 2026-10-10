@@ -43,6 +43,7 @@
   "prefix": "ナツメ",
   "sets": {
    "a": {
+   "decor_rules": [],
     "clothes": {
      "旗袍外套": {
       "cloth": 5240,
@@ -134,6 +135,12 @@
     }
    },
    "b": {
+    "decor_rules": [
+     {
+      "decor": "嫌弃阴影",
+      "emotion": "嫌弃"
+     }
+    ],
     "clothes": {
      "旗袍外套": {
       "cloth": 4085,
