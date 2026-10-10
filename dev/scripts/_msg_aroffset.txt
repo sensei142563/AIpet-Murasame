@@ -1,0 +1,10 @@
+fix(ar): AR 取景改用布局级 offset（graphicsLayer 对 SurfaceView 无效）
+
+发现：AR 里模型位置完全不受 graphicsLayer(translationY) 影响 —— dy 从 90 一路试到 2300，
+模型始终只在画面顶端露出一条。原因是 Live2D 画在 GLSurfaceView（SurfaceView）上，
+其内容由系统在视图画布之外合成，Compose 的 graphicsLayer 只改变视图画布变换，动不了 surface。
+
+改法：改成布局级 Modifier.fillMaxSize().offset(y = dy.dp) —— 布局变化会真正移动 surface。
+同时用一个对照实验验证：dy=330dp 与 dy=0 各截图一次，比较模型像素重心是否移动。
+
+（另：此前的像素标定被相机画面里的白色桌面骗了，本次测量已收紧为只认发丝偏绿色。）

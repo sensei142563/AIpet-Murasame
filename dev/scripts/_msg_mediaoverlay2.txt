@@ -1,0 +1,13 @@
+fix(ar): 给 GL 表面补回 MediaOverlay + 透明（模型此前被相机表面盖住）
+
+定位过程：连续对照发现模型位置对 graphicsLayer 与布局 offset 都无反应，
+且始终只在画面**最顶端**露出一条。结合"相机预览覆盖不到的地方才看得见"这一现象，
+判断真正原因是：GL 表面（SurfaceView）位于**相机预览表面之下**，被盖住了 ——
+之前 overlay 的透明与 Z 序设置（setZOrderOnTop/TRANSLUCENT 那段）在某次失败回滚中被一并冲掉。
+
+本次在 GLSurfaceView(c).apply 内补入：
+    if (overlay) { setZOrderMediaOverlay(true); holder.setFormat(TRANSLUCENT) }
+用 MediaOverlay 而非 OnTop：MediaOverlay 让 GL 表面盖在相机表面之上，同时仍留在应用窗口内，
+位置会跟随视图布局（OnTop 会变成独立顶层窗口，布局类手段对它无效）。
+
+验证：assembleRelease 通过并装机，AR 截图 dev/shots/ar_mediaoverlay_final.png。

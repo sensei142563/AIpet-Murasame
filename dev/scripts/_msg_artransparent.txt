@@ -1,0 +1,9 @@
+fix(ar): 让 AR 里的 Live2D 表面真正透明（去掉黑底）
+
+上一步换成 setZOrderMediaOverlay 之后，模型整身终于显示在实景之上，
+但出现一块**不透明的黑底**：GLSurfaceView 默认的 EGL 配置没有 alpha 通道。
+
+本次在 overlay 时补上 setEGLConfigChooser(8, 8, 8, 8, 16, 0)，
+并把 AR 的初始 offset 归零（dy = 0，居中），归位同步。
+
+验证：assembleRelease 通过并装机，AR 截图 dev/shots/ar_transparent.png。

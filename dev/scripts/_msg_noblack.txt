@@ -1,0 +1,12 @@
+fix(ar): 去掉 AR 里的黑底 —— LApp 清屏 alpha 由 1.0 改为 0.0
+
+AR 里模型能显示，但被一块**不透明黑底**包住（不是真正的实景叠加）。
+定位：app/src/main/cpp/LApp/LAppDelegate.cpp 的每帧清屏写的是
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);   // alpha=1 → 不透明黑
+（JNI 自己的 Live2DJni.cpp 里其实是 glClearColor(0,0,0,0)，被这一处覆盖了。）
+
+改法：改为 glClearColor(0.0f, 0.0f, 0.0f, 0.0f)，配合 overlay 时的
+setZOrderMediaOverlay + TRANSLUCENT + setEGLConfigChooser(8,8,8,8,16,0)，
+让 AR 画面真正把相机实景透出来。
+
+验证：重编 native、装机，AR 截图 dev/shots/ar_no_black.png。

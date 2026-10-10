@@ -1,0 +1,11 @@
+fix(ar): overlay 改用 setZOrderMediaOverlay（不再用 setZOrderOnTop）
+
+现象与推断：AR 里模型位置对 graphicsLayer(translationY) 与布局级 offset 都无反应
+（dy 从 0 试到 2300，模型始终只在顶端露一条）。原因是 overlay=true 时用了
+setZOrderOnTop(true) —— 那会把 surface 提升为**独立的顶层窗口图层**，
+其位置由系统摆放、不跟随视图布局，因此布局类手段都无效。
+
+改法：改用 setZOrderMediaOverlay(true)。它同样让 GL 表面盖在相机预览之上，
+但**仍留在应用窗口内**，位置会跟随视图布局 —— 这样 offset 才能真正移动模型。
+
+验证：同样做 dy=0 与 dy=330 的对照截图（dev/shots/ar_mediaoverlay_dy*.png）。

@@ -1,0 +1,10 @@
+feat(jev/phone): 手机端 Jev 日志（files/jev.log + logcat）
+
+用户要求"往手机里写一行日志"，以便在手机上确认这一次确实用了电脑端 Jev。
+本次只改 JevClient.kt：
+  - load(ctx) 记住 appCtx；新增 log(msg)：写 files/jev.log（超过 256KB 重开）并 Log.i("JevClient")
+  - choose() 记录：跳过原因（base 为空 / 候选为空 / state 为空）、请求地址与候选数、
+    返回不可用时的原始片段、以及选中项与置信度；异常也记录
+全部写日志操作都包在 runCatching 里，绝不影响主流程。
+
+验证：assembleRelease 通过并装机。

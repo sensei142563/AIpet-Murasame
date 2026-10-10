@@ -1,0 +1,12 @@
+feat(voice): VoiceClient 增加可取证日志（每个失败点都记原因）
+
+用户反馈"朗读还是系统语音"，而电脑端 F5 服务健康（health 0.17s、真合成 6.26s、输出合法 RIFF）。
+手机侧此前没有任何语音日志，无法判断 speak() 为什么返回 false。本次补齐：
+  - VoiceClient.log()：写外部可读 getExternalFilesDir()/voice.log（adb pull 可取）、
+    logcat 标签 VoiceClient、以及 App 的 LogBus；
+  - speak() 的每个 return false 之前都记录原因：base 为空、HTTP 状态码、响应体为空、
+    响应过小（附带响应片段）、不是 RIFF（附带头部字节）、合成/落盘失败；
+  - 成功播放时记录音频字节数。
+（同时补 @Volatile appCtx 并在 load() 中赋值，供日志使用。）
+
+验证：编译装机后触发一次朗读，pull voice.log 查看具体失败原因。

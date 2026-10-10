@@ -1,0 +1,7 @@
+fix(jev): 放宽 Jev 客户端超时（读 4s→15s，连 1.5s→2.5s）
+
+手机端日志显示请求确实发到了电脑（api 侧记录 POST /jev/choose 200 OK），
+但客户端 4 秒就 SocketTimeoutException 放弃 —— 本地 NanoJev 首次推理 + 首次
+HTTP 建连在真机上会超过 4 秒。放宽为读 15 秒、连 2.5 秒，让答案能真正落地。
+
+（配合上一提交的 network_security_config 明文放行，与 USB 反向转发 adb reverse。）

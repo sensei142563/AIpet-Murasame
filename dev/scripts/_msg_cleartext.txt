@@ -1,0 +1,16 @@
+fix(net): 允许到本机回环的明文 HTTP（Jet 一直发不出去的最后一道门）
+
+手机端日志（外部可读副本，adb pull 取得）已经打到最里面一层：
+    chatOnce 进入: useSticker=true 候选=20 baseUrl='http://127.0.0.1:28565'
+    请求 http://127.0.0.1:28565/jev/choose 候选=20 问：…
+    异常：UnknownServiceException CLEARTEXT communication to 127.0.0.1 not permitted by network security policy
+
+即：地址加载已修好、请求已发出，但被 Android 的网络安全策略拦下（明文 HTTP）。
+修复：
+  app/src/main/res/xml/network_security_config.xml —— 仅对 127.0.0.1 / localhost / 10.0.2.2
+  放开 cleartextTrafficPermitted（不整体打开明文），并在 manifest 的 <application> 上引用。
+
+配合既有的 USB 反向转发（adb reverse tcp:28565 → 手机用 127.0.0.1 访问电脑 api.py）。
+
+验证：编译安装后真机发消息，确认手机日志出现"选中「…」置信度=…"、电脑端 api 日志出现
+POST /jev/choose、NanoJev 日志出现 POST /api/evaluate。

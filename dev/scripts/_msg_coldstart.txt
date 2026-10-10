@@ -1,0 +1,13 @@
+fix(jev): 冷启动即加载电脑端地址（此前只在设置页 load，导致 /jev/choose 从不发出）
+
+排查结论：JevClient.baseUrl / VoiceClient.baseUrl 只在 SettingsPage 里通过
+JevClient.load()/VoiceClient.load() 赋值，因此**冷启动后若没进过设置页，baseUrl 一直是空串**，
+choose() 在第一行 `if (base.isEmpty())` 就返回 —— 一个请求都不发，这就是"手机聊天有回复但
+电脑端 api 日志里从没出现 /jev/choose"的原因。
+
+修复：
+  App.onCreate() 里 runCatching { JevClient.load(this); VoiceClient.load(this) }
+另外把 Jev 的日志同时写入 App 自己的 LogBus（之前只写 logcat 与私有文件，
+release 版无法 run-as 读取，用户在 App 里也看不到）。
+
+验证：assembleRelease 通过并装机；随后用真机发一条消息，确认电脑端 api 日志出现 /jev/choose。
