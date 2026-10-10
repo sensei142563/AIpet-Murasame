@@ -181,6 +181,70 @@ def test_yes_no_uses_two_options():
         _clean()
 
 
+def test_local_nanojev_shape():
+    """指向本地 NanoJev（endpoint 含 /api/evaluate）时：
+       ★ 报文必须是 {"states":[{id,state,questions}]}（顶层只能有 states）
+       ★ choice 的 criteria 值必须**非空**（NanoJev 会 raise）
+       ★ 无需 API key（available() 为真）
+       ★ 能解析 {"states":[{"answers":{...}}]} 这种响应
+    """
+    _clean()
+    os.environ[jev.ENV_BASE] = "http://127.0.0.1:8765/api/evaluate"
+    seen = {}
+
+    def fake_post(payload, key, timeout=6.0):
+        seen["payload"] = payload
+        seen["key"] = key
+        return {"states": [{"id": "s1", "answers": {
+            "pick": {"chosen": "哭哭", "probabilities": {"哭哭": 0.71, "偷看你": 0.29}}}}]}
+
+    real = jev._post
+    jev._post = fake_post
+    try:
+        assert jev.is_local() is True
+        assert jev.available({}) is True            # 本地不需要 key
+        val, conf = jev.choose("主人不理我", ["哭哭", "偷看你"], "配哪个表情", cfg={})
+        p = seen["payload"]
+        assert set(p) == {"states"}, p.keys()
+        st = p["states"][0]
+        assert set(st) == {"id", "state", "questions"}, st.keys()
+        q = st["questions"]["pick"]
+        assert q["type"] == "choice" and q["instructions"] == "配哪个表情"
+        assert all(isinstance(v, str) and v.strip() for v in q["criteria"].values()), q["criteria"]
+        assert set(q["criteria"]) == {"哭哭", "偷看你"}
+        assert val == "哭哭" and abs(conf - 0.71) < 1e-6
+    finally:
+        jev._post = real
+        _clean()
+
+
+def test_local_score_uses_list_criteria():
+    _clean()
+    os.environ[jev.ENV_BASE] = "http://127.0.0.1:8765/api/evaluate"
+    seen = {}
+    jev._post = lambda p, key, timeout=6.0: (seen.update(q=p["states"][0]["questions"]["score"]),
+                                            {"states": [{"answers": {"score": {"value": "高", "probability": 0.6}}}]})[1]
+    try:
+        v, c = jev.score("s", "有多急", ["低", "中", "高"], cfg={})
+        assert isinstance(seen["q"]["criteria"], list) and seen["q"]["criteria"] == ["低", "中", "高"]
+        assert v == "高"
+    finally:
+        _clean()
+
+
+def test_local_boolean_yes_no():
+    _clean()
+    os.environ[jev.ENV_BASE] = "http://127.0.0.1:8765/api/evaluate"
+    seen = {}
+    jev._post = lambda p, key, timeout=6.0: (seen.update(q=p["states"][0]["questions"]["yn"]),
+                                            {"states": [{"answers": {"yn": {"probabilities": {"true": 0.8, "false": 0.2}}}}]})[1]
+    try:
+        v, c = jev.yes_no("s", "要不要联网", cfg={})
+        assert seen["q"]["type"] == "boolean"
+        assert v == "yes" and abs(c - 0.8) < 1e-6
+    finally:
+        _clean()
+
 if __name__ == "__main__":
     fails = 0
     for name, fn in sorted(globals().items()):

@@ -1,35 +1,34 @@
-"""Jev（TypeSafe "System One"）薄客户端 —— 只用于**封闭、可验证、高频**的判断节点。
+"""Jev 判断层薄客户端 —— **双契约**，可指向云端或本地。
 
-报文形状**照官方 API 规格**（docs.typesafe.ai/api，2026-10 抓取）：
+支持两种后端（按 endpoint 自动识别，调用方无感）：
 
-    POST https://api.typesafe.ai/v1/systemone
-    Authorization: Bearer <API_KEY>
-    {
-      "model": "jev-latest",
-      "state": <string | object | array>,          # 被判断的内容
-      "questions": {                               # ★ 映射（map），不是数组
-         "<key>": { "type": "choice", "instructions": "...",
-                    "criteria": { "<选项>": "<描述>" } },   # 每个 choice 最多 255 个选项
-         "<key2>": { "type": "score", "instructions": "...", "criteria": { ... } }
-      }
-    }
+  1) 云端 TypeSafe "System One"（官方规格，docs.typesafe.ai/api）
+     POST https://api.typesafe.ai/v1/systemone     Authorization: Bearer <API_KEY>
+     { "model": "jev-latest", "state": <str|obj|arr>,
+       "questions": { "<qid>": { "type": "choice"|"score"|"boolean",
+                                 "instructions": "...", "criteria": {...} } } }
 
-答案按**同一个 key** 返回；choice/score 额外带 confidence（0~1，由概率分布推导）。
-错误码：401 = key 无效；422 = body 校验失败（例如缺 instructions/criteria）。
+  2) 本地开源复现 **NanoJev**（0.6B；scripts/predict_toy_decisions.py:validate_request 为准确契约）
+     POST http://127.0.0.1:8765/api/evaluate
+     { "states": [ { "id": "<唯一>", "state": <str|obj|arr>,
+                     "questions": { "<qid>": { "type": "choice"|"score"|"boolean",
+                                               "instructions": "...", "criteria": ... } } } ] }
+     硬约束：choice 的 criteria 是 **dict（2–255）且键值都必须非空字符串**；
+             score 的 criteria 是 **有序数组（2–10）**；boolean 的 criteria 可选（仅 false/true）；
+             顶层**只能有 states**（多一个键就报错）。
 
-为什么单独做一层：
-- Jev 不生成文本，只回答带类型的问题；适合"挑哪个表情包""这句是什么情绪""要不要联网"这类
-  封闭选择题，**不适合**写文案/总结/解释理由（那些仍应交给大语言模型）。
-- 官方是**云端 API**，且对部分地区返回 HTTP 451；因此本层的实现必须**可替换**：
-  调用方只认 choose()/score()/yes_no()，将来换成**本地开源复现**（如 NanoJev，0.6B）时，
-  把 _post 换成"本地推理"即可，调用点一行都不用改。
+识别方式：endpoint 里含 "/api/evaluate" → 本地 NanoJev 形状；否则官方形状。
+本地模式**不需要 API key**（available() 只看"有没有 key 或有没有配本地地址"）。
 
-设计约束（刻意为之）：
-1. **零新依赖**：只用标准库 urllib。
-2. **绝不抛异常**：任何失败退化成 (None, 0.0)。
-3. **答案必须落在候选集里**：否则视为失败（宁可不用，也不乱用）。
-4. **无 key 时一个请求都不发**：调用方按"没有判断"处理，行为与以前一致。
-5. **_post 可替换**：测试不需要网络与 key。
+为什么做成这样：调用点（电脑端 QQ 侧、api.py 的 /jev/choose、安卓 JevClient）只认
+choose()/score()/yes_no()，换后端只需改一个环境变量 TYPESAFE_BASE_URL，一行调用点都不用动。
+
+设计约束（沿用至今）：
+  1) 零新依赖（仅标准库 urllib）
+  2) 绝不抛异常：任何失败退化成 (None, 0.0)
+  3) 答案必须落在候选集里，否则视为失败（宁可不用，也不乱用）
+  4) 没配 key 且没配本地地址时**一个请求都不发**
+  5) _post 可替换 → 测试不需要网络与 key
 """
 
 from __future__ import annotations
@@ -40,24 +39,30 @@ import urllib.error
 import urllib.request
 
 __all__ = ["DEFAULT_API_URL", "API_URL", "DEFAULT_MODEL", "ENV_KEY", "ENV_BASE", "ENV_MODEL",
-           "endpoint", "api_key", "model_id", "available", "choose", "score", "yes_no"]
+           "endpoint", "is_local", "api_key", "model_id", "available",
+           "choose", "score", "yes_no"]
 
 DEFAULT_API_URL = "https://api.typesafe.ai/v1/systemone"
 API_URL = DEFAULT_API_URL          # 兼容旧引用；实际请求用 endpoint()
 DEFAULT_MODEL = "jev-latest"
 
 ENV_KEY = "TYPESAFE_API_KEY"
-ENV_BASE = "TYPESAFE_BASE_URL"     # 可选：代理/自建网关（区域被 451 拦时用）
-ENV_MODEL = "TYPESAFE_MODEL"       # 可选：覆盖模型 id
+ENV_BASE = "TYPESAFE_BASE_URL"     # 代理/自建网关/**本地 NanoJev 服务**都走这个
+ENV_MODEL = "TYPESAFE_MODEL"       # 仅云端用
 
 DEFAULT_TIMEOUT = 6.0
-MAX_CHOICES = 255                  # 官方限制：每个 choice 最多 255 个选项
+LOCAL_TIMEOUT = 120.0              # 本地 CPU 推理慢，给足时间
+MAX_CHOICES = 255
 
 
 def endpoint() -> str:
-    """实际请求地址：默认官方；设了 TYPESAFE_BASE_URL 则用它（代理/自建网关）。"""
     v = (os.environ.get(ENV_BASE) or "").strip()
     return v if v else DEFAULT_API_URL
+
+
+def is_local() -> bool:
+    """指到本地 NanoJev 服务？（它只认 /api/evaluate 这个路径）"""
+    return "/api/evaluate" in endpoint()
 
 
 def model_id() -> str:
@@ -66,7 +71,6 @@ def model_id() -> str:
 
 
 def api_key(cfg=None) -> str:
-    """取 API key：环境变量优先，其次项目配置。取不到返回空串。"""
     k = (os.environ.get(ENV_KEY) or "").strip()
     if k:
         return k
@@ -78,48 +82,61 @@ def api_key(cfg=None) -> str:
 
 
 def available(cfg=None) -> bool:
-    """是否具备调用条件（有 key）。**不联网**。"""
-    return bool(api_key(cfg))
+    """能发请求吗：本地地址存在（无需 key）**或**有 key。不联网。"""
+    return bool(api_key(cfg)) or (is_local() and endpoint().startswith("http"))
 
 
 def _post(payload: dict, key: str, timeout: float = DEFAULT_TIMEOUT) -> dict:
-    """真正发请求。失败抛异常，由上层统一兜住。测试里会被替换。"""
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    req = urllib.request.Request(
-        endpoint(),
-        data=body,
-        method="POST",
-        headers={
-            "Content-Type": "application/json; charset=utf-8",
-            "Authorization": "Bearer " + key,
-            "User-Agent": "AIpet-Murasame/jev-client",
-        },
-    )
+    headers = {"Content-Type": "application/json; charset=utf-8",
+               "User-Agent": "AIpet-Murasame/jev-client"}
+    if key:
+        headers["Authorization"] = "Bearer " + key
+    req = urllib.request.Request(endpoint(), data=body, method="POST", headers=headers)
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         raw = resp.read().decode("utf-8", "replace")
     return json.loads(raw) if raw.strip() else {}
 
 
-def _ask(state, questions: dict, cfg=None, timeout: float = DEFAULT_TIMEOUT) -> dict:
-    """按官方规格组包并请求；返回原始响应（失败/不可用 → {}）。"""
+def _ask(state, qid: str, question: dict, cfg=None, timeout=None) -> dict:
+    """按当前 endpoint 组包并请求；返回**归一化后**的若干答案形状（失败 → {}）。"""
     key = api_key(cfg)
-    if not key or not questions or state is None or (isinstance(state, str) and not state.strip()):
+    if not available(cfg):
         return {}
-    payload = {"model": model_id(), "state": state, "questions": questions}
+    if state is None or (isinstance(state, str) and not state.strip()):
+        return {}
+    local = is_local()
+    if timeout is None:
+        timeout = LOCAL_TIMEOUT if local else DEFAULT_TIMEOUT
     try:
+        if local:
+            payload = {"states": [{"id": "s1", "state": state, "questions": {qid: question}}]}
+        else:
+            payload = {"model": model_id(), "state": state, "questions": {qid: question}}
         return _post(payload, key, timeout) or {}
     except Exception:
         return {}
 
 
 def _answers_map(data) -> dict:
-    """把响应稳妥地归一成 {key: answer_dict}。
+    """把两种后端的响应都归一成 {qid: answer}。
 
-    兼容几种可能形状：
-      {"answers": {"k": {...}}} / {"answers": [{"key": ..., ...}]} / {"results": ...} / {"outputs": ...}
+    云端可能：{"answers": {"q": {...}}} / {"answers": [{...}]} / {"results": ...} / {"outputs": ...}
+    本地则为：{"states": [{"id": "s1", "answers": {"q": ...}}]}
     """
     if not isinstance(data, dict):
         return {}
+    # 本地 NanoJev
+    if isinstance(data.get("states"), list):
+        out = {}
+        for st in data["states"]:
+            if not isinstance(st, dict):
+                continue
+            ans = st.get("answers")
+            if isinstance(ans, dict):
+                for k, v in ans.items():
+                    out[str(k)] = v if isinstance(v, dict) else {"value": v}
+        return out
     raw = data.get("answers")
     if raw is None:
         raw = data.get("results")
@@ -144,14 +161,26 @@ def _answers_map(data) -> dict:
     return out
 
 
-def _value_conf(ans: dict):
-    """从一个答案对象里取 (值, 置信度)。"""
+def _value_conf(ans):
+    """从答案对象里取 (值, 置信度)。兼容 value/answer/choice/label 与 chosen/choice_id。"""
     if not isinstance(ans, dict):
-        return (ans if isinstance(ans, str) else None), 0.0
+        return (ans if isinstance(ans, (str, int, float)) else None), 0.0
     val = ans.get("answer", ans.get("value", ans.get("choice", ans.get("label"))))
+    if val is None:
+        val = ans.get("chosen", ans.get("choice_id", ans.get("selection")))
     if isinstance(val, dict):
-        val = val.get("choice", val.get("value", val.get("label")))
-    conf = ans.get("confidence", ans.get("score", 0.0))
+        val = val.get("choice", val.get("value", val.get("label"), val.get("id")))
+    conf = ans.get("confidence", ans.get("score", ans.get("probability", 0.0)))
+    if conf is None:
+        # 有的实现只给完整分布：取被选中的那一项概率当置信度
+        probs = ans.get("probabilities") or ans.get("distribution")
+        if isinstance(probs, dict) and val is not None:
+            try:
+                conf = float(probs.get(str(val), 0.0))
+            except (TypeError, ValueError):
+                conf = 0.0
+        else:
+            conf = 0.0
     try:
         conf = float(conf)
     except (TypeError, ValueError):
@@ -160,24 +189,26 @@ def _value_conf(ans: dict):
 
 
 def _first(ans_map: dict, keys):
-    """按待选 key 列表取第一个命中的答案对象。"""
     for k in keys:
         if k in ans_map:
             return ans_map[k]
-    if len(ans_map) == 1:                      # 只有一个答案时，不管 key 名
+    if len(ans_map) == 1:
         return next(iter(ans_map.values()))
     return None
 
 
-def choose(state, options, instructions: str, cfg=None, timeout: float = DEFAULT_TIMEOUT,
-           qkey: str = "pick"):
+def _criteria_choice(options):
+    """choice 的 criteria：dict（键=候选名，值=描述）。**值必须非空**（NanoJev 硬约束）。"""
+    return {str(o): ("配「%s」的选项" % o) for o in options}
+
+
+def choose(state, options, instructions: str, cfg=None, timeout=None, qkey: str = "pick"):
     """从候选里选一个。返回 (选项, 置信度)；失败/候选外 → (None, 0.0)。"""
     opts = [str(o) for o in (options or [])][:MAX_CHOICES]
     if not opts:
         return None, 0.0
-    questions = {qkey: {"type": "choice", "instructions": instructions,
-                        "criteria": {o: "" for o in opts}}}
-    ans = _first(_answers_map(_ask(state, questions, cfg, timeout)), [qkey])
+    q = {"type": "choice", "instructions": instructions, "criteria": _criteria_choice(opts)}
+    ans = _first(_answers_map(_ask(state, qkey, q, cfg, timeout)), [qkey])
     if ans is None:
         return None, 0.0
     val, conf = _value_conf(ans)
@@ -186,15 +217,13 @@ def choose(state, options, instructions: str, cfg=None, timeout: float = DEFAULT
     return str(val), conf
 
 
-def score(state, instructions: str, levels, cfg=None, timeout: float = DEFAULT_TIMEOUT,
-          qkey: str = "score"):
-    """在给定等级上打分（官方 score 类型），返回 (值, 置信度)；失败 → (None, 0.0)。"""
+def score(state, instructions: str, levels, cfg=None, timeout=None, qkey: str = "score"):
+    """在给定等级上打分。**criteria 用有序数组**（NanoJev 硬约束）。返回 (值, 置信度)。"""
     lv = [str(x) for x in (levels or [])]
     if not lv:
         return None, 0.0
-    questions = {qkey: {"type": "score", "instructions": instructions,
-                        "criteria": {x: "" for x in lv}}}
-    ans = _first(_answers_map(_ask(state, questions, cfg, timeout)), [qkey])
+    q = {"type": "score", "instructions": instructions, "criteria": lv}
+    ans = _first(_answers_map(_ask(state, qkey, q, cfg, timeout)), [qkey])
     if ans is None:
         return None, 0.0
     val, conf = _value_conf(ans)
@@ -203,6 +232,31 @@ def score(state, instructions: str, levels, cfg=None, timeout: float = DEFAULT_T
     return val, conf
 
 
-def yes_no(state, instructions: str, cfg=None, timeout: float = DEFAULT_TIMEOUT):
-    """布尔判断，返回 ("yes"/"no"/None, 置信度)。"""
-    return choose(state, ["yes", "no"], instructions, cfg=cfg, timeout=timeout, qkey="yn")
+def yes_no(state, instructions: str, cfg=None, timeout=None, qkey: str = "yn"):
+    """布尔判断。云端用 choice(yes/no)，本地用 boolean（同样接受 yes/no 两种写法）。"""
+    local = is_local()
+    if local:
+        q = {"type": "boolean", "instructions": instructions,
+             "criteria": {"true": "是", "false": "否"}}
+        ans = _first(_answers_map(_ask(state, qkey, q, cfg, timeout)), [qkey])
+        if ans is None:
+            return None, 0.0
+        val, conf = _value_conf(ans)
+        if val is None:
+            return None, 0.0
+        s = str(val).strip().lower()
+        if s in ("true", "yes", "1", "是"):
+            return "yes", conf
+        if s in ("false", "no", "0", "否"):
+            return "no", conf
+        # 分布形态：比较 true/false 哪边大
+        probs = ans.get("probabilities") if isinstance(ans, dict) else None
+        if isinstance(probs, dict) and probs:
+            try:
+                t = float(probs.get("true", probs.get("yes", 0.0)))
+                f = float(probs.get("false", probs.get("no", 0.0)))
+                return ("yes" if t >= f else "no"), (t if t >= f else f)
+            except (TypeError, ValueError):
+                pass
+        return None, 0.0
+    return choose(state, ["yes", "no"], instructions, cfg=cfg, timeout=timeout, qkey=qkey)
