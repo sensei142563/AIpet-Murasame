@@ -58,6 +58,7 @@
   "qq_napcat_http": "http://127.0.0.1:6099",
   "qq_napcat_token": "",
   "qq_send_sticker": "true",
+  "typesafe_api_key": "",
   "qq_send_voice": "false",
   "qq_vision_enabled": "true",
   "qq_stt_enabled": "true",

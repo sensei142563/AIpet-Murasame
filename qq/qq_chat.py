@@ -711,6 +711,24 @@ def chat_once(user_text: str, use_sticker: bool = True, vision_desc: str = None,
     sticker_names = []
     if use_sticker and stickers:
         matches = re.findall(r"\[表情\s*[:：]\s*([^\]]+)\]", full_reply)
+
+        # [jev] 用 Jev 从候选表情包里挑一个（Jev 不生成文本，只做「从 N 个选项里选 1 个」这类封闭判断）。
+        #  ★ 无 TYPESAFE_API_KEY 时 available() 为假 → 本段完全不执行，行为与以前一字不变。
+        try:
+            from tool.jev import available as _jev_ok, choose as _jev_choose
+            if use_sticker and stickers and _jev_ok(cfg):
+                import config as _cfgmod
+                _state = (user_text or "") + "\n" + (reply_text or "")
+                _name, _conf = _jev_choose(
+                    state=_state, options=stickers,
+                    question="这条回复最该配哪个表情包？只从给定文件名里选一个。",
+                    cfg=getattr(_cfgmod, "CONFIG", None), timeout=4.0)
+                if _name and _conf >= 0.5:      # 置信度不够就不发（宁可少发，也不乱发）
+                    sticker = _name
+                    print(f"[jev] 表情包选择: {_name} (置信度 {_conf:.2f})")
+        except Exception:
+            pass        # Jev 只是加分项，任何问题都不影响原有流程
+
         for name in matches:
             name = name.strip()
             if name in stickers and name not in sticker_names:
