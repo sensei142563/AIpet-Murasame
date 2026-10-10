@@ -300,7 +300,8 @@ if files is None:
     # 手工兜底清单（git 不可用时）
     top_items = [
         "api.py", "build_launcher.py", "config.example.json", "download.py",
-        "icon.ico", "icon.png", "install.bat", "LICENSE", "main.py",
+        "icon.ico", "icon.png", "install.bat", "LICENSE", "COPYRIGHT.md",
+        "THIRD_PARTY_NOTICES.md", "third_party", "main.py",
         "prompt.txt", "README.md", "requirements.txt", "重启长语音服务.bat",
         "run.py", "run_launcher.py", "run_qq.py",
         "思源黑体Bold.otf", "启动QQ.bat", "启动桌宠.bat", "启动微信.bat",
