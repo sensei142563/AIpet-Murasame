@@ -29,13 +29,24 @@ import os
 import urllib.error
 import urllib.request
 
-__all__ = ["API_URL", "api_key", "available", "choose", "score", "yes_no"]
+__all__ = ["API_URL", "DEFAULT_API_URL", "ENV_BASE", "endpoint",
+           "api_key", "available", "choose", "score", "yes_no"]
 
-API_URL = "https://api.typesafe.ai/v1/systemone"
+# 官方地址。若所在区域被拦（TypeSafe 会对部分地区返回 HTTP 451 Unavailable For Legal Reasons），
+# 可以把 TYPESAFE_BASE_URL 指到一个**自己能访问的代理/自建网关**（形如 https://your-proxy/v1/systemone）。
+DEFAULT_API_URL = "https://api.typesafe.ai/v1/systemone"
+API_URL = DEFAULT_API_URL   # 兼容旧引用；实际请求请用 endpoint()
 DEFAULT_TIMEOUT = 6.0
 # 环境变量优先，其次项目配置（config.json 里的 typesafe_api_key）
 ENV_KEY = "TYPESAFE_API_KEY"
+ENV_BASE = "TYPESAFE_BASE_URL"   # 可选：代理/自建网关地址
 CFG_KEY = "typesafe_api_key"
+
+
+def endpoint() -> str:
+    """实际请求地址：默认官方；设了 TYPESAFE_BASE_URL 则用它（代理/自建网关）。"""
+    v = (os.environ.get(ENV_BASE) or "").strip()
+    return v if v else DEFAULT_API_URL
 
 
 def api_key(cfg=None) -> str:
@@ -59,7 +70,7 @@ def _post(payload: dict, key: str, timeout: float = DEFAULT_TIMEOUT) -> dict:
     """真正发请求。失败抛异常，由上层统一兜住。测试里会被替换掉。"""
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     req = urllib.request.Request(
-        API_URL,
+        endpoint(),
         data=body,
         method="POST",
         headers={

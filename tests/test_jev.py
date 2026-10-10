@@ -113,6 +113,33 @@ def test_score_bounds():
         os.environ.pop(jev.ENV_KEY, None)
 
 
+
+def test_endpoint_override():
+    """区域被 451 拦时，可用 TYPESAFE_BASE_URL 指向代理/自建网关。"""
+    os.environ.pop(jev.ENV_BASE, None)
+    assert jev.endpoint() == jev.DEFAULT_API_URL
+    os.environ[jev.ENV_BASE] = "https://my-proxy.example/v1/systemone"
+    try:
+        assert jev.endpoint() == "https://my-proxy.example/v1/systemone"
+        captured = {}
+
+        def fake_post(payload, key, timeout=6.0):
+            captured["url"] = jev.endpoint()
+            return {"answers": [{"answer": "哭哭", "confidence": 0.9}]}
+
+        os.environ[jev.ENV_KEY] = "k"
+        real = jev._post
+        jev._post = fake_post
+        try:
+            val, conf = jev.choose("s", ["哭哭"], "q", cfg={})
+            assert val == "哭哭"
+            assert captured["url"].startswith("https://my-proxy.example")
+        finally:
+            jev._post = real
+    finally:
+        os.environ.pop(jev.ENV_BASE, None)
+        os.environ.pop(jev.ENV_KEY, None)
+
 if __name__ == "__main__":
     # 自跑兜底（没有 pytest 时也能验证）
     fails = 0
@@ -126,3 +153,28 @@ if __name__ == "__main__":
                 print("   FAIL " + name + " -> " + type(e).__name__ + ": " + e)
     print("   自跑结果: %s" % ("全部通过 ✓" if fails == 0 else "%d 个失败 ✗" % fails))
     sys.exit(1 if fails else 0)
+def test_endpoint_override():
+    """区域被 451 拦时，可用 TYPESAFE_BASE_URL 指向代理/自建网关。"""
+    os.environ.pop(jev.ENV_BASE, None)
+    assert jev.endpoint() == jev.DEFAULT_API_URL
+    os.environ[jev.ENV_BASE] = "https://my-proxy.example/v1/systemone"
+    try:
+        assert jev.endpoint() == "https://my-proxy.example/v1/systemone"
+        captured = {}
+
+        def fake_post(payload, key, timeout=6.0):
+            captured["url"] = jev.endpoint()
+            return {"answers": [{"answer": "哭哭", "confidence": 0.9}]}
+
+        os.environ[jev.ENV_KEY] = "k"
+        real = jev._post
+        jev._post = fake_post
+        try:
+            val, conf = jev.choose("s", ["哭哭"], "q", cfg={})
+            assert val == "哭哭"
+            assert captured["url"].startswith("https://my-proxy.example")
+        finally:
+            jev._post = real
+    finally:
+        os.environ.pop(jev.ENV_BASE, None)
+        os.environ.pop(jev.ENV_KEY, None)
