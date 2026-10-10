@@ -77,7 +77,9 @@ def test_exception_is_swallowed():
     jev._post = boom
     try:
         out = api.jev_choose_sync("s", ["a"], "q")
-        assert out["name"] is None and out["reason"] == "RuntimeError"
+        # tool.jev.choose 自身就吞掉异常并返回 (None, 0.0)，
+        # 因此 api 层拿到的是"没有答案"而不是异常 —— 这正是我们要的：手机端永远拿到可解析的 JSON。
+        assert out["name"] is None and out["confidence"] == 0.0
     finally:
         jev._post = real
         os.environ.pop(jev.ENV_KEY, None)
