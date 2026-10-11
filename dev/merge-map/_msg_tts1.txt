@@ -1,0 +1,31 @@
+feat(tts): 手机本机离线 TTS（Kokoro int8）接通 + 修台词包顺序 bug + TTS 方案文档
+
+一、修 bug（用户可见）：VoiceClient.speak 里 `base.isEmpty()` 的早退排在台词包判定之前，
+    于是"没配电脑地址"（拔线/热点没开）时**连已经打进 App 的离线台词包都不用**，
+    直接退化成系统 TTS。现在台词包提到最前，与有没有电脑无关。
+
+二、出声改为五层逐层降级（任何一层成功即接手）：
+    ① 预生成台词包 assets/voice（离线秒出）
+    ② 联网缓存（电脑合成过的结果）
+    ③ 电脑 F5-TTS /infer（她真正的音色，4–6s）
+    ④ **本机离线 TTS：Kokoro int8 多语（sherpa-onnx 的 OfflineTtsEngine，原本已写好但没接进链路）**
+    ⑤ 返回 false → 调用方回退系统 TTS
+    判定：① →(有地址)②→③ 失败落 ④；无地址时 ①→④；④ 不可用才回 ⑤。
+
+三、离线模型放置（不进 APK）：
+    · 取证：sherpa-onnx 官方 Release 的 kokoro-int8-multi-lang-v1_0.tar.bz2 = 132.3MB，
+      下载 12s（github.com 直链；GitHub API 被限流 403，故改用直链 HEAD 探测）；
+      解包后 model.int8.onnx 114.2MB + voices.bin 28.2MB + tokens.txt + espeak-ng-data/(120 文件)
+      + dict/ = 189.9MB / 377 文件。
+    · 模型**不进 assets**（否则 APK 316MB→约 500MB），而是放在
+      Android/data/<pkg>/files/tts —— 正是 OfflineTtsEngine.modelDir() 的第一顺位；
+      新增 dev/scripts/push_tts_model.py 一键推送（手机上线后执行）。
+    · APK 取证：BUILD SUCCESSFUL 316.2MB，含 assets/voice/index.json ✓，不含 assets/tts/ ✓。
+
+四、文档：dev/docs/TTS方案-2026-10.md
+    · 五层链路表 + 本轮实测数字；
+    · **显存仲裁结论**：本机 6141MiB 总、F5 常驻占 5668MiB、仅剩 253MiB → large-v3 装不下、
+      STT 回落 CPU 10–13.5s；但手机本机 SenseVoice 0.94 已追平 PC large-v3 0.93，
+      出声也已本机自足 ⇒ **不需要为 STT 抢显存**，只需一条共存规则（电脑同时只跑一个重型任务、
+      手机优先本机、只有要求最高质量识别时才走 PC 并接受等待）；
+    · 未验证项 4 条（真机合成、音色试听、日语路径、耗时实测）。

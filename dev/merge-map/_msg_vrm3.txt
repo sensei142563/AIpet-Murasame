@@ -1,0 +1,20 @@
+feat(3d): 手机端 VRM 演示页（WebView + 离线 three/three-vrm）—— M1 收口
+
+把电脑上验证通过的离线渲染搬进手机：
+  · app/src/main/assets/vrm/：index.html + vendor/{three.js,three-vrm.js,GLTFLoader.js}
+    （0.95MB，来自 jsDelivr 的 +esm 预打包；**绝对路径已改写成相对路径**，否则离线 404 —— 见
+     dev/three-demo/vendor/README.md 里记录的那条坑）；vendor/README.md 一并带入，注明来源/版本/许可
+    （three 与 three-vrm 均为 MIT）。
+  · index.html 相对电脑版的两处改动：① 模型路径由原生侧通过 ?model= 传入（手机端模型放在应用
+    外部目录，**不入库**——仓库里不放别人的资源）；② 保留"异常写进 document.title"的自诊断。
+  · ui/VrmScreen.kt：WebView（javaScriptEnabled + allowFileAccess + allowFileAccessFromFileURLs，
+    因为页面在 assets、模型在外部目录，是 file→file）；WebChromeClient.onReceivedTitle 把
+    VRM_OK / LOAD xx% / 失败原因**显示在页面上**并写入 files 外部目录的 vrm.log（供 adb 自动验收）；
+    模型缺失时页面直接给出可复制的 adb push 命令。
+  · 入口挂在聊天页 ☰ 抽屉：「🧍 VRM 演示（3D 的她）」（与「💬 QQ 通道」并列，不挤底部导航）。
+
+实测（本机无手机在线，故为编译期取证）：
+  · BUILD SUCCESSFUL；APK 316.2MB；
+  · APK 内含 assets/vrm/index.html 与三个 vendor 文件 ✓；
+  · APK 内**不含**任何 .vrm（测试模型不入库）✓。
+待办：装机与真机标题验收（需用户插线或开热点），以及用 VRoid 自制丛雨 VRM 替换测试模型。
