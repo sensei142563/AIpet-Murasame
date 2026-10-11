@@ -1,0 +1,8 @@
+chore(qq): 手机 QQ 页的验收脚本（APK dex 取证 + 五接口契约重放）
+
+手机未连线时的替代验收手段，可复跑：
+  · verify_qq_screen.py          真机点击验收（需连线：聊天→☰→QQ 通道→看数据→点发送→查 pending）
+  · verify_qq_screen_offline.py  APK dex 字符串取证 + 在电脑上原样重放手机页会发的 5 个请求
+  · qq_screen_1.py / qq_screen_2.py  建页面 / 重启 api 加载新路由
+
+经验：给 api.py 加路由后**必须重启 api 进程**，否则手机端会看到 404（本次踩到 /qq/outbox）。
