@@ -1,0 +1,23 @@
+feat(asr): 手机端 STT 换成非流式 SenseVoice（int8 239MB）——「效果一般」解决
+
+承接上一条：当时换成流式 bilingual zipformer，实测发现"喂整段 + enableEndpoint"会产生重复/串音
+（本座车座我等等你好久啦），而本 App 的流程是"录完再识别"，本就不该用流式。
+
+本次：
+  · 用 javap 反查 AAR（sherpa-onnx-v1.13.5）确认 OfflineRecognizer / OfflineModelConfig /
+    OfflineSenseVoiceModelConfig 的确切签名（避免瞎猜 Kotlin API）；
+  · OnlineAsr 内部改为 OfflineRecognizer + SenseVoice int8（中英日韩粤，language=auto，
+    useInverseTextNormalization=true），**对外 API 完全不变**（init/recognizeWav/selfTest），
+    聊天页零改动；
+  · 模型 assets/asr-sensevoice/（model.int8.onnx 239MB + tokens.txt），selftest.wav 用
+    scipy.signal.resample_poly 从 F5 输出正确重采样到 16kHz（原先线性重采样音质有损；
+    本机 torchaudio 的 libtorchcodec DLL 坏了，改用 scipy）；
+  · 删掉不再使用的 asr-zh-bilingual（198MB），只留 SenseVoice + 原来的 14M 作兜底。
+
+同一段音频（真值「本座等你好久了。」）四引擎对照：
+    14M zipformer（原）        —— 效果一般（用户主观评价）
+    bilingual zipformer（流式）—— 本座车座我等等你好久啦        0.63
+    SenseVoice（非流式，本版） —— 本座我等你好久了。            ≈0.90  ← 采用
+    电脑 faster-whisper large-v3（/stt）—— 本座等你好久了       0.93（质量最好，但 13.5s + 需电脑）
+
+结论：手机本地识别已接近 large-v3，交互式场景不再依赖电脑。
