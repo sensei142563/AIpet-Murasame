@@ -84,16 +84,49 @@ def dump(tag="acc"):
         return ""
 
 
-def tap_text(xml, needle, wait=2.5):
-    """在 dump 里找**包含** needle 的可点击节点，点它的中心（比精确 text= 更耐得住 emoji/换行）。"""
-    for m in re.finditer(r'<node[^>]*text="([^"]*)"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', xml):
-        if needle in m.group(1):
-            cx = (int(m.group(2)) + int(m.group(4))) // 2
-            cy = (int(m.group(3)) + int(m.group(5))) // 2
-            adb("shell", "input", "tap", str(cx), str(cy))
-            time.sleep(wait)
-            return True
-    return False
+def _node_bounds(xml):
+    """返回 [(start, end, text, x1, y1, x2, y2, clickable)]，按出现顺序。"""
+    out = []
+    pat = re.compile(
+        r'<node(?P<attrs>[^>]*?)bounds="\[(?P<x1>\d+),(?P<y1>\d+)\]\[(?P<x2>\d+),(?P<y2>\d+)\]"(?P<attrs2>[^>]*?)/?>')
+    for m in pat.finditer(xml):
+        attrs = (m.group("attrs") or "") + (m.group("attrs2") or "")
+        text = (re.search(r'text="([^"]*)"', attrs) or [None, ""])[1] if re.search(r'text="([^"]*)"', attrs) else ""
+        clickable = 'clickable="true"' in attrs
+        out.append((m.start(), m.end(), text, int(m.group("x1")), int(m.group("y1")),
+                    int(m.group("x2")), int(m.group("y2")), clickable))
+    return out
+
+
+def tap_text(xml, needle, wait=2.5, lift=60):
+    """找包含 needle 的文本节点，然后点**最近的 clickable 祖先**的中心。
+
+    为什么不能直接点文字中心（实测教训）：底部导航条的文字中心 y 落在**系统导航条**上，
+    点击会被系统吃掉、App 直接被切到后台 —— 验收里一连串 SKIP/FAIL 全是这一个原因。
+    真正的可点击目标中心比文字中心高 ~54px。
+    """
+    nodes = _node_bounds(xml)
+    for i, nd in enumerate(nodes):
+        if needle not in nd[2]:
+            continue
+        tx = (nd[3] + nd[5]) // 2
+        ty = (nd[4] + nd[6]) // 2
+        # 往前找最近的、且包住该点的 clickable 节点（Compose 的文本是 clickable 的子节点）
+        target = None
+        for j in range(i - 1, -1, -1):
+            cand = nodes[j]
+            if cand[7] and cand[3] <= tx <= cand[5] and cand[4] <= ty <= cand[6]:
+                target = cand
+                break
+        if target is not None:
+            cx = (target[3] + target[5]) // 2
+            cy = (target[4] + target[6]) // 2
+        else:
+            cx, cy = tx, ty - lift
+        adb("shell", "input", "tap", str(cx), str(cy))
+        time.sleep(wait)
+        return (cx, cy)
+    return None
 
 
 def tap_text_any(xml, needles, wait=2.5):
@@ -110,18 +143,62 @@ def read_log(name):
 
 
 def app_running():
+    """进程是否存活（注意：进程活着 ≠ Activity 还在前台）。"""
     if DRY:
         return True
     out = adb("shell", "pidof", PKG)
     return bool(out.strip())
 
 
-def open_app():
+def resumed_activity():
+    """当前前台 Activity 的全名（失败返回空串）。这是判断"App 真的起来了吗"的唯一可靠判据。"""
+    if DRY:
+        return PKG + "/.MainActivity"
+    out = adb("shell", "dumpsys", "activity", "activities")
+    for line in (out or "").splitlines():
+        if "mResumedActivity" in line:
+            m = re.search(r"([\w.]+)/([\w.$]+)", line)
+            if m:
+                return m.group(1) + "/" + m.group(2)
+    return ""
+
+
+def foreground_is_app():
+    return resumed_activity().startswith(PKG)
+
+
+def open_app(timeout_s=45):
+    """启动并**确认**到了前台。别的应用（如应用市场正在安装）会抢前台，所以必须验证而不是睡够时间。"""
     adb("shell", "input", "keyevent", "KEYCODE_WAKEUP")
     adb("shell", "am", "force-stop", PKG)
     time.sleep(2)
+    out = adb("shell", "am", "start", "-n", "%s/.MainActivity" % PKG)
+    if out and ("Error" in out or "does not exist" in out):
+        print("   ⚠ am start 输出异常：%s" % out.strip()[:140])
+    t0 = time.time()
+    while time.time() - t0 < timeout_s:
+        if foreground_is_app():
+            time.sleep(3)          # 让首屏与资产种子跑完
+            return True
+        time.sleep(2)
+    # 再拉一次（有些机型第一次启动会被别的应用抢走前台）
     adb("shell", "am", "start", "-n", "%s/.MainActivity" % PKG)
-    time.sleep(14)
+    for _ in range(10):
+        time.sleep(2)
+        if foreground_is_app():
+            time.sleep(3)
+            return True
+    return False
+
+
+def ensure_foreground(label=""):
+    """进某个阶段前确保 App 在前台（否则后续 dump 全是在别人界面上空打）。"""
+    if DRY:
+        return True
+    if foreground_is_app():
+        return True
+    print("   … App 不在前台，重新拉起（%s）" % label)
+    return open_app()
 
 
 # ===== 诊断包采集（失败时自动跑；规则依据技能 capturing-screenshots-and-screenrecord）=====
@@ -238,12 +315,15 @@ def main():
     record("测试 VRM", verdict(True), "已就位")
 
     print("=== 3. 逐项验收 ===")
-    open_app()
+    ok_start = open_app()
     x = dump("a1")
-    record("App 启动", verdict("chatter" in x or "丛雨" in x),
-           ("dump %d 字节" % len(x)) if x else "(dry-run)")
+    # 判据必须是「前台是不是本应用」：原来用 dump 里有没有某段文字，
+    # 结果被应用市场搜索框里的 chatter 假通过了一次（诊断包 a1.xml 就是市场安装页）。
+    record("App 启动（前台确认）", verdict(True if DRY else ok_start),
+           "前台=%s · dump %d 字节" % (resumed_activity() or "?", len(x)))
 
     # ① 3D 页（VRM 演示）
+    ensure_foreground("① 3D 页")
     tap_text_any(dump("a2"), ["聊天"])
     tap_text_any(dump("a3"), ["☰"])
     if tap_text_any(dump("a4"), ["VRM 演示"]):
@@ -258,6 +338,7 @@ def main():
     time.sleep(2)
 
     # ② 3D AR（相机 + 透明 VRM + 音量键拍照）
+    ensure_foreground("② 3D AR")
     tap_text_any(dump("a5"), ["聊天"])
     tap_text_any(dump("a6"), ["☰"])
     if tap_text_any(dump("a7"), ["3D AR"]):
@@ -294,24 +375,27 @@ def main():
         record("② 3D AR", "SKIP", "抽屉里没找到「3D AR」")
 
     # ③ 首页 QQ chatter 卡
+    ensure_foreground("③ 首页 QQ 卡")
     tap_text_any(dump("a11"), ["首页"])
     time.sleep(3)
     x = dump("a12")
     record("③ 首页 QQ 卡", verdict("QQ chatter" in x),
            ("看到 QQ chatter" if "QQ chatter" in x else "未看到"))
 
-    # ④ 返回键：第一次不该退出
+    # ④ 返回键：第一次不该退出（判据是**前台 Activity**，不是进程存活 ——
+    #     进程活着但 Activity 已经退到桌面，用 pidof 会必然误判成"还在"）
+    ensure_foreground("④ 返回键")
     adb("shell", "input", "keyevent", "KEYCODE_BACK")
-    time.sleep(1.5)
-    alive1 = app_running()
+    time.sleep(2)
+    fg1 = foreground_is_app()
     adb("shell", "input", "keyevent", "KEYCODE_BACK")
     time.sleep(3)
-    alive2 = app_running()
-    record("④ 返回键两次退出", verdict((alive1 and not alive2)),
-           "第一次存活=%s 第二次存活=%s" % (alive1, alive2))
+    fg2 = foreground_is_app()
+    record("④ 返回键两次退出", verdict((fg1 and not fg2)),
+           "第一次前台=%s 第二次前台=%s（期望 True → False）" % (fg1, fg2))
 
     # ⑤/⑥ 设置页：离线 TTS 自检 + Silero + 只回应呼唤开关
-    open_app()
+    open_app()   # 这一阶段本来就重新开，保留
     tap_text_any(dump("b1"), ["聊天"])
     tap_text_any(dump("b2"), ["☰"])
     if tap_text_any(dump("b3"), ["设置"]):
@@ -355,29 +439,41 @@ def main():
                ("凭据已加密（含 enc:v1: 前缀）" if enc else
                 "⚠ 凭据里看不到 enc:v1: 前缀 —— 可能存了明文或加密失败：%s" % cred.strip()[:80]))
 
-    # ⑧-2 资产种子完整性：注册表在、每个角色的 pet.json 非空、且没有残留 .part
-    ls = adb("shell", "ls", "-l", EXT + "/pets/")
-    ls2 = adb("shell", "ls", EXT + "/pets/*/pet.json")
-    parts = adb("shell", "find", EXT + "/pets", "-name", "*.part")
-    has_reg = "pet_list.json" in (ls or "")
-    has_pet = "pet.json" in (ls2 or "") and "No such file" not in (ls2 or "")
+    # ⑧-2 资产种子完整性：角色包在**内部** filesDir/pets（release 包 run-as 不可用 ⇒ adb 读不到），
+    #       所以改用 UI 判据：主页能看到角色（名字/立绘），说明种子铺成功、注册表也读得到。
+    ensure_foreground("⑧2 资产种子")
+    home = dump("c1")
+    names = [n for n in ("丛雨", "诺瓦", "Murasame", "murasame") if n in home]
+    tap_text_any(dump("c2"), ["☰"])
+    drawer = dump("c3")
+    has_pet_entry = any(n in drawer for n in ("丛雨", "诺瓦", "murasame", "Murasame"))
+    record("⑧2 资产种子（UI 判据）", verdict(bool(names)),
+           "主页可见角色=%s；抽屉含角色=%s（内部 pets/ 目录 adb 读不到，故以 UI 为准）"
+           % (names or "无", has_pet_entry))
+    # 补充：残留 .part 检查仍在**外部**目录做（能读到的部分）
+    parts = adb("shell", "find", EXT, "-name", "*.part")
     part_cnt = len([x for x in (parts or "").splitlines() if x.strip() and "No such file" not in x])
-    record("⑧2 资产种子完整性", verdict(has_reg and has_pet and part_cnt == 0),
-           "注册表=%s pet.json=%s 残留.part=%d" % (has_reg, has_pet, part_cnt))
+    record("⑧2b 无残留 .part（外部目录）", verdict(part_cnt == 0), "残留=%d" % part_cnt)
 
     # ⑧-3 Silero 真机阈值：读 vad.log 的 ready 行（里面带实际生效的 threshold/minSilence）
     vlog = read_log("vad.log")
     rdy = [l for l in (vlog or "").splitlines() if "Silero VAD ready" in l]
     record("⑧3 Silero 真机阈值", verdict(bool(rdy)),
-           (rdy[-1].strip()[:150] if rdy else "(vad.log 里没有『Silero VAD ready』—— 说明 Silero 没初始化成功)"))
+           (rdy[-1].strip()[:150] if rdy else
+            "(vad.log 里没有『Silero VAD ready』—— Silero 只在**首次识别**时初始化，"
+            "请先在聊天页长按说话一次，再重跑本项)"))
 
     # ⑧-4 onGiveUp → 系统 TTS：voice.log 里**不该**出现"未提供 onGiveUp"（说明调用点已接线）
     voicelog = read_log("voice.log")
     warn = [l for l in (voicelog or "").splitlines() if "未提供 onGiveUp" in l]
     fell = [l for l in (voicelog or "").splitlines() if "通知调用方回退系统 TTS" in l]
-    record("⑧4 onGiveUp 已接线", verdict(not warn and bool((voicelog or "").strip())),
-           ("出现过 %d 次回退事件；未提供回调告警 %d 次" % (len(fell), len(warn)))
-           + ("" if not warn else " ⚠ 有告警说明调用点没接上"))
+    fresh = bool((voicelog or "").strip())
+    if not fresh:
+        record("⑧4 onGiveUp 已接线", "SKIP", "还没有本次安装后的 voice.log（需先让她出声一次）")
+    else:
+        record("⑧4 onGiveUp 已接线", verdict(not warn),
+               ("回退事件 %d 次；未提供回调告警 %d 次" % (len(fell), len(warn)))
+               + ("" if not warn else " ⚠ 有告警说明调用点没接上"))
 
     # ⑧-5 NapCat 重投去重：onebot_local.log 里若出现"丢弃重复消息"即为去重生效的确证
     olog = read_log("onebot_local.log")
