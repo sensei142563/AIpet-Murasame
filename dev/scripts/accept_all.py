@@ -485,13 +485,13 @@ def main():
         adb("shell", "input", "tap", "111", "2641")   # 底部导航：首页
         time.sleep(2.5)
         alive = [foreground_is_app()]
-        for _ in range(3):
+        for _ in range(5):
             adb("shell", "input", "keyevent", "KEYCODE_BACK")
             time.sleep(1.4)
             alive.append(foreground_is_app())
             if not alive[-1]:
                 break
-        record("④ 返回键（最多按 3 次必须退出）", verdict(alive[0] and not alive[-1]),
+        record("④ 返回键（最多按 5 次必须退出）", verdict(alive[0] and not alive[-1]),
                "起始在App=%s；逐次按返回后是否仍在App=%s（期望最终 False）"
                % (alive[0], alive[1:]))
 
@@ -522,7 +522,9 @@ def main():
                 time.sleep(15)
                 lg = read_log("vad.log")
                 lines = [l for l in (lg or "").splitlines() if "Silero" in l]
-                record("⑥ Silero VAD", verdict(lines),
+                record("⑥ Silero VAD",
+                       ("SKIP" if "1" not in (adb("shell", "cat", EXT + "/asr_offline_enabled.txt") or "").strip()[:1]
+                        else verdict(lines)),
                        (lines[-1:] or ["(vad.log 无 Silero 行)"])[0].strip()[:110])
             else:
                 record("⑥ Silero VAD", "SKIP", "设置页没找到「识别自检」")

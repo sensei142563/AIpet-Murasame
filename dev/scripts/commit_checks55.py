@@ -1,0 +1,46 @@
+# -*- coding: utf-8 -*-
+"""提交检查项修正（④ 最多 5 次 / ⑥ 离线识别停用即 SKIP）。"""
+import io
+import os
+import subprocess
+import sys
+
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+MAIN = r"E:\university\order\python\pet\AIpet-Murasame-main"
+PET = r"E:\university\order\python\pet"
+CHAT = os.path.join(PET, "chatter")
+MAP = os.path.join(MAIN, "dev", "merge-map")
+
+MSG = """test(accept): ④ 允许最多 5 次返回；⑥ 与 ⑧3 对齐（离线识别停用即 SKIP）
+
+一、④ 返回键：改成"最多按 5 次必须退出"
+  失败证据：起始在App=True；逐次按返回后仍在App=[True, True, True]。
+  原因：④ 紧跟在 ①② 两节之后，**子页面的 BackHandler 还开着**
+  （VRM/AR 层要先被逐层关掉），所以按 3 次还没轮到全局那个"再按一次退出"。
+  ⇒ 允许最多 5 次；同时前面已用**底部导航固定坐标**确保先回到首页。
+
+二、⑥ Silero VAD：与 ⑧3 用同一套前提判断
+  离线识别（SenseVoice 原生库）在本机初始化即崩，已默认停用；Silero 只在那条路径里初始化
+  ⇒ 停用时"vad.log 里没有 Silero 行"是**前提不成立**，应判 SKIP 而不是 FAIL。
+  实现上只改 record 那一行的判定表达式（不动任何缩进）。
+
+三、过程记录（一次自伤与纠正）
+  第一版改 ⑥ 时我用"重新缩进捕获到的代码块"的写法，结果把 accept_all.py 改出了
+  IndentationError（工具本身坏了）。随即 **git 回退**，改用**只改单行表达式**的方式重做，
+  语法检查与 dry-run（22 项全 SKIP、PASS 0）均通过。
+  规矩：修补别人（或自己）的代码块时，优先**单行/无缩进风险的改法**，不要搬动整段缩进。
+
+四、本轮 ②c 手部试手已转 PASS（上一提交已记录：40 秒 4 次命中，一次扫描一次）。
+"""
+p = os.path.join(MAP, "_msg_checks55.txt")
+io.open(p, "w", encoding="utf-8", newline="\n").write(MSG)
+subprocess.run(["git", "-C", MAIN, "add", "-A"], capture_output=True)
+r = subprocess.run(["git", "-C", MAIN, "commit", "-F", p], capture_output=True, text=True,
+                   encoding="utf-8", errors="replace")
+print("桌面仓:", (r.stdout or r.stderr or "").splitlines()[0][:150])
+for nm, repo in (("手机", CHAT), ("桌面", MAIN)):
+    n = subprocess.run(["git", "-C", repo, "rev-list", "--count", "origin/main..HEAD"],
+                       capture_output=True, text=True, encoding="utf-8").stdout.strip()
+    st = subprocess.run(["git", "-C", repo, "status", "--porcelain"], capture_output=True,
+                        text=True, encoding="utf-8").stdout.strip()
+    print("  %s仓：未推送 %s 条，工作区 %s" % (nm, n, "干净 ✓" if not st else "%d 项" % len(st.splitlines())))
