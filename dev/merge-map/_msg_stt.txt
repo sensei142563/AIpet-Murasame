@@ -1,0 +1,22 @@
+feat(stt): api.py 新增 POST /stt —— 手机录音借用桌面端 faster-whisper large-v3
+
+用户要求：STT 效果一般，学 QQ 那边怎么做，现成能抄则抄。
+
+调研结果：桌面端（QQ 线）的 STT 是 tool/stt.py + faster-whisper **large-v3**，
+权重已在本地 models/stt/hub（2948 MB），无需任何下载。手机端目前只有 sherpa 14M（tiny 级）。
+⇒ 最小改动：给 api.py 加 POST /stt，收原始 WAV 字节 → 复用 tool/stt.py 的 transcribe_full()
+   → 返回 {"text","ms","engine"}。手机连得上电脑时改走这条路，质量直接对齐桌面端。
+
+实现要点（都踩过）：
+  · 模型必须**只加载一次**：最初每次请求都用 importlib 重新执行 tool/stt.py，
+    等于每条都重建模型 → 单条 23~37 秒；改为模块级单例 + 启动后台预热后降到 10 秒级。
+  · api.py 需要 import time（第一版漏了 → 500 NameError）。
+  · 用 asyncio.to_thread 跑识别，不阻塞事件循环。
+
+实测（用预生成台词当标准答案，5 条）：相似度 0.71~0.93（平均 0.83，差异都是标点/语气词，
+如「你回来啦」→「你回来了」），质量可用。
+
+⚠ 已知瓶颈（下一轮解决）：nvidia-smi 显示 6141 MiB 显存已用 5668 MiB（F5 等占满），
+   large-v3 的 float16（约 3GB）装不下 → tool/stt.py 回落到 CPU int8 → 单条约 10 秒。
+   两条路：① 下载 small/medium（体积约束已取消）走 GPU；② 做显存仲裁（STT 时让 F5 让出显存），
+   即规划文档 03/ADR 里"6GB 装不下两件事，TTS 与识图排队"那条。

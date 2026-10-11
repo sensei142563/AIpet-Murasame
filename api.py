@@ -1,3 +1,4 @@
+import time
 import asyncio
 import io
 import json
@@ -312,6 +313,72 @@ async def control_feature(feature: str):
 async def pet_position():
     """桌宠窗口当前坐标（供启动器显示 / 判断在不在屏幕内）"""
     return dict(_window_pos)
+
+
+# ===== 手机端 STT：收原始 WAV 字节，复用 tool/stt.py 的 faster-whisper large-v3 =====
+# 手机本地只有 sherpa 14M（效果一般），连得上电脑时改走这里，质量直接对齐桌面端。
+try:
+    import threading as _th
+    _th.Timer(1.0, _stt_warmup).start()
+except Exception:
+    pass
+
+
+@app.post("/stt")
+async def stt_transcribe(request: Request):
+    import tempfile as _tf
+    data = await request.body()
+    if not data or len(data) < 1000:
+        return {"text": "", "ms": 0, "reason": "audio too small (%d bytes)" % len(data)}
+    t0 = time.time()
+    tmp = _tf.NamedTemporaryFile(suffix=".wav", delete=False)
+    try:
+        tmp.write(data)
+        tmp.close()
+        text = await asyncio.to_thread(_stt_transcribe_full, tmp.name)
+        return {"text": text or "", "ms": int((time.time() - t0) * 1000), "engine": "faster-whisper-large-v3"}
+    except Exception as e:
+        return {"text": "", "ms": int((time.time() - t0) * 1000), "error": "%s: %s" % (type(e).__name__, e)}
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except Exception:
+            pass
+
+
+_STT_MOD = None
+_STT_LOCK = None
+
+
+def _stt_module():
+    """只加载一次（否则每次请求都会重建 faster-whisper 模型，单条要 20~37 秒）。"""
+    global _STT_MOD, _STT_LOCK
+    import threading
+    if _STT_LOCK is None:
+        _STT_LOCK = threading.Lock()
+    with _STT_LOCK:
+        if _STT_MOD is None:
+            import importlib.util as _ilu
+            spec = _ilu.spec_from_file_location(
+                "aipet_stt",
+                os.path.join(os.path.dirname(os.path.abspath(__file__)), "tool", "stt.py"))
+            mod = _ilu.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            _STT_MOD = mod
+    return _STT_MOD
+
+
+def _stt_warmup():
+    try:
+        t0 = time.time()
+        _stt_module().warmup("large-v3")
+        print("[stt] 预热完成 %.1fs" % (time.time() - t0), flush=True)
+    except Exception as e:
+        print("[stt] 预热失败: %s: %s" % (type(e).__name__, e), flush=True)
+
+
+def _stt_transcribe_full(path):
+    return _stt_module().transcribe_full(path)
 
 
 @app.post("/voice/start")
