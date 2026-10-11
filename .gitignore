@@ -112,3 +112,7 @@ _import_tmp/
 
 # 记忆导出/导入的实体文件（含她的真实对话，绝不入库）
 dev/memory_io/
+
+# 3D 通路验证用的第三方测试 VRM 与浏览器临时目录（不入库：红线=不用他人资源）
+dev/three-demo/*.vrm
+dev/three-demo/_edge*/
