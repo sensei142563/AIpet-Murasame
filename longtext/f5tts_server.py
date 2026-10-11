@@ -377,4 +377,5 @@ if __name__ == "__main__":
     # 后台线程预加载模型（避免阻塞 uvicorn 启动）
     threading.Thread(target=_preload_model, daemon=True).start()
 
-    uvicorn.run(app, host="127.0.0.1", port=9881, log_level="info")
+    _host = os.environ.get("F5TTS_HOST", "0.0.0.0")  # 默认 0.0.0.0：USB/局域网/手机热点都能连
+uvicorn.run(app, host=_host, port=9881, log_level="info")
