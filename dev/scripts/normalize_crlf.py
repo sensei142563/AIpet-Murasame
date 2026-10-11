@@ -44,8 +44,8 @@ def to_crlf(path):
 
 print("=== 桌面仓 ===")
 if not safety_ok(MAIN, "桌面仓"):
-    main_files = []
-else:
+    print("RESULT_CONVERTED: 0（桌面仓按策略跳过）")
+    sys.exit(0)
 main_files = [
     "api.py", "tool/vad.py", "tool/silero_vad.py", "tool/heavy_gate.py",
     "dev/scripts/accept_all.py", "dev/scripts/test_vad.py", "dev/scripts/test_heavy_gate.py",
