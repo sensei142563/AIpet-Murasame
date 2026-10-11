@@ -1,0 +1,21 @@
+feat(qq): 方案 A 代码侧——App 直连本机 OneBot11（NapCat 跑在手机里）
+
+用户选定方案 A（手机 Termux + 官方 NapCat），本次完成 App 侧全部准备：
+
+· 新增 bot/chat/OneBotLocal.kt：本机 OneBot11 客户端（OkHttp WebSocket，**不新增依赖**），
+  默认 ws://127.0.0.1:3001；解析 post_type=message/message_sent（私聊/群聊、字符串与数组两种
+  message 形态），维护每会话最近 200 条 / 最多 40 个会话，落盘 files/onebot_local.json；
+  日志写 files/onebot_local.log（含外置目录同名文件，便于 adb 验收）。
+· 新增 QqBackend 门面：**本机 OneBot11 优先，电脑 api.py 兜底**；两者产出与 api.py
+  **完全相同的 JSON 形状**（status/sessions/messages/outbox），所以界面几乎不用改。
+· QqScreen / HomeScreen 改用 QqBackend；状态卡新增「数据源」一行（本机连上时显示
+  "本机 NapCat(OneBot11 ws://127.0.0.1:3001)"）。
+· MainActivity 冷启动 OneBotLocal.start(app)：自动尝试直连本机，连不上静默失败。
+· 发送：本机直连时**立即发**（send_msg），走电脑时仍是旧的投递队列。
+
+预备（桌面仓）：
+· dev/docs/QQ手机自足-Termux版NapCat-准备.md：手机侧照着做的完整步骤（官方 Termux 安装脚本、
+  screen 常驻启动、WebUI 6099 扫码、onebot11_<QQ>.json 里加正向 WS 127.0.0.1:3001、保活要点）、
+  验收通道（onebot_local.log / 首页卡片）、风险合规（只用小号、别在这台手机日常登录该小号、
+  o3Hook=0）、以及 6 条未验证项。
+· dev/scripts/termux_napcat_setup.sh：把上述步骤固化成可粘贴片段。
