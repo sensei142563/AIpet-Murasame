@@ -2,6 +2,7 @@ import re
 import time
 import socket
 import asyncio
+import functools
 import io
 import json
 import os
@@ -19,6 +20,40 @@ from pets.pet_registry import get_prompt_path
 
 # ============== App ==============
 app = FastAPI()
+
+
+# ===== 重型任务闸门（docs/plan/03：TTS/识图必须排队）=====
+# 本机显存实测 6141MiB，F5 常驻占 5668MiB、只余 253MiB；本地 LLM 与 whisper 再并发只会互相挤爆。
+# 这里让 api.py 进程内的重型接口**串行**，并对外暴露 /heavy/status 供手机显示"电脑正忙"。
+# 注意：F5-TTS 跑在独立进程（9881），不在本闸门范围内（已在 status 里如实标注）。
+from tool.heavy_gate import GATE as _HEAVY, Busy as _HeavyBusy
+
+
+def heavy_route(name, timeout=120.0):
+    """把一个重型接口纳入串行闸门；忙满上限时返回 503 + error=busy（便于手机优雅回退到本机离线 TTS）。"""
+    def deco(fn):
+        @functools.wraps(fn)
+        async def wrapper(*a, **kw):
+            try:
+                tok = await asyncio.to_thread(_HEAVY.acquire, name, timeout)
+            except _HeavyBusy as e:
+                return JSONResponse(
+                    {"error": "busy", "holder": e.holder, "waited_ms": int(e.waited * 1000),
+                     "hint": "电脑正忙，可改用手机本机离线 TTS / SenseVoice"},
+                    status_code=503)
+            try:
+                return await fn(*a, **kw)
+            finally:
+                _HEAVY.release(tok)
+        return wrapper
+    return deco
+
+
+@app.get("/heavy/status")
+async def heavy_status():
+    """重型任务闸门状态：手机端可据此显示"电脑正忙（合成中）"。"""
+    return _HEAVY.status()
+
 
 
 # ── Jev（TypeSafe "System One"）───────────────────────────────────────────────
@@ -116,6 +151,7 @@ class Qwen3LoraRequest(BaseModel):
 
 
 @app.post("/qwen3-lora")
+@heavy_route("qwen3-lora")
 async def qwen3_lora(req: Qwen3LoraRequest):
     global model, tokenizer
     history = req.history
@@ -158,6 +194,7 @@ class OllamaRequest(BaseModel):
 
 
 @app.post("/ollama")
+@heavy_route("ollama")
 async def ollama_qwen3(req: OllamaRequest):
     try:
         timeout = aiohttp.ClientTimeout(total=180)
@@ -176,6 +213,7 @@ class GPTSoVITSTTSRequest(BaseModel):
 
 
 @app.post("/tts")
+@heavy_route("tts")
 async def gpt_sovits_tts(req: GPTSoVITSTTSRequest):
     url = "http://localhost:9880/tts"
     try:
@@ -497,6 +535,7 @@ async def qq_queue_send(request: Request):
 
 
 @app.post("/stt")
+@heavy_route("stt")
 async def stt_transcribe(request: Request):
     import tempfile as _tf
     data = await request.body()
@@ -690,6 +729,7 @@ class LongTextChatRequest(BaseModel):
 
 
 @app.post("/longtext/chat")
+@heavy_route("longtext")
 async def longtext_chat(req: LongTextChatRequest):
     """
     QQ 机器人预留接口（SSE 流式返回）。

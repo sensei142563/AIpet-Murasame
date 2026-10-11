@@ -1,0 +1,7 @@
+fix(tts): heavy_route 定义位置前移 —— 首个使用点(118 行)在定义(320 行)之前导致 NameError
+
+上一提交把装饰器定义插在 /stt 之前（≈320 行），但第一个用到它的 /qwen3-lora 在 118 行，
+启动即 NameError: name 'heavy_route' is not defined。
+改为把 heavy_route 定义与 /heavy/status 一起放在 app = FastAPI() 之后（所有路由之前）。
+
+验证：语法检查通过；重启 api 就绪；/heavy/status、/qq/status、/qq/outbox 均正常返回。
