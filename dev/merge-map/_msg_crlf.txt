@@ -1,0 +1,19 @@
+docs(env): 实测两仓行尾策略不同；给 normalize_crlf 加保险；新增行尾与编码纪律文档
+
+起因：按技能 windows-powershell-traps §14.1 的建议做自查，发现我改过的文件在工作区都是 LF-only，
+于是写了个 normalize_crlf.py 想统一成 CRLF —— **结果差点制造事故**：
+
+  桌面仓 core.autocrlf=false + core.eol=lf ⇒ 仓库本体就是 LF
+     转 CRLF 后 git diff --numstat 显示 api.py 839/839、合计 **1904 行** 全变（整文件翻动）
+     ⇒ 已 `git checkout -- .` 回滚，仓库恢复干净（内容未变，diff -w 忽略空白后为空可证）
+  手机仓 core.autocrlf=true ⇒ 转 CRLF 后 diff 为 **0 行**（git 自动归一化，无害）
+
+结论（与技能默认假设相反，故必须记录）：
+  · 我用 Python 改文件统一写 LF 的写法是**正确的** —— 对桌面仓正是本体格式，对手机仓被 git 归一化；
+  · 不要为了"统一 CRLF"去批量转换。normalize_crlf.py 已加 SAFETY_GUARD：
+    检测到 core.autocrlf=false 且 core.eol=lf 的仓库直接拒绝转换。
+
+新增 dev/docs/行尾与编码纪律-2026-10.md，固化本会话实测的三类翻车：
+  ① 两仓行尾策略不同的判据与处置；② Python stdout 控制台 UTF-8 / 管道 GBK（含跨进程必须显式
+  encoding="utf-8"）；③ PowerShell 三条硬规矩（文本改动用 Python、别用 Select-Object -Last 收输出、
+  复杂命令写文件）；④ 判据要选不会撒谎的那个（看接口字段而非"编译通过"）。
