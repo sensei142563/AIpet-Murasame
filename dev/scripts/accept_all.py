@@ -736,6 +736,23 @@ def main():
                        % (has_minus, has_plus))
             tap_text(dump("k7"), "返回", wait=2.0)
 
+    # ===== ⑪ 记忆互通真机往返（用户原目标的第一条）=====
+    print("=== 7. 记忆互通（真机往返）===")
+    if DRY:
+        record("⑪ 记忆互通真机往返", "SKIP", "dry-run")
+    else:
+        rt = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mem_device_roundtrip.py")
+        if not os.path.isfile(rt):
+            record("⑪ 记忆互通真机往返", "SKIP", "缺少 mem_device_roundtrip.py")
+        else:
+            rr = subprocess.run([sys.executable, "-u", rt], capture_output=True, text=True,
+                                encoding="utf-8", errors="replace", timeout=1800,
+                                env=dict(os.environ, PYTHONIOENCODING="utf-8"))
+            oo = (rr.stdout or "") + (rr.stderr or "")
+            lines = [l.strip() for l in oo.splitlines() if "PASS" in l or "FAIL" in l]
+            detail = "；".join(l[:60] for l in lines[:4]) or "(无输出)"
+            record("⑪ 记忆互通真机往返", verdict(rr.returncode == 0), detail)
+
     print()
     print("=== 汇总 ===")
     npass = sum(1 for _, s, _ in RESULTS if s == "PASS")
