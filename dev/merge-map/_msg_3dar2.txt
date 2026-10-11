@@ -1,0 +1,19 @@
+feat(3d-ar): 新增真正的 3D AR —— 相机 + 透明 VRM 叠加，窗口级 PixelCopy 拍照，音量键快门
+
+用户要求"3D 的 AR 也要可以拍照"。此前 VRM 只是一个全屏 WebView 演示（没有相机），
+谈不上 AR；本次把它变成真正的 AR，并且**与 Live2D AR 并存**（用户明确要求两种形态都保留）。
+
+新增 ui/VrmArScreen.kt（独立通路，不碰 ArScreen 的渲染与合成）：
+· CameraX 预览铺满（PreviewView，FILL_CENTER + PERFORMANCE/SurfaceView，模板抄自 ArScreen）；
+· 上面叠一层**透明 WebView** 渲染 VRM：走 WebViewAssetLoader 的
+  https://appassets.androidplatform.net/assets/vrm/index.html?model=/vrmmodel/model.vrm&bg=transparent
+  （透明模式已用 WebGL 像素验证 corner alpha=0）；
+· **拍照 = 窗口级 PixelCopy.request(window, …)**：一次就把"相机预览(SurfaceView) + WebView(WebGL)"
+  的合成画面抓下来 —— 比 Live2D 那条"相机 + GL 手工配矩阵合成"更省事、所见即所得；
+  存相册复用 ArScreen 已有的 saveShot（该函数改为 internal，行为不变）；
+· **音量下键快门**：复用 ArShot 单例（同一时刻只会开一个 AR，不会冲突）；
+· 沉浸式全屏（隐藏系统栏）+「干净」模式（只留一个极小按钮）+ 自己的 BackHandler。
+· 入口：聊天页 ☰ 抽屉 →「🧍 3D AR（VRM 叠在相机上）」（与「VRM 演示」并列）。
+
+状态：编译通过。**真机未验证**（手机不在手边）—— 需在真机确认三件事：
+  ① 相机预览与 VRM 是否都出现且对齐；② PixelCopy 抓到的图是否含两层；③ 音量键是否触发。

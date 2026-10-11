@@ -1,0 +1,23 @@
+fix(ar)+feat(3d-ar): 修 ArGround 俯仰符号（交叉验证抓出的真 bug）；3D AR 接上俯仰与点击互动
+
+一、**真 bug（我的）**：ArGround.groundPointY 把地面点相对光轴的夹角写成
+    `pitch + atan(camH/dist)`，而低头时应为 `atan(camH/dist) − pitch` ⇒ 方向完全反了
+    （低头时脚不是上移而是下移）。原有单测只查了"在地平线下方""越远越高"，没查俯仰方向，所以漏过。
+    发现方式：把同一件事用两种独立实现对照 —— 页面里让 three.js 相机按 pitch 转、投影已知世界点，
+    再和 Kotlin 公式逐项比。修好后 **6 个俯仰角(0/10/20/30/45/60°) 的脚位差值为 0.00 px**。
+    已补方向性单测 `feet_move_up_when_looking_down`（ArGroundTest 现 11 个用例全绿）。
+
+二、页面新增 AR 接口（dev/three-demo 与 app assets 两份同步）：
+    · `__setPitch(deg)`：相机跟随设备俯仰角 ⇒ 角色"站在地面平面"与透视缩放由三维几何**自动**给出，
+      与 Kotlin 公式同源；`__placeOnGround()` 按真实身高(1.58m)缩放并把脚落到 y=0；
+    · `__setFov(deg)`：**AR 时页面相机 FOV 必须与手机相机 FOV 对齐**，否则三维透视与实拍对不上；
+    · `__vrmFeetPx()`：投影**已知世界点**回读脚位/像素高（注意 Box3.setFromObject **不含蒙皮**，
+      对 VRM 不可靠，第一版就是这么误判的）；
+    · `__poke()`：被戳时的最小反馈（切表情 + 轻轻一跳）。
+
+三、VrmArScreen 接线：加速度计 → ArGround.pitchDeg → 10Hz `__setPitch`；
+    点按 → ArGround.collisionRect/hit 判定命中（命中才触发 `__poke`，**不做假命中**）。
+    编译通过（assembleRelease）。
+
+已知近似（如实标注）：角色像素高用的是小角度近似（f·h/dist），实际投影会随俯仰有透视缩短，
+20–30° 时约 7% 偏差；碰撞盒宽高比 0.55 留了余量，可接受。真机仍需验证对齐与手感。

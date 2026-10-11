@@ -1,0 +1,18 @@
+test(qq): 抽出 OneBot11 纯解析层并加 9 个 JVM 单测（真机联调前先离线验证）
+
+方案 A（NapCat 跑在手机 Termux 里）里，App 侧最容易出错、又最适合离线验证的就是**协议解析**。
+本次把它从 OneBotLocal 里抽成**无 Android 依赖的纯函数** OneBotParse，并让 OneBotLocal 调用它
+（即"跑的代码 = 被测的代码"）。
+
+新增 bot/chat/OneBotParse.kt：
+  · extractText()：message 既可能是字符串也可能是 [{type,data}] 数组；文本拼接时把
+    image/face/record/at 转成 [图片]/[表情]/[语音]/@qq 占位，reply 忽略；
+  · parseMessage()：只认 post_type=message/message_sent，产出 key(private_<uid>/group_<gid>)、
+    role(自己发的=assistant)、content、timestampMs、messageId；缺 id 返回 null；
+  · parseLoginInfo()：解析 get_login_info 回包。
+新增 app/src/test/.../OneBotParseTest.kt：9 个用例，全部用**真实形态的 payload**：
+  私聊文本 / 群聊文本(键与角色) / message_sent→assistant / user_id==self_id→assistant /
+  数组消息占位符拼接 / 非消息事件与坏 JSON 一律 null / 缺 id 拒绝 / login_info 回包 /
+  无 time 字段时时间戳回落到当前时间。
+结果：gradlew :app:testDebugUnitTest --tests …OneBotParseTest → **tests=9 failures=0 errors=0**；
+      assembleRelease 通过，APK 316MB，仍含 assets/vrm 与 assets/voice、不含任何 .vrm、不含 assets/tts。
