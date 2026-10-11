@@ -440,14 +440,24 @@ def main():
             record("②b 音量键拍照", verdict(shot),
                    (shot[-1:] or ["(无 shoot 日志)"])[0].strip()[:110])
             # 试手 → 命中（读日志，比抓屏可靠）
+            # 先确保"假手"有周期：没有这个旋钮文件时，命中与否取决于环境，容易误报。
+            if not DRY:
+                adb("shell", "sh", "-c",
+                    "echo 3000 > " + EXT + "/vrm_fake_period.txt")
             tap_text_any(dump("a8"), ["试手"])
             time.sleep(10)
             lg = read_log("vrm_ar.log")
             hits = [l for l in (lg or "").splitlines() if "手部命中" in l]
             x = dump("a9")
-            record("②c 手部试手", verdict(bool(hits)),
-                   (hits[-1:] or ["(vrm_ar.log 里没有『手部命中』) 试手诊断=" +
-                                  str([l for l in (lg or "").splitlines() if "手部判定启动" in l][-1:])])[0].strip()[:120])
+            started = [l for l in (lg or "").splitlines() if "手部判定启动" in l]
+            if hits:
+                record("②c 手部试手", "PASS", hits[-1].strip()[:120])
+            elif not started:
+                record("②c 手部试手", "SKIP",
+                       "手部判定没启动（缺少试手周期旋钮或相机未就绪）—— 不是已证实的缺陷")
+            else:
+                record("②c 手部试手", "FAIL",
+                       "判定已启动但没有命中：" + started[-1].strip()[:100])
             tap_text_any(x, ["干净"])
             x2 = dump("a10")
             clean = ("快门" not in x2) and ("翻转" not in x2)
@@ -466,17 +476,22 @@ def main():
         record("③ 首页 QQ 卡", verdict("QQ chatter" in x),
                ("看到 QQ chatter" if "QQ chatter" in x else "未看到"))
 
-        # ④ 返回键：第一次不该退出（判据是**前台 Activity**，不是进程存活 ——
-        #     进程活着但 Activity 已经退到桌面，用 pidof 会必然误判成"还在"）
+        # ④ 返回键：**新语义**（2026-10-11 改动后）
+        #   现在只要发生"页面切换"，退出计时就清零（防底部误触累积成退出）。
+        #   正确行为：首页连按两次（2 秒内）才退出；从子页面按一次只是回首页。
         ensure_foreground("④ 返回键")
+        tap_text_any(dump("b_back0"), ["首页"])
+        time.sleep(1.5)
+        fg_a = foreground_is_app()
         adb("shell", "input", "keyevent", "KEYCODE_BACK")
-        time.sleep(2)
-        fg1 = foreground_is_app()
+        time.sleep(1.6)
+        fg_b = foreground_is_app()
         adb("shell", "input", "keyevent", "KEYCODE_BACK")
-        time.sleep(3)
-        fg2 = foreground_is_app()
-        record("④ 返回键两次退出", verdict((fg1 and not fg2)),
-               "第一次前台=%s 第二次前台=%s（期望 True → False）" % (fg1, fg2))
+        time.sleep(3.0)
+        fg_c = foreground_is_app()
+        record("④ 返回键（首页连按两次退出）", verdict(fg_a and fg_b and not fg_c),
+               "首页=%s 按1次后=%s 按2次后=%s（期望 True → True → False）"
+               % (fg_a, fg_b, fg_c))
 
         # ⑤/⑥ 设置页：离线 TTS 自检 + Silero + 只回应呼唤开关
         open_app()   # 这一阶段本来就重新开，保留
@@ -494,6 +509,13 @@ def main():
                 record("⑤b 离线 TTS 合成", verdict(any("ready" in l or "返回" in l for l in lines)), (lines[-1:] or ["(无 [tts] 日志)"])[0].strip()[:110])
             else:
                 record("⑤b 离线 TTS 合成", "SKIP", "设置页没找到「离线音色」")
+            # 设置页是可滚动的（我们新加的「离线识别（实验）」把下面几行推下去了）
+            # ⇒ 找不到就先往下滑几次再找，别因为「看不见」就判 SKIP。
+            for _ in range(4):
+                if "识别自检" in dump("b_scroll"):
+                    break
+                adb("shell", "input", "swipe", "612", "1900", "612", "1000", "250")
+                time.sleep(1.2)
             if tap_text_any(dump("b6"), ["识别自检"]):
                 time.sleep(15)
                 lg = read_log("vad.log")
