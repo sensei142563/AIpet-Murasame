@@ -1,0 +1,21 @@
+test(3d): three/three-vrm 离线化（0.95MB 本地包）并验证「不联外网也能渲染」
+
+上一提交证明了 CDN 版本能渲染，但手机 WebView 不能依赖 CDN，且校园网对部分域名有拦截。
+本次把依赖本地化并用同一套 CDP 手段验证离线可用。
+
+做法：
+  · 用 jsDelivr 的 `+esm` 端点取三个文件（Rollup+esbuild 预打包、自带依赖）：
+    three.js 729.5KB / three-vrm.js 148.4KB / GLTFLoader.js 45.8KB，合计 0.95MB；
+  · index.html 的 importmap 指向本地文件；页面加自诊断（异常写进 document.title）；
+  · 抓错过程（dev/scripts/vrm_cdp_console.py，CDP 打开 Runtime/Log 域）发现真凶：
+      HTTP 404 http://127.0.0.1:8099/npm/three@0.186.1/+esm
+      HTTP 404 http://127.0.0.1:8099/npm/three@0.185.1/+esm
+    ⇒ `+esm` 会把依赖**外部化成绝对路径**，importmap 拦不住路径式导入；离线必然 404。
+  · vrm_offline_fix.py 把这些绝对路径改写成相对本地文件（three-vrm.js 引用的是 0.185.1，
+    GLTFLoader.js 引用 0.186.1，都指向本地 three.js），复核残留为 0。
+
+结果：页面标题 **VRM_OK 在 0 秒**返回（本地文件加载远快于 CDN），
+      CDP 截图 85.5KB，3D 角色（MToon 材质 + spring bone 头发）正常渲染。
+
+附带：dev/three-demo/vendor/README.md 记录来源/版本/许可（three 与 three-vrm 均为 MIT）
+      以及"本地化必须改写绝对路径"这条坑。测试用 VRM 仍不入库（.gitignore）。
