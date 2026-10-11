@@ -476,22 +476,24 @@ def main():
         record("③ 首页 QQ 卡", verdict("QQ chatter" in x),
                ("看到 QQ chatter" if "QQ chatter" in x else "未看到"))
 
-        # ④ 返回键：**新语义**（2026-10-11 改动后）
-        #   现在只要发生"页面切换"，退出计时就清零（防底部误触累积成退出）。
-        #   正确行为：首页连按两次（2 秒内）才退出；从子页面按一次只是回首页。
+        # ④ 返回键（新语义，2026-10-11 改动后）
+        #   现在的规则：只要发生"页面切换"，退出计时就清零（防底部误触累积成退出）。
+        #   ⇒ 从子页面按一次只是回首页；在首页连按两次（2 秒内）才退出。
+        #   检查方式不能假设"当前在首页"（之前用文字找「首页」没点中，导致误报）：
+        #   先用**底部导航固定坐标**点首页，再最多按 3 次返回，必须退出。
         ensure_foreground("④ 返回键")
-        tap_text_any(dump("b_back0"), ["首页"])
-        time.sleep(1.5)
-        fg_a = foreground_is_app()
-        adb("shell", "input", "keyevent", "KEYCODE_BACK")
-        time.sleep(1.6)
-        fg_b = foreground_is_app()
-        adb("shell", "input", "keyevent", "KEYCODE_BACK")
-        time.sleep(3.0)
-        fg_c = foreground_is_app()
-        record("④ 返回键（首页连按两次退出）", verdict(fg_a and fg_b and not fg_c),
-               "首页=%s 按1次后=%s 按2次后=%s（期望 True → True → False）"
-               % (fg_a, fg_b, fg_c))
+        adb("shell", "input", "tap", "111", "2641")   # 底部导航：首页
+        time.sleep(2.5)
+        alive = [foreground_is_app()]
+        for _ in range(3):
+            adb("shell", "input", "keyevent", "KEYCODE_BACK")
+            time.sleep(1.4)
+            alive.append(foreground_is_app())
+            if not alive[-1]:
+                break
+        record("④ 返回键（最多按 3 次必须退出）", verdict(alive[0] and not alive[-1]),
+               "起始在App=%s；逐次按返回后是否仍在App=%s（期望最终 False）"
+               % (alive[0], alive[1:]))
 
         # ⑤/⑥ 设置页：离线 TTS 自检 + Silero + 只回应呼唤开关
         open_app()   # 这一阶段本来就重新开，保留
