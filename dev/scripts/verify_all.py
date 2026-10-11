@@ -147,6 +147,27 @@ if "--quick" not in sys.argv:
     if rc != 0 or fail:
         print("     " + " ".join(classes))
 
+# ---------- ⑦ 所有脚本语法自检（把引号/缩进写错这类错误拦在跑之前）----------
+print(chr(10) + '⑦ 脚本语法自检（dev/scripts 与 tool 下所有 .py）')
+n_ok = n_bad = 0
+bad_list = []
+for folder in (os.path.join(MAIN, 'dev', 'scripts'), os.path.join(MAIN, 'tool')):
+    for f in (sorted(os.listdir(folder)) if os.path.isdir(folder) else []):
+        if not f.endswith('.py'):
+            continue
+        p = os.path.join(folder, f)
+        rc, out, _ = run([PY, '-c',
+                          'import ast,io,sys;ast.parse(io.open(sys.argv[1],encoding=' + chr(39)
+                          + 'utf-8' + chr(39) + ').read())', p], timeout=120)
+        if rc == 0:
+            n_ok += 1
+        else:
+            n_bad += 1
+            tail = out.strip().splitlines()[-1:] 
+            bad_list.append(f + ': ' + (tail[0][:80] if tail else '?'))
+row('脚本语法自检（%d 个 .py）' % (n_ok + n_bad), n_bad == 0,
+    '全部可解析' if n_bad == 0 else '有 %d 个语法错：%s' % (n_bad, '; '.join(bad_list[:3])))
+
 # ---------- 总表 ----------
 print("\n" + "=" * 78)
 print("%-36s %-6s %-10s %s" % ("检查项", "结果", "耗时", "关键数字"))
