@@ -1,0 +1,66 @@
+# -*- coding: utf-8 -*-
+"""提交手机仓（SafeStore 与接线）+ 桌面仓脚本。"""
+import io
+import os
+import subprocess
+import sys
+
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+MAIN = r"E:\university\order\python\pet\AIpet-Murasame-main"
+PET = r"E:\university\order\python\pet"
+CHAT = os.path.join(PET, "chatter")
+
+MSG = """fix(persist): 修掉"读坏→当空→被覆盖"的永久丢数据路径（新增 SafeStore，7 个单测）
+
+对本地持久化做故障注入式审查，直接读到两条**永久丢数据**路径：
+
+  · ChatScreen.load：JSONArray(f.readText()) 包在 runCatching 里 ⇒ 文件损坏时静默得到空
+    ⇒ sessions 为空 ⇒ 新建空会话；而 save() **每条消息都写** ⇒ 空会话立刻覆盖掉那个坏文件
+    ⇒ **旧对话永久消失**（用户看到的是"聊天记录被清空"，实际连原始字节都没了）。
+  · MemoryStore 同理：readHistory 静默返回空列表，writeHistory 非原子 ⇒ 记忆也会被覆盖。
+
+新增 bot/chat/SafeStore.kt（纯 java.io，可 JVM 单测）：
+  ① writeAtomic       —— 同目录临时文件 + Files.move(REPLACE_EXISTING)（沿用项目里 PendingInbox 的做法）；
+  ② writeAtomicWithBackup —— 替换前把旧内容留一份 `<name>.bak`（备份=**写入前**的版本，
+     正好是"写一半被杀"时的最后一版好数据）；
+  ③ readWithRecovery  —— 主文件坏了就**隔离**成 `<name>.corrupt-<时间戳>`（改名保留，绝不删除/覆盖），
+     若 .bak 可解析则用它顶上；没有备份时返回 null 让调用方走"新建"，
+     但原始字节仍被保留，后续写入不会再覆盖它。
+
+接线：
+  · ChatScreen.load → SafeStore.readWithRecovery；save → writeAtomicWithBackup；
+  · MemoryStore.readHistory → readWithRecovery；writeHistory → writeAtomicWithBackup。
+
+单测 SafeStoreTest（7 个，纯 JVM）：
+  · 原子写不留 .tmp 且内容正确；
+  · **失败注入**：把 `<name>.tmp` 先建成目录让写失败 ⇒ 应当抛异常且**原文件完好**（原子性证据）；
+  · 备份保留的是上一版内容；坏主文件 + 好备份 ⇒ 恢复出备份内容且坏文件被隔离；
+  · 没有备份的坏文件 ⇒ 调用方拿到 null，但原始字节仍以 .corrupt-* 保留；
+  · 文件不存在时不创建任何东西；正常文件读取不会产生备份或 quarantine。
+
+我自己的一处错误（如实记录）：第一次把"恢复出来的内容"期望写成**写入后**的版本，
+实际是**写入前**的（即 .bak 语义）—— 是**测试**错了，不是实现错了，已改。
+
+另记一条跨语言坑（第二次踩）：在 Python 三引号串里生成 Kotlin 时，写了 \\"，而
+Python 中 \\" 是**合法转义**、反斜杠被吃掉 ⇒ 生成出的 Kotlin 成了裸引号 ⇒ 编译失败。
+今后规则：生成 Kotlin 的表达式里**不要出现转义引号**，换等价写法。
+
+验证：全量单测 **94 个用例失败 0**（新增 SafeStoreTest 7）；release 构建通过。
+"""
+p = os.path.join(MAIN, "dev", "merge-map", "_msg_safestore.txt")
+io.open(p, "w", encoding="utf-8", newline="\n").write(MSG)
+subprocess.run(["git", "-C", CHAT, "add", "-A"], capture_output=True)
+rc = subprocess.run(["git", "-C", CHAT, "commit", "-F", p], capture_output=True, text=True,
+                    encoding="utf-8", errors="replace")
+print("手机仓:", (rc.stdout or rc.stderr or "").splitlines()[0][:140])
+subprocess.run(["git", "-C", MAIN, "add", "-A"], capture_output=True)
+r2 = subprocess.run(["git", "-C", MAIN, "commit", "-m",
+                     "chore(scripts): 本地持久化审查与 SafeStore 接线脚本"],
+                    capture_output=True, text=True, encoding="utf-8", errors="replace")
+print("桌面仓:", (r2.stdout or r2.stderr or "").splitlines()[0][:140])
+for nm, repo in (("手机", CHAT), ("桌面", MAIN)):
+    n = subprocess.run(["git", "-C", repo, "rev-list", "--count", "origin/main..HEAD"],
+                       capture_output=True, text=True, encoding="utf-8").stdout.strip()
+    st = subprocess.run(["git", "-C", repo, "status", "--porcelain"], capture_output=True,
+                        text=True, encoding="utf-8").stdout.strip()
+    print("  %s仓：未推送 %s 条，工作区 %s" % (nm, n, "干净 ✓" if not st else "%d 项" % len(st.splitlines())))
