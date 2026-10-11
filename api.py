@@ -1,4 +1,6 @@
+import re
 import time
+import socket
 import asyncio
 import io
 import json
@@ -322,6 +324,136 @@ try:
     _th.Timer(1.0, _stt_warmup).start()
 except Exception:
     pass
+
+
+# ===== QQ 通道（搬手机第一步：只读状态与会话）=====
+# NapCat/OneBot11 的实时收发在桌面端进程里，这里先提供"看"的能力：
+#   /qq/status    连接方式与在线状态 + 会话数
+#   /qq/sessions  所有 QQ 会话（私聊/群）与最后一条消息预览
+#   /qq/messages  某个会话的最近消息
+# 发送通道（命令队列）见 /qq/queue/send，桌面端轮询后经 OneBot11 WS 发出。
+def _qq_memory_module():
+    import importlib.util as _ilu
+    p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "qq", "qq_memory.py")
+    spec = _ilu.spec_from_file_location("aipet_qq_memory", p)
+    mod = _ilu.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _qq_mem_dir():
+    try:
+        mod = _qq_memory_module()
+        d = getattr(mod, "_active_qq_memory_dir", None)
+        if callable(d):
+            return str(d())
+    except Exception:
+        pass
+    pet = "murasame"
+    try:
+        cfg = json.loads(io.open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                              "config.json"), encoding="utf-8").read())
+        pet = cfg.get("qq_pet") or cfg.get("active_pet") or pet
+    except Exception:
+        pass
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "pets", pet, "memory", "qq")
+
+
+def _qq_cfg():
+    try:
+        return json.loads(io.open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                               "config.json"), encoding="utf-8").read())
+    except Exception:
+        return {}
+
+
+def _port_open(host, port, timeout=1.0):
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except Exception:
+        return False
+
+
+@app.get("/qq/status")
+async def qq_status():
+    cfg = _qq_cfg()
+    ws_url = str(cfg.get("qq_napcat_ws") or "ws://127.0.0.1:3001")
+    http_url = str(cfg.get("qq_napcat_http") or "http://127.0.0.1:6099")
+    m = re.search(r"//([^:/]+):(\d+)", ws_url)
+    host, port = (m.group(1), int(m.group(2))) if m else ("127.0.0.1", 3001)
+    d = _qq_mem_dir()
+    files = []
+    if os.path.isdir(d):
+        files = [f for f in os.listdir(d) if f.endswith(".json")]
+    return {
+        "qq_enabled": str(cfg.get("qq_enabled", "")) == "true",
+        "napcat_ws": ws_url,
+        "napcat_http": http_url,
+        "napcat_ws_listening": _port_open(host, port),
+        "owner_id": cfg.get("qq_owner_id"),
+        "memory_dir": d,
+        "sessions": len(files),
+        "note": "实时收发在桌面端进程内（OneBot11 正向 WS）；此处只读会话与状态",
+    }
+
+
+@app.get("/qq/sessions")
+async def qq_sessions():
+    d = _qq_mem_dir()
+    out = []
+    if os.path.isdir(d):
+        for f in sorted(os.listdir(d)):
+            if not f.endswith(".json"):
+                continue
+            p = os.path.join(d, f)
+            last = None
+            cnt = 0
+            try:
+                j = json.loads(io.open(p, encoding="utf-8").read())
+                h = j.get("history") or []
+                cnt = len(h)
+                if h:
+                    last = str(h[-1].get("content") or "")[:80]
+            except Exception:
+                pass
+            out.append({"file": f, "key": f[:-5], "messages": cnt, "last": last,
+                        "mtime": int(os.path.getmtime(p))})
+    out.sort(key=lambda x: -x["mtime"])
+    return {"dir": d, "count": len(out), "sessions": out[:50]}
+
+
+@app.get("/qq/messages")
+async def qq_messages(session: str, limit: int = 30):
+    d = _qq_mem_dir()
+    f = os.path.join(d, session if session.endswith(".json") else session + ".json")
+    if not os.path.isfile(f):
+        return {"session": session, "error": "not found", "dir": d}
+    try:
+        j = json.loads(io.open(f, encoding="utf-8").read())
+        h = j.get("history") or []
+        return {"session": session, "total": len(h), "messages": h[-max(1, min(limit, 200)):]}
+    except Exception as e:
+        return {"session": session, "error": "%s: %s" % (type(e).__name__, e)}
+
+
+@app.post("/qq/queue/send")
+async def qq_queue_send(request: Request):
+    """把"要发到 QQ 的消息"写进队列文件，桌面端轮询后经 OneBot11 发出。
+    body: {"target_type":"private|group","target_id":123,"text":"...","sticker":"可选"}"""
+    body = await request.body()
+    try:
+        item = json.loads(body.decode("utf-8", "replace") or "{}")
+    except Exception:
+        return {"ok": False, "error": "bad json"}
+    if not item.get("target_id") or not (item.get("text") or item.get("sticker")):
+        return {"ok": False, "error": "need target_id and text/sticker"}
+    qf = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "qq_outbox.jsonl")
+    os.makedirs(os.path.dirname(qf), exist_ok=True)
+    item["queued_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    with io.open(qf, "a", encoding="utf-8") as f:
+        f.write(json.dumps(item, ensure_ascii=False) + "\n")
+    return {"ok": True, "queued_to": qf, "item": item}
 
 
 @app.post("/stt")
