@@ -1,0 +1,20 @@
+test(accept): 一键真机验收脚本 accept_all.py（含 --dry-run 自检）
+
+把"等你插线后要验的 10 项"固化成一条命令，避免靠临场记忆：
+    python dev/scripts/accept_all.py            # 真跑
+    python dev/scripts/accept_all.py --dry-run  # 无手机时自检脚本本身
+
+覆盖：安装（记录 lastUpdateTime）/ 推送离线 TTS 模型与测试 VRM（已有则跳过）/
+① 3D 页加载（读 files/vrm.log 找 title=VRM_OK）/
+② 3D AR（读 files/vrm_ar.log 的"相机已绑定"与"相机 FOV"行 → 音量下键拍照看 shoot 日志 →
+   点「试手」后在 dump 里找命中提示 → 点「干净」后确认控件确实消失）/
+③ 首页 QQ chatter 卡（dump 文本）/
+④ 返回键：**第一次按应存活、第二次才退出**（用 pidof 实测存活状态）/
+⑤ 设置页「只回应呼唤」开关存在 + 点「离线音色」后读 live2d.log 的 [tts] 行 /
+⑥ 点「识别自检」后读 vad.log 的 Silero 行 /
+⑦ Termux+NapCat 需人工（给出文档位置与要看的日志）。
+每项输出 PASS/FAIL/SKIP + 原始证据，最后写 dev/shots/accept_report.json。
+
+诚实性修正（写脚本时自己发现的）：第一版在 --dry-run 下把"没验证的项"也报成 PASS
+（比如"首页 QQ 卡 PASS"却附证据"未看到"）—— 这会误导。已改为 verdict() 统一判定：
+**dry-run 一律 SKIP**，只有真机跑出来的结果才会是 PASS/FAIL。
