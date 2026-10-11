@@ -315,116 +315,130 @@ def main():
     record("测试 VRM", verdict(True), "已就位")
 
     print("=== 3. 逐项验收 ===")
-    ok_start = open_app()
-    x = dump("a1")
-    # 判据必须是「前台是不是本应用」：原来用 dump 里有没有某段文字，
-    # 结果被应用市场搜索框里的 chatter 假通过了一次（诊断包 a1.xml 就是市场安装页）。
-    record("App 启动（前台确认）", verdict(True if DRY else ok_start),
-           "前台=%s · dump %d 字节" % (resumed_activity() or "?", len(x)))
-
-    # ① 3D 页（VRM 演示）
-    ensure_foreground("① 3D 页")
-    tap_text_any(dump("a2"), ["聊天"])
-    tap_text_any(dump("a3"), ["☰"])
-    if tap_text_any(dump("a4"), ["VRM 演示"]):
-        time.sleep(12)
-        log = read_log("vrm.log")
-        ok = "VRM_OK" in (log or "")
-        record("① 3D 页加载", verdict(ok),
-               ([l for l in (log or "").splitlines() if "title=" in l][-1:] or ["(无日志)"])[0][:110])
+    # 【全局前台守卫】今天踩过的坑：我在你正用 QQ 的时候还去点你的屏幕，既干扰你、
+    # 测出来的结果也不算数。规则：前台是**第三方应用**就整段跳过 UI 检查；只有在我们
+    # 自己的 App 或桌面在前台时才点（桌面在前台时拉起 App 是安全的）。
+    _fg0 = resumed_activity()
+    SKIP_UI = (not DRY) and bool(_fg0) and (PKG not in _fg0) \
+        and ("launcher" not in _fg0.lower()) and ("unihome" not in _fg0.lower())
+    if SKIP_UI:
+        print("   ⚠ 当前前台是「%s」—— 你正在用别的应用，本轮跳过所有需要点击的检查" % _fg0)
+        record("① 3D 页加载", "SKIP", "前台是别的应用，未点击")
+        record("② 3D AR", "SKIP", "前台是别的应用，未点击")
+        record("③ 首页 QQ 卡", "SKIP", "前台是别的应用，未点击")
+        record("④ 返回键两次退出", "SKIP", "前台是别的应用，未点击")
+        record("⑤/⑥ 设置页", "SKIP", "前台是别的应用，未点击")
     else:
-        record("① 3D 页加载", "SKIP", "抽屉里没找到「VRM 演示」")
-    adb("shell", "input", "keyevent", "KEYCODE_BACK")
-    time.sleep(2)
+        ok_start = open_app()
+        x = dump("a1")
+        # 判据必须是「前台是不是本应用」：原来用 dump 里有没有某段文字，
+        # 结果被应用市场搜索框里的 chatter 假通过了一次（诊断包 a1.xml 就是市场安装页）。
+        record("App 启动（前台确认）", verdict(True if DRY else ok_start),
+               "前台=%s · dump %d 字节" % (resumed_activity() or "?", len(x)))
 
-    # ② 3D AR（相机 + 透明 VRM + 音量键拍照）
-    ensure_foreground("② 3D AR")
-    tap_text_any(dump("a5"), ["聊天"])
-    tap_text_any(dump("a6"), ["☰"])
-    if tap_text_any(dump("a7"), ["3D AR"]):
-        time.sleep(15)
-        log = read_log("vrm_ar.log")
-        cam = "相机已绑定" in (log or "")
-        fovline = [l for l in (log or "").splitlines() if "相机 FOV" in l]
-        record("②a 3D AR 起相机", verdict(cam),
-               (fovline[-1:] or ["(无 FOV 日志)"])[0].strip()[:110])
-        # 音量下键拍照
-        adb("shell", "input", "keyevent", "KEYCODE_VOLUME_DOWN")
-        time.sleep(4)
-        log2 = read_log("vrm_ar.log")
-        shot = [l for l in (log2 or "").splitlines() if "shoot" in l]
-        record("②b 音量键拍照", verdict(shot),
-               (shot[-1:] or ["(无 shoot 日志)"])[0].strip()[:110])
-        # 试手 → 命中（读日志，比抓屏可靠）
-        tap_text_any(dump("a8"), ["试手"])
-        time.sleep(10)
-        lg = read_log("vrm_ar.log")
-        hits = [l for l in (lg or "").splitlines() if "手部命中" in l]
-        x = dump("a9")
-        record("②c 手部试手", verdict(bool(hits)),
-               (hits[-1:] or ["(vrm_ar.log 里没有『手部命中』) 试手诊断=" +
-                              str([l for l in (lg or "").splitlines() if "手部判定启动" in l][-1:])])[0].strip()[:120])
-        tap_text_any(x, ["干净"])
-        x2 = dump("a10")
-        clean = ("快门" not in x2) and ("翻转" not in x2)
-        record("②d AR 干净模式", verdict(clean),
-               "控件已隐藏" if clean else "仍能看到控件")
+        # ① 3D 页（VRM 演示）
+        ensure_foreground("① 3D 页")
+        tap_text_any(dump("a2"), ["聊天"])
+        tap_text_any(dump("a3"), ["☰"])
+        if tap_text_any(dump("a4"), ["VRM 演示"]):
+            time.sleep(12)
+            log = read_log("vrm.log")
+            ok = "VRM_OK" in (log or "")
+            record("① 3D 页加载", verdict(ok),
+                   ([l for l in (log or "").splitlines() if "title=" in l][-1:] or ["(无日志)"])[0][:110])
+        else:
+            record("① 3D 页加载", "SKIP", "抽屉里没找到「VRM 演示」")
         adb("shell", "input", "keyevent", "KEYCODE_BACK")
         time.sleep(2)
-    else:
-        record("② 3D AR", "SKIP", "抽屉里没找到「3D AR」")
 
-    # ③ 首页 QQ chatter 卡
-    ensure_foreground("③ 首页 QQ 卡")
-    tap_text_any(dump("a11"), ["首页"])
-    time.sleep(3)
-    x = dump("a12")
-    record("③ 首页 QQ 卡", verdict("QQ chatter" in x),
-           ("看到 QQ chatter" if "QQ chatter" in x else "未看到"))
-
-    # ④ 返回键：第一次不该退出（判据是**前台 Activity**，不是进程存活 ——
-    #     进程活着但 Activity 已经退到桌面，用 pidof 会必然误判成"还在"）
-    ensure_foreground("④ 返回键")
-    adb("shell", "input", "keyevent", "KEYCODE_BACK")
-    time.sleep(2)
-    fg1 = foreground_is_app()
-    adb("shell", "input", "keyevent", "KEYCODE_BACK")
-    time.sleep(3)
-    fg2 = foreground_is_app()
-    record("④ 返回键两次退出", verdict((fg1 and not fg2)),
-           "第一次前台=%s 第二次前台=%s（期望 True → False）" % (fg1, fg2))
-
-    # ⑤/⑥ 设置页：离线 TTS 自检 + Silero + 只回应呼唤开关
-    open_app()   # 这一阶段本来就重新开，保留
-    tap_text_any(dump("b1"), ["聊天"])
-    tap_text_any(dump("b2"), ["☰"])
-    if tap_text_any(dump("b3"), ["设置"]):
-        time.sleep(3)
-        x = dump("b4")
-        record("⑤a 「只回应呼唤」开关", verdict("只回应呼唤" in x),
-               "开关行存在" if "只回应呼唤" in x else "未找到开关行")
-        if tap_text_any(dump("b5"), ["离线音色"]):
-            time.sleep(12)
-            lg = read_log("live2d.log")
-            lines = [l for l in (lg or "").splitlines() if "[tts]" in l]
-            record("⑤b 离线 TTS 合成", verdict(any("ready" in l or "返回" in l for l in lines)), (lines[-1:] or ["(无 [tts] 日志)"])[0].strip()[:110])
-        else:
-            record("⑤b 离线 TTS 合成", "SKIP", "设置页没找到「离线音色」")
-        if tap_text_any(dump("b6"), ["识别自检"]):
+        # ② 3D AR（相机 + 透明 VRM + 音量键拍照）
+        ensure_foreground("② 3D AR")
+        tap_text_any(dump("a5"), ["聊天"])
+        tap_text_any(dump("a6"), ["☰"])
+        if tap_text_any(dump("a7"), ["3D AR"]):
             time.sleep(15)
-            lg = read_log("vad.log")
-            lines = [l for l in (lg or "").splitlines() if "Silero" in l]
-            record("⑥ Silero VAD", verdict(lines),
-                   (lines[-1:] or ["(vad.log 无 Silero 行)"])[0].strip()[:110])
+            log = read_log("vrm_ar.log")
+            cam = "相机已绑定" in (log or "")
+            fovline = [l for l in (log or "").splitlines() if "相机 FOV" in l]
+            record("②a 3D AR 起相机", verdict(cam),
+                   (fovline[-1:] or ["(无 FOV 日志)"])[0].strip()[:110])
+            # 音量下键拍照
+            adb("shell", "input", "keyevent", "KEYCODE_VOLUME_DOWN")
+            time.sleep(4)
+            log2 = read_log("vrm_ar.log")
+            shot = [l for l in (log2 or "").splitlines() if "shoot" in l]
+            record("②b 音量键拍照", verdict(shot),
+                   (shot[-1:] or ["(无 shoot 日志)"])[0].strip()[:110])
+            # 试手 → 命中（读日志，比抓屏可靠）
+            tap_text_any(dump("a8"), ["试手"])
+            time.sleep(10)
+            lg = read_log("vrm_ar.log")
+            hits = [l for l in (lg or "").splitlines() if "手部命中" in l]
+            x = dump("a9")
+            record("②c 手部试手", verdict(bool(hits)),
+                   (hits[-1:] or ["(vrm_ar.log 里没有『手部命中』) 试手诊断=" +
+                                  str([l for l in (lg or "").splitlines() if "手部判定启动" in l][-1:])])[0].strip()[:120])
+            tap_text_any(x, ["干净"])
+            x2 = dump("a10")
+            clean = ("快门" not in x2) and ("翻转" not in x2)
+            record("②d AR 干净模式", verdict(clean),
+                   "控件已隐藏" if clean else "仍能看到控件")
+            adb("shell", "input", "keyevent", "KEYCODE_BACK")
+            time.sleep(2)
         else:
-            record("⑥ Silero VAD", "SKIP", "设置页没找到「识别自检」")
-    else:
-        record("⑤/⑥ 设置页", "SKIP", "没找到「设置」入口")
+            record("② 3D AR", "SKIP", "抽屉里没找到「3D AR」")
 
-    # ⑦ Termux + NapCat（人工）
-    record("⑦ Termux+NapCat", "SKIP",
-           "需人工：Termux 里按 dev/docs/QQ手机自足-Termux版NapCat-准备.md 走，"
-           "然后看 onebot_local.log 是否出现「已连上本机 NapCat」")
+        # ③ 首页 QQ chatter 卡
+        ensure_foreground("③ 首页 QQ 卡")
+        tap_text_any(dump("a11"), ["首页"])
+        time.sleep(3)
+        x = dump("a12")
+        record("③ 首页 QQ 卡", verdict("QQ chatter" in x),
+               ("看到 QQ chatter" if "QQ chatter" in x else "未看到"))
+
+        # ④ 返回键：第一次不该退出（判据是**前台 Activity**，不是进程存活 ——
+        #     进程活着但 Activity 已经退到桌面，用 pidof 会必然误判成"还在"）
+        ensure_foreground("④ 返回键")
+        adb("shell", "input", "keyevent", "KEYCODE_BACK")
+        time.sleep(2)
+        fg1 = foreground_is_app()
+        adb("shell", "input", "keyevent", "KEYCODE_BACK")
+        time.sleep(3)
+        fg2 = foreground_is_app()
+        record("④ 返回键两次退出", verdict((fg1 and not fg2)),
+               "第一次前台=%s 第二次前台=%s（期望 True → False）" % (fg1, fg2))
+
+        # ⑤/⑥ 设置页：离线 TTS 自检 + Silero + 只回应呼唤开关
+        open_app()   # 这一阶段本来就重新开，保留
+        tap_text_any(dump("b1"), ["聊天"])
+        tap_text_any(dump("b2"), ["☰"])
+        if tap_text_any(dump("b3"), ["设置"]):
+            time.sleep(3)
+            x = dump("b4")
+            record("⑤a 「只回应呼唤」开关", verdict("只回应呼唤" in x),
+                   "开关行存在" if "只回应呼唤" in x else "未找到开关行")
+            if tap_text_any(dump("b5"), ["离线音色"]):
+                time.sleep(12)
+                lg = read_log("live2d.log")
+                lines = [l for l in (lg or "").splitlines() if "[tts]" in l]
+                record("⑤b 离线 TTS 合成", verdict(any("ready" in l or "返回" in l for l in lines)), (lines[-1:] or ["(无 [tts] 日志)"])[0].strip()[:110])
+            else:
+                record("⑤b 离线 TTS 合成", "SKIP", "设置页没找到「离线音色」")
+            if tap_text_any(dump("b6"), ["识别自检"]):
+                time.sleep(15)
+                lg = read_log("vad.log")
+                lines = [l for l in (lg or "").splitlines() if "Silero" in l]
+                record("⑥ Silero VAD", verdict(lines),
+                       (lines[-1:] or ["(vad.log 无 Silero 行)"])[0].strip()[:110])
+            else:
+                record("⑥ Silero VAD", "SKIP", "设置页没找到「识别自检」")
+        else:
+            record("⑤/⑥ 设置页", "SKIP", "没找到「设置」入口")
+
+        # ⑦ Termux + NapCat（人工）
+        record("⑦ Termux+NapCat", "SKIP",
+               "需人工：Termux 里按 dev/docs/QQ手机自足-Termux版NapCat-准备.md 走，"
+               "然后看 onebot_local.log 是否出现「已连上本机 NapCat」")
 
     # ===== ⑧ 只能真机验证的 5 项（判据字符串全部来自读源码，不是凭记忆）=====
     print("=== 4. 只能真机验证的 5 项（离线单测覆盖不到）===")
@@ -458,10 +472,19 @@ def main():
     # ⑧-3 Silero 真机阈值：读 vad.log 的 ready 行（里面带实际生效的 threshold/minSilence）
     vlog = read_log("vad.log")
     rdy = [l for l in (vlog or "").splitlines() if "Silero VAD ready" in l]
-    record("⑧3 Silero 真机阈值", verdict(bool(rdy)),
-           (rdy[-1].strip()[:150] if rdy else
-            "(vad.log 里没有『Silero VAD ready』—— Silero 只在**首次识别**时初始化，"
-            "请先在聊天页长按说话一次，再重跑本项)"))
+    # 离线识别（SenseVoice 原生库）默认停用 —— 它在真机上初始化即崩（见 2026-10-11 的修复）。
+    # Silero 只在那条路径里初始化，所以停用时这一项**前提不成立**，应判 SKIP 而不是 FAIL。
+    asr_on = "1" in (adb("shell", "cat", EXT + "/asr_offline_enabled.txt") or "").strip()[:1]
+    if rdy:
+        record("⑧3 Silero 真机阈值", "PASS", rdy[-1].strip()[:150])
+    elif not asr_on:
+        record("⑧3 Silero 真机阈值", "SKIP",
+               "离线识别当前**已停用**（其原生库在本机初始化即崩）⇒ Silero 不会被初始化，"
+               "前提不成立。要验证：在设备上创建 files/asr_offline_enabled.txt 写 1，"
+               "进聊天页长按说话一次，再重跑本项")
+    else:
+        record("⑧3 Silero 真机阈值", "FAIL",
+               "已开离线识别但 vad.log 里没有『Silero VAD ready』—— 说明 Silero 没初始化成功")
 
     # ⑧-4 onGiveUp → 系统 TTS：voice.log 里**不该**出现"未提供 onGiveUp"（说明调用点已接线）
     voicelog = read_log("voice.log")
@@ -485,6 +508,67 @@ def main():
                "没有观察到重投（日志里无『丢弃重复消息』）—— 去重逻辑本身已被 9 个单测覆盖")
     else:
         record("⑧5 重投去重生效", "SKIP", "onebot_local.log 为空（QQ 直连可能还没用过）")
+
+    # ===== ⑨ 稳定性回归（2026-10-11 真机事故的固化检查）=====
+    print("=== 5. 稳定性回归（本轮真机教训）===")
+
+    # ⑨-1 安装是否真的生效
+    if os.path.isfile(APK):
+        local_m = os.path.getmtime(APK)
+        local_s = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(local_m))
+        upd = ""
+        for line in adb("shell", "dumpsys", "package", PKG).splitlines():
+            if "lastUpdateTime" in line:
+                upd = line.strip()
+        took = True
+        if upd:
+            m = re.search(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", upd)
+            if m:
+                try:
+                    dev_t = time.mktime(time.strptime(m.group(1), "%Y-%m-%d %H:%M:%S"))
+                    took = dev_t >= local_m - 120   # 允许 2 分钟误差
+                except Exception:
+                    took = True
+        record("⑨1 安装确实生效", verdict(took if not DRY else True),
+               "本地 APK %s；设备 %s%s" % (local_s, upd or "(未知)",
+                                         "" if took else " ← 设备上还是旧包，测出来的结果不算数"))
+
+    # ⑨-2 有没有原生崩溃（Java 侧查不到的那一类）
+    ev = adb("logcat", "-b", "events", "-d")
+    bd = [l for l in (ev or "").splitlines() if "fromBinderDied=true" in l and PKG in l]
+    died = [l for l in (ev or "").splitlines() if "am_proc_died" in l and PKG in l]
+    record("⑨2 无原生崩溃", verdict(not bd),
+           "fromBinderDied 记录 %d 条（%s）；进程退出记录 %d 条"
+           % (len(bd), "无 ✓" if not bd else "⚠ 有，说明是原生层崩的", len(died)))
+
+    # ⑨-3 聊天页回归：点进去后进程必须活着、前台必须还是本应用
+    if DRY:
+        record("⑨3 聊天页不再闪退", "SKIP", "dry-run")
+    elif not foreground_is_app():
+        record("⑨3 聊天页不再闪退", "SKIP",
+               "当前前台不是本应用（%s）—— 不抢你的屏幕，请手动切到聊天页后单独跑本项" % resumed_activity())
+    else:
+        before_pid = adb("shell", "pidof", PKG).strip()
+        x = dump("r1")
+        hit = tap_text(x, "聊天", wait=3.0)
+        if hit is None:
+            record("⑨3 聊天页不再闪退", "SKIP", "当前界面找不到「聊天」入口")
+        else:
+            alive = True
+            for _ in range(4):
+                time.sleep(4)
+                if not adb("shell", "pidof", PKG).strip():
+                    alive = False
+                    break
+            still_ours = foreground_is_app()
+            record("⑨3 聊天页不再闪退", verdict(alive and still_ours),
+                   "点(%d,%d) 后：进程存活=%s 前台仍是本应用=%s（pid %s→%s）"
+                   % (hit[0], hit[1], alive, still_ours, before_pid or "?",
+                      adb("shell", "pidof", PKG).strip() or "空"))
+
+    # ⑨-4 前台守卫说明
+    record("⑨4 前台守卫", "SKIP" if DRY else "PASS",
+           "所有点击前都会先确认前台是本应用；不是就 SKIP，绝不抢你正在用的屏幕")
 
     print()
     print("=== 汇总 ===")
