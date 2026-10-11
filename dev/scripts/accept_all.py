@@ -190,13 +190,15 @@ def main():
         shot = [l for l in (log2 or "").splitlines() if "shoot" in l]
         record("②b 音量键拍照", verdict(shot),
                (shot[-1:] or ["(无 shoot 日志)"])[0].strip()[:110])
-        # 试手 → 命中提示
+        # 试手 → 命中（读日志，比抓屏可靠）
         tap_text_any(dump("a8"), ["试手"])
-        time.sleep(8)
+        time.sleep(10)
+        lg = read_log("vrm_ar.log")
+        hits = [l for l in (lg or "").splitlines() if "手部命中" in l]
         x = dump("a9")
-        hit = ("碰到她了" in x) or ("摸到头了" in x) or ("试手：" in x)
-        record("②c 手部试手", verdict(hit),
-               "命中提示出现" if hit else "未见命中提示（假手可能还没扫到）")
+        record("②c 手部试手", verdict(bool(hits)),
+               (hits[-1:] or ["(vrm_ar.log 里没有『手部命中』) 试手诊断=" +
+                              str([l for l in (lg or "").splitlines() if "手部判定启动" in l][-1:])])[0].strip()[:120])
         tap_text_any(x, ["干净"])
         x2 = dump("a10")
         clean = ("快门" not in x2) and ("翻转" not in x2)

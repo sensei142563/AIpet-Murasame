@@ -1,0 +1,22 @@
+feat(ar): 手部命中写日志 + 假手周期可调（为真机验收准备"当场可修"的路径）
+
+背景：验收脚本里最难判的一项原是"点试手后在 dump 里找命中提示"——提示可能一闪而过、
+dump 时机错过就误判失败。改成**读日志**后判定就确定了。
+
+VrmArScreen：
+  · 每次手部命中写一行 vrm_ar.log：
+    「手部命中 HEAD/BODY（假手=… 周期=…ms 视口=WxH fov=… pitch=…）」+「↳ 摸到头/摸到身子」；
+  · 进入 3D AR 时打印一次「手部判定启动：视口=… fov=… 假手周期=…ms」，失败时能立刻看出是
+    视口/FO V没拿到还是命中没触发；
+  · 假手周期从 files/vrm_fake_period.txt 读（500~60000ms 之间才生效）⇒ 真机上调
+    "多久扫到她一次"**不用重新打包**。
+
+HandTracker：新增 @Volatile var periodMs（默认 4000ms），points() 传入。
+踩坑记录：第一次判断"属性是否已加"用了 `"periodMs" in 文件`，而 FakeHand.pointAt 的**形参**
+也叫 periodMs ⇒ 误判为"已有"，编译才报 Unresolved reference。已改成精确判断
+（`"var periodMs" in ...`）并把这条写进注释。
+
+accept_all.py：②c 由"抓屏找提示"改为"读 vrm_ar.log 的『手部命中』"，失败时附上
+「手部判定启动」那行作为诊断。
+
+验证：release 编译通过；全量单测 56 个用例全绿；accept_all --dry-run 仍 PASS 0/FAIL 0/SKIP 10。
