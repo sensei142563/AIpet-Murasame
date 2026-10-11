@@ -1,0 +1,25 @@
+feat(ar): 手部互动接线 —— 可插拔数据源 + 「试手」自测 + 命中分区反馈（4 个行为单测）
+
+把上一轮的纯数学（HandTouch）真正接进 3D AR，并解决"检测器还没接、整条链路无法验证"的问题。
+
+新增 ui/HandTracker.kt：
+  · `provider: (() -> List<Pair<Float,Float>>?)?` —— 手部数据源的**可插拔接口**：
+    等接入 MediaPipe/TFLite 之类检测器时，只要给 provider 赋一个"返回帧坐标系关键点"的闭包即可，
+    其余（旋转/裁剪/镜像/命中/去抖/通知页面）都已就位；
+  · `FakeHand.pointAt(nowMs, w, h)` —— 确定性的假手（三角波横扫 + 轻微起伏），
+    纯函数（时间→点），因此可单测。
+
+VrmArScreen：
+  · 15Hz 判定：取关键点 → ArGround.collisionRect（用实测 fovY 与 charPixelHeightExact）
+    → HandTouch.onLandmark（含 3 帧去抖 + 12 帧冷却）→ 命中则 evaluateJavascript 调
+    `__poke('HEAD'|'BODY')`，并在画面上提示"摸到头了/碰到她了"；
+  · 顶部新增「试手」按钮：开启假手后，你不接摄像头也能**亲眼看到整条链路**
+    （假手扫过 → 命中她 → 她切表情+跳一下）。
+
+页面：`__poke(zone)` 现在按分区给不同表情（摸头用 surprised/angry/happy，碰身用 happy/joy/relaxed），
+两份 index.html（电脑测试版与手机 assets）同步。
+
+单测 HandTrackerTest（4 个用例，全绿）：
+  · 假手始终在帧内；· 一趟扫描**恰好触发 1~6 次**（既不是 0 次、也不是每帧都触发）；
+  · 把轨迹挪到远离她处 → 0 次触发；· 没有手的一帧会把去抖清零。
+全量回归：ArGround 15 + HandTouch 8 + HandTracker 4 + OneBotParse 9 + NativeSmoke 4 = **40 个用例全绿**。
