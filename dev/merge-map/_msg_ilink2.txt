@@ -1,0 +1,29 @@
+fix(ilink): 微信桥的凭据与收件箱加固（凭据不再"静默失效"、未回复消息不再被覆盖）
+
+对抗审查 bot/ilink/*（微信/企业微信桥），读代码得到两处真问题：
+
+① CredentialStore 三个文件全是**非原子写**（wechat_credentials.json / wechat_sync_buf.txt /
+   wechat_context_tokens.json），而且凭据文件损坏时 readJson 静默返回 null ⇒ credentials() 变 null
+   ⇒ 整个微信桥**静默失效**：用户只会觉得"发了消息没反应"，日志也看不出原因。
+   修法：三处改 SafeStore.writeAtomic；readJson 改用 SafeStore.readWithRecovery（损坏即隔离改名保留）
+   并**明确告警**，留下可查痕迹。
+
+② PendingInbox.load 读到损坏文件时得到空列表，而下一次 save 会把原文件**覆盖掉** ——
+   那些"还没回复的用户消息"就永久消失了（与聊天记录那条路径同类）。
+   修法：load 走 SafeStore.readWithRecovery（坏主文件隔离 + 尝试 .bak 恢复）；
+   save 统一走 SafeStore.writeAtomicWithBackup（语义与原 tmp+move 相同，另留 .bak）；
+   顺带清理不再使用的 tmp 行与 Files import。
+
+单测 PendingInboxTest（6 个，纯 JVM —— 只依赖 java.io.File）：
+  追加/读取往返（含 .bak 生成）；**messageId 幂等**；remove（含删不存在的 id）；
+  **无可用备份时**：读空 + 隔离保留原始字节 + 之后追加仍可用且隔离文件不被覆盖；
+  **有可用备份时**：从 .bak 恢复出内容；文件不存在时读空且不产生副作用。
+
+测试过程记录（两次都是**预期**与实现不一致，不是实现错）：
+  · 第一次断言"首次写入后就该有 .bak"——备份只在旧文件已有内容时产生，已改为追加两次；
+  · 第二次该用例变成 `load` 非空（因为此时已有可用备份，实现正确地恢复了）——
+    于是把它拆成两个用例：**无备份分支先删 .bak**，有备份分支单列。
+
+验证：PendingInboxTest 6/6；全量单测 122 个用例失败 0；release 构建通过。
+诚实标注：CredentialStore 的加解密走 Android Keystore，JVM 单测无法覆盖其加解密分支，
+本次只对文件层（原子写/隔离/告警）负责；真机登录流程未验。
