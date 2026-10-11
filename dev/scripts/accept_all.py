@@ -41,6 +41,17 @@ def verdict(cond, dry_note="(dry-run 未验证)"):
 def record(name, status, evidence=""):
     RESULTS.append((name, status, evidence))
     print("   [%-4s] %-26s %s" % (status, name, evidence[:150]))
+    if status == "FAIL" and not DRY:
+        # 失败瞬间先抓一张现场图（事后补拍通常已经不是那个画面了）
+        try:
+            snap = adb_bytes("exec-out", "screencap", "-p")
+            if snap[:8] == b"\x89PNG\r\n\x1a\n":
+                d = os.path.join(SHOTS, "fail-shots")
+                os.makedirs(d, exist_ok=True)
+                io.open(os.path.join(d, "%s.png" % re.sub(r"[^0-9A-Za-z]+", "_", name)),
+                        "wb").write(snap)
+        except Exception:
+            pass
 
 
 def adb(*args, timeout=600, binary=False):
@@ -111,6 +122,79 @@ def open_app():
     time.sleep(2)
     adb("shell", "am", "start", "-n", "%s/.MainActivity" % PKG)
     time.sleep(14)
+
+
+# ===== 诊断包采集（失败时自动跑；规则依据技能 capturing-screenshots-and-screenrecord）=====
+LOGS = ["vrm.log", "vrm_ar.log", "vad.log", "live2d.log", "onebot_local.log",
+        "voice.log", "tts.log"]
+SETTINGS = ["silero_threshold.txt", "silero_min_silence.txt", "vrm_fake_period.txt",
+            "wake_word.txt"]
+
+
+def adb_bytes(*args, timeout=300):
+    """二进制干净的 adb 输出（截图必须走 exec-out，不能用 shell + 重定向：
+    在 Windows 上 adb shell 会给 stdout 分配 PTY，把 LF 翻成 CRLF，PNG 就坏了）。"""
+    if DRY:
+        return b""
+    r = subprocess.run([ADB, "-s", DEV] + list(args), capture_output=True, timeout=timeout)
+    return r.stdout or b""
+
+
+def collect_diag(tag="fail", note=""):
+    """把当前设备状态打成一个目录，便于事后复盘（不猜原因，留原始材料）。"""
+    d = os.path.join(SHOTS, "diag-%s-%s" % (time.strftime("%m%d-%H%M%S"), tag))
+    os.makedirs(os.path.join(d, "logs"), exist_ok=True)
+    os.makedirs(os.path.join(d, "settings"), exist_ok=True)
+    got = []
+    if not DRY:
+        # ① 截图：exec-out + -p（缺 -p 会得到裸 RGBA；用 shell 重定向会被 CRLF 破坏）
+        png = adb_bytes("exec-out", "screencap", "-p")
+        if png[:8] == b"\x89PNG\r\n\x1a\n":
+            io.open(os.path.join(d, "screen.png"), "wb").write(png)
+            got.append("screen.png(%d B)" % len(png))
+        else:
+            got.append("screen.png(✗ 非 PNG 头部 %r)" % png[:8])
+        # ② UI dump
+        adb("shell", "uiautomator", "dump", "/sdcard/diag.xml")
+        subprocess.run([ADB, "-s", DEV, "pull", "/sdcard/diag.xml",
+                        os.path.join(d, "ui.xml")], capture_output=True, timeout=120)
+        # ③ 应用日志
+        for name in LOGS:
+            body = adb("shell", "cat", "%s/%s" % (EXT, name))
+            if body and body.strip() and "No such file" not in body:
+                io.open(os.path.join(d, "logs", name), "w", encoding="utf-8").write(body)
+                got.append("logs/" + name)
+        # ④ 可调设置（真机调参用的旋钮）
+        for name in SETTINGS:
+            body = adb("shell", "cat", "%s/%s" % (EXT, name))
+            if body and body.strip() and "No such file" not in body:
+                io.open(os.path.join(d, "settings", name), "w", encoding="utf-8").write(body)
+                got.append("settings/" + name)
+        # ⑤ logcat（本应用相关）
+        lc = adb("logcat", "-d", "-v", "threadtime", "-t", "400")
+        io.open(os.path.join(d, "logcat.txt"), "w", encoding="utf-8").write(lc or "")
+        # ⑥ 环境
+        env = "device=%s\napk=%s\n" % (DEV, APK)
+        env += adb("shell", "getprop", "ro.build.version.release")
+        env += adb("shell", "dumpsys", "package", PKG).split("lastUpdateTime=")[-1][:40] + "\n"
+        io.open(os.path.join(d, "env.txt"), "w", encoding="utf-8").write(env)
+    # ⑦ README：结论 + 原始证据清单
+    lines = ["# 验收诊断包", "", "时间：%s" % time.strftime("%Y-%m-%d %H:%M:%S"),
+             "标记：%s" % tag, ""]
+    if note:
+        lines += ["## 备注", note, ""]
+    lines += ["## 本次结果"]
+    for name, st, ev in RESULTS:
+        lines.append("- [%s] %s — %s" % (st, name, ev))
+    lines += ["", "## 采集到的材料", ", ".join(got) or "(dry-run 未采集)", "",
+              "## 复跑的判定依据（判据要选不会撒谎的那个）",
+              "- 3D AR 命中：`cat files/vrm_ar.log | grep 手部命中`",
+              "- 假手/阈值调参：把新值写进 files/{silero_threshold.txt,vrm_fake_period.txt} 再点一次",
+              "- 离线 TTS：`cat files/live2d.log | grep '\[tts\]'`",
+              "- 返回键：`adb shell pidof %s` 两次按键之间是否还为真" % PKG]
+    io.open(os.path.join(d, "README.md"), "w", encoding="utf-8").write("\n".join(lines) + "\n")
+    print("   诊断包：%s（%d 项材料）" % (d, len(got)))
+    return d
 
 
 def main():
@@ -266,6 +350,12 @@ def main():
     for name, st, ev in RESULTS:
         print("   %-4s %s" % (st, name))
     print("   ---- PASS %d / FAIL %d / SKIP %d ----" % (npass, nfail, nskip))
+    if "--selftest-diag" in sys.argv:
+        collect_diag("selftest", "无设备自检：只验证目录与 README 生成")
+    elif nfail > 0:
+        print()
+        print("=== 有失败项 ⇒ 采集诊断包 ===")
+        collect_diag("fail", "本次有 %d 项 FAIL，下面是原始材料" % nfail)
     rep = os.path.join(SHOTS, "accept_report.json")
     io.open(rep, "w", encoding="utf-8").write(json.dumps(
         {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "results": RESULTS},

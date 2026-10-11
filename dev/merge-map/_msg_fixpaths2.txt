@@ -1,0 +1,14 @@
+feat(stt): Silero 阈值/最短静音支持文件调参（真机当场可修，无需重新打包）
+
+把真机最可能需要调的两个参数变成文件开关：
+  · files/silero_threshold.txt      一行浮点（0.05~0.95，默认 0.5）
+  · files/silero_min_silence.txt    一行浮点秒（0.05~2.0，默认 0.25）
+超范围或文件不存在则用默认值；初始化日志写明实际取值：
+  「Silero VAD ready (model=… 字节, threshold=0.50, minSilence=0.25s)」
+
+配套（本轮另两处"当场可修"路径）：
+  · 3D AR 手部命中写 vrm_ar.log + 进页面打印「手部判定启动：视口/ fov/ 假手周期」
+    ⇒ 验收脚本 ②c 改为读日志判定，不再靠抓屏找一闪而过的提示；
+  · 假手周期可由 files/vrm_fake_period.txt 调（500~60000ms）。
+
+验证：release 编译通过；全量单测 56 用例全绿。

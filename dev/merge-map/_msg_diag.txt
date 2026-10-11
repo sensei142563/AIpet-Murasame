@@ -1,0 +1,20 @@
+feat(accept): 失败即自动采集诊断包（截图/日志/dump/设置/logcat + README）
+
+动机：万一我判断错了失败原因，不必再向你要一次手机；原始材料一次带全。
+
+新增 collect_diag(tag, note)：
+  · screen.png —— **adb exec-out screencap -p**（技能 capturing-screenshots-and-screenrecord 硬性要求：
+    必须带 -p 才是 PNG；且 Windows 上 adb shell 会给 stdout 分配 PTY 把 LF 翻成 CRLF 而毁掉 PNG，
+    所以一律走 exec-out）；会校验 PNG 魔数，不是 PNG 就如实记为「✗ 非 PNG 头部」；
+  · ui.xml（uiautomator dump 后 pull）；
+  · logs/ —— vrm.log、vrm_ar.log、vad.log、live2d.log、onebot_local.log、voice.log、tts.log；
+  · settings/ —— silero_threshold.txt、silero_min_silence.txt、vrm_fake_period.txt、wake_word.txt
+    （即上轮预置的那几个"当场可修"旋钮，带着现值）；
+  · logcat.txt（-d -v threadtime -t 400）、env.txt（设备/APK 路径/系统版本/lastUpdateTime）；
+  · README.md —— 本次逐项结果 + 材料清单 + **复跑判定依据**（该 grep 哪个日志、旋钮怎么改）。
+
+触发：record() 里一旦出现 FAIL，**当场**先抓一张 fail-shots/<项名>.png（事后补拍通常已不是那个画面）；
+跑完若仍有 FAIL，再出完整诊断包。另加 `--selftest-diag`：无设备时只验证目录与 README 生成。
+
+自查（按技能列出的硬性规则）：脚本内不含 screenrecord、不含 kill -9；截图调用带 -p 且用 exec-out。
+验证：语法 OK；--dry-run --selftest-diag 退出码 0，且能在 dev/shots/ 下生成 diag-*/README.md 与清单。
