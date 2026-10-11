@@ -1,0 +1,12 @@
+feat(3d-ar): 用相机真实 FOV 对齐三维透视；碰撞盒改用精确式
+
+一、FOV 对齐（此前页面相机写死 34°，与手机相机不一致 ⇒ VRM 的透视会与实拍"飘"）：
+    CameraX 不直接给 FOV，改走 Camera2 互操作：读
+      SENSOR_INFO_PHYSICAL_SIZE（传感器物理尺寸 mm）+ LENS_INFO_AVAILABLE_FOCAL_LENGTHS（焦距 mm），
+    竖屏显示时画面高度对应传感器宽边 ⇒ 显示用竖直 FOV = 2·atan(size.width / (2f))。
+    绑定相机后计算并通过 evaluateJavascript 调页面 `__setFov(deg)`，同时写日志
+    （"相机 FOV：传感器 … 焦距 … → 显示竖直 FOV …"）便于真机核对。
+    注意：这是**近似**（预览可能按分辨率/宽高比裁剪，实际 FOV 略有出入），真机需目视微调。
+
+二、碰撞盒改用 charPixelHeightExact（上一轮新增的精确式），FOV 也用实测值 ——
+    于是"点她"的命中区与页面里她真正占的像素范围同源。

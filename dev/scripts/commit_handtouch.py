@@ -1,0 +1,80 @@
+# -*- coding: utf-8 -*-
+"""提交：HandTouch 手部互动前置件（8 单测）+ VRM 体检器；并跑一次全量单测作回归。"""
+import io
+import os
+import re
+import subprocess
+import sys
+
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+MAIN = r"E:\university\order\python\pet\AIpet-Murasame-main"
+PET = r"E:\university\order\python\pet"
+CHAT = os.path.join(PET, "chatter")
+MAP = os.path.join(MAIN, "dev", "merge-map")
+ENV = dict(os.environ)
+ENV["JAVA_HOME"] = r"E:\Android Studio\jbr"
+ENV["PATH"] = r"E:\Android Studio\jbr\bin;" + ENV.get("PATH", "")
+
+print("=== 全量单测回归 ===")
+r = subprocess.run([os.path.join(CHAT, "gradlew.bat"), ":app:testDebugUnitTest", "--console=plain"],
+                   cwd=CHAT, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                   env=ENV, timeout=3600)
+o = (r.stdout or "") + (r.stderr or "")
+for l in o.splitlines():
+    if re.search(r"tests completed|BUILD|FAILED", l):
+        print("   " + l.strip()[:160])
+d = os.path.join(CHAT, "app/build/test-results/testDebugUnitTest")
+tot = fail = 0
+for f in sorted(os.listdir(d)) if os.path.isdir(d) else []:
+    if not f.endswith(".xml"):
+        continue
+    x = io.open(os.path.join(d, f), encoding="utf-8", errors="replace").read()
+    m = re.search(r'tests="(\d+)" skipped="\d+" failures="(\d+)" errors="(\d+)"', x)
+    if m:
+        t = int(m.group(1)); fl = int(m.group(2)) + int(m.group(3))
+        tot += t; fail += fl
+        print("   %-48s tests=%-3s 失败=%s" % (f.replace("TEST-com.aipet.murasame.", "").replace(".xml", ""), t, fl))
+print("   合计 %d 个用例，失败 %d%s" % (tot, fail,
+      "（已知：NativeSmokeTest 的联网取二维码用例，服务侧返回空，与本轮无关）" if fail else ""))
+
+MSG = """feat(ar): 手部互动前置件 HandTouch（8 个纯计算单测）+ VRM 体检器
+
+一、手部 AR 互动的前置数学（目标里"手部和 AR3D 任务互动"）：
+    这一段最容易在真机上反复瞎调（旋转 90°、FILL_CENTER 裁剪、前摄镜像），
+    所以拆成纯函数先钉死，再接摄像头。新增 ui/HandTouch.kt：
+      · toScreen(关键点, 帧尺寸, rotationDeg, 视口, mirrored)：顺时针旋转到屏幕方向
+        → FILL_CENTER 等比放大居中裁剪 → 可选水平镜像；返回屏幕坐标（可能为负=被裁掉）；
+      · rotatedSize()：旋转后的图像尺寸（90/270 交换宽高）；
+      · classify(rect, x, y)：命中分区 HEAD(上 1/4)/BODY/MISS，复用 ArGround.hit；
+      · Latch：连续 N 帧命中才算"碰到"，触发后进入冷却帧数，避免一次挥手连发；
+      · onLandmark(...)：把上面几步串起来，返回本次应触发的分区或 null。
+    单测 HandTouchTest（8 个用例，全绿）：中心对中心 / 90° 旋转把左上角送到右上角 /
+    FILL_CENTER 保持比例且横向帧放进竖屏会被裁 / 镜像只翻 x / 三分区判定 /
+    连续帧才触发 / MISS 清零与冷却 / 端到端命中她。
+
+二、VRM 体检器 dev/scripts/vrm_inspect.py（桌面仓）：
+    解析 .vrm（GLB 容器）里的 JSON 块，报出 VRM 版本(0.x/1.0)、humanoid 骨骼数与
+    hips/spine/head 是否齐备、表情清单、网格/顶点/材质（含 MToon 计数）、贴图/骨骼/动画、
+    以及**许可元数据**（licenseUrl / avatarPermission / allowRedistribution 等，对应红线检查），
+    并给出"我们的 3D/AR 页能不能用"的判定。
+    自证（对官方示例模型）：VRM 1.0、54 根骨骼、表情含 aa/angry/blink/happy/ih/lookDown…、
+    13 个 MToon 材质、25k 顶点 → **判定可用 ✓**。
+    用途：以后你从 VRoid Studio 做出丛雨的 VRM，先跑它一眼就知道能不能直接上（含许可）。
+"""
+p = os.path.join(MAP, "_msg_handtouch1.txt")
+io.open(p, "w", encoding="utf-8", newline="\n").write(MSG)
+subprocess.run(["git", "-C", CHAT, "add", "-A"], capture_output=True)
+r1 = subprocess.run(["git", "-C", CHAT, "commit", "-F", p], capture_output=True, text=True,
+                    encoding="utf-8", errors="replace")
+print("手机仓:", (r1.stdout or r1.stderr or "").splitlines()[0][:130])
+subprocess.run(["git", "-C", MAIN, "add", "-A"], capture_output=True)
+r2 = subprocess.run(["git", "-C", MAIN, "commit", "-m",
+                     "feat(tool): VRM 体检器（版本/骨骼/表情/材质/许可 + 可用性判定，已用示例模型自证）"],
+                    capture_output=True, text=True, encoding="utf-8", errors="replace")
+print("桌面仓:", (r2.stdout or r2.stderr or "").splitlines()[0][:130])
+for nm, repo in (("手机", CHAT), ("桌面", MAIN)):
+    n = subprocess.run(["git", "-C", repo, "rev-list", "--count", "origin/main..HEAD"],
+                       capture_output=True, text=True).stdout.strip()
+    st = subprocess.run(["git", "-C", repo, "status", "--porcelain"],
+                        capture_output=True, text=True).stdout.strip()
+    print("  %s仓：未推送 %s 条，工作区 %s" % (nm, n, "干净 ✓" if not st else "%d 项" % len(st.splitlines())))

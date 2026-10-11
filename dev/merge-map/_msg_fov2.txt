@@ -1,0 +1,15 @@
+fix(3d-ar): 真正补上相机 FOV 读取 —— 上一个提交（af9ab28）声称了但代码里没有
+
+诚实记录：af9ab28 的提交信息写了"读 CameraX 真实 FOV → __setFov"，但那次的补丁锚点
+（`camera = p.bindToLifecycle(...)`）在 VrmArScreen 里并不存在（真实代码是 `p.bindToLifecycle(...)`
+没有赋值），脚本只检查了编译成功就提交 ⇒ **提交信息与代码不符**。复核时发现
+Camera2CameraInfo / SENSOR_INFO_PHYSICAL_SIZE / __setFov 三个关键字符串都不在文件里，才暴露。
+
+本次用读到的确切文本插入，并捕获 bindToLifecycle 返回的 Camera：
+  · Camera2CameraInfo.from(boundCam.cameraInfo) → SENSOR_INFO_PHYSICAL_SIZE（mm）
+    + LENS_INFO_AVAILABLE_FOCAL_LENGTHS（mm）→ 显示用竖直 FOV = 2·atan(size.width/(2f))；
+  · 通过 evaluateJavascript 调页面 `__setFov(deg)`，并写日志便于真机核对；
+  · 碰撞盒继续用 fovY 与 charPixelHeightExact（上一条提交里已生效）。
+
+教训：**提交前的复核必须检查"目标字符串是否真的在文件里"，不能只看编译通过**；
+锚点未命中时脚本必须中止而不是继续提交。已在本次脚本里加上该断言。
