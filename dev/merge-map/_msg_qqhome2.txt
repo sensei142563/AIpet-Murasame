@@ -1,0 +1,18 @@
+feat(ui): 首页新增同级「QQ chatter」卡＋移除抽屉「QQ 通道」；并修 3D 页根因（WebViewAssetLoader）
+
+一、3D 页根因（用户反馈"3D 的 AR 没成功"——属实：此前只验证过电脑端渲染，没验证手机）：
+    以 file:// 打开 assets/vrm/index.html 实测，Chromium 直接拦掉 ES module：
+      "Access to script at 'file:///…/vendor/three.js' from origin 'null' has been blocked by CORS policy"
+      net::ERR_FAILED → 页面里 <script type="module"> 根本不执行 → 手机上必然白屏。
+    修法：改用 WebViewAssetLoader（新增 androidx.webkit:webkit:1.12.1），页面走
+    https://appassets.androidplatform.net/assets/vrm/index.html（正经 origin），模型走同源自定义
+    路径 /vrmmodel/model.vrm → 应用外部目录里的 .vrm（不入库）；并关掉 allowFileAccess*。
+    诚实标注：**真机仍未验证**（手机不在线），不再声称"3D 成功"。
+
+二、QQ 入口按用户要求搬到首页，与微信 chatter **同级**：
+    · HomeScreen 新增「QQ chatter」卡（在微信 chatter 卡下方、同一层级），带实时状态行
+      （NapCat 在线/离线 · 会话数 · 待发送字节，取自电脑 /qq/status 与 /qq/outbox）
+      以及展开/收起；展开后**内嵌** QqScreen（复用现成页面，不重复造）。
+    · QqScreen 增加 embedded 模式：嵌入时去掉 fillMaxSize 与内层 verticalScroll，避免与首页
+      滚动形成无限高度约束而崩；嵌入时不显示返回按钮。
+    · 抽屉里的「💬 QQ 通道」入口与渲染分支已删除（入口只在首页）。
