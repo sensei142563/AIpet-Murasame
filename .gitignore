@@ -116,3 +116,9 @@ dev/memory_io/
 # 3D 通路验证用的第三方测试 VRM 与浏览器临时目录（不入库：红线=不用他人资源）
 dev/three-demo/*.vrm
 dev/three-demo/_edge*/
+
+# 临时试验产物与下载的模型缓存（体积大 / 第三方二进制，不入库）
+dev/vrm_file_test/
+dev/tts_model_cache/
+dev/three-demo/_p/
+
