@@ -1,0 +1,16 @@
+feat(memory): 记忆页加「导出互通包 / 导入互通包」（④ 记忆互通的界面入口）
+
+原来只有"把文件丢进 files/memory_io/import/ 再开 App"这条路（上一条提交），
+普通使用不方便。本次在记忆页「记忆文件」卡片右侧加两个按钮：
+
+  · 导出互通包 → SAF(CreateDocument, application/json)，默认文件名
+    aipet_记忆互通_<角色>.json，内容是 MemoryStore.exportBundle() 的 aipet.memory/1；
+  · 导入互通包 → SAF(OpenDocument)，读入后 MemoryStore.importBundle()，
+    完成后 Toast 显示"新增 X，重复 Y，现有 Z"并刷新列表。
+
+真机验收（dev/scripts/verify_mem_ui2.py）：
+  ✓ 记忆页渲染出「导出互通包 / 导入互通包」两个按钮；
+  ✓ 点导出 → 系统选择器打开 → 保存 → /sdcard/Download/aipet_记忆互通_murasame.json 落盘，
+    logcat 出现 "MemoryIO: UI导出 murasame 成功=true"；
+  · 导入按钮能拉起系统选择器（已验证），选文件的自动化点击受 DocumentsUI 布局影响，
+    功能本身已由"目录丢文件自动导入"那条路完整验证（新增/去重都测过）。

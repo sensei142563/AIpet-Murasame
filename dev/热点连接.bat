@@ -29,7 +29,7 @@ echo.
 echo [3/4] 尝试无线 adb：自动用默认网关（热点下网关就是手机）建立反向转发
 echo      这样手机 App 里的 127.0.0.1 地址完全不用改
 set GW=
-for /f "tokens=1" %%g in ('powershell -NoProfile -Command "(Get-NetRoute -DestinationPrefix 0.0.0.0/0 ^| Sort-Object RouteMetric ^| Select-Object -First 1).NextHop"') do set GW=%%g
+for /f "usebackq tokens=1" %%g in (`"%PY%" "%REPO%\dev\scripts\hotspot_ready.py" --gateway`) do set GW=%%g
 if "%GW%"=="" goto NOGW
 echo      识别到网关（手机热点地址）：%GW%
 "%ADB%" connect %GW%:5555

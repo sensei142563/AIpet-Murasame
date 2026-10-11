@@ -107,4 +107,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if "--gateway" in sys.argv:
+        print(default_gateway() or "")
+    else:
+        main()
