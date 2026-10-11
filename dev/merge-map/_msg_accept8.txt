@@ -1,0 +1,20 @@
+test(accept): 把 5 条「只能真机验证」的项做成精确判据，接进一键验收（第 ⑧ 节）
+
+上一轮交接文档里列了 5 条"从设计上无法在 JVM 单测覆盖"的项。本轮把它们改写成
+**真机上可执行、判据明确**的检查，接进 accept_all.py，让验收报告直接给出结论。
+
+判据字符串全部来自**读源码**（不是凭记忆）：
+  · ⑧1 Keystore 加解密：files/wechat_credentials.json 里的凭据必须含前缀 `enc:v1:`
+        （SecureStore 的存储格式；看不到前缀即可能存了明文或加密失败）。
+        文件不存在时 SKIP（该功能未配置）。
+  · ⑧2 资产种子完整性：files/pets/pet_list.json 在、每个角色 pet.json 非空、
+        且**没有任何 *.part 残留**（原子复制的临时文件不该留下）。
+  · ⑧3 Silero 真机阈值：读 files/vad.log 的 `Silero VAD ready (model=… 字节, threshold=…, minSilence=…s)`
+        —— 该行本身就是实际生效的阈值证据。
+  · ⑧4 onGiveUp 已接线：files/voice.log **不应**出现 `未提供 onGiveUp`
+        （出现即说明调用点没接上、可能静默无声）；同时统计 `通知调用方回退系统 TTS` 的次数。
+  · ⑧5 重投去重生效：files/onebot_local.log 里出现 `丢弃重复消息` 即为去重生效的确证；
+        没观察到重投则 SKIP（去重逻辑本身已有 9 个单测覆盖），不谎报 PASS。
+
+dry-run 自检：第 ⑧ 节 5 项与原有 10 项一起输出，合计 PASS 0 / FAIL 0 / SKIP 15 —— 仍未谎报。
+交接文档已用 make_handover.py 重新生成，第二节的检查项清单自动包含新的 ⑧ 节。
