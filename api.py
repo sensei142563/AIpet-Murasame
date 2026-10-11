@@ -437,6 +437,46 @@ async def qq_messages(session: str, limit: int = 30):
         return {"session": session, "error": "%s: %s" % (type(e).__name__, e)}
 
 
+@app.get("/qq/outbox")
+async def qq_outbox_status(limit: int = 20):
+    """手机发起的 QQ 发送队列状态：等待发送 / 最近已处理。"""
+    d = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+    qf = os.path.join(d, "qq_outbox.jsonl")
+    of = os.path.join(d, "qq_outbox.offset")
+    af = os.path.join(d, "qq_outbox_ack.jsonl")
+
+    def _tail(p, n):
+        if not os.path.isfile(p):
+            return []
+        out = []
+        try:
+            for line in io.open(p, encoding="utf-8"):
+                line = line.strip()
+                if line:
+                    try:
+                        out.append(json.loads(line))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        return out[-max(1, min(int(n), 200)):]
+
+    total = 0
+    if os.path.isfile(qf):
+        try:
+            total = int(os.path.getsize(qf))
+        except Exception:
+            total = 0
+    try:
+        done = int(io.open(of, encoding="utf-8").read().strip() or 0) if os.path.isfile(of) else 0
+    except Exception:
+        done = 0
+    return {"outbox": qf, "bytes_total": total, "bytes_done": done,
+            "pending_bytes": max(0, total - done),
+            "queued": _tail(qf, limit), "acked": _tail(af, limit),
+            "worker_hint": "消费者在桌面端进程（QQBridge.connect 启动的 qq-outbox 线程）"}
+
+
 @app.post("/qq/queue/send")
 async def qq_queue_send(request: Request):
     """把"要发到 QQ 的消息"写进队列文件，桌面端轮询后经 OneBot11 发出。

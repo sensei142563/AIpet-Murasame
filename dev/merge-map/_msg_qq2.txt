@@ -1,0 +1,25 @@
+feat(qq): 桌面端消费手机投递的发送队列（第 2 步）—— 队列有人发了
+
+上一提交只做了 api.py 的 /qq/queue/send（写 data/qq_outbox.jsonl），**没有消费者**，
+所以手机发起的消息永远发不出去。本次补上消费者：
+
+  · 新增 qq/qq_outbox.py（零重依赖、可注入 senders）：
+      drain(ws, self_id, outbox, offset_path, ack_path, senders) 按 offset 增量读队列，
+      按字段分派 send_text / send_image（sticker 先经 get_sticker_path 解析）/ send_voice，
+      结果写 data/qq_outbox_ack.jsonl；offset 用**旁路文件**记录（不重写队列文件，
+      避免与手机端并发追加打架）；文件被截断时自动从头。
+      ack_tail() 读最近结果；start_worker() 起幂等后台线程（每 1.5s 一次）。
+  · qq/qq_bridge.py：QQBotBridge.connect() 里起 qq-outbox 线程（取 self.ws / self.self_id）。
+      （两处 websocket.create_connection 本来就有 enable_multithread=True，原作者已考虑线程安全。）
+  · api.py：新增 GET /qq/outbox 返回 bytes_total/bytes_done/pending_bytes/queued/acked，
+      手机端 QQ 页可直接显示"待发送/已发送"。
+
+离线验收（dev/scripts/verify_qq_outbox.py，**不需要 NapCat**）：
+  · 假 senders + 假 ws：4 条（私聊文本/群聊图片/表情包/缺 target_id）分派正确，
+    错误项带明确 error（缺 target_id、表情包文件不存在）；
+  · ack 落盘、offset 前进到文件末尾、二次 drain 返回空（不重发）；
+  · **真实 send_text + 假 ws** 断言 OneBot11 payload 形状：
+    {"action":"send_msg","params":{"message_type":"private","user_id":12345,
+     "message":"...","auto_escape":false},"echo":"send_xxxx"} ✓
+  · 追加一条后再 drain 只处理新增 ✓
+结论：队列消费逻辑正确；真机端到端仍等 NapCat 起来（第 1 步，只能由用户扫码登录）。

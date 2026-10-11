@@ -392,6 +392,12 @@ class QQBotBridge:
         - 主循环因任何原因断开后自动重连（不再一断就静默退出）
         """
         self.running = True  # 先置 running，_reconnect_loop 的 while 才会进入
+        # 手机端（App 的 QQ 页）投递的发送队列：后台线程消费，经 OneBot11 WS 发出
+        try:
+            from qq.qq_outbox import start_worker
+            start_worker(lambda: self.ws, lambda: self.self_id)
+        except Exception as _e:
+            print(f"[QQBridge] ⚠ 发送队列线程启动失败: {_e}")
         # 后台守护线程：空闲自动离线 + 活泼模式（只启动一次，重连期间持续运行）
         if not self._watcher_started:
             self._watcher_started = True
