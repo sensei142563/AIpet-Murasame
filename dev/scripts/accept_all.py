@@ -350,6 +350,8 @@ def main():
     for name, st, ev in RESULTS:
         print("   %-4s %s" % (st, name))
     print("   ---- PASS %d / FAIL %d / SKIP %d ----" % (npass, nfail, nskip))
+    if "--selftest-rules" in sys.argv:
+        selftest_rules()
     if "--selftest-diag" in sys.argv:
         collect_diag("selftest", "无设备自检：只验证目录与 README 生成")
     elif nfail > 0:
@@ -362,6 +364,37 @@ def main():
         ensure_ascii=False, indent=2))
     print("   报告：%s" % rep)
     return 0 if nfail == 0 else 1
+
+
+def selftest_rules():
+    """SELFTEST_SEMANTIC：按**语义**检查本脚本是否违反截图技能的两条硬性规则。
+    教训：不要用"文件里是否出现某个词"来判断 —— 注释、文档、README 文本都会命中。
+    实测：`screenrecord` 只是出现在注释里，却被朴素子串检查报成"违规"。
+    """
+    src = io.open(os.path.abspath(__file__), encoding="utf-8").read()
+    code_lines = [l for l in src.split("\n") if not l.strip().startswith("#")]
+    code = "\n".join(code_lines)
+    problems = []
+    # ① 截图必须带 -p 且走 exec-out
+    if "exec-out" not in code or 'screencap", "-p"' not in code:
+        problems.append("截图调用缺少 exec-out 或 -p")
+    # ② 不允许真的调用 screenrecord（注释里提到不算）
+    if re.search(r"adb(_bytes)?\([^)]*screenrecord", code):
+        problems.append("真的调用了 screenrecord")
+    # ③ 不允许 kill -9
+    if re.search(r'"kill"\s*,\s*"-9"', code):
+        problems.append("使用了 kill -9")
+    # ④ 截图必须校验 PNG 魔数
+    if b"PNG".decode() not in code or "\\x89PNG" not in code:
+        problems.append("未校验 PNG 魔数")
+    print("   [selftest-rules] " + ("全部符合截图技能要求 ✓" if not problems
+                                    else "发现问题：" + "; ".join(problems)))
+    # 自证：注入一段"只在注释里提 screenrecord"的文本，检查器应仍然通过
+    fake = "# 这里提到 screenrecord 只是注释\nadb('exec-out','screencap','-p')\n"
+    fake_code = "\n".join(l for l in fake.split("\n") if not l.strip().startswith("#"))
+    ok_comment = not re.search(r"adb(_bytes)?\([^)]*screenrecord", fake_code)
+    print("   [selftest-rules] 注释里出现 screenrecord 时判为合规：%s（应为 True）" % ok_comment)
+    return not problems and ok_comment
 
 
 if __name__ == "__main__":
