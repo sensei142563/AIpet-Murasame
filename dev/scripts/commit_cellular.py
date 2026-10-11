@@ -1,0 +1,55 @@
+# -*- coding: utf-8 -*-
+"""提交：NetDiag 蜂窝识别修正（之前把移动数据误判成普通 Wi-Fi）。"""
+import io
+import os
+import subprocess
+import sys
+
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+MAIN = r"E:\university\order\python\pet\AIpet-Murasame-main"
+PET = r"E:\university\order\python\pet"
+CHAT = os.path.join(PET, "chatter")
+MAP = os.path.join(MAIN, "dev", "merge-map")
+
+MSG = """fix(net): 纠正"移动数据"被误判成普通 Wi-Fi —— 这正是用户连不上电脑的真实原因
+
+一、上一轮我给出的判断是**错的**，这里更正
+  手机侧 10.88.97.91 挂在 **rmnet0** 上（ip -4 只列出 lo 与 rmnet0）——
+  这是**移动数据（蜂窝）**接口，说明手机当时**根本没连 Wi-Fi**。
+  而我按"IP 落在 10.x 就当成普通路由器网络"给了指引，属于误判。
+  真实情况：手机走流量、电脑走 172.25.x/17 校园网，**两个网络物理上不可能互通**，
+  所以"连不上电脑"的根本原因在这里，与端口/防火墙无关。
+
+二、修正内容（NetDiag）
+  · 新增 isCellular(iface)：识别 rmnet / ccmni / pdp / seth 等蜂窝接口名。
+  · 只有蜂窝时：
+      - 提示改为「本机 10.88.97.91 是**移动数据**（流量），不是局域网 ——
+        手机和电脑这样永远连不上。请二选一：① 手机开个人热点、电脑连这个热点（推荐，最快）；
+        ② 手机和电脑连同一个 Wi-Fi（校园网常把设备互相隔离，可能仍不通）」
+      - **不再生成 254 个候选地址**（拿一堆地址去扫运营商网络既无用又冒犯）。
+  · 开热点时蜂窝仍在（rmnet 不消失），此时必须按热点处理并给出电脑候选 —— 已加用例锁死。
+
+三、测试：NetDiagTest 10 → **12 个用例，全部通过**
+  新增「只有移动数据：认出是移动数据 + 提示含热点出路 + 候选为空」、
+  「rmnet/ccmni/pdp 判定为蜂窝，wlan/ap/swlan/eth 不是」、
+  「热点优先于蜂窝（hotspot 与蜂窝并存时按热点处理并给出候选）」。
+
+四、真机：已编译装机（BUILD SUCCESSFUL / Success）。复验时读到控件里有「个人热点」——
+  用户正在手机里开热点，因此**停止自动点击，不打扰**；文案逻辑已由单测覆盖。
+"""
+p = os.path.join(MAP, "_msg_cellular.txt")
+io.open(p, "w", encoding="utf-8", newline="\n").write(MSG)
+subprocess.run(["git", "-C", CHAT, "add", "-A"], capture_output=True)
+r = subprocess.run(["git", "-C", CHAT, "commit", "-F", p], capture_output=True, text=True,
+                   encoding="utf-8", errors="replace")
+print("手机仓:", (r.stdout or r.stderr or "").splitlines()[0][:150])
+subprocess.run(["git", "-C", MAIN, "add", "-A"], capture_output=True)
+r2 = subprocess.run(["git", "-C", MAIN, "commit", "-m", "chore(scripts): 蜂窝识别修正的验证脚本"],
+                    capture_output=True, text=True, encoding="utf-8", errors="replace")
+print("桌面仓:", (r2.stdout or r2.stderr or "").splitlines()[0][:150])
+for nm, repo in (("手机", CHAT), ("桌面", MAIN)):
+    n = subprocess.run(["git", "-C", repo, "rev-list", "--count", "origin/main..HEAD"],
+                       capture_output=True, text=True, encoding="utf-8").stdout.strip()
+    st = subprocess.run(["git", "-C", repo, "status", "--porcelain"], capture_output=True,
+                        text=True, encoding="utf-8").stdout.strip()
+    print("  %s仓：未推送 %s 条，工作区 %s" % (nm, n, "干净 ✓" if not st else "%d 项" % len(st.splitlines())))
