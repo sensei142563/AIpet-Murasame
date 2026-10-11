@@ -70,6 +70,27 @@ def read_wav_mono(path):
     return mono, sr
 
 
+def analyze_smart(path):
+    """首选 Silero（真模型，能区分"大纯音"与"说话"），不可用时回退能量法。
+
+    返回 (is_speech, start_sample, end_sample, detail)。start/end 是按 **16k** 计的采样位置，
+    方便调用方直接裁 WAV。
+    """
+    try:
+        from tool import silero_vad as _sv
+        if _sv.available():
+            r = _sv.analyze_file(path)
+            return (bool(r["is_speech"]), int(r["start"]), int(r["end"]), r["detail"])
+    except Exception as e:
+        _err = "%s: %s" % (type(e).__name__, e)
+    else:
+        _err = "Silero 不可用（缺 onnxruntime 或模型）"
+    samples, sr = read_wav_mono(path)
+    r = analyze(samples, sr)
+    return (bool(r.is_speech), r.start_sample, r.end_sample,
+            r.describe() + "（回退能量法：%s）" % _err)
+
+
 def frame_rms(samples, frame_len):
     if frame_len <= 0 or not samples:
         return []
@@ -118,6 +139,41 @@ def analyze(samples, sample_rate=16000, frame_ms=FRAME_MS, min_speech_ms=MIN_SPE
     s = max(0, first * frame_len - pad)
     e = min(len(samples), (last + 1) * frame_len + pad)
     return VadResult(True, s, e, speech_ms, noise, peak, len(rms))
+
+
+def trim_range(src_path, dst_path, start_sample, end_sample, sample_rate=16000):
+    """按【16k 采样区间】裁剪写盘（analyze_smart 的返回就是这个坐标系）。"""
+    samples, sr = read_wav_16k_like(src_path)
+    n_src = len(samples)
+    if sr != sample_rate and sr > 0:
+        k = float(sample_rate) / sr
+        start_sample = int(start_sample / k)
+        end_sample = int(end_sample / k)
+    s0 = max(0, min(start_sample, n_src))
+    s1 = max(s0, min(end_sample, n_src))
+    seg = samples[s0:s1]
+    if not seg:
+        return 0
+    import array
+    a = array.array("h", [max(-32768, min(32767, int(v * 32767))) for v in seg])
+    with wave.open(dst_path, "wb") as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(sample_rate); w.writeframes(a.tobytes())
+    return len(a)
+
+
+def read_wav_16k_like(path):
+    """读 WAV 为 float（原采样率，不做重采样），供 trim_range 用。"""
+    import array as _array
+    with wave.open(path, "rb") as w:
+        ch, sw, sr, n = w.getnchannels(), w.getsampwidth(), w.getframerate(), w.getnframes()
+        raw = w.readframes(n)
+    if sw != 2:
+        raise ValueError("只支持 16bit PCM")
+    a = _array.array("h")
+    a.frombytes(raw[: len(raw) // 2 * 2])
+    if ch > 1:
+        return [sum(a[i * ch:(i + 1) * ch]) / ch / 32768.0 for i in range(len(a) // ch)], sr
+    return [v / 32768.0 for v in a], sr
 
 
 def trim_wav(src_path, dst_path, result, sample_rate=None):

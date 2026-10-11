@@ -552,14 +552,13 @@ async def stt_transcribe(request: Request):
         trimmed_path = None
         try:
             from tool import vad as _vad
-            _mono, _sr = _vad.read_wav_mono(stt_path)
-            _res = _vad.analyze(_mono, _sr)
-            vad_info = _res.describe()
-            if not _res.is_speech:
+            # 首选 Silero（真模型，能区分"大纯音"与"说话"）；不可用时在 analyze_smart 内部回退能量法
+            _sp, _s0, _s1, vad_info = _vad.analyze_smart(stt_path)
+            if not _sp:
                 return {"text": "", "ms": int((time.time() - t0) * 1000),
                         "reason": "vad_no_speech", "vad": vad_info}
             trimmed_path = stt_path + ".trim.wav"
-            _got = _vad.trim_wav(stt_path, trimmed_path, _res, sample_rate=16000)
+            _got = _vad.trim_range(stt_path, trimmed_path, _s0, _s1, sample_rate=16000)
             if _got > 0:
                 stt_path = trimmed_path          # 只把语音段送去识别（省算力、减少边缘幻觉）
                 vad_info += " trimmed=%d" % _got

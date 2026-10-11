@@ -1,0 +1,24 @@
+feat(stt): 接入 Silero VAD 真模型（0.64MB，sherpa-onnx 自带，无新依赖）—— 补掉能量法的边界
+
+上一轮如实标注了能量法 VAD 的边界：分不出"很大的纯音"和"说话"。本轮上真模型。
+
+取证过程（不猜 API）：
+  · 从 AAR 里解出 classes.jar，用 javap **实测**签名：
+      Vad(AssetManager, VadModelConfig) / acceptWaveform(FloatArray) /
+      isSpeechDetected(): Boolean / flush() / front(): SpeechSegment(start, samples) / pop()
+      SileroVadModelConfig(model, threshold, minSilenceDuration, minSpeechDuration,
+                           windowSize, maxSpeechDuration)
+      VadModelConfig(sileroVadModelConfig, tenVadModelConfig, sampleRate, numThreads, provider, debug)
+  · 模型：官方 release 的 silero_vad.onnx，**0.64MB**，sha256 前缀 9e2449e1087496d8，
+    已放入 app/src/main/assets/vad/silero_vad.onnx（小，直接进 APK）。
+
+新增 ui/SileroVad.kt：
+  · init()：把 assets 里的模型复制到私有目录（绝对路径最稳，与 TTS 那边一致），
+    用 SileroVadModelConfig(threshold=0.5, minSilence=0.25s, minSpeech=0.20s, window=512) 建 Vad；
+  · analyze()：按 512 采样窗口喂完整段音频 → flush() → 取 front()/pop() 得到的语音段，
+    返回是否有人声 + 第一段区间 + 一行摘要；任何异常返回 null。
+OnlineAsr.recognizeWav：**Silero 优先，不可用时回退能量法 VadGate**（保留上一轮已验证的兜底），
+判定无人声仍直接返回空、不把噪声送进识别器。
+
+诚实标注：**真机未验证** —— API 名与模型文件都已核对，但运行时行为（阈值是否合适、
+window 是否需按模型版本调整）要等手机上机确认。能量法的 7 个单测仍然有效（兜底路径）。
