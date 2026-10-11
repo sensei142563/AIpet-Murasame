@@ -151,7 +151,7 @@ def main():
         adb("shell", "mkdir", "-p", EXT + "/vrm")
         subprocess.run([ADB, "-s", DEV, "push", vrm, EXT + "/vrm/model.vrm"],
                        capture_output=True, timeout=900)
-    record("测试 VRM", "PASS", "已就位")
+    record("测试 VRM", verdict(True), "已就位")
 
     print("=== 3. 逐项验收 ===")
     open_app()
@@ -237,8 +237,7 @@ def main():
             time.sleep(12)
             lg = read_log("live2d.log")
             lines = [l for l in (lg or "").splitlines() if "[tts]" in l]
-            record("⑤b 离线 TTS 合成", "PASS" if (DRY or any("ready" in l or "返回" in l for l in lines))
-                   else "FAIL", (lines[-1:] or ["(无 [tts] 日志)"])[0].strip()[:110])
+            record("⑤b 离线 TTS 合成", verdict(any("ready" in l or "返回" in l for l in lines)), (lines[-1:] or ["(无 [tts] 日志)"])[0].strip()[:110])
         else:
             record("⑤b 离线 TTS 合成", "SKIP", "设置页没找到「离线音色」")
         if tap_text_any(dump("b6"), ["识别自检"]):

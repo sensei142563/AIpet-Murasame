@@ -1,0 +1,10 @@
+fix(accept): 修掉正则替换引入的双逗号语法错误（accept_all.py 第 240 行）
+
+上一提交用正则把「DRY 直接判 PASS」统一替换成 verdict(...) 时，把 ⑤b 那条多行语句
+替换成了 `... verdict(any(...)),, (lines[-1:] ...)` —— 多出一个逗号，ast.parse 在第 240 行报错。
+已修（`),, (` → `), (`）。
+
+教训（与技能 windows-powershell-traps 一致）：
+  · 正则做批量改写后，必须立刻跑一次语法检查，且**不要只看退出码**；
+  · 我的核验脚本自己在 subprocess.run(text=True) 时没写 encoding="utf-8"，
+    撞上本机 GBK 默认编码抛 UnicodeDecodeError —— 已统一显式指定 encoding/errors。
