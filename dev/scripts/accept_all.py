@@ -167,6 +167,36 @@ def foreground_is_app():
     return resumed_activity().startswith(PKG)
 
 
+
+def dismiss_market_dialog():
+    """关掉华为应用市场在安装后弹出的"安装完成/建议开启增强防护"页。
+
+    为什么要它：这个弹窗会**一直压在最上面**，导致后面所有 UI 检查都 dump 到市场界面
+    （要么误判 FAIL，要么被前台守卫全部 SKIP）。只在**确认前台就是市场**时才点它的按钮，
+    其他情况一律不动手 —— 绝不碰用户正在用的应用。
+    """
+    if DRY:
+        return False
+    fg = resumed_activity().lower()
+    if "appmarket" not in fg and "appgallery" not in fg:
+        return False
+    x = dump("mk_auto")
+    for label in ("完成", "开启", "取消", "关闭"):
+        for pat in (r'text="%s"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"' % label,
+                    r'<node[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"[^>]*text="%s"' % label):
+            m = re.search(pat, x)
+            if m:
+                adb("shell", "input", "tap", str((int(m.group(1)) + int(m.group(3))) // 2),
+                    str((int(m.group(2)) + int(m.group(4))) // 2))
+                time.sleep(3)
+                print("   （已自动关闭华为市场弹窗：点了「%s」）" % label)
+                return True
+    adb("shell", "am", "force-stop", "com.huawei.appmarket")
+    time.sleep(2)
+    print("   （已自动关闭华为市场弹窗：force-stop）")
+    return True
+
+
 def open_app(timeout_s=45):
     """启动并**确认**到了前台。别的应用（如应用市场正在安装）会抢前台，所以必须验证而不是睡够时间。"""
     adb("shell", "input", "keyevent", "KEYCODE_WAKEUP")
@@ -290,10 +320,25 @@ def main():
     r = subprocess.run([ADB, "-s", DEV, "install", "-r", "--no-streaming", APK],
                        capture_output=True, text=True, encoding="utf-8", errors="replace",
                        timeout=3600) if not DRY else None
+    # 装完先把这个弹窗关掉：华为市场的"安装完成/建议开启增强防护"会一直压在最上面，
+    # 让后面所有 UI 检查都 dump 到市场界面（要么误判、要么全被前台守卫 SKIP）。
+    dismiss_market_dialog()
     ver = adb("shell", "dumpsys", "package", PKG)
     m = re.search(r"lastUpdateTime=([^\n]+)", ver or "")
-    record("安装", verdict((r and r.returncode == 0)),
-           "lastUpdateTime=" + (m.group(1).strip() if m else "?"))
+    dev_s = m.group(1).strip() if m else "?"
+    # 判据：设备上的安装时间**不早于**本地 APK 的构建时间（允许 2 分钟误差）。
+    # 之前看安装命令的返回码，但华为是"推送安装"，输出里未必有 Success，会误报失败。
+    fresh = False
+    if m:
+        try:
+            fresh = time.mktime(time.strptime(dev_s, "%Y-%m-%d %H:%M:%S")) >= \
+                os.path.getmtime(APK) - 120
+        except Exception:
+            fresh = bool(r and r.returncode == 0)
+    record("安装", verdict(fresh if not DRY else True),
+           "设备 lastUpdateTime=%s；本地 APK %s ⇒ %s"
+           % (dev_s, time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(os.path.getmtime(APK))),
+              "确认为本次构建 ✓" if fresh else "⚠ 设备上可能还是旧包"))
 
     print("=== 2. 推送离线 TTS 模型与测试 VRM（已有则跳过）===")
     ls = adb("shell", "ls", EXT + "/tts/model.int8.onnx")
@@ -319,6 +364,13 @@ def main():
     # 测出来的结果也不算数。规则：前台是**第三方应用**就整段跳过 UI 检查；只有在我们
     # 自己的 App 或桌面在前台时才点（桌面在前台时拉起 App 是安全的）。
     _fg0 = resumed_activity()
+    # 安装之后华为市场可能停在它自己的搜索页（我们已点过「完成」，但它又回来了）。
+    # 只对**市场**动手：关掉它再看一次前台；其它第三方应用（比如你在用 QQ）一律不碰。
+    if (not DRY) and _fg0 and (("appmarket" in _fg0.lower()) or ("appgallery" in _fg0.lower())):
+        dismiss_market_dialog()
+        adb("shell", "am", "force-stop", "com.huawei.appmarket")
+        time.sleep(2)
+        _fg0 = resumed_activity()
     SKIP_UI = (not DRY) and bool(_fg0) and (PKG not in _fg0) \
         and ("launcher" not in _fg0.lower()) and ("unihome" not in _fg0.lower())
     if SKIP_UI:
@@ -456,14 +508,20 @@ def main():
     # ⑧-2 资产种子完整性：角色包在**内部** filesDir/pets（release 包 run-as 不可用 ⇒ adb 读不到），
     #       所以改用 UI 判据：主页能看到角色（名字/立绘），说明种子铺成功、注册表也读得到。
     ensure_foreground("⑧2 资产种子")
-    home = dump("c1")
-    names = [n for n in ("丛雨", "诺瓦", "Murasame", "murasame") if n in home]
-    tap_text_any(dump("c2"), ["☰"])
-    drawer = dump("c3")
-    has_pet_entry = any(n in drawer for n in ("丛雨", "诺瓦", "murasame", "Murasame"))
-    record("⑧2 资产种子（UI 判据）", verdict(bool(names)),
-           "主页可见角色=%s；抽屉含角色=%s（内部 pets/ 目录 adb 读不到，故以 UI 为准）"
-           % (names or "无", has_pet_entry))
+    # 重新拉起后**再确认一次**前台：今天遇到过"市场安装弹窗又抢走前台"⇒ dump 到的是市场页，
+    # 结果误报 FAIL。不是我们的界面就 SKIP（既不误报失败，也不硬抢用户的屏幕）。
+    if not DRY and not foreground_is_app():
+        record("⑧2 资产种子（UI 判据）", "SKIP",
+               "重新拉起后前台仍不是本应用（%s）—— 多半是别的窗口抢了前台，稍后重跑" % resumed_activity())
+    else:
+        home = dump("c1")
+        names = [n for n in ("丛雨", "诺瓦", "Murasame", "murasame") if n in home]
+        tap_text_any(dump("c2"), ["☰"])
+        drawer = dump("c3")
+        has_pet_entry = any(n in drawer for n in ("丛雨", "诺瓦", "murasame", "Murasame"))
+        record("⑧2 资产种子（UI 判据）", verdict(bool(names)) if not DRY else "SKIP",
+               "主页可见角色=%s；抽屉含角色=%s（内部 pets/ 目录 adb 读不到，故以 UI 为准）"
+               % (names or "无", has_pet_entry))
     # 补充：残留 .part 检查仍在**外部**目录做（能读到的部分）
     parts = adb("shell", "find", EXT, "-name", "*.part")
     part_cnt = len([x for x in (parts or "").splitlines() if x.strip() and "No such file" not in x])
@@ -569,6 +627,70 @@ def main():
     # ⑨-4 前台守卫说明
     record("⑨4 前台守卫", "SKIP" if DRY else "PASS",
            "所有点击前都会先确认前台是本应用；不是就 SKIP，绝不抢你正在用的屏幕")
+
+    # ===== ⑩ 画面级检查（2026-10-11 教训：日志说 OK ≠ 屏幕上看得见）=====
+    print("=== 6. 画面级检查（以屏幕为准）===")
+    if DRY:
+        record("⑩1 3D 页真的画出来了", "SKIP", "dry-run")
+        record("⑩2 AR 顶栏 +/− 存在", "SKIP", "dry-run")
+    elif SKIP_UI:
+        record("⑩1 3D 页真的画出来了", "SKIP", "前台是别的应用，未点击")
+        record("⑩2 AR 顶栏 +/− 存在", "SKIP", "前台是别的应用，未点击")
+    else:
+        # 走：聊天 → ☰ → VRM 演示
+        ensure_foreground("⑩ 3D 画面")
+        tap_text(dump("k1"), "聊天", wait=4.0)
+        tap_text(dump("k2"), "☰", wait=3.0)
+        hit3d = tap_text(dump("k3"), "VRM 演示", wait=13.0)
+        if hit3d is None:
+            record("⑩1 3D 页真的画出来了", "SKIP", "抽屉里没找到「VRM 演示」")
+        else:
+            shot = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                "shots", "accept_3d_page.png")
+            try:
+                os.makedirs(os.path.dirname(shot), exist_ok=True)
+                with open(shot, "wb") as fh:
+                    subprocess.run([ADB, "-s", DEV, "exec-out", "screencap", "-p"], stdout=fh,
+                                   stderr=subprocess.DEVNULL, timeout=180)
+                import PIL.Image
+                im = PIL.Image.open(shot).convert("RGB")
+                w, hh = im.size
+                # 只取画面中段（3D 画布所在区域），避开顶栏/底部导航
+                box = im.crop((int(w * 0.08), int(hh * 0.28), int(w * 0.92), int(hh * 0.72)))
+                colors = len(set(box.getdata()))
+                # 空白/纯色区域颜色数极少（几个到几十）；正常渲染的 3D 场景是几千以上
+                okpix = colors >= 200
+                record("⑩1 3D 页真的画出来了", verdict(okpix),
+                       "中段区域不同颜色数 = %d（阈值 200；空白/纯色会远低于此）· 截图 %s"
+                       % (colors, os.path.basename(shot)))
+            except Exception as ex:
+                record("⑩1 3D 页真的画出来了", "SKIP", "截图分析失败：%s: %s" % (type(ex).__name__, ex))
+
+        # ⑩2 AR 顶栏 +/−：进入 AR 页后，屏幕上必须同时出现「－」和「＋」
+        back = tap_text(dump("k4"), "返回", wait=3.0)
+        ar_entry = None
+        for lbl in ("3D AR", "Live2D AR", "AR 相机"):
+            x = dump("k5")
+            ar_entry = tap_text(x, lbl, wait=13.0)
+            if ar_entry is not None:
+                break
+        if ar_entry is None:
+            record("⑩2 AR 顶栏 +/− 存在", "SKIP", "抽屉里没找到 3D AR 入口")
+        else:
+            x = dump("k6")
+            # 「－ ＋」是 **Live2D AR 页**（ArScreen）上的桌宠缩放按钮，从设置页进入。
+            # 3D AR 页（VrmArScreen）不一定有，所以先判断当前到底在哪一页，避免误报。
+            is_live2d_ar = any(k in x for k in ("1×", "2×", "5×", "手电", "闪光", "归位"))
+            if not is_live2d_ar:
+                record("⑩2 AR 顶栏 +/− 存在", "SKIP",
+                       "当前进入的是 3D AR 页；「－ ＋」在 Live2D AR 页（设置页进入），本项不适用")
+            else:
+                has_minus = "－" in x
+                has_plus = "＋" in x
+                record("⑩2 AR 顶栏 +/− 存在", verdict(has_minus and has_plus),
+                       "－=%s ＋=%s（真机反馈：加了「干净」后这两个被挤出屏幕 ⇒ 已改可滚动并前移到可见区）"
+                       % (has_minus, has_plus))
+            tap_text(dump("k7"), "返回", wait=2.0)
 
     print()
     print("=== 汇总 ===")
