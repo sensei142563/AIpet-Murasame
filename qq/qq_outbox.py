@@ -84,10 +84,17 @@ def drain(ws, self_id, outbox=None, offset_path=None, ack_path=None, senders=Non
                 line = f.readline()
                 if not line:
                     break
+                # **只消费完整行**：手机端是并发追加的（api.py 的 /qq/queue/send 用 "a" 模式
+                # 写 json+"\n"），所以 readline() 很可能读到"写到一半、还没有换行"的半行。
+                # 原实现在判断完整性之前就记下 consumed 并推进 offset ⇒ 半行被当成已消费，
+                # 等后半截到来时会被当作新的垃圾行读掉 ⇒ **这条消息永远不会发出**（静默丢消息）。
+                # 对抗测试已复现：半行场景下 offset=87（应 67），补完后该条一条都发不出去。
+                if not line.endswith("\n"):
+                    break
                 consumed = f.tell()
                 line = line.strip()
                 if not line:
-                    off = consumed
+                    off = consumed          # 空行直接跳过（不产生 ack 噪音）
                     continue
                 res = {"ok": False, "item": None, "error": None, "echo": None}
                 try:
