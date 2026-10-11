@@ -1,0 +1,27 @@
+fix(qq): 字符串形态 message 的 CQ 码映射成可读文本（并记录一次"假设不成立"的对抗结果）
+
+对抗审查对象：bot/chat/OneBotParse.kt（手机端每条 QQ 消息都要过的解析层）。
+
+一、先验证一个假设，结果**假设不成立**（这也是收获，附证据）：
+    我怀疑 org.json 的 optString() 会把 JSON null 变成字符串 "null"，
+    那样 user_id:null 会造出 "private_null" 虚构会话、message:null 会显示一条内容为 null 的消息。
+    写测试验证后：**不成立** —— optString 对 JSON null 返回空串，解析层本来就是安全的。
+    该结论已用 4 条断言钉住（user_id/group_id/message/nickname 为 JSON null 的各种组合）。
+
+二、对抗视角挖出的真缺口（已修）：
+    字符串形态的 message（"[CQ:image,file=abc.jpg]你好"）会被**原样带出 CQ 码**，
+    而数组形态本来就会映射成 [图片]/[表情] ⇒ 两种形态观感不一致，用户会以为坏了。
+    新增 cqToReadable()：image→[图片]、face→[表情]、record/audio→[语音]、video→[视频]、
+    at→@qq、reply→不显示、未知类型→[类型] 占位；并对字符串路径生效。
+    实现中自己发现并修掉的小问题：有的客户端在 [CQ:at,qq=…] 前还有字面 "@"，
+    直接映射会出现 "@@123" ⇒ 若前面已是 @ 就不再补。
+
+三、我自己的两处错误（如实记录）：
+    · 测试里有一条自相矛盾的断言（写 assertNull，注释却说"仍应解析"）⇒ 已按真实语义改为
+      "解析成内容为空的一条"；
+    · 编译失败一次：提示语里用 ASCII 双引号（"null"）导致字符串提前闭合；更隐蔽的是
+      **生成脚本里写的是 \"null\"，而 Python 三引号串中 \" 是合法转义、反斜杠被吃掉**，
+      于是生成出来的 Kotlin 成了裸引号。教训：跨语言生成时，提示语里提到字符串一律用中文引号【】/「」；
+      另外测试文件由脚本生成，改生成物会被覆盖，必须改脚本本身。
+
+验证：OneBotAdversarialTest 11/11；全量单测（含原有 OneBotParseTest）与 release 构建通过。
