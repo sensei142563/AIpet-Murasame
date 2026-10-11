@@ -13,6 +13,7 @@
 """
 import argparse
 import json
+from collections import Counter
 import os
 import shutil
 import sys
@@ -125,16 +126,21 @@ def cmd_import(a):
             print("  ⚠ %s 已存在但无法解析（%d 字节）—— 会先备份再写，请检查 .bak-import"
                   % (name, f.stat().st_size))
         cur = [e for e in cur if _valid_record(e)]
-        seen = {_key(e) for e in cur}
+        # **多重集**去重（不是集合）：真实记忆里 59/148 条没有 timestamp，判定键退化成
+        # role||content，于是"同一句台词出现 5 次"会被集合去重成 1 条，导入时静默丢掉 4 条。
+        # 改成计数感知：当前有 2 条、要导入 5 条相同 ⇒ 补 3 条；再导入 5 条 ⇒ 补 0 条。
+        # 这样既保持重导入幂等，又不丢合法的重复次数（计数本身就是信息）。
+        remain = Counter(_key(e) for e in cur)
         added = dup = bad = 0
         for e in incoming:
             if not _valid_record(e):
                 bad += 1
                 continue
-            if _key(e) in seen:
+            k = _key(e)
+            if remain.get(k, 0) > 0:
+                remain[k] -= 1          # 已有同款记录，消耗一个计数 ⇒ 算重复
                 dup += 1
             else:
-                seen.add(_key(e))
                 cur.append(e)
                 added += 1
         # 只要文件已存在就先备份（原来只在 added>0 时备份，损坏场景下会漏）

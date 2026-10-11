@@ -1,0 +1,45 @@
+# -*- coding: utf-8 -*-
+"""提交：多重集去重（真实记忆往返 148→148 无损）。"""
+import io
+import os
+import subprocess
+import sys
+
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+MAIN = r"E:\university\order\python\pet\AIpet-Murasame-main"
+PET = r"E:\university\order\python\pet"
+CHAT = os.path.join(PET, "chatter")
+
+MSG = """fix(memory): 去重改为多重集（计数感知）—— 真实记忆往返从 148→141 变为 148→148 无损
+
+接着上一提交继续审：用真实记忆做往返（导出→导入临时角色）时发现 **148 条只进来 141 条**，
+查证原因后确认这是一条**静默丢数据的路径**：
+
+  · 真实记忆里有 **59/148 条没有 timestamp** ⇒ 判定键退化成 role||content；
+  · 于是"同一句台词出现 5 次"（例如被戳了 5 次）会被**集合去重**成 1 条 ⇒ 导入时丢掉 4 条；
+  · 记录里没有 id/messageId 可用（只有 content/role/timestamp/priority），无法用更细的键；
+  · 而 AR 戳她恰恰会大量产生"重复台词"记录 ⇒ 这类丢失会越来越明显。
+
+修法：去重从"集合"改成**多重集（计数感知）**：
+    当前有 2 条、要导入 5 条相同 ⇒ 补 3 条；再导入同一份 5 条 ⇒ 补 0 条。
+既保持重导入幂等（这是去重存在的理由），又不丢合法的重复次数（次数本身就是信息）。
+
+验证：
+  · 对抗套件新增 4 条断言并全绿（首次导入 5 条相同 ⇒ 新增 5；再导入 ⇒ 0；已有 5 条时导入 8 条 ⇒ 补 3；
+    最终 8 条）⇒ 套件 **19/19**，退出码 0；
+  · 真实记忆只读往返：148 条短记忆 + 24 条长记忆 → 临时角色后 **148 / 24**（原始一致，无损），
+    导入输出为「新增 148，重复 0，跳过 0」；临时角色目录已清理，真实记忆文件未被改动；
+  · 顺带确认损坏现状的告警也生效：`⚠ history.json 已存在但无法解析（49 字节）—— 会先备份再写`。
+"""
+p = os.path.join(MAIN, "dev", "merge-map", "_msg_mem_multiset.txt")
+io.open(p, "w", encoding="utf-8", newline="\n").write(MSG)
+subprocess.run(["git", "-C", MAIN, "add", "-A"], capture_output=True)
+rc = subprocess.run(["git", "-C", MAIN, "commit", "-F", p], capture_output=True, text=True,
+                    encoding="utf-8", errors="replace")
+print("桌面仓:", (rc.stdout or rc.stderr or "").splitlines()[0][:130])
+for nm, repo in (("桌面", MAIN), ("手机", CHAT)):
+    n = subprocess.run(["git", "-C", repo, "rev-list", "--count", "origin/main..HEAD"],
+                       capture_output=True, text=True, encoding="utf-8").stdout.strip()
+    st = subprocess.run(["git", "-C", repo, "status", "--porcelain"], capture_output=True,
+                        text=True, encoding="utf-8").stdout.strip()
+    print("%s仓：未推送 %s 条，工作区 %s" % (nm, n, "干净 ✓" if not st else "%d 项" % len(st.splitlines())))

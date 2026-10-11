@@ -79,6 +79,24 @@ note("非法 JSON 不静默成功", st == "exc", "结果=%s %s" % (st, err))
 note("非法 JSON 未改动记忆", before == after, "前后一致" if before == after else "内容变了 ✗")
 
 print()
+print("=== ②b 合法的重复次数不能被丢掉（多重集语义）===")
+pet_rep = "pet_repeat"
+rep = Path(TMP) / "rep.json"
+same = {"role": "assistant", "content": "同一句台词", "timestamp": "2026-01-07 00:00:00"}
+write(rep, {"pet": pet_rep, "history": [dict(same) for _ in range(5)]})
+st, n, err = run_import(rep, pet=pet_rep)
+note("首次导入 5 条相同记录 ⇒ 新增 5", st == "ok" and n == 5, "added=%s %s" % (n, err))
+got = len(hist(pet_rep) or [])
+note("记忆里确实有 5 条（没有被集合去重成 1 条）", got == 5, "实际 %d" % got)
+st, n, err = run_import(rep, pet=pet_rep)
+note("再导入同一份 ⇒ 新增 0（幂等）", st == "ok" and n == 0, "added=%s %s" % (n, err))
+# 部分重叠：再导入 8 条相同 ⇒ 只补 3 条
+write(rep, {"pet": pet_rep, "history": [dict(same) for _ in range(8)]})
+st, n, err = run_import(rep, pet=pet_rep)
+note("导入 8 条、已有 5 条 ⇒ 补 3 条", st == "ok" and n == 3, "added=%s %s" % (n, err))
+note("最终 8 条", len(hist(pet_rep) or []) == 8, "实际 %d" % len(hist(pet_rep) or []))
+
+print()
 print("=== ③ incoming 里混入非 dict（字符串/数字/null）===")
 mix = Path(TMP) / "mix.json"
 write(mix, {"pet": BASE_PET, "history": ["我是一个字符串", 42, None,
