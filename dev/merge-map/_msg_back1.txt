@@ -1,0 +1,14 @@
+fix(nav): 补上子页面自己的 BackHandler —— 上一提交的说明过度声称了
+
+上一提交（e53f62c）说"子页面各自的 BackHandler 会优先接管"，但实测全工程**只有 MainActivity**
+一个 BackHandler，子页面（会话抽屉/＋面板/设置/AR/VRM）都没有 ⇒ 在这些页面按返回走的是
+全局逻辑（历史/回首页），并没有"关掉当前页面"。
+
+本次补齐：
+· ChatScreen 为 showDrawer / showPlus / showSettings / showVrm / showAr 各加一个
+  BackHandler(enabled = ...) { 关闭 }。ChatScreen 在 MainActivity 之后组合，
+  Compose 的返回回调是后加者优先 ⇒ 子页面会正确抢先，返回=回上一层。
+· HomeScreen 为展开的 QQ 面板加 BackHandler（先收起面板）。
+· 同页多层同时为真时，按"后写的先生效"排序（VRM 在 AR 之前渲染，故 AR 的处理在后）。
+
+教训：提交信息里写"已经具备某某行为"之前，必须**grep 取证**，不能凭设计意图推断。

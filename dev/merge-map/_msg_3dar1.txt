@@ -1,0 +1,21 @@
+feat(3d): VRM 页面支持透明背景（?bg=transparent）—— 3D AR 叠加的前置件（含像素级验证）
+
+目标：把 VRM 叠到相机画面上做成真正的 3D AR。第一步是让页面**真正透明**（否则会盖住相机）。
+
+改动（dev/three-demo/index.html 与 app/src/main/assets/vrm/index.html 两份同步）：
+· 新增 `transparentBg`（`?bg=transparent` 查询参数），声明放在 module 脚本**最前面** ——
+  踩坑：第一次插在 `const scene` 那行，而 renderer 在更前面就用到它，触发 TDZ
+  （Cannot access 'transparentBg' before initialization），页面白屏，靠自诊断的
+  document.title=E:err=... 才发现；
+· 透明模式下：renderer 用 alpha:true + premultipliedAlpha:false，setClearColor(0,0) 且
+  每帧 setClearAlpha(0)，scene.background 不设色，**不加地面与网格**（AR 里地板由相机画面提供），
+  html/body 背景置 transparent。
+
+验证（不靠截图 —— CDP 截图会把透明压平成白/黑，第一次就误判了）：
+· 改为在页面里直接 `gl.readPixels` 读 WebGL 缓冲：
+    不透明（默认）      corner=[32,36,44,255]（深色背景）
+    透明（?bg=transparent）corner=[0,0,0,0] ← **alpha=0**，且 window.__bgTransparent=true
+  两种模式下 center=[102,69,53,255]（角色头发像素）都在 ⇒ 角色正常渲染、背景正确透明。
+· 工具：dev/scripts/vrm_transparent_px.py（可复跑）。
+
+顺带：补上子页面 BackHandler 的自我纠错已在 f9a862d 完成；本轮回归 JVM 单测仍全绿。
