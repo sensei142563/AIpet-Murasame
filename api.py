@@ -546,8 +546,28 @@ async def stt_transcribe(request: Request):
     try:
         tmp.write(data)
         tmp.close()
-        text = await asyncio.to_thread(_stt_transcribe_full, tmp.name)
-        return {"text": text or "", "ms": int((time.time() - t0) * 1000), "engine": "faster-whisper-large-v3"}
+        # 先过 VAD：没说话就别让模型去"编"（实测嗡嗡声会被 whisper 识别成一句丹麦语）
+        vad_info = "skipped"
+        stt_path = tmp.name
+        trimmed_path = None
+        try:
+            from tool import vad as _vad
+            _mono, _sr = _vad.read_wav_mono(stt_path)
+            _res = _vad.analyze(_mono, _sr)
+            vad_info = _res.describe()
+            if not _res.is_speech:
+                return {"text": "", "ms": int((time.time() - t0) * 1000),
+                        "reason": "vad_no_speech", "vad": vad_info}
+            trimmed_path = stt_path + ".trim.wav"
+            _got = _vad.trim_wav(stt_path, trimmed_path, _res, sample_rate=16000)
+            if _got > 0:
+                stt_path = trimmed_path          # 只把语音段送去识别（省算力、减少边缘幻觉）
+                vad_info += " trimmed=%d" % _got
+        except Exception as _e:
+            vad_info = "vad error: %s: %s" % (type(_e).__name__, _e)
+        text = await asyncio.to_thread(_stt_transcribe_full, stt_path)
+        return {"text": text or "", "ms": int((time.time() - t0) * 1000),
+                    "engine": "faster-whisper-large-v3", "vad": vad_info}
     except Exception as e:
         return {"text": "", "ms": int((time.time() - t0) * 1000), "error": "%s: %s" % (type(e).__name__, e)}
     finally:

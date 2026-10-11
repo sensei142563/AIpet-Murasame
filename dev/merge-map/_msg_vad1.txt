@@ -1,0 +1,24 @@
+feat(stt): VAD/静音剔除 —— 噪声不再被"编"成一句话（7 个纯计算单测）
+
+上一轮做闸门取证时发现：我那段合成嗡嗡声被 whisper 识别成 "Teksting av Nicolai Winther"。
+噪声幻觉对"没说话也发识别请求"的场景很致命（手机语音输入、连续识别都受影响），本次补上。
+
+新增 ui/VadGate.kt（纯计算，可 JVM 单测）：
+  · frameRms()：按 20ms 分帧算 RMS；
+  · percentile()：**nearest-rank**（不插值）—— 噪声底宁可偏低，安全由 absFloor 兜底；
+    若用插值把噪声底抬高，安静环境里的轻声反而会被门限切掉；
+  · analyze()：噪声底取各帧 RMS 的 20 百分位；某帧算有声当且仅当
+    rms > max(absFloor, noiseRms × relThreshold)；累计语音时长 ≥ minSpeechMs 才算说了话；
+    返回裁剪区间（含 150ms padding）；
+  · trim()/describe()：裁出语音段、给出一行日志摘要。
+
+接进 OnlineAsr.recognizeWav：读 WAV 后**先过 VAD**，没检测到人声就直接返回空
+（于是不会把噪声送去识别，也不会把幻觉出的文字发进对话），日志里留下 VAD 摘要。
+识别时只送裁剪后的语音段，顺带省算力、减少边缘幻觉。
+
+单测 VadGateTest（7 个用例）：
+  纯静音不算说话 / 静音中的 600ms 突发算说话且被裁短（含 padding）/
+  60ms 咔哒因小于 200ms 被拒 / **持续大声噪声不误判**（自适应噪声底的意义）/
+  底噪上的语音被检出且主要覆盖语音段 / 百分位 nearest-rank 取值 / 空输入安全。
+踩坑（第三次"我的测试预期错了"）：我按线性插值写了 20 分位=0.02，实现给 0.01 ——
+以实现为准，并把 nearest-rank 的定义与理由写进代码注释。

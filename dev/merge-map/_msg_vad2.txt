@@ -1,0 +1,26 @@
+feat(stt): 电脑端 /stt 入口也过 VAD（噪声不再被"编"成一句话）+ 真实接口验证
+
+上一轮在手机端（OnlineAsr）加了 VAD；本轮把**同一套算法、同一组阈值**搬到电脑端，
+于是"手机上传的音频"和"电脑收到的音频"两头都不会被噪声骗。
+
+新增 tool/vad.py（只依赖标准库）：与 ui/VadGate.kt 完全同源 —— 20ms 分帧 RMS、
+噪声底取 20 百分位（nearest-rank）、帧有声 ⟺ rms > max(absFloor, noise×3)、
+累计 ≥200ms 才算说话、返回含 150ms padding 的裁剪区间；附 read_wav_mono（多声道取平均）
+与 trim_wav（把语音段写成 16k 单声道 WAV）。
+
+api.py 的 /stt：写完临时 wav 后**先过 VAD**：
+  · 判定无语音 → 直接返回 {"text":"", "reason":"vad_no_speech", "vad":<摘要>}，
+    **根本不去加载/运行 whisper**（实测省下 26 秒）；
+  · 有语音 → 只把裁剪后的语音段送去识别（vad 摘要里带 trimmed 采样数）；
+  · 任何 VAD 异常都降级为 "vad error: …" 而不影响识别主流程。
+
+验证：
+  · dev/scripts/test_vad.py：与 Kotlin 版同信号的 7 个场景全部符合（静音/突发/短咔哒/
+    持续噪声/噪声上的语音/百分位/空输入），并**回归上一轮那个真实 bug**：
+    探针 wav 被判定为无语音；
+  · 真实接口：把同一条探针 POST /stt → 返回 {"text":"", "reason":"vad_no_speech", "vad":"VAD未命中 …"}，
+    即上一轮"嗡嗡声被识别成 Teksting av Nicolai Winther"的问题在电脑端也修掉了。
+
+踩坑：第一次插入用的锚点缩进猜错（真实是 8 空格），脚本提前 sys.exit 导致测试文件没生成；
+第二次改用正则捕获原缩进，并且不写 tmp.name（NamedTemporaryFile 的 .name 不保证可写），
+改用一个单独变量传递路径、在 finally 里一并清理裁剪文件。
