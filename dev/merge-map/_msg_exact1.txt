@@ -1,0 +1,21 @@
+feat(ar): 精确投影式（charPixelHeightExact / screenYOfPoint）—— 与 three.js 实测 0.00 px 吻合
+
+上一轮把"脚位"对到了 0.00 px，但"像素高"仍是小角度近似（f·h/dist，与俯仰无关），
+而真实投影会因俯仰出现透视缩短（实测 20~30° 差约 7%、60° 接近 2 倍）。本次补上精确式。
+
+新增 ArGround.screenYOfPoint(pitch, camH, yWorld, dist, fovY, viewH)：
+相机在 (0,camH,0)、光轴下俯 pitch，点 (0,yWorld,dist) 的精确针孔投影
+（depth = d·cosθ − Δy·sinθ，up = Δy·cosθ + d·sinθ，screenY = h/2 − f·up/depth）。
+新增 charPixelHeightExact = screenY(脚) − screenY(头)。
+
+验证（两条互相独立的证据）：
+1. 页面里让 three.js 相机按 pitch 真转、投影已知世界点，逐角对照本式：
+     0/10/20/30/45/60° → **全部 0.00 px**（FOV 34°、视口 320px、相机 1.45m、角色 1.58m、距离 2m）；
+2. 把这六个**实测值写成黄金断言**（golden_matches_threejs_measurement，12 条断言），
+   于是 Kotlin 实现被钉死在三维几何的真实结果上，而不是钉在我自己的推导上。
+另加 exact_matches_approx_at_zero_pitch（θ=0 时精确式退化为近似式）、
+exact_shrinks_with_pitch_due_to_foreshortening、screen_y_of_feet_matches_groundPointY
+（确保"脚"的两处实现同源）—— ArGroundTest 现在 15 个用例。
+
+踩坑：screenYOfPoint 里 focalPx 返回 Float 而 up/depth 是 Double，编译报
+"Argument type mismatch: actual type is 'Double', but 'Float' was expected"，已加 .toDouble()。
