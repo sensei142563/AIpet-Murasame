@@ -1,0 +1,29 @@
+fix(tts): 定位到离线合成卡死的真因并默认停用；清掉会卡死主线程的遗留诊断
+
+一、真因（真机 MIS-AL00 / Android 12，按"自己加日志找"的做法一步步量出来的）
+  · live2d.log 里只有 "[tts] main：准备构造"，后面什么都没有 —— 而这一行来自
+    **我早先留下的诊断函数** diagEmptyConfigOnMain（用空配置在主线程构造 OfflineTts）。
+    也就是说：⑤b 这条检查读到的是诊断的日志，不是真实合成路径。
+  · 把该诊断调用从 ChatScreen 移除后，走**真实路径**（设置页「离线音色（本地合成）→ 点一下测试」）：
+        [tts] speak() 被调用 text=[你好，我是丛雨。] lang=zh
+        [tts] init() 进入 lang=zh modelDir=/storage/.../files/tts
+    然后**没有下文**：既没有 "ready lang=…"，也没有 "init failed"。
+  · 判决性实验：触发后逐段等待到 **90 秒**，日志始终停在 init 进入；
+    同时界面**响应正常**（uiautomator dump 2.4s）⇒ 不是 ANR，是**原生构造函数无限卡住**。
+    连异常都不抛 ⇒ runCatching 兜不住。
+
+二、结论（与之前离线识别那条串起来）
+  这台机器上 sherpa-onnx 的**两个原生组件都不可用**：
+    · SenseVoice（离线识别）：初始化即让进程被内核收走（Java 侧全无痕迹）
+    · Kokoro（离线合成）：初始化即无限卡住（不抛异常、界面还正常）
+  ⇒ 所以架构上必须默认绕开它们：离线识别走系统识别；离线合成走系统 TTS / 电脑 F5。
+    （电脑 F5 那条路是好的：voice.log 里有「成功播放 …（电脑 F5-TTS）」的记录。）
+
+三、改动
+  ① OfflineTtsEngine 增加总开关 offlineEnabled(ctx)：**默认停用**，停用时 init() 直接返回 false、
+     **根本不构造原生对象**。要试验时在设备上创建 files/tts_offline_enabled.txt 写 1。
+  ② 删除遗留诊断函数 diagEmptyConfigOnMain，并从 ChatScreen 移除它的调用
+     （它会在进聊天页/点设置时用空配置构造原生对象 ⇒ 卡死主线程）。
+  ③ 设置页新增「离线音色（实验）」开关行，明确写出：
+       已停用（推荐）—— 本机原生库会卡死；请用系统语音或电脑 F5
+  ④ ⑤b 检查项改为走真实路径（选离线音色 + 点一下测试），并按 ready/samples/failed 细分判定。
