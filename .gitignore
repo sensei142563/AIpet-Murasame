@@ -109,3 +109,6 @@ pcl_launcher/themes/senrenbanka_copy/assets/bg_custom.mp4
 .zcode/
 _import_tmp/
 .DS_Store
+
+# 记忆导出/导入的实体文件（含她的真实对话，绝不入库）
+dev/memory_io/

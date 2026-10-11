@@ -1,0 +1,14 @@
+feat(memory): 桌面端记忆导出/导入 CLI + ④ 记忆互通验收脚本
+
+tool/memory_transfer.py：
+  export --pet <id> [--out 路径]  导出为 aipet.memory/1（事件日志的导出格式）
+  import <文件.json> [--pet <id>] 合并（兼容裸 {"history":[...]}），去重 + 排序 + 备份 .bak-import
+并按手机端同一 key（role|timestamp|content）去重，保证两端可互换。
+
+dev/scripts/：
+  mem_transfer_1.py / mem_transfer_2.py  手机端改造与接线（含一次目录用错的修正）
+  fix_memio_order.py                    把冷启动顺序改为"先导入、后导出"
+  verify_memory_roundtrip.py            首版验收（暴露了"未探测当前角色"的脚本缺陷）
+  verify_memory_roundtrip2.py           修正版验收（每轮唯一探针，可重复跑，全绿）
+
+.gitignore 增加 dev/memory_io/：导出物含她的真实对话，绝不入库。

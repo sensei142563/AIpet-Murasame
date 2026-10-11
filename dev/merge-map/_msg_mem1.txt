@@ -1,0 +1,19 @@
+feat(memory): 记忆导出/导入（④ 记忆互通第一步，ADR-001/009 的"导出格式"）
+
+契约：{"schema":"aipet.memory/1","pet":..,"source":..,"exported_at":..,
+       "history":[{role,content,timestamp}],"long_history":[...]}
+与桌面端 pets/<id>/memory/{history,long_history}.json 同构；导入兼容三种形状
+（本 schema / 桌面裸文件 / 纯数组），按 role|timestamp|content 去重后按时间排序落盘。
+
+MemoryStore：
+  · exportBundle(pet?)  导出当前角色记忆
+  · importBundle(text)  合并并返回 ImportResult(added/dup/total/pet)
+MainActivity（冷启动）：
+  · 先扫 getExternalFilesDir()/memory_io/import/*.json 合并，成功后归档到 imported/
+  · 再写一份导出快照到 memory_io/export/（顺序必须"先导入后导出"，否则快照是旧状态）
+  · 日志标签 MemoryIO，便于 adb logcat 取证
+
+真机验收（dev/scripts/verify_memory_roundtrip2.py，可复跑）：
+  · 桌面导出 148 短 + 24 长 = 172 条 → 推入 import/ → App 日志"新增 172"，再推同文件"新增 0 重复 172"；
+  · 探针 4 条导入后，手机自己写出的快照里能查到（history 243 / long_history 52）；
+  · 反向：手机快照用桌面 CLI 导入临时角色成功（之后已清理）。
