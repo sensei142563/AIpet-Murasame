@@ -1,0 +1,9 @@
+chore(stt): STT 选型与升级的调研脚本（模型体积取证 / AAR API 盘点 / 升级与验收）
+
+dev/scripts/：
+  · stt_survey.py        候选模型在 hf-mirror 的体积 + 本仓库 sherpa-onnx AAR 暴露的识别类 +
+                          selfTest 的界面入口（这三份取证决定了升级方案）
+  · stt_upgrade_1..5.py  下载模型/造 16k 样例/换模型/加自检按钮/逐步验收（含我踩的坑：
+                          多设备 adb install 必须 -s；点按钮前必须等页面渲染；重试逻辑别选错标签；
+                          selfTest 的"存在即跳过"会让换了模型的验收失真）
+用途：下次换非流式模型（paraformer-zh / SenseVoice）时，这套取证与验收脚本可直接复用。

@@ -1,0 +1,27 @@
+feat(asr): 手机端 STT 从 14M tiny 换成中英双语 zipformer（int8 约 198MB）
+
+用户反馈"STT 效果一般"，要求多找开源社区现成的东西。取证结论：
+  · 现用 sherpa-onnx-streaming-zipformer-zh-14M（encoder int8 21.6MB）——tiny 级，这就是效果一般的原因；
+  · 换成 sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20（encoder 181.9 + decoder 13.1
+    + joiner 3.2 MB）——社区经典模型，中英双语，**同一套 OnlineRecognizer/transducer API**，
+    代码只改模型目录常量（文件名相同）；
+  · 本仓库 AAR sherpa-onnx-v1.13.5 还暴露 OfflineRecognizer / OfflineParaformerModelConfig /
+    OfflineSenseVoiceModelConfig 等 66 个识别相关类 —— 非流式更强模型（paraformer-zh-2024-03-09 int8
+    227MB、SenseVoice）留作下一步，因为 App 是"录完再识别"，非流式其实更合适。
+
+配套改动：
+  · OnlineAsr.DIR 指向 assets/asr-zh-bilingual，并放了 16kHz/单声道 selftest.wav（由已知台词的 F5 输出
+    「本座等你好久了。」重采样得到，作为验收真值）；
+  · selfTest 改为**每次都从 assets 重新复制**样例——原来"存在就跳过"，换了模型还在识别旧样例，
+    导致自检结果失真（实测踩到）；
+  · 设置页（聊天 → ☰ → 设置）新增「识别自检」按钮，结果写 files/live2d.log 的 [asr] selftest text=[...]，
+    便于 adb 自动验收。
+
+验收状态（如实）：
+  ✓ 新模型已打进 APK 并加载成功（日志 recognizer ready）；
+  ✓ 自检能跑出结果，且日志里能辨认出样例内容（"本座…你…好久"）；
+  ✗ 但与真值相比有重复/串音（如"本座车座我等等你好久啦"）。两个原因已定位：
+    ① 验收音频是 24kHz F5 输出线性重采样到 16kHz，音质有损，应改用正常 16k 录音；
+    ② 流式 zipformer 喂整段 + enableEndpoint 易出现重复，而本 App 是"录完再识别"，
+       更适合非流式 paraformer/SenseVoice（下一步换 OfflineRecognizer）。
+  对照：同一段音频走电脑 /stt（faster-whisper large-v3）得到「本座等你好久了」，与真值相似度 0.93。
