@@ -1,0 +1,37 @@
+feat(3d,napcat): 2D→3D 操作手册（回答"下载什么软件"）+ Termux 装 NapCat 的踩坑固化
+
+一、dev/docs/2D转3D-操作手册-下载什么软件.md（回答用户原话）
+  · 明确一件容易误解的事：**Live2D 立绘不能"转"成 3D**（2D 网格里没有 3D 拓扑信息，不可逆），
+    只能"另做一个 3D 的她" —— 即既定的 D4 双轨（Live2D 日常形态 + VRM/AR 形态，两者都留）。
+  · 要下载的**只有一个软件**：VRoid Studio（免费，Windows，https://vroid.com/en/studio）。
+    理由：导出**直接就是 .vrm**（自带 humanoid 骨骼/表情/spring bone），不需要绑骨或重拓扑。
+  · AI 网站（Meshy/Tripo/Rodin/Hunyuan3D）定位为**探路**：动漫脸易崩、拓扑乱、绑骨要另做，
+    不适合当最终资产；真要走，链路是"网站出网格 → Blender 绑骨 → VRM"。
+  · 给了 VRoid 里的 7 步操作（含丛雨要素：紫瞳/紫发/和风 + 保留 Happy/Angry/Blink 表情），
+    并建议"先随便捏一个导出、先跑通再精修"。
+  · 交付方式：把 .vrm 给我 → `python dev/scripts/vrm_swap.py <文件>`（体检 → 备份 → 推送 →
+    上机像素验收 → 不合格自动回滚）。
+  · 如实写明手机上现有模型是 **pixiv 官方示例**（VRM1_Constraint_Twist_Sample.vrm，10.7MB，
+    54 骨骼 / 12 表情 / 24951 顶点），**不是她**，我也**从未做过任何 2D→3D 转换**。
+
+二、dev/scripts/termux_napcat_oneclick.sh —— 今天真机踩坑的固化（脚本头部逐条写明）
+  1) 经 adb run-as 执行时 **$HOME=/data/user/0/com.termux**（应用数据根），
+     而 Termux 真正的 home 是 **/data/data/com.termux/files/home** ——
+     两个是**不同目录**，这就是"文件下好了却找不到"的原因 ⇒ 脚本里显式指定 HOME。
+  2) 清华镜像与基础包版本不同步 ⇒ curl 报
+     `CANNOT LINK EXECUTABLE "curl": cannot locate symbol "SSL_set_quic_tls_..."`；
+     修法：`dpkg --force-confdef --force-confold --configure -a` 再 `apt upgrade` 对齐
+     （注意：`-o Dpkg::Options::=` 是 **apt** 的选项，dpkg 不认，用了等于没修 —— 今天就栽在这）。
+  3) 官方下载域名 nclatest.znin.net 超时、raw.githubusercontent.com 直连不通
+     ⇒ 用 **https://ghproxy.net** 代理（实测可用；ghfast.top / gh-proxy.com 也可用）。
+  4) proot-distro 5 默认 registry-1.docker.io 不通
+     ⇒ 换 **docker.m.daocloud.io/library/debian:bookworm-slim**（实测可达）。
+  5) 长安装会被系统休眠杀掉 ⇒ **termux-wake-lock + setsid nohup**。
+
+三、附：今天实测的网络可达性（手机侧，用于选路）
+  可用：清华 termux 源、baidu、ghproxy.net、ghfast.top、gh-proxy.com、
+        docker.m.daocloud.io / dockerproxy.net / docker.1ms.run / hub.rat.dev / 阿里云、
+        deb.debian.org + 清华/阿里/中科大 debian 源
+  不可用：nclatest.znin.net、raw.githubusercontent.com、cdn.jsdelivr.net、raw.gitmirror.com、
+        registry-1.docker.io
+  ⇒ 结论：**不需要"魔法"**，有可用的国内镜像与代理即可。
