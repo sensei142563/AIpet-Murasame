@@ -860,7 +860,6 @@ class HomePage(QWidget):
         self.btn_preload = QPushButton(
             "  预载语音服务" + (f"（{_ap_now}）" if _ap_now else "（当前角色）"))
         self.btn_preload.setStyleSheet(_ghost_btn_qss())
-        self.btn_preload.setMinimumHeight(46)
         self.btn_preload.setToolTip(
             "提前启动并预热语音服务（GPT-SoVITS）：\n"
             "首次加载模型要 1~2 分钟，预热后桌宠开口几乎不用等。\n"
@@ -870,13 +869,14 @@ class HomePage(QWidget):
         # 预载视觉服务：本地视觉模型加载 + 预热约 30 秒
         self.btn_vpreload = QPushButton("  预载视觉服务")
         self.btn_vpreload.setStyleSheet(_ghost_btn_qss())
-        self.btn_vpreload.setMinimumHeight(46)
         self.btn_vpreload.setToolTip(
             "提前启动本地视觉服务（屏幕/摄像头识别用的那个模型）：\n"
             "加载 + 预热约 30 秒，预载后桌宠第一屏识别就不用等。\n"
             "不预载也没关系：启动桌宠时会自动拉起。")
         self.btn_vpreload.clicked.connect(self.preload_vision)
-        for b in (self.btn_pet, self.btn_qq, self.btn_wx, self.btn_preload, self.btn_vpreload):
+        # ★ 2026-10-14（主人反馈）：顶部原来挤了 5 个按钮（启动桌宠/QQ/微信 + 两个预载），
+        #   又挤又不好看。两个「预载」已挪到下面的「快捷工具」卡片里。
+        for b in (self.btn_pet, self.btn_qq, self.btn_wx):
             row.addWidget(b)
         row.addStretch()
         cl.addLayout(row)
@@ -942,6 +942,11 @@ class HomePage(QWidget):
             if "NapCat WebUI" in text:
                 self.btn_webui = b      # 拉起 NapCat 时要改它的文案/置灰（不能让局部变量带走）
             tr.addWidget(b)
+        # ★ 2026-10-14：两个「预载」按钮挪到这里 —— 它们本就是"提前把服务热起来"的工具，
+        #   放在「快捷工具」里比挤在顶部合理。（主人："首页的两个预加载模型的模块删了，
+        #   丑丑的，或者换个地方，放在下面几个板块。"）
+        for _pb in (self.btn_preload, self.btn_vpreload):
+            tr.addWidget(_pb)
         tr.addStretch()
         tl.addLayout(tr)
         # ── 剧情模式（Galgame）入口（合并保留）：程序目录里真有 story/ 与 剧情素材 才显示，
