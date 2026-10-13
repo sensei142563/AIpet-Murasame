@@ -1,0 +1,17 @@
+build(ppt): 重建 deck —— 第 16 页数字同步为 386（源码改了就必须重建，否则产物与源不一致）
+
+上一条改了 outline.json（381→386）与 notes.json，但**没有重建** ⇒ `Deck.pptx` 里还是 381。
+这条把产物补齐，并**读回 pptx 文本验证**：
+
+```
+读 dev/ppt/out/Deck.pptx：
+   第 16 页: ['▪  386 项自带自检  边界 / 配置契约 / 生命周期 / 前端一致性 / 语音链路']
+   没有 381 残留 ✓
+```
+
+流程（顺序不能反，重建会丢备注）：
+```
+build_deck.py       → 23 页 ✓
+ppt_add_notes.py    → 23 页全挂、缺备注的页：无 ✓
+render_qc.ps1       → 23 张 slide-*.png + Deck.pdf ✓
+```
