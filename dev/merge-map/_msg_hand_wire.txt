@@ -1,0 +1,39 @@
+feat(hand): 把手部检测器接进 AR 相机 —— 全链路打通（不再是"没被使用的组件"）
+
+上一提交只到了"编译通过的组件"，没有任何调用点。这一步补上调用点，功能才真的落地。
+
+## 改动
+1. `ArScreen.kt`：
+   · 新增 `ImageAnalysis` 用例并绑进 `bindToLifecycle`（与 preview / ImageCapture 并列）：
+       - `STRATEGY_KEEP_ONLY_LATEST` —— 只处理最新帧，绝不让检测积压拖慢预览；
+       - `OUTPUT_IMAGE_FORMAT_RGBA_8888` —— 这是"自己按平面拷位图"的前提（见下）；
+     · 分析器跑在 `remember { Executors.newSingleThreadExecutor() }` 的专用线程上；
+     · 每帧：`HandDetector.onFrame(img, img.imageInfo.rotationDegrees)`，`finally { img.close() }`，
+       `try/catch` 包住 —— **一帧检测失败绝不影响预览**；
+   · 进页面 `HandDetector.init(ctx, mirrored = useFront)`（幂等）；
+   · 离开页面在 `DisposableEffect` 的 `onDispose` 里 `HandDetector.release()` + `handExec.shutdown()`。
+2. `HandDetector.kt`：**不再用 `ImageProxy.toBitmap()`**。
+   原因：那个 API 对"是否已应用 rotationDegrees"在不同版本/机型上说法不一致，
+   而 `HandTouch` 的契约要求关键点是**未旋转的原始帧**坐标（旋转/镜像由它自己完成）。
+   一旦 `toBitmap()` 替我们转了，下游再转一次就是**双重变换**。
+   ⇒ 改为自己按 RGBA_8888 平面逐行拷（并处理 `rowStride > width*4` 的**行尾填充**，
+     否则图像会斜），保证交出去的一定是原始帧。
+
+## 现在的链路（全部有调用点）
+```
+CameraX ImageAnalysis（RGBA_8888 / 只留最新帧）
+  → HandDetector.onFrame → MediaPipe HandLandmarker（LIVE_STREAM，21 关键点）
+  → 食指指尖换算到帧像素 → HandTracker.provider
+  → VrmArScreen: HandTracker.points() → HandTouch.toScreen(旋转/镜像/FILL_CENTER)
+  → 命中盒判定（头/身）→ 去抖 Latch → 触发反应
+```
+
+## 验证
+- `gradlew.bat assembleDebug`（JAVA_HOME=Android Studio 自带 jbr）⇒ **BUILD SUCCESSFUL in 42s**；
+- 调用点已逐个复核（import / 执行器 / analyzer / init / release 都在，见提交时打印的行号）。
+
+## ⚠ 仍然要说清楚的
+**还没在真机上验证过** —— 编译通过 ≠ 真机能用。下一件必须做的事：手机插上后
+① 进 AR 页面、把「试手」关掉；② 伸真手过去，看 `HandDetector.detectedFrames` 是否增长、
+   她/3D 有没有反应；③ 若坐标偏了，按 `HandTouch` 的约定调 `rotationDeg` / `mirrored`
+   （**只调那两个参数，不要回头去改检测器**，那会把双重变换又引回来）。

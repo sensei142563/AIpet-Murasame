@@ -1,0 +1,60 @@
+# -*- coding: utf-8 -*-
+"""在 chatter 仓提交"视线跟随"。"""
+import io
+import os
+import subprocess
+import sys
+
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+REPO = r"E:\university\order\python\pet\chatter"
+MAP = r"E:\university\order\python\pet\AIpet-Murasame-main\dev\merge-map"
+
+MSG = """feat(hand): 她的视线跟着我的手（lookAt.target）—— 用户点名的"看着她/我的手"
+
+需求原话（用户）："我说的可互动是指，比如说通过手部动捕，可以让她的眼睛看着我的手"。
+手部检测上一批已经接好，这一步把"看着"补上。
+
+## 改动
+1. `assets/vrm/index.html`：新增 `window.__lookAt(nx, ny)`
+   · 用 **three-vrm 的 `lookAt.target`**（接受一个 `Object3D`）—— 这是官方的视线控制口子，
+     不是我们硬改骨骼；
+   · 懒创建一个 `Object3D` 放进场景，只在第一次调用时挂到 `vrm.lookAt.target`；
+   · 入参是**屏幕归一化坐标** `nx, ny ∈ [-1,1]`（0,0 = 屏幕中心，y 向下为正），
+     内部映射到她**前方 0.6 m 的一个小平面**；
+   · 范围刻意收窄（±0.45 m / ±0.30 m）—— 否则手一挥眼睛就"翻"到极限，看着不自然；
+   · 越界/NaN 一律夹到 [-1,1]；失败返回 false，不抛。
+2. `VrmArScreen.kt`：AR 循环里每帧把**食指指尖**经 `HandTouch.toScreen(...)` 换算成屏幕坐标，
+   再归一化到 [-1,1] 后调用 `window.__lookAt`。
+   · ⚠ **只在"有手"时调用**：没手就不动，保持上一次视线 ——
+     否则手一消失她的眼睛会"啪"地弹回正前方，比不跟随还突兀。
+   · 用 `runCatching` 包住：坐标换算出问题不能打断 AR 循环。
+
+## 验证
+- **`node --check`** 抽出 `__lookAt` 片段单查 ⇒ **OK**；
+- `gradlew assembleDebug` ⇒ **BUILD SUCCESSFUL in 38s**；
+- `gradlew testDebugUnitTest` ⇒ **BUILD SUCCESSFUL in 33s**（145 个单测仍全绿，没弄坏东西）。
+
+## 手机端手部互动现在的完整能力
+```
+看一眼：视线跟随（__lookAt，本提交）
+碰一下：命中判定（只吃食指）→ __poke('HEAD'/'BODY') → 表情 + 轻轻一跳
+捏一下：拇指↔食指距离过阈值 → __pinch() → 扭头躲 + 缩一下 + 抗拒表情
+```
+三者共用同一条关键点来源（MediaPipe HandLandmarker），各自独立去抖，互不顶掉。
+
+## 仍待真机
+编译/语法/单测都过了，但"她的手伸过去她的眼睛真的跟着转吗"要真机上才能确认。
+若发现方向反了或幅度不对：**只调 `__lookAt` 里那两个系数（0.45 / 0.30）与 1.30 的高度基准**，
+不要去动检测器与坐标换算（那两层已经被单测和 `HandTouch` 的约定固定住了）。
+"""
+p = os.path.join(MAP, "_msg_lookat.txt")
+io.open(p, "w", encoding="utf-8", newline="\n").write(MSG)
+subprocess.run(["git", "-C", REPO, "add", "-A"], capture_output=True)
+rc = subprocess.run(["git", "-C", REPO, "commit", "-F", p], capture_output=True, text=True,
+                    encoding="utf-8", errors="replace")
+print("手机仓:", (rc.stdout or rc.stderr or "").splitlines()[0][:170])
+n = subprocess.run(["git", "-C", REPO, "rev-list", "--count", "origin/main..HEAD"],
+                   capture_output=True, text=True, encoding="utf-8").stdout.strip()
+st = subprocess.run(["git", "-C", REPO, "status", "--porcelain"], capture_output=True,
+                    text=True, encoding="utf-8").stdout.strip()
+print("  未推送 %s 条，工作区 %s" % (n, "干净 ✓" if not st else "%d 项" % len(st.splitlines())))
