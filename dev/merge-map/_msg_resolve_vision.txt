@@ -1,0 +1,33 @@
+docs(vision): 结清"两套本地视觉机制" —— 机制 B 是死代码；据此精准修正 README 那句 Ollama 提示
+
+上一条我把三个问题列为"待确认"。这次全部查清（都有代码证据），并据此改文档。
+
+## 结论一：统一入口只有一个，且不碰 Ollama
+`tool/chat.py:758-784 describe_image()`：
+    if vision_source() == "local": → _local_vision_describe（tool/vision_service.py，Qwen2-VL-2B）
+                                     本地失败还会 _ensure_local_vision() 自启后重试一次
+    else:                          → cloud_vl
+⇒ describe_image **从不调用** ollama_qwen25vl。
+
+## 结论二：机制 B（Ollama qwen2.5vl）是**死代码**
+全仓检索 `ollama_qwen25vl` 只有：定义（chat.py:275）、它自洽的内部调用（chat.py:284）、
+日志分支（chat.py:32）、以及 `classes/murasame_class.py:72` 的 **import** —— **没有任何调用点**。
+⇒ `ollama pull qwen2.5vl:7b` 对当前实现**没有任何作用**。
+
+## 结论三：你的配置实际走云端
+config.json：model_type='qwen'、vision_model_name='qwen-vl-plus'、
+             无 vision_source、无 ollama 键 ⇒ vision_source() 缺省 cloud。
+
+## 据此修正 README（与上次"差点改错"相对照）
+原 1477 行 `ollama pull qwen2.5vl:7b  # 如需本地屏幕识别` 改为：
+```
+# 注意：本地「屏幕识别」**不是**走 Ollama —— 它走 tool/vision_service.py（Qwen2-VL-2B）；
+#       `ollama pull qwen2.5vl:7b` 对应的是历史遗留函数 ollama_qwen25vl，
+#       该函数目前**没有任何调用点**（只被 import，不被调用），拉了也不会生效。
+```
+⚠ 与上一次的区别：上次我准备按"想当然"把整句删掉（那会丢掉"确实存在这么一个函数"的事实）；
+这次是**先查清调用点**再写，所以能说准"函数在、但没人调"。
+
+## 顺带留档（未处理）
+`classes/murasame_class.py:72` 的 `ollama_qwen25vl` 是**未使用的导入**，建议后续连同
+`chat.py:275-290` 一起清理 —— 但那是删代码，不在本轮范围。

@@ -1474,7 +1474,9 @@ main.py (PyQt5 主窗口 + FastAPI 28565 + 快捷键监听 + 托盘)
 
 ```bash
 ollama pull qwen3:14b
-ollama pull qwen2.5vl:7b  # 如需本地屏幕识别
+# 注意：本地「屏幕识别」**不是**走 Ollama —— 它走 tool/vision_service.py（Qwen2-VL-2B）；
+#       `ollama pull qwen2.5vl:7b` 对应的是历史遗留函数 ollama_qwen25vl，
+#       该函数目前**没有任何调用点**（只被 import，不被调用），拉了也不会生效。
 ```
 
 ---
