@@ -1015,10 +1015,11 @@ class HomePage(QWidget):
         self._timer.timeout.connect(self.refresh_status)
         self._timer.start(6000)
 
-        # ── 启动器一起来就自动预热语音服务（合并保留的功能）────────────────
+        # ── 自动预热语音服务（**默认关闭**，见 _auto_preload_tts 里的开关）──
         # 首次加载 GPT-SoVITS 模型要 1~2 分钟；提前热好，桌宠开口第一句几乎不用等。
-        # 和点「预载语音服务」走同一条路（preload_tts），只是不用手动点；
-        # 云端语音 / 关掉短语音时不预热（判断见 _auto_preload_tts）。
+        # 但★ 2026-10-14 主人反馈：**还没选要开哪只桌宠**，启动器就自己预载并弹出控制台，
+        #   这不对。所以现在默认不自动预载；启动桌宠时（run.py）才会把语音服务拉起来。
+        #   想恢复"开启动器就预热"：config.json 里写 "auto_preload_tts": "true"。
         try:
             from PyQt5.QtCore import QTimer as _QT_pre
             _QT_pre.singleShot(2500, self._auto_preload_tts)
@@ -1026,8 +1027,19 @@ class HomePage(QWidget):
             print(f"[NewUI] ⚠ 自动预热未排上: {_e}")
 
     def _auto_preload_tts(self):
-        """启动器启动后自动预热本地语音服务（只用本地 TTS 且开着短语音时才做）。"""
+        """启动器启动后自动预热本地语音服务（**默认关闭**；只用本地 TTS 且开着短语音时才做）。"""
         try:
+            # ★ 2026-10-14（主人反馈）：启动器一起来就预载语音是**不合适的** ——
+            #   主人还没选要开哪只桌宠，它就已经把某个角色的语音服务拉起来、还弹出控制台。
+            #   现在默认**不**自动预载；想恢复：config.json 写 "auto_preload_tts": "true"。
+            #   手动按钮「预载语音服务」一直都在；启动桌宠时 run.py 也会自动拉起服务。
+            from tool.config import get_config as _gc_auto
+            _cfg_auto = _gc_auto("./config.json") or {}
+            if str(_cfg_auto.get("auto_preload_tts", "false")).strip().lower() not in (
+                    "true", "1", "yes", "on", "开"):
+                print("[NewUI] 自动预载语音已关闭（config: auto_preload_tts）→ 不预热；"
+                      "启动桌宠时才会拉起语音服务（要恢复就把它设为 true）")
+                return
             if getattr(self.shell, "_tts_proc", None) is not None:
                 print("[NewUI] 语音服务已在预载/运行 → 跳过自动预热")
                 return
