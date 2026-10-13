@@ -241,8 +241,12 @@ check("画布是竖的（宽 < 高），不再是被撑宽的横条",
 
 print("== ⑤ 2D 文本框字号/位置回到 v1.16.1 口径 ==")
 _mc5 = read("classes/murasame_class.py")
-check("2D 字体按 v1.16.1 构造（QFont(字体名, 点数)）",
-      "self.text_font = QFont(self._font_family, max(8, int(scaled_font_size)))" in _mc5)
+# 2026-10-13 改判：本项目**有意**不再用 self._font_family（它的初值就是写死的
+# "思源黑体Bold.otf"），改成 self._resolve_pet_font() —— 旧写法正是
+# 「主题页换了界面字体，桌宠对话框的字还是老样子（用户反馈"没变成"）」那个 bug 的根因。
+# 所以这里断言**修好后的写法**；想要"真加载字体 + 像素字号"的老做法可开 text_font_native。
+check("2D 字体走 _resolve_pet_font()（不再用写死的 _font_family）",
+      "self.text_font = QFont(self._resolve_pet_font(), max(8, int(scaled_font_size)))" in _mc5)
 check("留白在 2D 下就是 140×scale（20% 夹取只留给 Live2D）",
       "self.text_x_offset = old_margin" in _mc5
       and 'if getattr(self, "_live2d_mode", False):' in _mc5)
