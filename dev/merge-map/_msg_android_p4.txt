@@ -1,0 +1,26 @@
+docs(android): Phase 4 构建验收通过（实测）+ 新发现「包体仍有 302 MB」
+
+一、构建验收（实测，不是推的）
+  用 Android Studio 自带 JDK（E:\Android Studio\jbr）跑 `gradlew.bat assembleDebug`：
+      BUILD SUCCESSFUL in 1m 10s / 38 actionable tasks: 13 executed, 25 up-to-date
+  逐条核对 NATIVE_MIGRATION_PLAN.md 的验收标准：
+    · 构建只需 JDK + Android SDK ✅（全程用 jbr，没碰 Python；Chaquopy 那条
+      "not a valid Python 3.10 command" 报错不再出现）
+    · 仓库里不再有 .py / .pyc ✅（非 build 目录下数量 = **0**）
+    · 无 Chaquopy 配置 ✅（两个 build.gradle 命中 = **0**）
+    · 真机全链路回归 ⏳ **未做** —— adb 显示无设备（手机未连接）
+
+二、⚠ 新发现的问题：包体并没有变小
+    app-debug.apk    313.22 MB（2026-10-13 19:47 刚构建）
+    app-release.apk  302.18 MB（2026-10-11 22:19）
+  当初删除 Chaquopy 的预期收益之一是"APK 更小"，但实测 release 仍有 **302 MB** ——
+  对"发给别人试用/上架"都是硬伤，建议列为安卓段的下一个待办。
+  初步判断（**待核实，不是结论**）：大概率来自 Live2D 模型与素材（assets 下的模型贴图 +
+  cpp 里的 Cubism 原生库）；需要先按目录统计占用，再定优化手段
+  （按角色拆 AAB / 纹理压缩 / 大模型改成按需下载）。
+
+三、环境备忘（下次构建直接用）
+    JAVA_HOME = E:\Android Studio\jbr
+    ANDROID_HOME / ANDROID_SDK_ROOT = E:\Android\SDK
+    adb = E:\Android\SDK\platform-tools\adb.exe
+    PATH 里没有 java/gradle ⇒ 一律用 chatter 仓自带的 gradlew.bat + 显式设 JAVA_HOME。
