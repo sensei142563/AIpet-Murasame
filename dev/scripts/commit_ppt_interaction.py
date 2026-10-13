@@ -1,0 +1,63 @@
+# -*- coding: utf-8 -*-
+"""提交：PPT 互动页与实现对齐（原来把已完成的事写成中期规划）。"""
+import io
+import os
+import subprocess
+import sys
+
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+ROOT = r"E:\university\order\python\pet\AIpet-Murasame-main"
+MAP = os.path.join(ROOT, "dev", "merge-map")
+
+MSG = """docs(ppt): 互动页与实现对齐 —— 原来把"已经做完的事"写成了中期规划
+
+## 问题
+deck 第 19 页（中期：让互动更自然）写的是未来要做的事：
+   · "手部动捕驱动视线跟随——她会看着你的手"     ← **已经做完了**
+   · "识别捏脸等动作并给出反应"                  ← **已经做完了**（捏合/握拳/挥手）
+   · "现有摄像头链路已通，继续扩展识别能力"        ← 这句是对的
+⇒ 这属于"内容与实现脱节"，正是用户要的"贴合实现"要修的。
+
+## 改成什么（第 19 页 → 「互动：从『看着你』到『看懂你』（已落地一半）」）
+```
+已实现：手部 21 关键点检测   手机端接入 MediaPipe HandLandmarker；相机帧 → 关键点 → 命中她 → 反应
+已实现：视线跟随            她自己「看着你的手」——关键点换算到屏幕后驱动 3D 角色的视线目标
+已实现：三个手势            捏合=捏脸、握拳、挥手；各自独立去抖（21 个单测：9+6+6）
+下一步：更多手势 + 接进对话   比心 / 指向某处；挥手时顺便触发一句问候，把动作和她的性格连起来
+还没做：真机调优            编译与单测都过了，但「手伸过去她眼睛是否跟着转」要真机确认；偏差只调相机
+```
+**保留"还没做"这一条**是刻意的：编译/单测通过 ≠ 真机可用，
+这一页既是成果也是下一步清单，不吹。
+
+## 第 18 页（近期）顺带对齐
+把第一条从"安卓端功能对齐、稳定性与耗电优化"改成
+"**手机端：真机验证与调优** —— 功能已写好（含手部互动），近期重点是插上真机跑全链路并调准相机参数"，
+因为"功能对齐"这件事已经做掉了，剩下的是验证。
+
+## 讲稿同步
+互动页 / 近期页 / 毫米波页（毫米波那条上一轮已换成诚实版）三页讲稿重写；
+重建后核对「缺备注的页：无 ✓」。
+
+## 渲染质检（发现并修了两处）
+第一次渲染出来：① 最后一条要点过长，换行贴到幻灯片边缘；② 用了 ⚠ 符号，与 deck 其余页面
+（无符号）风格不一致。⇒ 缩短该条 + 去掉符号 ⇒ **重新渲染确认**：5 条各占一行、无溢出、无符号。
+
+## 流程
+```
+build_deck.py → 23 页 ✓
+ppt_add_notes.py → 23 页全挂、无缺页 ✓
+render_qc.ps1 → 23 张 slide-*.png + Deck.pdf ✓
+目视复核第 19 页 ✓（这是本轮唯一"看图确认过"的改动）
+```
+"""
+p = os.path.join(MAP, "_msg_ppt_interaction.txt")
+io.open(p, "w", encoding="utf-8", newline="\n").write(MSG)
+subprocess.run(["git", "-C", ROOT, "add", "-A"], capture_output=True)
+rc = subprocess.run(["git", "-C", ROOT, "commit", "-F", p], capture_output=True, text=True,
+                    encoding="utf-8", errors="replace")
+print("桌面仓:", (rc.stdout or rc.stderr or "").splitlines()[0][:170])
+n = subprocess.run(["git", "-C", ROOT, "rev-list", "--count", "origin/main..HEAD"],
+                   capture_output=True, text=True, encoding="utf-8").stdout.strip()
+st = subprocess.run(["git", "-C", ROOT, "status", "--porcelain"], capture_output=True,
+                    text=True, encoding="utf-8").stdout.strip()
+print("  未推送 %s 条，工作区 %s" % (n, "干净 ✓" if not st else "%d 项" % len(st.splitlines())))
