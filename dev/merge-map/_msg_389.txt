@@ -1,0 +1,19 @@
+docs: 自检项数 386 → 389（恢复主题后 test_frontend_style 涨了 3 项）并重建 deck
+
+## 为什么会变
+`tests/test_frontend_style.py` 是**按主题资源内容**计数的（31 项）。本轮恢复「沫子的日常」主题、
+补齐 9 个资源后，它 +3 项 ⇒ 总计 **389**。
+各项明细：bounds 68 / bugfix_0930 67 / bugfix_0930b 108 / config_contracts 39 /
+frontend_style 31 / plugin_markup 19 / qt_lifecycle 30 / vision_interface 27（另两个 0 项）。
+
+## 同步的地方（8 个文件）
+README、（PPT）outline+notes、录屏操作单、本地视觉口径排查、大厂入局与对标补查、
+docs/plan 两份（它们此前已带"2026-10-13 更正"标注）—— 全部 386 → 389。
+
+## 重建
+build_deck → ppt_add_notes（重建会丢备注）→ render_qc 渲染 24 页 → 读回 pptx 复核数字。
+
+## 记一笔（设计观察，不属本次改动）
+`test_frontend_style.py` 的项数**随内容变化** ⇒ 文档里写死的数字会**反复过期**。
+更稳的做法是让该体检输出"稳定项数"（把随内容增减的检查合并计一条），
+或者文档里只写"全绿"、不写具体数字。本轮先按现状同步，**留作待办**。
