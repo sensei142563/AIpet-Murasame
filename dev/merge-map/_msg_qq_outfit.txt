@@ -1,0 +1,28 @@
+docs: 验证 deck 那句「QQ 侧立绘与桌宠同一套装扮」——成立（代码级）
+
+## 为什么单独验
+这句话在 deck 第 15 页，之前依据只是**代码注释**，没端到端核过；
+演示时它最容易被追问（"QQ 里看到的和桌面上是同一套吗？"）。
+
+## 关键点：不能只看"路径相同"，要看**两种布局**
+`data/portrait_choice.json` 有两种布局：顶层 `a/b/active`（无 `portrait.sets` 的角色）
+与 `pets.<id>.<set>`（**丛雨属于这一种**）。若 QQ 侧自己实现读取且只认第一种，
+对丛雨就会回落默认装扮 —— 正是本工程反复出现的"对错了对象"。
+
+## 查证结果：成立
+```
+qq/qq_portrait.py:210-215  _choice_path() → from tool.portrait_outfit import choice_path
+qq/qq_portrait.py:218-225  load_choice()  → from tool.portrait_outfit import load_outfit
+qq/qq_portrait.py:228-239  save_choice()  → from tool.portrait_outfit import save_outfit
+tool/portrait_outfit.py:116/118  → <BASE>/data/portrait_choice.json（与桌宠同一份）
+```
+⇒ QQ 侧**委托给与桌宠完全相同的那一个模块**，该模块本身处理两种布局
+⇒ 对丛雨的 `pets.<id>.<set>` 同样成立。写入侧也共用：
+`murasame_class.py:3253/3699`（右键换装）、`qq/qq_bridge.py:709/720`（AI 自主换装）。
+
+## 仍未验的（写进文档，不夸大）
+**没有**在真实 QQ 群里发图后与桌面逐像素比对（需要 QQ 环境与真机）。
+本次是**代码级**验证（同文件 + 同模块 + 同一读写入口）——比注释强，但不等同于"亲眼见过同一套"。
+建议录一段可演示证据：桌面换装 → 立刻在 QQ 里发一张立绘 → 两张同套装扮。
+
+顺带把这条结论补进 `docs/大厂入局与对标补查-2026-10-13.md` 的**预设问答**表。
