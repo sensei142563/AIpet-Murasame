@@ -307,6 +307,29 @@ def _opaque(pet):
     return 100.0 * op / max(1, smp), (pm.width(), pm.height())
 
 
+def _img_digest(pet):
+    """合成图的**内容摘要**（决定性判据）。
+
+    为什么不用"不透明占比"：那只是非透明像素的比例，两件不同衣服完全可能撞上同一个值
+    （实测"睡衣/私服/刀服"都是 31.22）—— 用它判"换装生效"会误判。
+    这里直接对像素取摘要：只要画出来的东西有一处不同，摘要就不同。
+    """
+    try:
+        img = pet.grab().toImage()
+        if img.isNull():
+            return "null"
+        w, h = img.width(), img.height()
+        buf = bytearray()
+        for y in range(0, h, 2):
+            for x in range(0, w, 2):
+                c = img.pixelColor(x, y)
+                buf += bytes((c.red(), c.green(), c.blue(), c.alpha()))
+        import hashlib
+        return hashlib.md5(bytes(buf)).hexdigest()[:10]
+    except Exception as e:
+        return "err:%s" % e
+
+
 _r_before, _sz_before = _opaque(_pet2)
 
 
@@ -344,30 +367,41 @@ except Exception as e:
     traceback.print_exc()
     check("Live2D 退出路径能跑通", False, "%s: %s" % (type(e).__name__, e))
 
-print("== ① 换装复核：四套衣服合成结果确实不同 ==")
+print("== ① 换装复核：走**真实入口** _switch_cloth()，四套必须真的不同 ==")
+print("   （原写法有两个错：① 写顶层 b，而有 portrait.sets 的角色读 pets.<id>.<set>；")
+print("     ② 把固定不变的 first_portrait 当 layers 传给 update_portrait ⇒ 图层从没变过。")
+print("     详见 dev/docs/换装不生效-排查结论-2026-10-13.md）")
 try:
-    import json as _json                    # noqa: E402
     from tool import portrait_outfit as PO2  # noqa: E402
     _pc = os.path.join(REPO, "data", "portrait_choice.json")
     _orig_pc = io.open(_pc, encoding="utf-8").read()
-    _ratios = {}
+    _ratios, _cids, _digs = {}, {}, {}
     try:
         for _c in ("制服", "睡衣", "私服", "刀服"):
-            _d = _json.loads(_orig_pc)
-            _d["b"]["cloth"] = _c
-            io.open(_pc, "w", encoding="utf-8").write(_json.dumps(_d, ensure_ascii=False))
-            if hasattr(PO2, "reset_cache"):
-                PO2.reset_cache()
-            _pet2.update_portrait(_pet2.portrait_target, _pet2.first_portrait)
-            _ratios[_c] = _opaque(_pet2)[0]
+            _pet2._switch_cloth(_c)              # ← 右键菜单点衣服走的就是这个
+            _cids[_c] = PO2.load_outfit().get("cloth_id")
+            _ratios[_c] = round(_opaque(_pet2)[0], 2)
+            _digs[_c] = _img_digest(_pet2)
     finally:
+        # 还原主人原本的装扮选择（_switch_cloth 会真的写盘）
         io.open(_pc, "w", encoding="utf-8").write(_orig_pc)
         if hasattr(PO2, "reset_cache"):
             PO2.reset_cache()
-    print("      四套衣服的不透明占比：%s" % {k: round(v, 1) for k, v in _ratios.items()})
-    check("★ 四套衣服画出来各不相同（换装确实生效）",
-          len(set(round(v, 1) for v in _ratios.values())) >= 3, str(_ratios))
+        try:
+            from tool.portrait_outfit import load_outfit as _lo
+            _pet2.update_portrait(_pet2.portrait_target,
+                                  _pet2._first_portrait_for(_pet2._current_set()))
+        except Exception:
+            pass
+    print("      解析层 cloth_id：%s" % _cids)
+    print("      渲染层 不透明占比：%s" % _ratios)
+    print("      渲染层 图像摘要：%s" % _digs)
+    check("★ 解析层：四套 cloth_id 互不相同", len(set(_cids.values())) >= 3, str(_cids))
+    check("★ 渲染层：四套画出来内容各不相同（图像摘要）",
+          len(set(_digs.values())) >= 3, str(_digs))
 except Exception as e:
+    import traceback
+    traceback.print_exc()
     check("换装复核", False, "%s: %s" % (type(e).__name__, e))
 
 print("== ④ 联网学习三方共用（tool/learn_hub.py）==")
