@@ -13,7 +13,10 @@ import sys
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 ROOT = r"E:\university\order\python\pet\AIpet-Murasame-main"
-DECK = os.path.join(ROOT, "dev", "ppt", "out", "Deck.pptx")
+# 可选：命令行给一个目标 pptx（默认仍是 Deck.pptx）。
+# 用途：Deck.pptx 被 PowerPoint/WPS 打开时会被加写锁，此时先建到别的名字再挂讲稿。
+DECK = (sys.argv[1] if len(sys.argv) > 1
+        else os.path.join(ROOT, "dev", "ppt", "out", "Deck.pptx"))
 NOTES = os.path.join(ROOT, "dev", "ppt", "notes.json")
 
 from pptx import Presentation            # noqa: E402

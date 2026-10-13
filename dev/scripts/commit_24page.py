@@ -1,0 +1,50 @@
+# -*- coding: utf-8 -*-
+"""提交：24 页 deck 的最终产物 + 脚本改进。"""
+import io
+import os
+import subprocess
+import sys
+
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+ROOT = r"E:\university\order\python\pet\AIpet-Murasame-main"
+MAP = os.path.join(ROOT, "dev", "merge-map")
+
+MSG = """build(ppt): 24 页 deck 定稿（新增第 10 页：更广的同类对标）+ 两处流程改进
+
+## 这轮踩到并修掉的两个流程问题
+1. **文件被 WPS 锁住** ⇒ 重建 `PermissionError: Permission denied: 'Deck.pptx'`
+   （是我刚才用 WPS 打开给用户看造成的）。⇒ 先建到 `Deck_24.pptx`，等解锁后再改名定稿。
+2. **我把 build 的输出过滤得太狠** ⇒ 构建失败时**静默通过**，我还以为成功了
+   （渲染出来仍是 23 页才发现）。⇒ 现在脚本都**检查 returncode**，失败即停并打印错误。
+
+## 附带改进
+`dev/scripts/ppt_add_notes.py` 原来把 `Deck.pptx` 写死 ⇒ 加了可选参数：
+`python ppt_add_notes.py [目标.pptx]`（默认仍是 Deck.pptx）。
+
+## 内容
+- 新页（第 10 页）「更广的同类：都在做『形象』，只有我们在做『关系』」：
+  展示工具类（Live2DViewerEX）/ 养成玩具类（Shimeji、BongoCat、VPet）/
+  大厂吉祥物（人工桌面 yoyo 鹿鸣、天选桌宠）/ 手机端助手（兽耳助手）/ 共同点 / 我们的位置。
+- 6 条要点经渲染**复核**：各占一行、无字面 `**`、无溢出。
+- ⚠ 我又在新页里写了 `**加粗**`（本会话第二次）⇒ 建前扫描并清掉；
+  现在 pptx 全文复查"含 ** 的页：无 ✓"。
+
+## 验证
+```
+build_deck.py   → Deck_24.pptx（24 页），退出码 0 ✓
+ppt_add_notes.py→ 已写入备注 24 页，缺备注的页：无 ✓
+render_qc.ps1   → Rendered 24 slides + Deck_24.pdf ✓
+目视复核第 10 页 ✓
+```
+"""
+p = os.path.join(MAP, "_msg_24page.txt")
+io.open(p, "w", encoding="utf-8", newline="\n").write(MSG)
+subprocess.run(["git", "-C", ROOT, "add", "-A"], capture_output=True)
+rc = subprocess.run(["git", "-C", ROOT, "commit", "-F", p], capture_output=True, text=True,
+                    encoding="utf-8", errors="replace")
+print("桌面仓:", (rc.stdout or rc.stderr or "").splitlines()[0][:170])
+n = subprocess.run(["git", "-C", ROOT, "rev-list", "--count", "origin/main..HEAD"],
+                   capture_output=True, text=True, encoding="utf-8").stdout.strip()
+st = subprocess.run(["git", "-C", ROOT, "status", "--porcelain"], capture_output=True,
+                    text=True, encoding="utf-8").stdout.strip()
+print("  未推送 %s 条，工作区 %s" % (n, "干净 ✓" if not st else "%d 项" % len(st.splitlines())))
