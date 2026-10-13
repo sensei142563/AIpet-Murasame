@@ -1,4 +1,8 @@
 requests~=2.32.5
+# ⚠ 用户 2026-10-13 明确要求：**opencv-python 与 numpy 的版本组合不要动**。
+#   原因：`opencv-python 4.12.x` + `numpy 1.26.x` 是**唯一**在"协作者机器"和"本机"
+#   两边都能跑的组合。pip check 会提示 "opencv-python requires numpy>=2"——那是**已知且接受**的，
+#   不要为了消除这条告警去升 numpy（升了会破坏其中一台）。
 opencv-python~=4.10.0.84
 numpy>=1.26.4,<2
 aiohttp~=3.12.15
@@ -22,7 +26,7 @@ onnxruntime>=1.12.0
 insightface>=1.0.0
 websocket-client>=1.6.0
 
-# ΢�� ClawBot��iLink �ٷ�Э��ͻ��ˣ�ɨ���¼��ά�뱾�����ɣ�
+# ΢�� ClawBot��iLink �ٷ�Э��ͻ��ˣ�ɨ���¼��ά�뱾�����ɣ�
 qrcode
 pillow
 pycryptodome

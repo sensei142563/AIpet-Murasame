@@ -1,0 +1,38 @@
+docs+chore: 三条拍板落仓 + 《红测试修复清单》+ agent 守卫丢失定位
+
+一、用户 2026-10-13 拍板，逐条写进仓库（避免以后被"顺手"改回去）
+  1) **不恢复表情符号** —— 右键菜单继续用金色菱形标记 + 暗红小标题这套视觉语言，
+     写进 classes/murasame_class.py 菜单构造处的注释（旧版 💬🎭📖 不回填）。
+  2) **PPT 用中文、不署名** —— 写进 dev/docs/汇报PPT规划-2026-10-13.md：
+     不写姓名/学号/学校/学院/实验室，不做"校园/实验室"署名样式，页面只留页码。
+  3) **不要动 opencv-python / numpy 的版本组合** —— 写进 requirements.txt 顶部注释：
+     `opencv-python 4.12.x` + `numpy 1.26.x` 是**协作者机器与本机唯一都能跑**的组合；
+     `pip check` 的 "opencv-python requires numpy>=2" 属**已知且接受**，不许为消告警去升 numpy。
+
+二、新增 dev/docs/红测试修复清单-2026-10-13.md（**实测数字，可复现**）
+  命令：`runtime\venv\Scripts\python.exe tests\run_all.py`
+    test_bounds.py           66 OK /  2 FAIL   字体缩放下界（实际 0.05，断言要 [0.1,3.0]）
+    test_bugfix_0930.py      60 OK /  7 FAIL   状态窗/状态页整套
+    test_bugfix_0930b.py     16 OK /  2 FAIL   main.py 的 off/voice/chat 三路
+    test_config_contracts.py 34 OK /  3 FAIL   全仓重复字典键（tool/jp_names.py 等）
+    test_frontend_style.py   14 OK / 13 FAIL   启动器配色/顺序一致性
+    test_vision_interface.py 17 OK /  9 FAIL   视觉服务接口键
+    test_qt_lifecycle.py      2 OK / **直接崩** ValueError: substring not found
+    test_plugin_markup.py    19 OK /  0 FAIL   ← ✅ 本轮已修好
+    test_jev.py / test_jev_endpoint.py  rc=0（无检查项）
+  ⇒ 合计 **36 项失败 + 1 个文件崩溃**。
+  文档里每一项都列成可勾选清单，并标注"主要缺什么"。
+
+三、本轮定位于 test_qt_lifecycle.py 崩溃的真因（下一轮修）
+  测试第 60 行要求源码里同时存在：
+      mc.index("我还在做上一件事") < mc.index("要让她去做吗")
+  而当前树里 **`_run_agent_task` / `_on_agent_done` 都不存在**（`_agent_worker` 字段在、
+  `tool/agent_bridge.py` 也在）；覆盖前备份里这段是**完整**的 ——
+  含「**同一时间只允许一个 agent 任务**」守卫（注释写明理由：它会以主人身份操作电脑，
+  起第二个等于两个 agent 同时动这台机器）与默认按钮为「否」的确认框。
+  ⇒ 属"换基线时丢失"的又一处真实功能，恢复即可让该文件不再崩。
+
+四、纪律（写进文档，防止以后走偏）
+  · 先看断言要什么，再决定补代码还是修测试；**不许为了变绿放松断言**。
+  · 与覆盖前备份对照时先判断是否**双向分叉**；双向分叉**不做整file覆盖**
+    （pcl_launcher/colors.py 就是这种：本树 700 行 / 备份 605 行，双方各有新东西）。
