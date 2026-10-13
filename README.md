@@ -1427,7 +1427,7 @@ main.py (PyQt5 主窗口 + FastAPI 28565 + 快捷键监听 + 托盘)
 | 路径 | 用途 |
 |------|------|
 | `config.json` | **核心配置**（API Key / 开关 / 模型选择），首次运行自动从 `config.example.json` 生成 |
-| `api.py` / `main.py` / `run.py` | 桌宠本体：启动器 / FastAPI 后端 / 主窗口 |
+| `run.py` / `main.py` / `api.py` | 桌宠本体三件套，**按启动顺序**：`run.py` = 启动器（引导环境、拉起各服务与主窗口）→ `main.py` = 主窗口（PyQt 界面 + 本地 FastAPI 接口）→ `api.py` = 独立的 FastAPI 后端接口 |
 | `pets/<角色>/` | **角色包**（多桌宠核心）：pet.json + 人设 + 头像 + live2d/ + voices/ + biaoqingbao/ + memory/ |
 | `pets/<角色>/live2d/` | 该角色 Live2D 模型（model3.json + moc3 + 贴图 + exp/ + motion/） |
 | `pets/<角色>/fgimages/` | 2D 立绘素材（仅丛雨有，分 `a`/`b` 两套服装） |
