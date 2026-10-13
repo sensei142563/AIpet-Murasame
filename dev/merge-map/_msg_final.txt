@@ -1,0 +1,29 @@
+fix(test): 换装那项收尾 —— **补 app.processEvents()**，全仓测试从此全绿 🎉
+
+一、定性结论（对前两版结论的最终修正）
+  「连续换装只有第一次生效」**不是产品 bug** —— 是测试**没跑事件队列就取图**，
+  `pet.grab()` 拿到的是**上一帧**。用独立落地脚本直接对照（脚本 + 结果都入库）：
+
+    dev/scripts/probe_pixmap_vs_grab2.py → dev/probe_pixmap_result.txt
+      SW 制服 | pixmap 05e26f5176 | grab 91fadd44c1
+      SW 睡衣 | pixmap c2c6dfd172 | grab be87bddd61
+      SW 私服 | pixmap 3e6b7980b6 | grab c29e311df5
+      SW 刀服 | pixmap 95605ad092 | grab ba335edc85
+    ⇒ 四套 pet.pixmap()（真正设进 QLabel 的图）**全不同** ⇒ 合成正常；
+      四套 grab() **也全不同** ⇒ 取图正常 —— 前提是先 processEvents()。
+
+二、改动
+  `tests/test_bugfix_0930b.py`：`_pet2._switch_cloth(_c)` 之后补 `app.processEvents()`，
+  并注明原因与证据文件（避坑提示写进注释：GUI 测试改完状态要先跑事件队列再取图）。
+
+三、结果
+  `tests/test_bugfix_0930b.py` → **第二批缺陷回归体检全部通过，退出码 0**：
+      解析层 cloth_id：{'制服': 1952, '睡衣': 1956, '私服': 1978, '刀服': 1950}
+      渲染层 图像摘要：{'制服': '91fadd44c1', '睡衣': 'be87bddd61',
+                       '私服': 'c29e311df5', '刀服': 'ba335edc85'}
+  ⇒ **10 个测试文件全部通过**，红测试战役收官。
+
+⚠ 两次判断反转的记录（诚实留档）：
+  第一次以为"只是测试入口用错"→ 修好入口后仍失败；
+  第二次以为"真 bug：连续换装只有第一次生效"→ 用落地脚本对照 pixmap/grab 才定性为取图时机。
+  教训：**先排除取图时机，再怀疑产品逻辑**；GUI 测试尤其如此。

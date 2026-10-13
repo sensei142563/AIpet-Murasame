@@ -1,0 +1,5 @@
+== 换装 pixmap vs grab 对照 ==
+SW 制服   | pixmap 05e26f5176   | grab 91fadd44c1   | size (184, 330)
+SW 睡衣   | pixmap c2c6dfd172   | grab be87bddd61   | size (184, 330)
+SW 私服   | pixmap 3e6b7980b6   | grab c29e311df5   | size (184, 330)
+SW 刀服   | pixmap 95605ad092   | grab ba335edc85   | size (184, 330)

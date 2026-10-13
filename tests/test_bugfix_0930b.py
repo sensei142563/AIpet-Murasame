@@ -379,6 +379,12 @@ try:
     try:
         for _c in ("制服", "睡衣", "私服", "刀服"):
             _pet2._switch_cloth(_c)              # ← 右键菜单点衣服走的就是这个
+            # ⚠ 必须先把事件队列跑完再取图：实测不 processEvents() 的话，
+            #   pet.grab() 会拿到**上一帧** —— 于是"睡衣/私服/刀服"三套摘要完全相同，
+            #   看着像"换装不生效"，其实是取图时机问题。
+            #   证据（落地脚本直接跑 pet.pixmap() 与 grab 的 md5 对照，四套全不同）：
+            #   dev/probe_pixmap_result.txt
+            app.processEvents()
             _cids[_c] = PO2.load_outfit().get("cloth_id")
             _ratios[_c] = round(_opaque(_pet2)[0], 2)
             _digs[_c] = _img_digest(_pet2)
