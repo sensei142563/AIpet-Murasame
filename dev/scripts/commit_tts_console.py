@@ -1,0 +1,73 @@
+# -*- coding: utf-8 -*-
+"""提交：语音服务控制台外壳（窗口变好看）+ run.py 接线 + 实测证据。"""
+import io
+import os
+import subprocess
+import sys
+
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+ROOT = r"E:\university\order\python\pet\AIpet-Murasame-main"
+MAP = os.path.join(ROOT, "dev", "merge-map")
+
+MSG = """feat(tts): 给语音服务加"控制台外壳" —— 那个窗口变好看、有名字、不再刷屏
+
+## 用户的要求
+"用新版本吧，让终端变得好看一点，像旧版一点。"
+背景：旧版 V1.17.2 起的是 `api_v2.py`（安静），当前版起 `api.py`（会刷一整屏中文日志），
+所以主人会觉得"以前不长这样"。**不动 GPT-SoVITS 第三方文件**（改坏了不好还原）。
+
+## 做法：外面包一层 tool/tts_console.py
+```
+run.py 起：<GPT-SoVITS 的 python> tool/tts_console.py <data/tts_console.json> -- api.py -s .. -g ..
+外壳负责：
+  1. 设控制台标题 → "AIpet 语音服务 · 丛雨（GPT-SoVITS 9880）"
+  2. 打一个整齐横幅（角色名 / 端口 / 用了哪个模型 / 日志在哪 / 怎么停）
+  3. 把服务本体的 stdout+stderr **全部追加写进 data/tts_service.log**
+  4. 外壳自己被 /T 收掉时，把服务本体一起带走（不留孤儿 —— 今天刚踩过这个坑）
+失败回落：写配置或外壳缺失时，仍按原样直接起 api.py（不会因为新机制起不来）。
+```
+
+## 实测（两张证据都在仓库里）
+```
+① 手动跑：外壳存活 ✓ 9880 监听 ✓ 日志含 api.py 全部输出 ✓
+② 按 run.py 一模一样的方式（新控制台 + BELOW_NORMAL）复验：
+   外壳 14340 + api.py 15936 进程树正确 ✓
+   第 20 秒 9880 已监听 ✓
+   窗口标题 = "AIpet 语音服务 · 丛雨（GPT-SoVITS 9880）" ✓
+   /T 杀掉外壳 ⇒ 残留 python 0 个 ✓、9880 释放 ✓
+   截图：dev/ppt/out/tts-console-shot.png（横幅 + 两行提示，其余空白 = 不再刷屏）
+```
+
+## 过程中踩到并修掉的两个坑（都值得记）
+1. **`OSError: [WinError 193] %1 不是有效的 Win32 应用程序`** ——
+   我把 `"api.py"` 当成**可执行文件**交给 Popen；脚本必须用解释器跑。
+   ⇒ 改成 `[sys.executable] + rest`（`sys.executable` 就是 GPT-SoVITS 那个便携 python）。
+2. **外壳自己的报错没进日志** ⇒ 子进程起不来时日志一片空白，只能满世界找原因。
+   ⇒ 现在外壳异常也会写进 `data/tts_service.log`（并在窗口里提示日志路径）。
+
+## 诚实说明
+中间有**一次**启动失败，原因我**没有完全定位**（日志只有"启动/退出"两行）。
+但同一套代码随后**两次**独立验证都成功（手动一次、run.py 方式一次），
+所以判定为已修；如果以后再现，日志里会留下证据（第 2 条改进就是为这个加的）。
+"""
+p = os.path.join(MAP, "_msg_tts_console.txt")
+io.open(p, "w", encoding="utf-8", newline="\n").write(MSG)
+subprocess.run(["git", "-C", ROOT, "add", "-A"], capture_output=True)
+rc = subprocess.run(["git", "-C", ROOT, "commit", "-F", p], capture_output=True, text=True,
+                    encoding="utf-8", errors="replace")
+print("桌面仓:", (rc.stdout or rc.stderr or "").splitlines()[0][:170])
+n = subprocess.run(["git", "-C", ROOT, "rev-list", "--count", "origin/main..HEAD"],
+                   capture_output=True, text=True, encoding="utf-8").stdout.strip()
+st = subprocess.run(["git", "-C", ROOT, "status", "--porcelain"], capture_output=True,
+                    text=True, encoding="utf-8").stdout.strip()
+print("  未推送 %s 条，工作区 %s" % (n, "干净 ✓" if not st else "%d 项" % len(st.splitlines())))
+
+# 全量自检（改了 run.py，必须回归）
+print()
+print("=== 全量自检（改了 run.py）===")
+r = subprocess.run([os.path.join(ROOT, "runtime", "venv", "Scripts", "python.exe"),
+                    os.path.join(ROOT, "tests", "run_all.py")],
+                   cwd=ROOT, capture_output=True, text=True, encoding="utf-8",
+                   errors="replace", timeout=1800)
+for l in ((r.stdout or "") + (r.stderr or "")).split("\n")[-4:]:
+    print("   " + l.strip()[:120])
