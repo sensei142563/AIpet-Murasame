@@ -1620,8 +1620,18 @@ class HomePage(QWidget):
         except Exception as e:
             print(f"[NewUI]  启动本地视觉服务失败（不影响桌宠）: {e}")
         try:
-            self.shell._pet_proc = subprocess.Popen([py, os.path.join(base, "run.py")], cwd=base,
-                                                    creationflags=_spawn_flags())
+            # ⚠ 桌宠也走**共用**的 _spawn_console + _watch_child（与微信/QQ 桥接保持一致）。
+            #   原来这里是裸 Popen + _spawn_flags()：桌宠要是秒退，控制台**一闪就关**、
+            #   启动器界面上一个字都没有 —— 和当年"点启动微信秒卡退，界面上什么都没说"
+            #   是同一个毛病，只是换了主角。
+            #   统一之后：Windows 上套一层 cmd /k（报错留在屏幕上），
+            #   并由 _watch_child 在 1.8 秒后回查，死了就把退出码 + 常见原因显示出来。
+            self.shell._pet_proc = self._spawn_console(py, os.path.join(base, "run.py"), base)
+            self._watch_child(self.shell._pet_proc, "桌宠",
+                              "常见原因：\n"
+                              "· 依赖没装全（先跑 install.bat）\n"
+                              "· 端口 28565 被占（上一只桌宠没退干净）\n"
+                              "· 杀毒软件拦了 python 子进程")
             print("[NewUI] 已启动桌宠（run.py）")
             return True
         except Exception as e:
