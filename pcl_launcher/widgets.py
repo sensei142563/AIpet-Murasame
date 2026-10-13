@@ -216,8 +216,8 @@ class PCLSettingsPanel(QWidget):
                 font-size: {int(12*S)}px; border-radius: {btn_radius()}px;
                 font-family: '{ui_font_family()}'; }}
             QPushButton:hover {{ background: {surface_fill(220, 44)}; }}
-            QPushButton:checked {{ background: {Color3.name()}; color: white;
-                border-color: {Color3.name()}; font-weight: bold; }}
+            QPushButton:checked {{ background: {fill_for_text(Color3).name()}; color: white;
+                border-color: {fill_for_text(Color3).name()}; font-weight: bold; }}
         """
         cat_row = QHBoxLayout(); cat_row.setSpacing(int(6 * S))
         self._cat_btns = {}
@@ -683,10 +683,10 @@ class PCLSettingsPanel(QWidget):
         lbl = QLabel(f"  {icon} {text}")
         lbl.setFont(QFont(ui_font_family(), int(13 * S), QFont.Bold))
         lbl.setStyleSheet(
-            f"color: {Color3.name()}; margin-top: {int(18*S)}px;"
+            f"color: {fill_for_text(Color3).name()}; margin-top: {int(18*S)}px;"
             f"padding: {int(5*S)}px {int(10*S)}px;"
             f"background: {surface_fill(120, 20)};"
-            f"border-left: 4px solid {Color3.name()}; border-radius: {int(4*S)}px;")
+            f"border-left: 4px solid {fill_for_text(Color3).name()}; border-radius: {int(4*S)}px;")
         self._cur_layout.addWidget(lbl)
         return lbl
 
@@ -703,7 +703,7 @@ class PCLSettingsPanel(QWidget):
             QLineEdit {{ border: 1px solid {Gray5.name()}; padding: {int(6*S)}px;
                 font-size: {int(12*S)}px; border-radius: {int(4*S)}px;
                 background: {surface_fill(190, 26)}; font-family: '{ui_font_family()}'; }}
-            QLineEdit:focus {{ border: 1px solid {Color3.name()}; }}
+            QLineEdit:focus {{ border: 1px solid {fill_for_text(Color3).name()}; }}
         """)
         if not secure:
             self._cur_layout.addWidget(inp)
@@ -724,8 +724,8 @@ class PCLSettingsPanel(QWidget):
                     font-size: {int(12*S)}px; border-radius: {int(4*S)}px;
                     font-family: '{ui_font_family()}'; }}
                 QPushButton:hover {{ background: {surface_fill(235, 40)}; }}
-                QPushButton:checked {{ background: {Color3.name()}; color: white;
-                    border-color: {Color3.name()}; }}
+                QPushButton:checked {{ background: {fill_for_text(Color3).name()}; color: white;
+                    border-color: {fill_for_text(Color3).name()}; }}
             """)
 
             def _toggle_echo(on, _w=inp, _b=eye):
@@ -846,8 +846,8 @@ class PCLSettingsPanel(QWidget):
             QComboBox {{ border: 1px solid {Gray5.name()}; padding: {int(4*S)}px;
                 font-size: {int(12*S)}px; border-radius: {int(4*S)}px;
                 background: {surface_fill(190, 26)}; font-family: '{ui_font_family()}'; }}
-            QComboBox:focus {{ border: 1px solid {Color3.name()}; }}
-            QComboBox QAbstractItemView {{ background: {surface_fill(190, 26)}; selection-background-color: {Color3.name()}; }}
+            QComboBox:focus {{ border: 1px solid {fill_for_text(Color3).name()}; }}
+            QComboBox QAbstractItemView {{ background: {surface_fill(190, 26)}; selection-background-color: {fill_for_text(Color3).name()}; }}
         """)
         self._block_wheel(combo)
         if hint:
@@ -1155,7 +1155,7 @@ class PCLFaceManager(QScrollArea):
         # 添加主人照片按钮
         btn_add_master = QPushButton("  + 添加主人照片")
         btn_add_master.setStyleSheet(f"""
-            QPushButton {{ background: {Color3.name()}; color: white; border: none;
+            QPushButton {{ background: {fill_for_text(Color3).name()}; color: white; border: none;
                 padding: {int(8*S)}px {int(16*S)}px; font-size: {int(13*S)}px;
                 border-radius: {btn_radius()}px; font-family: '{ui_font_family()}'; }}
             QPushButton:hover {{ background: {Color4.name()}; }}
@@ -1178,7 +1178,7 @@ class PCLFaceManager(QScrollArea):
 
         btn_add_other = QPushButton("  + 添加其他人")
         btn_add_other.setStyleSheet(f"""
-            QPushButton {{ background: {Color3.name()}; color: white; border: none;
+            QPushButton {{ background: {fill_for_text(Color3).name()}; color: white; border: none;
                 padding: {int(8*S)}px {int(16*S)}px; font-size: {int(13*S)}px;
                 border-radius: {btn_radius()}px; font-family: '{ui_font_family()}'; }}
             QPushButton:hover {{ background: {Color4.name()}; }}
@@ -1828,7 +1828,7 @@ class PCLPetManager(QScrollArea):
         # 添加桌宠按钮 → 打开分步引导向导
         btn_add = QPushButton("  + 添加新桌宠（跟着引导一步步来）")
         btn_add.setStyleSheet(f"""
-            QPushButton {{ background: {Color3.name()}; color: white; border: none;
+            QPushButton {{ background: {fill_for_text(Color3).name()}; color: white; border: none;
                 padding: {int(8*S)}px {int(16*S)}px; font-size: {int(13*S)}px;
                 border-radius: {btn_radius()}px; font-family: '{ui_font_family()}'; }}
             QPushButton:hover {{ background: {Color4.name()}; }}
@@ -1996,7 +1996,7 @@ class PCLPetManager(QScrollArea):
             for text, color in badges:
                 b = QLabel(f" {text} ")
                 b.setStyleSheet(f"""
-                    background: {color}; color: white; border: none;
+                    background: {fill_for_text(color).name()}; color: white; border: none;
                     padding: {int(2*S)}px {int(6*S)}px; font-size: {int(10*S)}px;
                     border-radius: {int(4*S)}px; font-weight: bold;
                 """)
@@ -2500,7 +2500,7 @@ class PCLLive2DTunePanel(QWidget):
                 QPushButton {{ background: {Color6.name()}; color: {Color1.name()};
                     border: 1px solid {Color5.name()}; padding: {int(8*S)}px {int(14*S)}px;
                     font-size: {int(12*S)}px; font-family: '{ui_font_family()}'; border-radius: {btn_radius()}px; }}
-                QPushButton:hover {{ background: {fill_for_text(Color4).name()}; color: white; border: 1px solid {Color3.name()}; }}
+                QPushButton:hover {{ background: {fill_for_text(Color4).name()}; color: white; border: 1px solid {fill_for_text(Color3).name()}; }}
             """)
         btn_live.clicked.connect(self._load_from_live)
         btn_save.clicked.connect(self._save)
@@ -2696,7 +2696,7 @@ class PCLPromptEditor(QWidget):
         btn_reload = QPushButton("重新加载")
         for b in (btn_save, btn_reload):
             b.setStyleSheet(f"""
-                QPushButton {{ background: {Color3.name()}; color: white; border: none;
+                QPushButton {{ background: {fill_for_text(Color3).name()}; color: white; border: none;
                     padding: {int(8*S)}px {int(16*S)}px; font-size: {int(13*S)}px;
                     border-radius: {btn_radius()}px; font-family: '{ui_font_family()}'; }}
                 QPushButton:hover {{ background: {Color4.name()}; }}
