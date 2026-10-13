@@ -1,0 +1,63 @@
+# -*- coding: utf-8 -*-
+"""提交安卓包体分析。"""
+import io
+import os
+import subprocess
+import sys
+
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+ROOT = r"E:\university\order\python\pet\AIpet-Murasame-main"
+MAP = os.path.join(ROOT, "dev", "merge-map")
+
+MSG = """docs(android): 包体 302MB 拆包实测 —— 真凶与可省清单（含 228MB 的按需下载方案）
+
+拆包脚本 `dev/scripts/apk_size_breakdown.py`（可重跑），APK 为 2026-10-13 19:47 构建的 debug。
+
+一、账目（谁占的）
+    228.15 MB  assets/asr-sensevoice/model.int8.onnx   ← 离线语音识别模型（单体占 73%）
+     72.76 MB  assets/pets/murasame/                  ← 丛雨角色素材
+     59.96 MB  classes*.dex                           ← debug 未混淆
+     31.11 MB  lib/arm64-v8a（onnxruntime 20.68 + sherpa 8.79）
+     24.13 MB  assets/asr-zh-14M/*.onnx               ← **第二套** ASR 模型
+      6.20 MB  assets/Murasame/*                     ← 与 pets/murasame 重复（同一张 texture 存两遍）
+      5.80 MB  assets/noir/*
+  app/src/main/assets 合计 343.47 MB，是全仓唯一大头。
+
+二、**纠正了我自己的初步误判**（写下来免得别人再错一次）
+  一开始我以为 SenseVoice 是"死代码、直接删"。**错了**：
+    · OnlineAsr.kt 就是它的模块（DIR="asr-sensevoice"，MODEL="model.int8.onnx"）；
+    · ChatScreen.kt:619/634 真在调 offlineEnabled / recognizeWav；
+    · SettingsPage.kt:108/128 有开关与自检；
+    · WakeWord.kt:6 写着"手机端已经有本地 STT（SenseVoice，**实测 0.94**）"。
+  它的真实问题是**在部分真机上初始化解崩**（OfflineTtsEngine.kt:38 与 OnlineAsr.kt:33 都记了
+  MIS-AL00 / Android 12 的实测），所以代码里已有 offlineEnabled 门控。
+  ⇒ 正确做法是**把模型移出 APK（按需下载）**，不是删功能。
+
+三、可执行清单（按性价比）
+  ① release 开 R8：`app/build.gradle:47` 现在是 `minifyEnabled false` —— 这正是 release(302MB)
+     只比 debug(313MB) 小 11MB 的原因。建议发版前开启（附了配置片段）。
+  ② 删 `assets/asr-zh-14M/`（**省 24 MB**）：OnlineAsr.kt:16 的换模型历史写明它是"最初那套
+     tiny zipformer，效果一般"已被取代；全仓检索 asr-zh-14M / zh-14M / zipformer **只有那条注释**，
+     没有任何加载代码。
+  ③ **SenseVoice 改按需下载（省 228 MB，收益最大）**：OnlineAsr 本来就把 assets 里的模型
+     **复制到 filesDir** 再交给 sherpa（OnlineAsr.kt:50-57）⇒ 把"从 assets 复制"换成
+     "从网络下载到 filesDir 并校验"，是同一段代码的自然延伸。上架可用 AAB/Asset Delivery，
+     但直接发 APK 的本地分发要走下载路线。**不建议回退小模型**（当年就是效果差才换的）。
+  ④ 素材去重（省 6~8 MB）：assets/Murasame 与 pets/murasame/live2d 是同一套的两份拷贝；
+     assets/noir/NOIR 同理。确认无老路径引用后可删。
+
+四、结论
+  保守估计做完 ②③，APK 可从 302 MB 降到 **约 50 MB 量级**；再做 ①④ 还能更低。
+  这是个值得排进安卓段的明确任务（写入 dev/docs/安卓包体分析-2026-10-13.md）。
+"""
+p = os.path.join(MAP, "_msg_apksize.txt")
+io.open(p, "w", encoding="utf-8", newline="\n").write(MSG)
+subprocess.run(["git", "-C", ROOT, "add", "-A"], capture_output=True)
+rc = subprocess.run(["git", "-C", ROOT, "commit", "-F", p], capture_output=True, text=True,
+                    encoding="utf-8", errors="replace")
+print("桌面仓:", (rc.stdout or rc.stderr or "").splitlines()[0][:160])
+n = subprocess.run(["git", "-C", ROOT, "rev-list", "--count", "origin/main..HEAD"],
+                   capture_output=True, text=True, encoding="utf-8").stdout.strip()
+st = subprocess.run(["git", "-C", ROOT, "status", "--porcelain"], capture_output=True,
+                    text=True, encoding="utf-8").stdout.strip()
+print("  未推送 %s 条，工作区 %s" % (n, "干净 ✓" if not st else "%d 项" % len(st.splitlines())))
