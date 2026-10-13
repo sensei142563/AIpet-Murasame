@@ -64,20 +64,48 @@ try:
 finally:
     V._cfg = _real_cfg
 
-print("== 2) 本地视觉的 UI 面**按设计不存在**（接口保留，但不走这条路）==")
-print("   （2026-10-13 用户拍板：本地视觉不使用、仅保留接口 ⇒ 上游那套 UI 面是被否决的设计，")
-print("     所以这里反过来查：**不该**出现在示例配置与设置页里。真要接的人自己接。）")
+print("== 2) 本地视觉：接口保留、默认不使用（按**键名与取值**查，不按标签查）==")
+print("   （2026-10-13 用户拍板：本地视觉不使用、仅保留接口。现行设计是——")
+print("     示例配置里不出现这些键；设置页里**有**「识别来源」下拉（vision_source），")
+print("     但**没有**上游那套本地地址/命令输入框。")
+print("     ⚠ 这里特意**按键名与取值**断言而不是按标签文案：")
+print("       上一版查的是 `\"vision_source\", \"视觉来源\"`，可设置页用的标签是「识别来源」，")
+print("       字符串对不上 ⇒ 断言永远成立 ⇒ 默认值被写成 local（与实现缺省 cloud 相反）")
+print("       也能一路全绿。改文案就等于把检查悄悄关掉，这类断言不能再这么写。）")
 ex = json.load(io.open(os.path.join(REPO, "config.example.json"), encoding="utf-8"))
 for k in ("vision_source", "vision_local_url", "vision_local_command", "vision_local_model"):
     check("示例配置里**没有** %-22s（本地视觉不启用）" % k, k not in ex, repr(ex.get(k)))
 check("代码的取值集合仍是 (cloud, local)（接口没被删）",
       V.SOURCES == ("cloud", "local"), str(V.SOURCES))
 w = io.open(os.path.join(REPO, "pcl_launcher", "widgets.py"), encoding="utf-8").read()
-check("设置页**没有**「视觉来源」选择器（上游那套未采纳）",
-      '"vision_source", "视觉来源" not in w')
-check("设置页**没有**本地地址 / 命令输入框",
-      '"vision_local_url", "本地视觉服务地址"' not in w
-      and '"vision_local_command", "本地视觉命令"' not in w)
+# ① 设置页**应当**有「识别来源」选择器，且**默认值必须是 cloud**（与 tool/vision_local.py 的缺省一致）。
+#    直接钉住"键名 + 取值集合 + 默认值"这一整串 —— 这正是当初被放过的那一处。
+check("设置页有「识别来源」且默认 cloud（与实现缺省一致）",
+      '_add_choice("vision_source", "识别来源", ["local", "cloud"], "cloud"' in w)
+# ② 防回归：vision_source 那一次 _add_choice 的默认值必须是 cloud。
+#    ⚠ 上一版把模式写成 `["local", "cloud"], "local"` —— 结果命中的是 **TTS** 的
+#      `_add_choice("tts_type", "TTS 语音合成", ["local", "cloud"], "local")`（合理配置），
+#      属于**误报**。所以这里必须带上键名，只盯 vision_source 这一处。
+check("设置页 vision_source 默认不是 local（防回归，只盯这一处）",
+      '_add_choice("vision_source", "识别来源", ["local", "cloud"], "local"' not in w)
+# ③ 上游那套输入框仍然不该有（这一条原本就正确，保留）
+check("设置页**没有**本地地址输入框",
+      '"vision_local_url"' not in w)
+check("设置页**没有**本地命令输入框",
+      '"vision_local_command"' not in w)
+# ④ 全仓守卫：任何地方都不得再写 `vision_source … or "local"`（缺省必须是 cloud）。
+#    2026-10-13 修过的 bug：启动器首页会因此写"本地视觉模型（本地部署）"，
+#    而 set_slider 载入状态、设置页状态探测两处也有同样写法 —— 一并由本条守住。
+_bad = []
+for _rel in ("pcl_launcher/silicon_window.py", "pcl_launcher/widgets.py",
+             "pcl_launcher/plugins_panel.py"):
+    _p = os.path.join(REPO, _rel)
+    if os.path.isfile(_p):
+        _s = io.open(_p, encoding="utf-8").read()
+        if 'vision_source") or "local"' in _s:
+            _bad.append(_rel)
+check("没有任何文件把 vision_source 缺省当 local（防回归）",
+      not _bad, "命中：" + ", ".join(_bad))
 
 print("== 3) HTTP 接法：三种常见响应形状都要认 ==")
 from http.server import BaseHTTPRequestHandler, HTTPServer   # noqa: E402

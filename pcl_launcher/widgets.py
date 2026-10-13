@@ -356,7 +356,8 @@ class PCLSettingsPanel(QWidget):
         )
         # ★ 上游 8923136 的「本地视觉只留接口」（vision_local_url / vision_local_command +
         #   vision_source 默认 cloud）**不并进来**：本地这条线自带真能跑的本地视觉服务
-        #   （tool/vision_service.py + tool/chat.describe_image），默认就是 local。
+        #   （tool/vision_service.py + tool/chat.describe_image）。
+#   ⚠ 注意：那是**上游**那套的语义（上游默认 local）；本工程的实现默认是 **cloud**，
         #   同一个键 vision_source 在两边语义相反，并了会把本地视觉静默降级成云端。
         self._add_slider("screen_type", "屏幕识别", ["false", "true"], "false")
         self._add_slider("voice_trigger", "语音识别", ["false", "true"], "false")
@@ -878,7 +879,7 @@ class PCLSettingsPanel(QWidget):
             self._set_slider("voice_trigger", cfg.get("voice_trigger", "false"))
             self._set_slider("live2d_enabled", cfg.get("live2d_enabled", "false"))
             self._set_slider("quiet_mode", cfg.get("quiet_mode", "false"))
-            self._set_slider("vision_source", str(cfg.get("vision_source") or "local"))
+            self._set_slider("vision_source", str(cfg.get("vision_source") or "cloud"))
             self._set_if("vision_local_model_dir",
                          cfg.get("vision_local_model_dir",
                                  r"D:\下载\AI桌宠\vision\Qwen2-VL-2B-Instruct"))
@@ -1025,7 +1026,7 @@ class PCLSettingsPanel(QWidget):
                     sys.path.insert(0, base)
                 from pcl_launcher.silicon_window import _vision_alive, _vision_cfg, _vision_port
                 cfg = _vision_cfg()
-                if str(cfg.get("vision_source") or "local").strip().lower() != "local":
+                if str(cfg.get("vision_source") or "cloud").strip().lower() != "local":
                     state = "cloud"
                 else:
                     state = "online" if _vision_alive(_vision_port(cfg)) else "offline"
