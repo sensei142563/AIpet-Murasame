@@ -1,0 +1,30 @@
+fix(theme): 补回 _ACTIVE_THEME_ID —— 一次治好 8 个图标失败（真 bug：换主题不生效）
+
+发现路径（**先看断言要什么，再决定补代码还是改测试**）：
+  test_frontend_style 第 6 节把 `C._ACTIVE_THEME_ID = "senrenbanka"`，期望
+  `nav_icon_path(k)` 能取到该主题的 8 张导航图。实测 8 个键**全部**返回空串
+  → 界面退回 emoji。
+  一查：senrenbanka 的 `theme.json` **8 个 nav_icons 全都配了**，
+  且 `themes/senrenbanka/assets/nav/*.png` **文件也都在**（8 张，300~850 KB）。
+  所以不是缺图，是**主题解析**的问题：我们的 `current_theme_id()` **只读 config.json**，
+  而 `_ACTIVE_THEME_ID` 这个"内存里当前真正在用的主题"机制**在换基线时丢了**
+  （备份里有、我们这棵树没有 —— 早先审计时它还在"待定/双向分叉"里）。
+
+为什么它是**真 bug 不只是测试口径**：
+  换肤是「先改内存色板、config 稍后才落盘」（预览时甚至 persist=False 不落盘）。
+  主题背景与资源（`background_info()` / `theme_asset()` / `nav_icon_path()`）都要按
+  「当前主题」去查目录 —— 只读 config 就会拿到**上一个**主题的背景与图标。
+  这正是用户报过的「切了主题背景没变」，以及导航图标取不到图而退回 emoji 的同一个根因。
+
+改法（pcl_launcher/colors.py）：
+  · `THEME_DIR` 之后加模块级 `_ACTIVE_THEME_ID = ""`（空串 = 还没换过肤 → 回退读 config）；
+  · `current_theme_id()` 开头优先返回 `_ACTIVE_THEME_ID`（且该目录真实存在时才用）。
+
+验证：
+  · 直接查：`C._ACTIVE_THEME_ID='senrenbanka'` → `current_theme_id()` = senrenbanka，
+    `nav_icon_path('model')` / `nav_icon_path('status')` 都不再为空。
+  · `tests/test_frontend_style.py` 失败项 **12 → 4**（8 个图标项一次全消）。
+  · colors.py 通过 py_compile。
+
+⚠ 写法踩坑记录：第一版用「expr + 'str' "str" expr」跨行混拼，Python 会把字面量与名字并置
+  ⇒ SyntaxError。改为「纯字符串列表 + 逐行加缩进前缀」后一次通过。

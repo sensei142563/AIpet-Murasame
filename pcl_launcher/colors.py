@@ -59,6 +59,10 @@ def _resolve_theme_dir() -> str:
 
 THEME_DIR = _resolve_theme_dir()
 
+# 内存里「当前真正在用的主题」：换肤时写，current_theme_id() 优先用它。
+# 空串 = 还没换过肤（启动阶段）→ 回退读 config.json 的 ui_theme。
+_ACTIVE_THEME_ID = ""
+
 
 def _list_themes():
     """扫描 themes/ 目录返回 [{"id","name","builtin","desc","accent"}...]（按目录名排序）"""
@@ -103,6 +107,16 @@ def _load_theme_palette(theme_id: str) -> dict:
 
 
 def current_theme_id() -> str:
+    """当前主题 id：**以内存里正在用的为准**，其次才看 config.json。
+
+    为什么不能只读 config.json：换肤是「先改内存色板、config 稍后才落盘」
+    （预览时甚至 persist=False 不落盘）。而主题背景与资源（background_info /
+    theme_asset / nav_icon_path）都要按「当前主题」去查目录 —— 只看 config
+    就会拿到**上一个**主题的背景与图标：用户报的「切了主题背景没变」，
+    以及导航图标取不到图而退回 emoji，都是这个根因。
+    """
+    if _ACTIVE_THEME_ID and os.path.isdir(os.path.join(THEME_DIR, _ACTIVE_THEME_ID)):
+        return _ACTIVE_THEME_ID
     cfg = _config()
     tid = str(cfg.get("ui_theme", "classic") or "classic").strip()
     # 主题目录不存在时回退经典
