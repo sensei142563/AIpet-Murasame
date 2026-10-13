@@ -122,3 +122,6 @@ dev/vrm_file_test/
 dev/tts_model_cache/
 dev/three-demo/_p/
 
+
+# Office / WPS 打开文件时生成的锁文件
+~\$*
