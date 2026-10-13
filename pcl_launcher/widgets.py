@@ -282,7 +282,7 @@ class PCLSettingsPanel(QWidget):
         # ===== ③ 长文本输出 =====
         # ===== 视觉模型（屏幕 / 摄像头识别）=====  ← 合并保留：本地视觉的配置与状态
         self._section("视觉模型（屏幕 / 摄像头识别）", "")
-        self._add_choice("vision_source", "识别来源", ["local", "cloud"], "local",
+        self._add_choice("vision_source", "识别来源", ["local", "cloud"], "cloud",
                          display={"local": "本地视觉模型（本机显卡）", "cloud": "云端 API"},
                          hint="本地=用本机跑的视觉模型（不花钱、不联网，需要本地视觉服务在跑）；"
                               "云端=走对话模型的 API。")

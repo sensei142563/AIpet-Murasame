@@ -1,0 +1,63 @@
+# -*- coding: utf-8 -*-
+"""提交：本地视觉口径收尾（widgets 默认 + README 更正 + 测试盲区记录）。"""
+import io
+import os
+import subprocess
+import sys
+
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+ROOT = r"E:\university\order\python\pet\AIpet-Murasame-main"
+MAP = os.path.join(ROOT, "dev", "merge-map")
+
+MSG = """docs(pcl): 本地视觉口径收尾 —— 设置页下拉默认改云端 + README 更正 + 记下测试盲区
+
+同一根因（"本地视觉"从默认改成可选时没改干净）的**第三处**，也是最后一处 UI：
+`pcl_launcher/widgets.py:285`
+    _add_choice("vision_source", "识别来源", ["local","cloud"], **"local"**)
+⇒ 设置页的「识别来源」下拉默认选在 **local**，与实现（`tool/vision_local.py` 缺省 cloud）
+和测试口径（"没配 → cloud"）都相反。**已改成 "cloud"**。
+
+## ⚠ 一个差点被我写错的句子（记下来）
+我在改 README 时**顺手**写了"设置页不提供该选项"——**这是没验证的**。
+写完回头核对，发现 `silicon_window.py` 的 settings 页正是
+`_mk("pcl_launcher.widgets", "PCLSettingsPanel")`，而它第 285 行**就有**这个下拉。
+⇒ 已把那句**更正为事实**：设置页里有「识别来源」下拉，**默认已指向云端**。
+教训：改文案时顺手补的"事实陈述"，必须跟原生代码核对过再写。
+
+## 测试为什么没拦住（本次最值得记的一条）
+`tests/test_vision_interface.py:77` 断言设置页不含
+    `'"vision_source", "视觉来源"'`
+但它查的标签是 **「视觉来源」**，而设置页实际用的标签是 **「识别来源」**。
+**字符串对不上 ⇒ 断言永远成立** ⇒"设置页不该暴露这个选项"这条意图
+**从未被真正检查过**，一路全绿到这次手工翻代码才发现。
+⇒ 这类"断言某处不存在某字符串"的检查必须**同时钉住它的标签**，
+   否则改一次文案就等于把检查悄悄关掉。已写进
+   `dev/docs/本地视觉口径排查-2026-10-13.md`（含三处修改的清单与验证方式）。
+
+## README 同步
+`vision_source` 那一行改为：**`cloud`（默认）** / `local`（可选），
+并说明设置页确实有这个下拉、默认云端、`config.example.json` 不写该键。
+
+## 验证
+```
+tests/run_all.py ⇒ 10 个文件 / 381 项通过 / 0 个文件失败（含 test_vision_interface.py 24 项）
+复核：widgets.py:285 已是 "cloud"；README:1389 已是新口径
+```
+（前一提交已用 UIA 文本取证过启动器首页：`● 视觉服务：云端 API`、`qwen-vl-plus（云端）`。）
+
+## 仍未处理（诚实留档在文档里）
+README 1415 行起「本地模型（可选）」一节可能还有同类措辞，本次未逐行核；
+测试的**标签盲区**尚未改成按键名断言（改测试要连带确认它检查的是哪个 widget 源，
+建议单独一轮做，别和文案修复混在一起）。
+"""
+p = os.path.join(MAP, "_msg_vision_scope.txt")
+io.open(p, "w", encoding="utf-8", newline="\n").write(MSG)
+subprocess.run(["git", "-C", ROOT, "add", "-A"], capture_output=True)
+rc = subprocess.run(["git", "-C", ROOT, "commit", "-F", p], capture_output=True, text=True,
+                    encoding="utf-8", errors="replace")
+print("桌面仓:", (rc.stdout or rc.stderr or "").splitlines()[0][:170])
+n = subprocess.run(["git", "-C", ROOT, "rev-list", "--count", "origin/main..HEAD"],
+                   capture_output=True, text=True, encoding="utf-8").stdout.strip()
+st = subprocess.run(["git", "-C", ROOT, "status", "--porcelain"], capture_output=True,
+                    text=True, encoding="utf-8").stdout.strip()
+print("  未推送 %s 条，工作区 %s" % (n, "干净 ✓" if not st else "%d 项" % len(st.splitlines())))
