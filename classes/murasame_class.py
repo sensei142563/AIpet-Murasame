@@ -3320,9 +3320,37 @@ class Murasame(QLabel):
             except Exception:
                 cur_acts = []
             menu = StoryMenu(self)
-            # ★ 顶层只放三个分类，具体开关收进子菜单（以前十几项平铺，菜单太长）
-            # ── ① 换装与立绘 ▸ ──
-            _dress = submenu(menu, "换装与立绘")
+            # ★★ 第一层必须留两个「主操作」（2026-10-13 补回）
+            #   它们原本是用户反馈后专门加的，换基线（搬到协作者 main）时丢失了，
+            #   于是右键菜单"不如以前清楚"：
+            #   ① 输入对话：没有换装素材的角色（例如诺瓦）以前右键会是**空菜单**；
+            #      也是"点下半身才能打字 / 对话框不好点"的兜底入口。
+            #   ② 形象切换：用户报过「右键的更换为 live2d/2D 形象不见了」；
+            #      回调由 main.py 挂在 pet.toggle_live2d_form（与长按 Shift 2 秒同一函数）。
+            try:
+                act_in = item(menu, "输入对话（打字）")
+                act_in.setToolTip("进入打字模式（和点对话框一样）。Esc 取消。")
+                act_in.triggered.connect(lambda *_: self._trigger_input_mode())
+            except Exception as _e_menu_in:
+                print(f"[桌宠] ⚠ 菜单「输入对话」失败: {_e_menu_in}")
+            try:
+                _form_cb = getattr(self, "toggle_live2d_form", None)
+                if callable(_form_cb):
+                    _live_now = bool(self.is_live2d_mode())
+                    act_form = item(menu, "切换形象（当前：%s）"
+                                    % ("Live2D" if _live_now else "2D 立绘"))
+                    act_form.setToolTip("在 Live2D 与 2D 立绘之间切换（等效于长按 Shift 2 秒）。")
+                    act_form.triggered.connect(lambda *_: _form_cb())
+            except Exception as _e_menu_form:
+                print(f"[桌宠] ⚠ 菜单「切换形象」失败: {_e_menu_form}")
+            try:
+                separator(menu)
+            except Exception:
+                pass
+            # ── ① 换装与立绘 ▸（标题带上当前状态，省得点进去才知道）──
+            _dress = submenu(menu, "换装与立绘（当前：%s%s）"
+                             % (cur_name or "默认",
+                                ("／" + str(cur_act)) if cur_act else ""))
             if cloths:
                 _cloth_sub = submenu(_dress, "切换服装（当前：%s）" % (cur_name or "默认"))
                 for name, cid, _h in cloths:
