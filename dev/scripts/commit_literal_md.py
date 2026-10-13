@@ -1,0 +1,44 @@
+# -*- coding: utf-8 -*-
+"""提交：修字面 ** + 重建产物。"""
+import io
+import os
+import subprocess
+import sys
+
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+ROOT = r"E:\university\order\python\pet\AIpet-Murasame-main"
+MAP = os.path.join(ROOT, "dev", "merge-map")
+
+MSG = """fix(ppt): 幻灯片上的字面 ** 会直接显示（引擎不解析 markdown）+ 第 20 页那条换行
+
+## 问题（渲染后看图才发现）
+第 20 页第 5 条写成 `变量换成**角色的人格连续性**，指标换成**关系感知与打扰容忍度**`，
+而 **build_deck 引擎不解析 markdown** ⇒ 幻灯片上真的出现了 `**` 星号 ✗。
+（讲稿 notes 里保留 `**` 是有意的 —— 那是纯文本、给人念的；但**页面上**不能有。）
+
+## 修了什么
+① 全 deck 扫描字面 `**`：只有这一处（第 20 页 `.bullets[4].sub`），已清掉；
+   清理只作用于**幻灯片可见字段**（title/subtitle/text/by/左右栏标题/bullets/left/right），
+   **不动 notes**（讲稿里的 `**` 是强调记号，保持原样）。
+② 第 20 页"已经有 人做了（二）"那条原来会换行（"开源"跑到第二行），已缩短为一行。
+
+## 验证
+重建 → ppt_add_notes（缺备注的页：无 ✓）→ render_qc → **看图确认**：
+第 20 页 6 条各占一行、无 `**`、无溢出 ✓。
+
+## 教训
+这是同一类问题的又一次：**改了内容必须重新渲染并看图**，
+只在源码层检查"字符串对不对"是查不出"渲染出来好不好看"的
+（前一轮第 19 页也是靠看图才发现要点过长与 ⚠ 符号不一致）。
+"""
+p = os.path.join(MAP, "_msg_literal_md.txt")
+io.open(p, "w", encoding="utf-8", newline="\n").write(MSG)
+subprocess.run(["git", "-C", ROOT, "add", "-A"], capture_output=True)
+rc = subprocess.run(["git", "-C", ROOT, "commit", "-F", p], capture_output=True, text=True,
+                    encoding="utf-8", errors="replace")
+print("桌面仓:", (rc.stdout or rc.stderr or "").splitlines()[0][:170])
+n = subprocess.run(["git", "-C", ROOT, "rev-list", "--count", "origin/main..HEAD"],
+                   capture_output=True, text=True, encoding="utf-8").stdout.strip()
+st = subprocess.run(["git", "-C", ROOT, "status", "--porcelain"], capture_output=True,
+                    text=True, encoding="utf-8").stdout.strip()
+print("  未推送 %s 条，工作区 %s" % (n, "干净 ✓" if not st else "%d 项" % len(st.splitlines())))
