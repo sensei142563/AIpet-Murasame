@@ -980,6 +980,8 @@ def start_tts_api():
                     _json_c.dump({
                         "title": "AIpet 语音服务 · %s（GPT-SoVITS 9880）" % (_pet_label or "桌宠"),
                         "log": os.path.abspath(os.path.join("data", "tts_service.log")),
+                        "say_log": os.path.abspath(os.path.join("data", "tts_say.log")),
+                        "port": "9880",
                         "lines": [
                             "AIpet 语音服务 · %s" % (_pet_label or "桌宠"),
                             "GPT-SoVITS  ·  服务端口 9880  ·  模型：%s / %s"

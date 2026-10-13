@@ -1,0 +1,88 @@
+# -*- coding: utf-8 -*-
+"""提交：合成时打印要说的话 + 模型就绪提示 + 预载按钮显示角色；并跑全量自检。"""
+import io
+import os
+import subprocess
+import sys
+
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+ROOT = r"E:\university\order\python\pet\AIpet-Murasame-main"
+MAP = os.path.join(ROOT, "dev", "merge-map")
+
+MSG = """feat(tts): 语音窗口看得懂了 —— 每次合成都打印「要说的话」、模型起来也报一声
+
+## 主人要的两件（原话）
+"并且每次合成，把要说的话也打印出来。模型彻底起来，也打印出来。"
+（外加之前答应的：预载按钮要显示"会预载哪个角色"。）
+
+## 关键难点与解法
+服务本体（api.py）**看不到**"要说的话"：桌宠走的是 `POST /tts`，
+文字在**请求正文**里，uvicorn 的访问日志只有 `POST /tts`，没有正文。
+⇒ 用一个**解耦的小文件**把话递过去：
+   · `tool/chat.py` 每次合成前：先 `print("说：…")`，再把 `时间\\t文本` 追加进
+     `data/tts_say.log`；
+   · `tool/tts_console.py` 起一个线程跟这个文件，读到就显示成
+     `[00:12:05] 说：「今天有点累呢，主人」`。
+   这样不依赖任何 HTTP 细节，跨进程、可断链重连（文件被清空也能自己复位）。
+
+## 控制台现在长这样（实测）
+```
+====================================================================
+  AIpet 语音服务 · 丛雨
+  GPT-SoVITS · 服务端口 9880 · 模型：murasame-gpt.ckpt / murasame-sovits.pth
+  详细日志写在 data\\tts_service.log（本窗口故意保持安静）
+  关闭本窗口 = 停止语音服务；……
+====================================================================
+  日志：…\\data\\tts_service.log
+  本窗口保持打开即为正常运行；关掉本窗口＝停止语音服务。
+
+· 收到一次合成请求
+[00:12:05] 说：「今天有点累呢，主人」
+
+✅ 模型已彻底起来 —— 现在可以说话了（端口 9880）
+· 收到一次合成请求
+[00:12:07] 说：「那要不要先休息一会儿？」
+⚠ ERROR:    测试用的报错行
+```
+规则：**只有关键行**进控制台（模型就绪 / 合成请求 / 要说的话 / 报错），
+其余全部进 `data/tts_service.log`（实测日志仍是完整 11 行，包括被吞掉的 INFO 行）。
+
+## 预载按钮（主人上一轮说"加"）
+```
+按钮文字："  预载语音服务（丛雨）"        ← 用 self._active_pet_name() 取当前角色
+tooltip ："…将使用**当前角色**：丛雨…"
+点下去  ：终端打印 "[NewUI] 预载语音服务 → 当前角色：丛雨（脚本 tts_service.py）"
+         按钮变 "  预载中…（丛雨）"
+```
+
+## 验证
+```
+subprocess 实测（假服务模拟 api.py 的输出顺序 + 往桥文件写两句话）：
+  控制台 = 横幅 + 收到合成请求 + 说：「…」×2 + ✅模型已起来 + ⚠报错  ✓
+  日志   = 11 行完整（含被控制台吞掉的 INFO 行）✓
+  桥文件 = 两行 时间\\t文本 ✓
+四个改动点 py_compile 全过 ✓；全量自检见下。
+```
+"""
+p = os.path.join(MAP, "_msg_say.txt")
+io.open(p, "w", encoding="utf-8", newline="\n").write(MSG)
+subprocess.run(["git", "-C", ROOT, "add", "-A"], capture_output=True)
+rc = subprocess.run(["git", "-C", ROOT, "commit", "-F", p], capture_output=True, text=True,
+                    encoding="utf-8", errors="replace")
+print("桌面仓:", (rc.stdout or rc.stderr or "").splitlines()[0][:170])
+
+print()
+print("=== 全量自检（改了 chat.py / run.py / silicon_window.py）===")
+r = subprocess.run([os.path.join(ROOT, "runtime", "venv", "Scripts", "python.exe"),
+                    os.path.join(ROOT, "tests", "run_all.py")],
+                   cwd=ROOT, capture_output=True, text=True, encoding="utf-8",
+                   errors="replace", timeout=1800)
+for l in ((r.stdout or "") + (r.stderr or "")).split("\n")[-6:]:
+    print("   " + l.strip()[:124])
+
+n = subprocess.run(["git", "-C", ROOT, "rev-list", "--count", "origin/main..HEAD"],
+                   capture_output=True, text=True, encoding="utf-8").stdout.strip()
+st = subprocess.run(["git", "-C", ROOT, "status", "--porcelain"], capture_output=True,
+                    text=True, encoding="utf-8").stdout.strip()
+print()
+print("未推送 %s 条，工作区 %s" % (n, "干净 ✓" if not st else "%d 项" % len(st.splitlines())))

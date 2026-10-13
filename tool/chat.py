@@ -986,6 +986,22 @@ def _gsv_local_direct(text: str, ref_audio: str, prompt_text: str, speed: float,
     }
     import time as _t
     t0 = _t.time()
+    # ★ 2026-10-14：把"这一句要说的话"打出来，并写进 data/tts_say.log。
+    #   后者是给**语音服务那个控制台窗口**看的 —— 它只看得见 HTTP 请求，
+    #   看不见 POST 正文里的文字；所以这里用一个解耦的小文件把话"递"过去，
+    #   那个窗口会显示成  [00:12:01] 说：「…」。
+    try:
+        _say_txt = str(text or "").strip()
+        if _say_txt:
+            print(f"[{now_time()}] [gpt-sovits-tts] 说：{_say_txt}")
+            import os as _os_say
+            _say_dir = "data"
+            _os_say.makedirs(_say_dir, exist_ok=True)
+            with open(_os_say.path.join(_say_dir, "tts_say.log"), "a",
+                      encoding="utf-8") as _f_say:
+                _f_say.write("%.3f\t%s\n" % (t0, _say_txt.replace("\n", " ")[:200]))
+    except Exception:
+        pass
     _gsv_ensure_pet_model()                  # 确保是她的微调权重
     data = None
     # ① api_v2：POST /tts（新参数名）—— launcher 启的就是这个

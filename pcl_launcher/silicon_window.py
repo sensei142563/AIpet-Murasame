@@ -853,12 +853,18 @@ class HomePage(QWidget):
         self.btn_wx.clicked.connect(self.start_wechat)
         # ── 预载服务（合并保留：他版界面里没有这两个按钮）──────────────────
         # 预载语音服务：提前把 TTS 启动 + 预热好，之后再启动桌宠，第一句话不用等冷启动
-        self.btn_preload = QPushButton("  预载语音服务")
+        # ★ 2026-10-14（主人反馈）：这里必须写清"会预载**哪个角色**" ——
+        #   原来的按钮只写"预载语音服务"，而它用的是配置里的当前角色，
+        #   主人根本没选过，看着像"它自己决定了"。
+        _ap_now = self._active_pet_name()
+        self.btn_preload = QPushButton(
+            "  预载语音服务" + (f"（{_ap_now}）" if _ap_now else "（当前角色）"))
         self.btn_preload.setStyleSheet(_ghost_btn_qss())
         self.btn_preload.setMinimumHeight(46)
         self.btn_preload.setToolTip(
             "提前启动并预热语音服务（GPT-SoVITS）：\n"
             "首次加载模型要 1~2 分钟，预热后桌宠开口几乎不用等。\n"
+            f"将使用**当前角色**：{_ap_now or '（未选定）'}\n"
             "预载完成后按钮显示「预载完成」。")
         self.btn_preload.clicked.connect(self.preload_tts)
         # 预载视觉服务：本地视觉模型加载 + 预热约 30 秒
@@ -1164,8 +1170,11 @@ class HomePage(QWidget):
         if not py or not os.path.exists(script):
             QMessageBox.information(self, "预载语音服务", "未找到语音服务脚本（tool/tts_service.py）")
             return
+        _ap_click = self._active_pet_name()
+        print(f"[NewUI] 预载语音服务 → 当前角色：{_ap_click or '（未选定）'}"
+              f"（脚本 {os.path.basename(script)}）")
         self.btn_preload.setEnabled(False)
-        self.btn_preload.setText("  预载中…")
+        self.btn_preload.setText("  预载中…" + (f"（{_ap_click}）" if _ap_click else ""))
         self._preload_steps = []
         try:
             # 输出自己读（按钮上显示进度）→ 一律不弹控制台窗口
