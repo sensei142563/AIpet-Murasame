@@ -1,0 +1,26 @@
+fix(config): 修好配置契约 3 项 —— 重复字典键 / 窄真值比较 / 读取式下标
+
+这一批与协作者"健壮性"提交（1d86ec9）面对的是**同一组问题**，但那份提交不在本分支，
+所以这里**自己实现**（不拉取、不合并），并逐条验证。
+
+一、tool/jp_names.py：重复字典键（前者会被 Python 静默丢弃）
+  · 第 43 行的 `"納得": "接受"` 与第 67 行重复；第 63 行的
+    `"目を見開き驚く1"/"目を見開き驚く2"` 与第 76 行重复。
+  · 两处**值完全相同** ⇒ 删掉**前一份**，运行时行为不变，只是不再"看着像两份、实际只剩一份"。
+
+二、qq/qq_config.py：窄真值比较
+  · `str(cfg.get("qq_private_enable", "true")).lower() == "true"` 这类写法只认字符串 "true"，
+    既漏（"1"/"on"/"开" 都算假）又绕（自己造一套规则）。
+  · 改为项目自带的 `as_bool(cfg.get(...), True/False)`（同一份文件里 3 处），
+    与 `tool/config.py` 的既有语义统一（as_bool 认 1/true/yes/y/on/开/开启 为真）。
+
+三、顶层配置的读取式下标（缺键会直接 KeyError 崩）
+  · `chat.py`：`get_config("./config.json")["local_api"]["ollama"]` 等 3 处 + `["tts_type"]`
+    → 改为 `.get("local_api") or {}` 后逐键 `.get(..., "")`。
+  · `tool/stt.py:128`：`get_config("./config.json")["stt_model"]` → `.get("stt_model", "")`。
+  · 说明：这类"读取式下标"在缺键时会抛 KeyError 直接崩，而配置本来就可能缺键
+    （`config.json` 与 `config.example.json` 常有差异）。
+
+验证：
+  · `tests/test_config_contracts.py` → **"配置契约体检全部通过"，退出码 0**（修前 34 OK / 3 FAIL）。
+  · 三个改动文件均通过 py_compile。

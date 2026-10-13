@@ -15,12 +15,14 @@ def now_time():
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     return now
 
-ollama_url = get_config("./config.json")["local_api"]["ollama"]
-qwen3_lora_url = get_config("./config.json")["local_api"]["qwen3_lora"]
-gpt_sovits_tts_url = get_config("./config.json")["local_api"]["gpt_sovits_tts"]
+# ⚠ 顶层配置一律用 .get(...)：读取式下标遇到缺键会直接 KeyError 崩掉
+_cfg_local = (get_config("./config.json").get("local_api") or {})
+ollama_url = _cfg_local.get("ollama", "")
+qwen3_lora_url = _cfg_local.get("qwen3_lora", "")
+gpt_sovits_tts_url = _cfg_local.get("gpt_sovits_tts", "")
 _TTS_HINT_SHOWN = False
 _GSV_MODEL_OK = False   # 语音服务未就绪的提示只打一次（防刷屏）
-tts_type = get_config("./config.json")["tts_type"]
+tts_type = get_config("./config.json").get("tts_type", "")
 
 
 def ollama_post(name: str, prompt: dict):

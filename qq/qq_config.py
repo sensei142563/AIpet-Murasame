@@ -271,28 +271,28 @@ def get_qq_config():
         #   private_master_only   true  = 只回主人私信（覆盖下面两项）
         #   private_reply_friend  是否回好友私信（sub_type=friend/group）
         #   private_reply_stranger 是否回陌生人私信（非好友/临时会话）
-        "private_enable": str(cfg.get("qq_private_enable", "true")).lower() == "true",
-        "private_master_only": str(cfg.get("qq_private_master_only", "false")).lower() == "true",
-        "private_reply_friend": str(cfg.get("qq_private_reply_friend", "true")).lower() == "true",
-        "private_reply_stranger": str(cfg.get("qq_private_reply_stranger", "true")).lower() == "true",
+        "private_enable": as_bool(cfg.get("qq_private_enable"), True),
+        "private_master_only": as_bool(cfg.get("qq_private_master_only"), False),
+        "private_reply_friend": as_bool(cfg.get("qq_private_reply_friend"), True),
+        "private_reply_stranger": as_bool(cfg.get("qq_private_reply_stranger"), True),
         # 点歌（官方插件「点歌」开关；默认开）
-        "music_enabled": str(cfg.get("qq_music_enable", "true")).lower() == "true",
+        "music_enabled": as_bool(cfg.get("qq_music_enable"), True),
         # 自主学习（官方插件「自主学习」开关；默认开）
-        "auto_learn_enable": str(cfg.get("qq_auto_learn_enable", "true")).lower() == "true",
-        "auto_learn_search": str(cfg.get("qq_auto_learn_search", "true")).lower() == "true",
-        "auto_learn_media": str(cfg.get("qq_auto_learn_media", "true")).lower() == "true",
-        "auto_learn_links": str(cfg.get("qq_auto_learn_links", "true")).lower() == "true",
-        "auto_learn_chats": str(cfg.get("qq_auto_learn_chats", "true")).lower() == "true",
+        "auto_learn_enable": as_bool(cfg.get("qq_auto_learn_enable"), True),
+        "auto_learn_search": as_bool(cfg.get("qq_auto_learn_search"), True),
+        "auto_learn_media": as_bool(cfg.get("qq_auto_learn_media"), True),
+        "auto_learn_links": as_bool(cfg.get("qq_auto_learn_links"), True),
+        "auto_learn_chats": as_bool(cfg.get("qq_auto_learn_chats"), True),
         # 自主学习·表情收藏：把群里看到的动画表情自动存入自存表情池（供以后随机发送）
-        "auto_learn_sticker_save": str(cfg.get("qq_auto_learn_sticker_save", "true")).lower() == "true",
+        "auto_learn_sticker_save": as_bool(cfg.get("qq_auto_learn_sticker_save"), True),
         # 主人白名单（最多 5 个 QQ 号；第一位 = 主主人，负责共享记忆/离线补拉）
         "master_ids": _parse_master_ids(cfg),
         # 主主人（owner 兼容键，供离线补拉/共享记忆等"主号"逻辑使用）
         "owner_id": (_parse_master_ids(cfg) or [""])[0],
         # 插件全局总开关（启动器「插件」页管控；默认均启用）
-        "adult_allowed": str(cfg.get("qq_adult_enable", "true")).lower() == "true",
-        "galgame_allowed": str(cfg.get("qq_galgame_enable", "true")).lower() == "true",
-        "slang_allowed": str(cfg.get("qq_slang_enable", "true")).lower() == "true",
+        "adult_allowed": as_bool(cfg.get("qq_adult_enable"), True),
+        "galgame_allowed": as_bool(cfg.get("qq_galgame_enable"), True),
+        "slang_allowed": as_bool(cfg.get("qq_slang_enable"), True),
         # F5-TTS 服务是否就绪（端口 9881）
         "f5tts_ready": f5tts_ready,
     }
