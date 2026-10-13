@@ -123,5 +123,5 @@ dev/tts_model_cache/
 dev/three-demo/_p/
 
 
-# Office / WPS 打开文件时生成的锁文件（~\）
+# Office / WPS 打开文件时生成的临时锁文件（波浪号加美元符开头）
 ~\$*
