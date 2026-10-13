@@ -1,0 +1,60 @@
+fix(tts): data/tts_model.json 里 gpt/sovits 标签互换 —— 语音服务每次预载都被白重启
+
+## 怎么找到的
+用户问"这个 GPT-SoVITS 终端以前不长这样"。顺着查启动代码时发现 run.py 会把本次实际
+加载的模型记到 `data/tts_model.json`，读了那份文件，**标签是反的**：
+```
+"gpt":    "murasame-**sovits**.pth"
+"sovits": "murasame-**gpt**.ckpt"
+```
+
+## 根因
+`run.py` 按下标取参数：
+```
+_extra = ["-s", <soVITS>, "-g", <GPT>]        ← 见启动处
+"gpt":    os.path.basename(_extra[1])         ← [1] 其实是 soVITS
+"sovits": os.path.basename(_extra[3])         ← [3] 其实是 GPT
+```
+
+## 后果（不是我猜的，链路已逐段读过）
+`tool/tts_service.py` 正是拿这两个字段判断"要不要重启语音服务"：
+```
+ 81-84  _desired_model()：g, s, ver, pid = run.pet_voice_weights()
+        ⇒ 注释写明 (gpt_abs, sovits_abs, …) —— **want 侧标签正确**
+141-143  want, have = _desired_model(), _loaded_model()
+         any(str(want.get(k)) != str(have.get(k)) for k in ("model_version","gpt","sovits"))
+144      if is_ready() and _diff:  _stop_running_service(have)
+```
+want 正确、have 互换 ⇒ **永远判为不一致** ⇒ 只要服务在跑，每次预载都会
+**杀掉并重启**它（重新加载模型 1~2 分钟）。**这正是那个 TTS 终端反复出现的原因之一**，
+也属于注释里担心的"设了也不生效"那一类问题。
+
+## 修法（不再依赖参数顺序）
+新增 `_flag_arg(extra, flag)`：从参数表里按 `-g` / `-s` **标志**取值，
+记录改为 `"gpt": _flag_arg(_extra, "-g")` / `"sovits": _flag_arg(_extra, "-s")`。
+即使以后参数顺序变了也不会再错（已在脚本里用真实 `_extra` 验证：正序、倒序都对）。
+
+## 顺带纠正现有缓存
+`data/tts_model.json` 里那两个标签也当场改正（否则下次预载还会白重启一次）。
+
+## 回归守卫（差点写成死代码，靠计数发现）
+给 `tests/test_config_contracts.py` 加 2 条源码守卫：run.py 必须用 `_flag_arg` 取 -g/-s，
+且不得再出现 `"gpt": os.path.basename(_extra[1])` 这类写法。
+⚠ 第一次追加时被放在了 `sys.exit(0)` **之后** ⇒ 是死代码（单跑全套时**检查项数没变**才发现，
+384 → 仍 384）。已挪到 `if FAILS:` 之前，现在真的会跑。
+
+## 验证
+```
+run.py：_flag_arg 已加（第 540 行），记录处改为按标志取值（第 975-976 行），py_compile OK
+抠出 _flag_arg 用真实 _extra 验证：gpt=murasame-gpt.ckpt ✓ sovits=murasame-sovits.pth ✓
+顺序颠倒后同样正确 ✓
+tests/test_config_contracts.py ⇒ 两条新守卫 [OK]
+tests/run_all.py ⇒ 10 个文件 / **386 项通过** / 0 个文件失败（原 384，+2 即本次守卫）
+```
+
+## 与用户那个问题的关系（如实说）
+这解释了"为什么那个终端会冒出来/反复出现"的**一部分**（每次预载重启），
+但**没有**证明"以前它完全不出现"。窗口是否有、长什么样，仍取决于
+`quiet_mode`（默认 false = 开新控制台）与用户是从哪个入口启动的。
+下一步可以做：给窗口起个明确标题（"AIpet 语音服务 · 丛雨 (9880)"），
+以及"不弹窗 + 日志重定向到 data/tts_service.log"—— 都等用户点头。

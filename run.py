@@ -537,6 +537,22 @@ def quiet_mode() -> bool:
         return False
 
 
+def _flag_arg(extra: list, flag: str) -> str:
+    """从 ["-s", <soVITS>, "-g", <GPT>] 里按**标志**取参数的文件名。
+
+    ⚠ 不要改成按下标取（`_extra[1]` / `_extra[3]`）——曾经就是这么写的，
+      结果把 gpt / sovits 的标签写反了：记录文件 data/tts_model.json 里
+      gpt 存的是 SoVITS、sovits 存的是 GPT。而 tool/tts_service.py 正是拿这两个字段
+      判断"要不要重启语音服务"，标签一互换就**永远判为不一致**，
+      于是每次预载都杀一次服务、重载模型（1~2 分钟），表现为那个 TTS 终端反复出现。
+    """
+    try:
+        i = list(extra).index(flag)
+        return os.path.basename(str(list(extra)[i + 1]))
+    except Exception:
+        return ""
+
+
 def _console_flags(quiet: bool = None) -> int:
     """子进程窗口标志：纯净模式用 CREATE_NO_WINDOW(0x08000000)，否则开新控制台(0x10)"""
     if os.name != "nt":
@@ -956,8 +972,8 @@ def start_tts_api():
                     "extra": list(_extra),
                     "model_version": _mv,
                     "pet": str(locals().get("_pid", "") or ""),
-                    "gpt": os.path.basename(_extra[1]) if len(_extra) > 1 else "",
-                    "sovits": os.path.basename(_extra[3]) if len(_extra) > 3 else "",
+                    "gpt": _flag_arg(_extra, "-g"),
+                    "sovits": _flag_arg(_extra, "-s"),
                     "python": os.path.basename(python_path or ""),
                 }
                 os.makedirs("data", exist_ok=True)

@@ -250,6 +250,20 @@ check("子进程读到归一后的值（local / local / true）",
 check("没有 KeyError/NameError", "KeyError" not in (r.stdout or "") + (r.stderr or "")
       and "NameError" not in (r.stdout or "") + (r.stderr or ""))
 
+# ── 语音服务记录（data/tts_model.json）的标签方向必须与命令行标志一致 ──
+# 背景（2026-10-13 实测修过）：run.py 曾按下标取值 —— `_extra = ["-s", <soVITS>, "-g", <GPT>]`
+# 却写 `"gpt": _extra[1]`、`"sovits": _extra[3]`，两个标签**互换**。
+# 而 tool/tts_service.py 正是拿这两个字段判断"要不要重启语音服务"，
+# want 侧标签正确、have 侧互换 ⇒ **永远判为不一致** ⇒ 每次预载都杀掉服务重载模型，
+# 表现为那个 GPT-SoVITS 终端反复出现。已改为按 -s / -g 标志取值。
+_g = io.open(os.path.join(REPO, "run.py"), encoding="utf-8", errors="replace").read()
+check("run.py 用 _flag_arg 取 -g / -s（不再按下标）",
+      '_flag_arg(_extra, "-g")' in _g and '_flag_arg(_extra, "-s")' in _g)
+check("run.py 不再出现 _extra[1] / _extra[3] 当 gpt/sovits 用",
+      '"gpt": os.path.basename(_extra[1])' not in _g
+      and '"sovits": os.path.basename(_extra[3])' not in _g)
+
+
 print()
 if FAILS:
     print("FAILED %d 项：%s" % (len(FAILS), "、".join(FAILS)))
