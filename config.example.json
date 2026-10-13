@@ -108,5 +108,7 @@
   "learn_slang_pet": "true",
   "text_font_native": "false",
   "quiet_mode": "false",
-  "status_page_enabled": true
+  "status_page_enabled": true,
+  "startup_greeting_mode": "voice",
+  "startup_greeting_voice": ""
 }

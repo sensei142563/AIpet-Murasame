@@ -371,7 +371,8 @@ if __name__ == "__main__":
                                     print("[AIpet] 开机问候：没配 startup_greeting_voice → "
                                           "自动改用「模型自己说」（关掉请把 startup_greeting_mode 设为 off）")
                                     _mode = "chat"
-                                # chat：⚠ 开机那几十秒 GPT-SoVITS 还在加载模型，这时候直接说
+                                # chat：**老行为**（让模型自己说，与上游早期一致）。
+                                #   ⚠ 开机那几十秒 GPT-SoVITS 还在加载模型，这时候直接说
                                 #   必然失败（上游当初改成默认不说话就是这个原因）→ 先等语音服务就绪
                                 _p = _care.startup_line(getattr(pet, "pet_name", "我"))
                                 if not _p:
