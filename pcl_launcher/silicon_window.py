@@ -605,6 +605,46 @@ def _http_get_json(url: str, headers: dict, timeout: float = 8.0):
     raise last if last else RuntimeError("请求失败")
 
 
+# ★ 2026-10-14（主人要求）：模型状态那一行做成**可点**的 —— 点一下用浏览器打开对应控制台。
+#   为什么用"从文字推断"而不是走数据流：那两行的文案里本来就带供应商
+#   （如 "deepseek-flash（通义千问 云端）"），据此判断最稳，上游字段变了也不会失效。
+_CONSOLE_URLS = {
+    "deepseek": "https://platform.deepseek.com/usage",
+    "qwen": "https://bailian.console.aliyun.com/",
+}
+
+
+def console_url_for_model(model_text: str) -> str:
+    """按模型名/来源文字推断要打开哪个控制台；判断不了就返回空串（那就保持纯文本）。
+
+    ⚠ 顺序要紧：**先看供应商关键词，再看模型名**。
+      反例（自测抓到）：`deepseek-flash（通义千问 云端）` —— 模型名里带 deepseek，
+      但云端实际走的是通义千问 ⇒ 该打开阿里云百炼，而不是 DeepSeek 用量页。
+    """
+    t = str(model_text or "").lower()
+    if ("通义" in t) or ("qwen" in t) or ("阿里" in t) or ("百炼" in t) or ("dashscope" in t):
+        return _CONSOLE_URLS["qwen"]
+    if "deepseek" in t:
+        return _CONSOLE_URLS["deepseek"]
+    return ""
+
+
+def balance_link_html(text: str, model_text: str, color: str = "") -> str:
+    """把余额文字包成可点链接（判断不出控制台就原样返回纯文本）。
+
+    color：显式给链接颜色（Qt 富文本对 `color:inherit` 支持有限，不给就会是默认蓝）。
+           余额不足时调用方会传红色，保持"余额少标红"的提醒。
+    """
+    url = console_url_for_model(model_text)
+    if not url:
+        return str(text)
+    esc = (str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+    style = "text-decoration:underline;"
+    if color:
+        style += " color:%s;" % color
+    return '<a href="%s" style="%s">%s</a>' % (url, style, esc)
+
+
 def _balance_for(provider: str, key: str) -> str:
     if provider == "local":
         return "本地部署，无费用"
@@ -993,6 +1033,12 @@ class HomePage(QWidget):
             bal_lbl.setStyleSheet(f"color: {Gray2.name()}; font-size: 13px;"
                                   f" font-family: '{silicon_ui.M.font}';")
             bal_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            # ★ 2026-10-14：这一行是可点的（点开=对应控制台）。QLabel 原生支持外链，
+            #   比自己接 mousePressEvent 稳（也不会在只读/无浏览器时崩）。
+            bal_lbl.setOpenExternalLinks(True)
+            bal_lbl.setTextFormat(Qt.RichText)
+            bal_lbl.setCursor(Qt.PointingHandCursor)
+            bal_lbl.setToolTip("点击打开控制台（余额 / 用量在那里看）")
             row.addWidget(tag)
             row.addWidget(name_lbl, 1)
             row.addWidget(bal_lbl)
@@ -1147,7 +1193,6 @@ class HomePage(QWidget):
             model, bal = res.get(k, ("未配置", "—"))
             try:
                 name_lbl.setText(str(model))
-                bal_lbl.setText(str(bal))
                 # 余额少的标红提醒（本地部署/查询失败保持灰色）
                 warn = False
                 s = str(bal)
@@ -1156,8 +1201,18 @@ class HomePage(QWidget):
                         warn = float(s[1:]) < 5.0
                     except Exception:
                         warn = False
+                color = ('#e0603a' if warn else
+                         '#3d9e6a' if s and not warn and '无费用' in s else Gray2.name())
+                # ★ 2026-10-14：包成可点链接（点开=对应控制台）。
+                #   颜色显式传给链接，免得 Qt 富文本把主题色覆盖成默认蓝。
+                bal_lbl.setText(balance_link_html(str(bal), str(model), color))
+                _u = console_url_for_model(str(model))
+                if _u:
+                    bal_lbl.setToolTip("点击打开控制台（余额 / 用量在那里看）：\n%s" % _u)
+                else:
+                    bal_lbl.setToolTip("")
                 bal_lbl.setStyleSheet(
-                    f"color: {'#e0603a' if warn else '#3d9e6a' if s and not warn and '无费用' in s else Gray2.name()};"
+                    f"color: {color};"
                     f" font-size: 13px; font-family: '{silicon_ui.M.font}';")
             except Exception as e:
                 print(f"[NewUI]  模型状态显示失败: {e}")
