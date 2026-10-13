@@ -5283,7 +5283,8 @@ class Murasame(QLabel):
                 #   别的方格里根本没有这个变量）→ NameError → 被 except 吞掉 →
                 #   立绘高度比例**掉回全局默认 0.8**。pet.json 里没写 display_2d.height_ratio
                 #   的角色（例如刚用向导建的角色）会因此比设定的大一圈 —— "调了立绘大小不对劲"。
-                _ratio = num(self._pet_cfg.get("model", {}).get("portrait_height_ratio"),
+                _pet_cfg = self._pet_cfg
+                _ratio = num(_pet_cfg.get("model", {}).get("portrait_height_ratio"),
                                DEFAULT_PORTRAIT_SCREEN_RATIO, 0.10, 0.95)
             except Exception:
                 _ratio = DEFAULT_PORTRAIT_SCREEN_RATIO
@@ -5469,7 +5470,7 @@ class Murasame(QLabel):
                     if src.get(k) is not None and k not in out:
                         out[k] = src.get(k)
             if out.get("height_ratio") is None:
-                hr = (m.get("display") or {}).get("portrait_height_ratio")
+                hr = num((m.get("display") or {}).get("portrait_height_ratio"), None, 0.10, 1.0)
                 if hr is not None:
                     out["height_ratio"] = hr
         except Exception:
@@ -5577,7 +5578,7 @@ class Murasame(QLabel):
                     if src.get(k) is not None and k not in out:
                         out[k] = src.get(k)
             if out.get("height_ratio") is None:
-                hr = (m.get("display") or {}).get("portrait_height_ratio")
+                hr = num((m.get("display") or {}).get("portrait_height_ratio"), None, 0.10, 1.0)
                 if hr is not None:
                     out["height_ratio"] = hr
         except Exception:
