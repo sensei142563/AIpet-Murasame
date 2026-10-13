@@ -1,0 +1,66 @@
+# -*- coding: utf-8 -*-
+"""跑全量并提交状态窗融合收尾。"""
+import io
+import os
+import re
+import subprocess
+import sys
+
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+ROOT = r"E:\university\order\python\pet\AIpet-Murasame-main"
+VENV = os.path.join(ROOT, "runtime", "venv", "Scripts", "python.exe")
+MAP = os.path.join(ROOT, "dev", "merge-map")
+
+print("=== 全量 ===")
+r = subprocess.run([VENV, os.path.join("tests", "run_all.py")], cwd=ROOT, capture_output=True,
+                   text=True, encoding="utf-8", errors="replace", timeout=1800)
+out = (r.stdout or "") + (r.stderr or "")
+for l in out.split("\n"):
+    if re.match(r"\s*test_\w+\.py\s+-?\d", l) or "总计" in l:
+        print("   " + l.strip()[:135])
+
+MSG = """fix(status): 状态窗融合收尾 —— 设置页开关 + 右键菜单受同一开关管；test_bugfix_0930 全绿
+
+一、`pcl_launcher/widgets.py`：设置页加「状态」页开关
+  · 开关项（8 空格，与其它 `_add_slider` 同级）：
+        self._add_slider("status_page_enabled", "「状态」页", ["false", "true"], "true")
+  · 载入回填（**12 空格**，在既有 try 块内）：
+        self._set_slider("status_page_enabled", cfg.get("status_page_enabled", "true"))
+  用户原话记在注释里：「这个『状态』无法『不启用』这一点不好，也应该做成可以选择是否开启的」。
+
+二、`classes/murasame_class.py`：右键菜单「她的状态 / 记忆 / 提醒」受同一开关管
+  关掉后菜单里就不建这一项（点开只会是个空窗，不如没有）：
+        _sp_on = True
+        try:
+            from tool.config import as_bool as _ab_sp, get_config as _gc_sp
+            _sp_on = _ab_sp(_gc_sp(os.path.join(os.getcwd(), "config.json"))
+                            .get("status_page_enabled"), True)
+        except Exception:
+            _sp_on = True
+        if _sp_on:
+            _act_seen = item(_ai, "她的状态 / 记忆 / 提醒")
+            ...
+
+三、⚠ 本节两次踩坑（已记录，供以后参考）
+  第一次：两处插入都错。① `_set_slider` 那段其实在 **12 空格**的 try 块里，我按 8 空格插 ⇒
+          `SyntaxError: expected 'except' or 'finally' block`；
+          ② 判断条件写成了 `'...' in m`（**整文件文本**）而不是 `in l`（当前行）⇒ 恒真 ⇒
+          把菜单项的守卫插到了**文件开头**（紧跟 import 之后）。
+          ⇒ 处置：先 `git checkout --` 把两个文件**还原到 HEAD**（undo 永远比修补乱改便宜），
+            再用打印出来的**真实缩进**重做。
+  教训：改别人代码前先把"锚点所在行的真实缩进"打印出来，不要凭记忆写 4/8/12 空格。
+
+验证：`tests/test_bugfix_0930.py` → **本轮缺陷回归体检全部通过，退出码 0**（本轮从 7 项失败降到 0）。
+"""
+p = os.path.join(MAP, "_msg_status2.txt")
+io.open(p, "w", encoding="utf-8", newline="\n").write(MSG)
+subprocess.run(["git", "-C", ROOT, "add", "-A"], capture_output=True)
+rc = subprocess.run(["git", "-C", ROOT, "commit", "-F", p], capture_output=True, text=True,
+                    encoding="utf-8", errors="replace")
+print()
+print("桌面仓:", (rc.stdout or rc.stderr or "").splitlines()[0][:160])
+n = subprocess.run(["git", "-C", ROOT, "rev-list", "--count", "origin/main..HEAD"],
+                   capture_output=True, text=True, encoding="utf-8").stdout.strip()
+st = subprocess.run(["git", "-C", ROOT, "status", "--porcelain"], capture_output=True,
+                    text=True, encoding="utf-8").stdout.strip()
+print("  未推送 %s 条，工作区 %s" % (n, "干净 ✓" if not st else "%d 项" % len(st.splitlines())))

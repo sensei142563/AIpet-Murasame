@@ -419,6 +419,9 @@ class PCLSettingsPanel(QWidget):
         self._add_slider("qq_send_sticker", "QQ 表情包", ["false", "true"], "true")
         self._add_slider("qq_send_voice", "QQ 语音消息 (F5-TTS)", ["false", "true"], "false")
         self._add_slider("qq_vision_enabled", "QQ 图片识别", ["false", "true"], "true")
+        # 「状态」页 / 状态窗可以在设置里关掉（用户要求：「这个『状态』无法『不启用』
+        # 这一点不好，也应该做成可以选择是否开启的」）。默认开 ⇒ 不影响老用户。
+        self._add_slider("status_page_enabled", "「状态」页", ["false", "true"], "true")
         self._add_slider("qq_allow_groups", "QQ 群聊 (需@)", ["false", "true"], "true")
         self._add_slider("qq_offline_enable", "QQ 离线补拉", ["false", "true"], "true",
                          hint="启动时补回离线期间的消息。依赖 NapCat 支持 get_friend_msg_history；"
@@ -900,6 +903,7 @@ class PCLSettingsPanel(QWidget):
             self._set_slider("qq_send_sticker", cfg.get("qq_send_sticker", "true"))
             self._set_slider("qq_send_voice", cfg.get("qq_send_voice", "false"))
             self._set_slider("qq_vision_enabled", cfg.get("qq_vision_enabled", "true"))
+            self._set_slider("status_page_enabled", cfg.get("status_page_enabled", "true"))
             self._set_slider("qq_allow_groups", cfg.get("qq_allow_groups", "true"))
             self._set_slider("qq_offline_enable", cfg.get("qq_offline_enable", "true"))
             self._set_slider("qq_private_enable", cfg.get("qq_private_enable", "true"))

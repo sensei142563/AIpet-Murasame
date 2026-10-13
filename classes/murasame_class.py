@@ -3521,9 +3521,19 @@ class Murasame(QLabel):
                     "③ 每天写一段日记。全部存在 pets/角色/memory/learned.json。")
                 _act_learn.triggered.connect(lambda on=False: _sl.set_enabled(bool(on)))
                 separator(_ai)
-                _act_seen = item(_ai, "她的状态 / 记忆 / 提醒")
-                _act_seen.setToolTip("单独开一个小窗口，显示她记住的事、学到的东西和最近的日记。")
-                _act_seen.triggered.connect(self._show_learned)
+                # 「状态」页可以在设置里关掉（config.json 的 status_page_enabled，默认开）——
+                # 关掉后右键菜单里也不该再有这一项：点开只会是个空窗，不如没有。
+                _sp_on = True
+                try:
+                    from tool.config import as_bool as _ab_sp, get_config as _gc_sp
+                    _sp_on = _ab_sp(_gc_sp(os.path.join(os.getcwd(), "config.json"))
+                                    .get("status_page_enabled"), True)
+                except Exception:
+                    _sp_on = True
+                if _sp_on:
+                    _act_seen = item(_ai, "她的状态 / 记忆 / 提醒")
+                    _act_seen.setToolTip("单独开一个小窗口，显示她记住的事、学到的东西和最近的日记。")
+                    _act_seen.triggered.connect(self._show_learned)
                 # 「允许她玩游戏」菜单项已去掉（2026-09-24 用户要求）：
                 # 玩游戏属于「自主控制」的一部分 —— 主人开口随时能玩，
                 # 她自己想玩由「自主操作」开关决定，不再单独设开关。
