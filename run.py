@@ -664,8 +664,12 @@ def start_f5tts_api():
 
     log("检测到长文本模式已开启，启动 F5-TTS 服务%s..." % ("" if quiet_mode() else "（新控制台）"), "INFO")
     try:
+        # ★ 2026-10-14 修：这里原来写的是 _f5tts_venv_python()，**把上面探测的结果丢掉了** ——
+        #   探测（_find_f5tts_python）明明找到了"能 import f5_tts"的解释器（例如系统 Python），
+        #   启动时却又回去用 runtime\venv，于是必然报 "No module named 'f5_tts'"。
+        #   主人 2026-10-14 贴的日志就是这个现象。现在改为**用探到的那个**。
         proc = subprocess.Popen(
-            [_f5tts_venv_python(), "-m", "longtext.f5tts_server"],
+            [f5_py, "-m", "longtext.f5tts_server"],
             cwd=os.path.dirname(os.path.abspath(__file__)),
             creationflags=_console_flags()
         )

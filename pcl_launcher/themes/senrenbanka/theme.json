@@ -51,5 +51,6 @@
     "type": "image",
     "source": "assets/bg.jpg",
     "opacity": 1.0
-  }
+  },
+  "text_color": "#111111"
 }
