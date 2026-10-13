@@ -2725,64 +2725,64 @@ class Murasame(QLabel):
         except Exception:
             pass
 
-        def _run_agent_task(self, task) -> bool:
-            """/agent <任务>：让本机 agent 去做（DSH headless 优先、Codex 回落）。
+    def _run_agent_task(self, task) -> bool:
+        """/agent <任务>：让本机 agent 去做（DSH headless 优先、Codex 回落）。
 
-            · 默认关闭（config.json → agent_bridge_enabled），没打开只提示一句；
-            · **每次都要主人点头**（主线程弹确认框，默认按钮是"否"）；
-            · 同意后交给 AgentWorker 在后台跑，结果用信号回主线程显示（界面不卡）。
-            """
-            try:
-                from tool.agent_bridge import enabled, available
-            except Exception as e:
-                self.show_text(f"（agent 桥接不可用：{e}）", typing=True)
-                return True
-            if not enabled():
-                self.show_text('（先把 agent 桥接打开：config.json → "agent_bridge_enabled": "true"）',
-                               typing=True)
-                return True
-            av = available()
-            if not av.get("chosen"):
-                self.show_text(f"（没找到可用的 agent：{av.get('reason') or '未知原因'}）", typing=True)
-                return True
-            # ⚠ 同一时间只允许一个 agent 任务：它会**以主人的身份操作电脑**，
-            #   起第二个 = 两个 agent 同时在动这台机器（而且旧的没有任何人能停）。
-            #   在**弹确认框之前**挡住，并明说原因（而不是静默什么都不做）。
-            _aw = getattr(self, "_agent_worker", None)
-            if _aw is not None and _aw.isRunning():
-                self.show_text("（我还在做上一件事呢，等它做完再说～）", typing=True)
-                return True
-            try:
-                from PyQt5.QtWidgets import QMessageBox
-                box = QMessageBox(self)
-                box.setWindowTitle("要让她去做吗？")
-                box.setText(f"她打算把这件事交给本机的 agent（{av['chosen']}）去做：\n\n{task[:500]}")
-                box.setInformativeText("agent 会以你的身份操作电脑，并自己判断怎么做。")
-                box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-                box.setDefaultButton(QMessageBox.No)          # 默认不执行
-                if box.exec_() != QMessageBox.Yes:
-                    self.show_text("（好，那我不动了）", typing=True)
-                    return True
-            except Exception as e:
-                print(f"[桌宠] ⚠ agent 确认框失败（按不执行处理）: {e}")
-                return True
-            try:
-                from classes.Worker_class import AgentWorker
-                self._agent_worker = AgentWorker(task, self)
-                self._agent_worker.done.connect(self._on_agent_done)
-                self.show_text(f"（我去试试：{task[:40]}…）", typing=True)
-                self._agent_worker.start()
-            except Exception as e:
-                self.show_text(f"（起不了 agent 任务：{e}）", typing=True)
+        · 默认关闭（config.json → agent_bridge_enabled），没打开只提示一句；
+        · **每次都要主人点头**（主线程弹确认框，默认按钮是"否"）；
+        · 同意后交给 AgentWorker 在后台跑，结果用信号回主线程显示（界面不卡）。
+        """
+        try:
+            from tool.agent_bridge import enabled, available
+        except Exception as e:
+            self.show_text(f"（agent 桥接不可用：{e}）", typing=True)
             return True
+        if not enabled():
+            self.show_text('（先把 agent 桥接打开：config.json → "agent_bridge_enabled": "true"）',
+                           typing=True)
+            return True
+        av = available()
+        if not av.get("chosen"):
+            self.show_text(f"（没找到可用的 agent：{av.get('reason') or '未知原因'}）", typing=True)
+            return True
+        # ⚠ 同一时间只允许一个 agent 任务：它会**以主人的身份操作电脑**，
+        #   起第二个 = 两个 agent 同时在动这台机器（而且旧的没有任何人能停）。
+        #   在**弹确认框之前**挡住，并明说原因（而不是静默什么都不做）。
+        _aw = getattr(self, "_agent_worker", None)
+        if _aw is not None and _aw.isRunning():
+            self.show_text("（我还在做上一件事呢，等它做完再说～）", typing=True)
+            return True
+        try:
+            from PyQt5.QtWidgets import QMessageBox
+            box = QMessageBox(self)
+            box.setWindowTitle("要让她去做吗？")
+            box.setText(f"她打算把这件事交给本机的 agent（{av['chosen']}）去做：\n\n{task[:500]}")
+            box.setInformativeText("agent 会以你的身份操作电脑，并自己判断怎么做。")
+            box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+            box.setDefaultButton(QMessageBox.No)          # 默认不执行
+            if box.exec_() != QMessageBox.Yes:
+                self.show_text("（好，那我不动了）", typing=True)
+                return True
+        except Exception as e:
+            print(f"[桌宠] ⚠ agent 确认框失败（按不执行处理）: {e}")
+            return True
+        try:
+            from classes.Worker_class import AgentWorker
+            self._agent_worker = AgentWorker(task, self)
+            self._agent_worker.done.connect(self._on_agent_done)
+            self.show_text(f"（我去试试：{task[:40]}…）", typing=True)
+            self._agent_worker.start()
+        except Exception as e:
+            self.show_text(f"（起不了 agent 任务：{e}）", typing=True)
+        return True
 
-        def _on_agent_done(self, text, ok):
-            """agent 干完了：把它的答复显示出来（主线程信号槽，安全）"""
-            try:
-                head = "【agent 办好了】" if ok else "【agent 没办成】"
-                self.show_text(head + "\n" + str(text)[:800], typing=True)
-            except Exception as e:
-                print(f"[桌宠] ⚠ 显示 agent 结果失败: {e}")
+    def _on_agent_done(self, text, ok):
+        """agent 干完了：把它的答复显示出来（主线程信号槽，安全）"""
+        try:
+            head = "【agent 办好了】" if ok else "【agent 没办成】"
+            self.show_text(head + "\n" + str(text)[:800], typing=True)
+        except Exception as e:
+            print(f"[桌宠] ⚠ 显示 agent 结果失败: {e}")
 
 
     def start_thread(self, text, role, t=False, no_act=False):
