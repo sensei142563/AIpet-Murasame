@@ -7,29 +7,27 @@ import time
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# ⚠⚠⚠ 重点：本机的「虚拟环境」约定（2026-10-14 主人明确 + 本机实测）
+# ⚠⚠⚠ 重点：关于「虚拟环境」——**两种场景，别混为一谈**（2026-10-14 主人澄清）
 #
-#   主人原话：
-#     「咱本地不用虚拟环境」
-#     「咱们都是全局 Python，都用 GPU 加速」
+#   ① **发布给用户**：装机版会**装一个虚拟环境**（runtime\venv），依赖装在里面。
+#      ⇒ 所以本文件里 _ensure_project_python / _project_python / _f5tts_venv_python
+#        三个函数"优先用 runtime\venv"的逻辑，**对发布场景是对的，不要改**。
+#   ② **协作者**：他自己的机器上也是**虚拟环境**（依赖装在 venv 里）。
+#      ⇒ 这就是为什么"他那边能跑、咱们这边不行" —— 环境不同，不是代码对错。
+#   ③ **咱们俩本地开发**：一直用**全局 Python 310**
+#      （C:\Users\ASUS\AppData\Local\Programs\Python\Python310\python.exe），
+#      依赖都装在**全局** site-packages 里。
+#      ⇒ **本机这份 runtime\venv 是残缺的**：实测 126 个包，全局有 390 个，
+#        「全局有、venv 没有」= **273 个**（含 f5-tts / cn2an / edge-tts / datasets …）。
+#        ⇒ 本地跑时若走到 venv，凡是依赖那 273 个的功能都会报 No module named。
 #
-#   ⇒ **本机跑项目用的是全局 Python 3.10**（C:\Users\ASUS\AppData\Local\Programs\
-#      Python\Python310\python.exe），依赖（torch / f5_tts / pypinyin / onnxruntime …）
-#      都装在**全局**的 site-packages 里。
-#   ⇒ `runtime\venv` 是**历史遗留**，里面的包**不全**（实测：有 torch，但 f5_tts、
-#      pypinyin 都没有）。**默认不要用它** —— 用了就会报 "No module named 'xxx'"。
+#   ✅ 实用判断法（照这个来就不会错）：
+#      · 要**复现用户/协作者的环境**（测装机版行为） → 用 runtime\venv；
+#      · 要**本地开发/调试/录素材**                     → 用全局 Python 310；
+#      · 起**需要新依赖**的子进程（如 F5-TTS）时，**先探测谁能 import，再用探到的那个**，
+#        不要把 venv 写死（2026-10-14 的 F5-TTS 事故就是这么修的）。
 #
-#   ⚠ 与下面代码注释的矛盾（如实记录，别被带偏）：
-#      本文件 `_ensure_project_python` / `_project_python` / `_f5tts_venv_python`
-#      三个函数的注释都说"必须用 runtime\venv，否则会崩（MSVCP140 / 抢 28565 端口）"。
-#      那是**历史上的情况**（当年依赖确实装在 venv 里）。
-#      现在反了：依赖在全局，venv 反而缺包。
-#      ⇒ 以本条为准；那三处函数**保留原行为**（改了有崩的风险），
-#        但调用它们的地方要注意：**凡是需要 f5_tts/新依赖的子进程，必须用全局 Python**
-#        （F5-TTS 那次就是这么修的：探到能用的解释器后，启动时要用**探到的那个**，
-#          而不是再写死 venv —— 见 start_f5tts_api 里 2026-10-14 的注释）。
-#
-#   📄 详细说明另见：docs/本机环境约定-不用虚拟环境.md
+#   📄 详细说明：docs/本机环境约定-不用虚拟环境.md
 # ══════════════════════════════════════════════════════════════════════════════
 
 
@@ -46,8 +44,8 @@ except Exception:
     pass
 
 def _ensure_project_python():
-    # ⚠ 本机约定见文件顶部「虚拟环境」注释：**本机不用 venv**；
-    #   这个函数仍会把解释器切到 runtime\venv（历史行为，暂不改，改了有崩的风险）。
+    # ⚠ 见文件顶部「虚拟环境」注释：venv 是**发布/协作者**的场景；
+    #   咱们本地开发用全局 Python（本机 venv 残缺，缺 273 个包）。此逻辑保留。
     try:
         # ⚠ **只有直接跑这个脚本时才换解释器**（`python run.py`）。被 `import run` 时绝不
         #   拉新进程 —— 实测有探针为测一个纯函数 `import run`，于是这里起了第二个解释器，
@@ -109,7 +107,7 @@ else:
 
 
 def _project_python() -> str:
-    # ⚠ 本机约定见文件顶部：**本机不用 venv**（依赖在全局）。此函数保留历史行为。
+    # ⚠ 见文件顶部：venv 面向**发布/协作者**；本地开发用全局 Python。此逻辑保留。
     """跑本项目子进程（main.py / pip 等）一律用「项目自带解释器」。
 
     ⚠ 直接用 sys.executable 不可靠：venv 的 Scripts\\python.exe 在 Windows 上常常是
@@ -128,9 +126,9 @@ def _project_python() -> str:
 
 
 def _f5tts_venv_python():
-    # ⚠ 本机约定见文件顶部：**本机不用 venv**。
-    #   名字虽然叫 venv，但 2026-10-14 起 F5-TTS 已改为用**探测到的**解释器
-    #   （见 start_f5tts_api），不再无条件用它。
+    # ⚠ 见文件顶部：venv 面向**发布/协作者**。
+    #   注意：2026-10-14 起 F5-TTS 已改为用**探测到的**解释器（见 start_f5tts_api），
+    #   不再无条件用它 —— 因为本机 venv 缺 f5_tts。
     """拉起 F5-TTS 优先使用项目自带 runtime\venv 的 Python：
     若入口被系统 Python 执行（如无 venv 的旧副本启动器），sys.executable 拉出的
     f5tts 服务会因缺 f5_tts/torchaudio 修复而卡死并占住 9881。"""
