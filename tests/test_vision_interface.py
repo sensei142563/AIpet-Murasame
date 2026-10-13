@@ -1,6 +1,11 @@
 # -*- coding: utf-8 -*-
 """本地视觉模型「接口」体检（本项目不自带本地模型，只留接缝给用户接）。
 
+★ 2026-10-13 用户拍板：**本地视觉不使用，仅保留接口**。
+  所以本文件只校验"接口本身还在、行为可预期"，**不再要求**把上游那套 UI 面
+  （vision_source 选择器 / vision_local_url / vision_local_command 输入框等）接上 ——
+  那是被否决的设计。第 2、5 节已按此改判。
+
 要防的坑（都和 2026-09-29 审计里那几类同源）：
   · **默认必须等于从前**：`vision_source` 没配 → 走云端，一个字的行为都不变；
   · **选了本地但没接** → 必须是**可读的中文提示**（告诉他填哪个键），绝不静默不识别；
@@ -59,23 +64,20 @@ try:
 finally:
     V._cfg = _real_cfg
 
-print("== 2) 示例配置 / UI 选项 / 代码取值集合一致 ==")
+print("== 2) 本地视觉的 UI 面**按设计不存在**（接口保留，但不走这条路）==")
+print("   （2026-10-13 用户拍板：本地视觉不使用、仅保留接口 ⇒ 上游那套 UI 面是被否决的设计，")
+print("     所以这里反过来查：**不该**出现在示例配置与设置页里。真要接的人自己接。）")
 ex = json.load(io.open(os.path.join(REPO, "config.example.json"), encoding="utf-8"))
-for k, want in (("vision_source", "cloud"), ("vision_local_url", ""),
-                ("vision_local_command", ""), ("vision_local_model", "")):
-    check("示例里有 %-22s 且默认 %r" % (k, want), ex.get(k) == want, repr(ex.get(k)))
-check("代码的取值集合是 (cloud, local)", V.SOURCES == ("cloud", "local"), str(V.SOURCES))
+for k in ("vision_source", "vision_local_url", "vision_local_command", "vision_local_model"):
+    check("示例配置里**没有** %-22s（本地视觉不启用）" % k, k not in ex, repr(ex.get(k)))
+check("代码的取值集合仍是 (cloud, local)（接口没被删）",
+      V.SOURCES == ("cloud", "local"), str(V.SOURCES))
 w = io.open(os.path.join(REPO, "pcl_launcher", "widgets.py"), encoding="utf-8").read()
-check("设置页给了视觉来源选择（左=本地、右=云端，与 tts_type 同向）",
-      '"vision_source", "视觉来源", ["local", "cloud"], "cloud"' in w)
-check("设置页给了本地地址 / 命令两个输入框",
-      '"vision_local_url", "本地视觉服务地址"' in w
-      and '"vision_local_command", "本地视觉命令"' in w)
-check("设置页载入时也回填这三个键",
-      w.count('_set_slider("vision_source"') >= 1 and w.count('_set_if("vision_local_url"') >= 1
-      and w.count('_set_if("vision_local_command"') >= 1)
-sp = io.open(os.path.join(REPO, "pcl_launcher", "status_panel.py"), encoding="utf-8").read()
-check("状态页会显示「视觉来源」（本地/云端）", '"视觉来源"' in sp and "vision_local" in sp)
+check("设置页**没有**「视觉来源」选择器（上游那套未采纳）",
+      '"vision_source", "视觉来源" not in w')
+check("设置页**没有**本地地址 / 命令输入框",
+      '"vision_local_url", "本地视觉服务地址"' not in w
+      and '"vision_local_command", "本地视觉命令"' not in w)
 
 print("== 3) HTTP 接法：三种常见响应形状都要认 ==")
 from http.server import BaseHTTPRequestHandler, HTTPServer   # noqa: E402
@@ -142,11 +144,15 @@ check("命令不存在 → 提示检查 vision_local_command",
 
 print("== 5) 摄像头那条链路真的分支了（源码守卫）==")
 mc = io.open(os.path.join(REPO, "classes", "murasame_class.py"), encoding="utf-8").read()
-check("摄像头识图按 vision_local.source() 分支",
-      "if _vl.source() == \"local\":" in mc and "_vl.describe(url)" in mc)
+# 按拍板：摄像头识图**不**分支到本地视觉（上游那套语义未采纳）。
+# 仍要防的两件事：① 云端没配模型时不许静默 return；② 本地视觉模块不许被静默 import 进来。
+check("摄像头识图**不**走 vision_local 分支（本地视觉不启用）",
+      "if _vl.source() == \"local\":" not in mc)
+check("也没有活的 `from tool import vision_local`（保持注释状态）",
+      "\nfrom tool import vision_local" not in mc
+      and "\n    from tool import vision_local" not in mc)
 check("云端分支没配模型时**不再静默**（原来直接 return）",
       "没配视觉模型（vision_model_name / APIKEY）" in mc)
-check("本地失败时打印可读原因（不静默）", "本地视觉没给出描述" in mc)
 
 print()
 if FAILS:

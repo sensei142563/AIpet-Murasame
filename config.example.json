@@ -7,7 +7,6 @@
     "longtext_tts": "http://localhost:28565/tts_long",
     "vision": "http://127.0.0.1:28460/describe"
   },
-  "vision_source": "local",
   "vision_local_model_dir": "D:\\下载\\AI桌宠\\vision\\Qwen2-VL-2B-Instruct",
   "vision_local_port": 28460,
   "vision_max_side": 896,
