@@ -155,8 +155,21 @@ pet = Murasame()
 calls = []
 pet.toggle_live2d_form = lambda: calls.append("toggle")
 captured = {}
+# ⚠ 菜单的实现已经从「QMenu.exec_()」改成「动画 popup()」（见
+#   classes/murasame_class.py::_popup_menu_animated —— 为了做淡入上浮过渡）。
+#   所以只打桩 exec_ 会**永远捕获不到菜单**（menu=None，检查项全红）。
+#   这里把两种弹出方式都打桩，断言本身一条不改；并额外记下 pet._outfit_menu 兜底。
 _real_exec = QMenu.exec_
-QMenu.exec_ = lambda self, *a, **k: captured.setdefault("menu", self) or None
+_real_popup = QMenu.popup
+
+
+def _capture(self, *a, **k):
+    captured.setdefault("menu", self)
+    return None
+
+
+QMenu.exec_ = _capture
+QMenu.popup = _capture
 
 
 def _patch_exec():
@@ -169,7 +182,9 @@ try:
     pet._show_outfit_menu(QPoint(50, 50))
 finally:
     QMenu.exec_ = _real_exec
-menu = captured.get("menu")
+    QMenu.popup = _real_popup
+# 兜底：即使两种桩都没打中，也能从 pet 身上拿到刚构建的菜单
+menu = captured.get("menu") or getattr(pet, "_outfit_menu", None)
 acts = [a.text() for a in menu.actions()] if menu is not None else []
 print("      菜单项：%s" % " | ".join(acts)[:150])
 check("菜单能构建出来", menu is not None)

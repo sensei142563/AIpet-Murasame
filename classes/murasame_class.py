@@ -3462,7 +3462,7 @@ class Murasame(QLabel):
                                        "她就能多一项本事（比如内置的「系统信息」）。")
                     _act_pl.triggered.connect(lambda on=False: _plg2.set_enabled(bool(on)))
                     _act_pldir = item(_ai, "打开插件目录")
-                    _act_pldir.triggered.connect(lambda: __import__("os").startfile(_plg2._root()))
+                    _act_pldir.triggered.connect(lambda: __import__("os").startfile(_plg2.root()))
                 except Exception:
                     pass
                 try:
