@@ -108,5 +108,6 @@
   "learn_slang_wx": "true",
   "learn_slang_pet": "true",
   "text_font_native": "false",
-  "quiet_mode": "false"
+  "quiet_mode": "false",
+  "status_page_enabled": true
 }

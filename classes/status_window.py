@@ -22,8 +22,8 @@ import re
 from PyQt5.QtCore import QPointF, QPropertyAnimation, QRectF, Qt, pyqtProperty
 from PyQt5.QtGui import (QBrush, QColor, QFont, QFontDatabase, QLinearGradient, QPainter,
                          QPainterPath, QPen, QPixmap, QPolygonF)
-from PyQt5.QtWidgets import (QDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea,
-                             QSizeGrip, QStackedWidget, QVBoxLayout, QWidget)
+from PyQt5.QtWidgets import (QDialog, QFrame, QGroupBox, QHBoxLayout, QLabel, QPushButton,
+                             QScrollArea, QSizeGrip, QStackedWidget, QVBoxLayout, QWidget)
 
 # ── 剧情模式配色（与 engine.css / tool/pet_menu.py 完全一致）──
 CREAM_TOP = QColor(244, 236, 229, 250)
@@ -110,10 +110,16 @@ def _diamond(color=RED, size=9) -> QPixmap:
 
 # ── QSS：卡片 / 标签 / 按钮 / 滚动条（全部按 engine.css 配色）──
 QSS = """
+/* 窗自身的**不透明纸色底**：首次显示就要有底（不能等样式 polish）——
+   否则用户看到的是「字压在壁纸上看不清，点刷新后那块底色才出现」。 */
+QDialog#statusWindow {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #f4ece5, stop:1 #e7dbd0);
+}
 QWidget#panel { background: transparent; }
 QScrollArea { background: transparent; border: none; }
 QScrollArea > QWidget > QWidget { background: transparent; }
-QFrame#card {
+#card {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(250,246,242,235),
                                 stop:1 rgba(244,236,229,225));
     border: 1px solid rgba(160,58,53,110);
@@ -155,12 +161,16 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: trans
 """
 
 
-class _Card(QFrame):
+class _Card(QGroupBox):
     """一张剧情风格的卡片：标题（带红菱形）+ 标签行 + 正文"""
 
     def __init__(self, title: str, body: str = "", tags=(), parent=None):
         super().__init__(parent)
         self.setObjectName("card")
+        # ⚠ QSS 里给 #card 写了 background，但 Qt 对**自定义子类**默认不画样式表背景，
+        #   必须显式开 WA_StyledBackground —— 否则要等一次样式 polish（表现就是
+        #   "字压在壁纸上看不清，点刷新后那块底色才出现"，用户报过）。
+        self.setAttribute(Qt.WA_StyledBackground, True)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(14, 11, 14, 13)
         lay.setSpacing(7)
@@ -223,6 +233,10 @@ class StatusWindow(QDialog):
         self.setWindowTitle("丛雨 · 状态 · 习惯 · 记忆 · 提醒")
         self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setObjectName("statusWindow")
+        # ⚠ 开 WA_StyledBackground：让 QSS 里 QDialog#statusWindow 的**不透明纸色底**在
+        #   首次显示就画出来（自绘 paintEvent 仍在其上画渐变与圆角，两者不冲突）。
+        self.setAttribute(Qt.WA_StyledBackground, True)
         self.setStyleSheet(QSS)
         self.setMinimumSize(560, 460)
         self.resize(700, 640)
