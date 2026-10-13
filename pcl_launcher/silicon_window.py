@@ -513,7 +513,7 @@ def ensure_vision_service(shell) -> bool:
     - 找不到运行时/模型 → 只打日志，桌宠那边会自动回落到云端
     """
     cfg = _vision_cfg()
-    if str(cfg.get("vision_source") or "local").strip().lower() != "local":
+    if str(cfg.get("vision_source") or "cloud").strip().lower() != "local":
         print("[NewUI] 视觉识别设为云端 API，本地视觉服务不启动")
         return False
     port = _vision_port(cfg)
@@ -661,7 +661,7 @@ def _models_info() -> dict:
         out["lang"] = {"model": f"{name}（{prov} 云端）", "balance": None,
                        "provider": mt, "key": key}
     # ── 视觉模型（屏幕/摄像头识别）──
-    if str(cfg.get("vision_source") or "local").strip().lower() == "local":
+    if str(cfg.get("vision_source") or "cloud").strip().lower() == "local":
         d = str(cfg.get("vision_local_model_dir") or "").strip()
         base = os.path.basename(d.rstrip("\\/")) if d else ""
         out["vision"] = {"model": f"{base or '本地视觉模型'}（本地部署）",
@@ -1201,7 +1201,7 @@ class HomePage(QWidget):
         """
         import time as _t
         cfg = _vision_cfg()
-        if str(cfg.get("vision_source") or "local").strip().lower() != "local":
+        if str(cfg.get("vision_source") or "cloud").strip().lower() != "local":
             QMessageBox.information(
                 self, "预载视觉服务",
                 "当前「识别来源」是云端 API，不需要本地视觉服务。\n\n"
@@ -1335,7 +1335,7 @@ class HomePage(QWidget):
             vis_state = "unknown"
             try:
                 _vcfg = _vision_cfg()
-                if str(_vcfg.get("vision_source") or "local").strip().lower() != "local":
+                if str(_vcfg.get("vision_source") or "cloud").strip().lower() != "local":
                     vis_state = "cloud"
                 else:
                     vis_state = "online" if _vision_alive(_vision_port(_vcfg)) else "offline"
