@@ -1,37 +1,32 @@
-fix(env): 补上缺失的 comtypes（UIA 静默降级）+ 清 pip 残留 + 本机实跑记录
+docs(env): 重点注释「本机不用虚拟环境」+ 环境对比脚本（查出 venv 缺 273 个包）
 
-用户反馈"似乎有一些东西在协作者电脑上可以，咱们电脑不行（全局 Python / GPU 加速）"。
-本轮**在本机实测**定位，结果如下（全部可复现，脚本在 dev/scripts/）：
+## 主人要求
+"把那个每次你都搞混的虚拟环境重点注释，咱本地不用虚拟环境"
 
-一、真正的差异：comtypes 缺失（这条会静默降级，很难自己发现）
-  · `requirements.txt` 里写了 `comtypes`，但**项目 venv 和全局 Python 都没有**。
-  · 后果（项目自己的日志）：`tool/uia.py` 报
-      [UIA] ⚠ 不可用（ModuleNotFoundError: No module named 'comtypes'）→ 退回模拟键鼠方式
-    即精确的 UI Automation 后台控制不可用；`tool/music.py` 也明写"没装 comtypes 只能用系统媒体键"
-    （网易云等 CEF 界面的后台控制失效）。
-  · 处置：装进项目 venv（comtypes 1.4.17），复验 `comtypes/UIA 可用: True`。
-  · 全套依赖体检：`requirements.txt` 28 条，venv 里**只缺这一条**，已补齐。
+## 做了什么
+1. **run.py 顶部**加一大段「本机虚拟环境约定」重点注释（⚠⚠⚠ 框起来），写明：
+   - 本机跑项目用**全局 Python 3.10**，依赖都在全局 site-packages；
+   - `runtime\venv` 是**历史遗留、包不全**，默认不要用；
+   - **如实记录矛盾**：下面三个函数的注释说的恰好相反（"必须用 venv 否则会崩"），
+     那是历史情况，现在反了；保留原行为（改了有崩的风险），但调用处不要重复写死 venv。
+2. 三个函数各加一行指针（`_ensure_project_python` / `_project_python` / `_f5tts_venv_python`）。
+3. 新增 `docs/本机环境约定-不用虚拟环境.md`：结论、矛盾说明、**排查三步走**、
+   历次"装错环境"事故对照表、以及"装包前先 --dry-run"的教训。
+4. README 加指针。
+5. 新增 `dev/scripts/compare_envs.py`：对比两个解释器的包，列出"全局有、venv 没有"。
 
-二、顺手清掉 pip 残留（另一个"本机特有"的噪音）
-  · `runtime/venv/Lib/site-packages` 里有 `~orch`、`~umpy`、`~umpy-2.1.3.dist-info`、`~umpy.libs`
-    （pip 卸载未删干净的"待删除"标记）⇒ 每次 pip 操作都报 `Ignoring invalid distribution -umpy`。
-  · 处置：**移到** `dev/tmp/venv_junk/`（不删、留档）⇒ 告警清零。
+## 对比结果（关键）
+```
+全局包数 = 390      venv 包数 = 126
+「全局有、venv 没有」= **273 个**，含 f5-tts / cn2an / edge-tts / budoux /
+fast-langdetect / datasets / bigvgan / encodec / auraloss / aliyun-* / boto3 …
+⇒ 项目默认跑在 venv 上时，任何用到这些的功能都会炸（F5-TTS 就是其中之一，已修）
+```
+⇒ 数据完全支持主人的说法：**本机就是全局 Python 环境，venv 不该用**。
 
-三、发现但**未擅自修**的冲突（留给用户定）
-  · `pip check`：`opencv-python 4.12.0.88` 要求 `numpy>=2`，而实际 `numpy 1.26.4`
-    （`requirements.txt` 明确 `numpy>=1.26.4,<2`）。改 numpy 风险大，故只记录不动作。
-
-四、澄清一个"看起来像 bug 其实不是"的现象
-  · `run.py` 在 Windows 上会看到 venv 的 python.exe 只占 4MB、1 线程，并拉起一个 base python 子进程
-    —— 这是 virtualenv 转发器的正常行为；子进程内 `sys.executable`/`sys.prefix` 都正确指向 venv、
-    `torch` 也确实来自 venv。**venv 工作正常**，不需要"修"。
-
-五、本机实跑记录（桌宠真的能跑）
-  · `runtime\venv\Scripts\python.exe run.py` 启动成功；28565 由 main.py 监听、9881 由 F5-TTS 监听、
-    GPT-SoVITS 常驻；立绘正常渲染（dev/shots/pet_locate.png），对话管线在跑
-    （qwen-talk/portrait/emotion/translate → gpt-sovits-tts）。
-  · 如实标注未验证项：**右键菜单的实机截图没拿到** —— 合成右键被她当成左键/触摸
-    （她弹了「【丛雨】思考中…」），只能由用户用真实鼠标确认；菜单修复本身已由代码与离屏渲染验证。
-
-六、文档
-  · 新增 `dev/docs/环境差异-协作者机器vs本机.md`（结论表 + 可复现命令 + 给协作者的同步建议）。
+## 待主人拍板（未擅自改）
+要不要把默认行为也翻过来？三个方案：
+  A. 加配置开关 `use_venv`（默认 false）⇒ 三个函数都尊重它（可逆、最稳）
+  B. 让 `_ensure_project_python` 在"全局能 import 项目核心依赖"时不切换
+  C. 什么都不改（只保留注释与文档）
+主人说"重点注释"，所以我**只做了注释与文档**，行为未动 —— 等一句话。
