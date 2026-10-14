@@ -1,0 +1,67 @@
+fix(pet+launcher): 看屏幕无限刷屏（三道闸）+ _14 打字错误 + 首页写死的白字 + 预载按钮换行
+
+本提交实际包含四件事（前三件是同一次排查里改的，此前被打包进这一条，现补全说明）。
+
+════════ 一、看屏幕无限刷屏（主人："后面都是刷屏，永无止境"）════════
+根因链（与主人日志逐行对得上）：
+```
+classes/murasame_class.py::_look_screen_and_reply
+  describe_image(...) 因视觉模型 403/404 返回空
+  → self._request_dialog.emit(user_text, "user", False)   # 把**主人的原话**又当成 user 消息送回
+  → 再次命中 needs_screen_look → 又看屏幕 → 又空 → …
+而守卫 _screen_look_busy 在 finally 里已复位，挡不住 ⇒ 日志里「👀 主人让我看屏幕」永无止境
+```
+三道闸：
+- **闸1 跳过标记** `_screen_look_skip_once`：回退重答/带描述重答时打标，这一句不再触发看屏幕；
+- **闸2 冷却** `_screen_look_last`：距上次 < 20 秒（可用 `AIPET_SCREEN_LOOK_COOLDOWN` 调）不重复抓屏；
+- **闸3 熔断** `_screen_look_broken_until`：连续 3 次拿到空 ⇒ 暂停看屏幕 10 分钟，
+  并**打印真正原因**（模型未开通 / 名字不对）提示去控制台开通，
+  而不是让她一遍遍说"看不到"。
+
+════════ 二、`_14` 打字错误（队列去重整段静默失效）════════
+`classes/murasame_class.py:2924/2927`：`_kind = _t[:_14]` —— 多写了一个下划线，
+Python 把 `_14` 当变量名 ⇒ `NameError: name '_14' is not defined`
+⇒ 被外层 `except` 吞掉、只留一行「排队判断失败（照常继续）」⇒ 队列去重完全失效（队列只涨不消）。
+已修为 `[:14]`。
+
+════════ 三、首页写死的白字 ════════
+`pcl_launcher/silicon_ui.py::section_title()` 把标题色**写死** `#e6eaf2`（浅灰白）：
+深色主题没问题，浅色主题（千恋万花·樱华 / 沫子的日常，Color8=#fdf6ee）下就是
+**白字压在浅粉卡片上**——整行看不见，只剩左边那根 accent 竖条。
+改为跟随主题正文色 `Color1`（浅色=#4a3527 深棕 / 深色=亮色），取不到再退回 `_is_dark_theme()` 判断。
+
+定位方式（这次没靠猜）：
+1. 先排除主题数据 —— 两个主题的 `colors` 块**完全相同**，只有 background 不同（video/image）；
+2. 再核对 `SF()` —— 它是主题感知的，有壁纸时用 `Color6`（浅粉）+ 高不透明度 ⇒ 卡片浅粉近实心，与截图一致；
+3. **直接把启动器打开截图**（非激活启动 + 窗口截图）⇒ 一眼看到正文/卡片/导航都清晰，
+   唯独三个小节标题是白的 ⇒ 与主人"有一些字"的措辞吻合。
+
+顺手：`「控制台查看」` 链接原先是 Qt 默认蓝，在浅色主题上很突兀。
+Qt 富文本的 `<a>` 用**调色板 Link 角色**上色、不认 style 里的 color
+⇒ 改为显式设置 `QPalette.Link / LinkVisited`。
+
+目视验收（改前/改后各一张，留在 `dev/ppt/out/`）：
+```
+launcher-live.png   三个小节标题只剩竖条、字看不见 ✗
+launcher-fixed.png  三个小节标题全部清晰可见 ✓ 预载按钮在第二行不再被裁 ✓ 链接为深棕主题色 ✓
+```
+
+════════ 四、修我自己上次的副作用 ════════
+上次把两个「预载」按钮挪进「快捷工具」时与 6 个工具挤在同一行，
+8 个按钮 + 角色名后缀**被窗口裁掉**（主人截图里出现「…服务（丛雨△」）⇒ 已改到**第二行**。
+
+════════ 附：视觉模型 403/404 的真相（不是代码问题）════════
+用配置里的 key 实测（最小请求）：
+```
+✓ qwen-plus → 200            （key 有效、文本模型正常）
+✗ qwen-vl-plus / qwen-vl-max → 404 Model not exist
+✗ qwen-vl-plus-latest / -max-latest / qwen2.5-vl-* → 403 Access denied
+⇒ 403 = 模型存在但该账号未开通 ⇒ 屏幕/摄像头/人脸识别全都会失败
+⇒ 需到阿里云百炼控制台**开通 qwen-vl 系列**，或改 config.json 的 vision_model_name
+```
+另：主人报的「关闭桌宠掐不掉进程」判定为**上述风暴的症状**——关闭标志靠 GUI 线程上的
+500ms 轮询读取，而风暴把 GUI 线程占满；三道闸下去后请主人复测。
+
+════════ 验证 ════════
+`py_compile classes/murasame_class.py pcl_launcher/silicon_ui.py pcl_launcher/silicon_window.py` 均 OK；
+全量自检 10 个文件 / 389 项通过 / 0 失败。
