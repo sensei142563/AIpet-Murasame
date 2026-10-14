@@ -1,0 +1,30 @@
+docs(plan): 规划文档补入 MMEdge / HALO 作为技术依据（公开论文）
+
+## 来源
+老师转发的三篇里的两篇（均为公开论文）：
+- MMEdge: Accelerating On-device Multimodal Inference via Pipelined Sensing and Encoding (HKUST)
+- HALO: A Heterogeneity-Aware Language-Aligned IMU Foundation Model for Open-Set HAR (HKUST)
+
+## 补进规划文档的什么
+`dev/docs/汇报PPT规划-2026-10-13.md` §3「未来规划」下新增 **3.x 技术依据**：
+- **MMEdge → 手机端**：把「相机帧 → 关键点 → 命中 → 反应」从整帧串行改成
+  **流水线 + 跳帧 + 早停**，并把相机参数纳入"延迟约束下选配置"的框架；
+- **HALO → 非视觉感知路线**：我们写的是"标准化参数流"，它解决的正是"不同设备/采样率如何统一"，
+  且 ~35M 可训练参数（对照 MOMENT 341.2M）⇒ 手机端可跑；将来**别为每种设备写一套**，
+  做一层"语言对齐 + 异构适配"的统一编码器；
+- 第三篇（OphVLM-R1）只作旁证：小模型靠训练策略打赢大模型。
+
+## 纪律
+只引用**公开论文**；与外部装置相关的未发表工作**不写入文档或代码**（本条也已写入文档作为记录纪律）。
+
+## 同时修正的 PPT 断言
+主人质疑「手机端 3D 模型怎么与人交互？我没发现」。核实结果（依据 chatter 仓
+`docs/手部互动-实现与验证状态.md` 与 `VrmArScreen.kt` 注释）：
+- 代码链路是**完整**的：CameraX → HandDetector(MediaPipe 21 关键点) → HandTracker →
+  VrmArScreen 15Hz → `evaluateJavascript` → `assets/vrm/index.html` 的
+  `__poke/__pinch/__wave/__lookAt`；
+- 但**真机从未用真手验过**（文档原话"真机：完全没验过"）；真机只跑过**假手**的坐标链路
+  （rotation=90，40 秒命中 4 次）；且 VRM 模型需 `adb push` 到 `files/vrm/model.vrm`；
+- 所以 PPT 第 21 页措辞已改为准确版：标题"（代码链路已通，真机待验）"、
+  三条"代码已通"、"未验证：真机（从未用真手验过）"，并写明"要用真手须先关掉「试手」、
+  并先 push .vrm 模型"。**图片位置尺寸经断言完全未变（15/15）。**
