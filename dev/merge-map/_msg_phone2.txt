@@ -1,0 +1,23 @@
+chore(repo): 补挑漏掉的手机端脚本（termux/apk/chatter/android/hotspot/vrm 共 38 个）
+
+## 起因
+主人问"真的把一切手机端的东西都挑出去了吗" —— 一查**没有**。
+上一轮我只按 ar_/vrm_/hand_/phone 匹配，漏了 termux_*.sh（14 个）、apk_*.py、
+chatter_*.py、commit_android_*.py、hotspot_*.py 等共 **38 个**。
+
+## 本次
+`git rm --cached` 摘掉这 38 个（**文件仍在硬盘上**，不删）。
+全仓再扫：非文档的手机端内容 **0 个**（仅剩一个 .md 文档；按主人要求文档可以保留）。
+
+## 顺带核对到的插件
+`plugins/request_music` = 「点歌（网易云语音点歌）」：
+`default=false`，`config_key=qq_music_enable`，走 QQ 侧 —— 对她说「点歌 晴天」即可
+（歌名支持模糊搜索，取最匹配的一首作为 QQ 语音消息发出；也可说「放首歌」「来首歌 歌名」）。
+
+## 另：main 分叉的性质（供后续决策）
+主人判断"main 上都是旧代码"，核查**基本成立**：42 个双方都改过的文件里，他们普遍更旧
+（.gitignore 他们 09-25 / 我们 10-14；api.py 他们 10-01 / 我们 10-11；
+murasame_class.py 他们 10-10 / 我们 10-14…），新增的 1005 个文件基本都是我们这边的。
+⇒ 因此把 main 更新到最新，最稳的做法是 `git merge -X ours origin/main`
+（冲突一律保留我们这版；他们独有、我们没碰的改动会自然进来），之后推 main 即为快进。
+唯一需要单独照顾的是 `COPYRIGHT.md`（他们 10-10 的版权审计更新，应保留他们的）。

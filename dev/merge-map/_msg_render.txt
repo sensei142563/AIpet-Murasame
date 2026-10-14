@@ -1,0 +1,4 @@
+chore(ppt): 保存 Deck.pptx / Deck.pdf 的最新渲染（PowerPoint 渲染后元数据变化）
+
+渲染脚本用 PowerPoint COM 打开过 Deck.pptx，退出时会改动文件元数据 ⇒ 工作区变脏。
+filter-branch（历史改写）要求工作区干净，故先提交。
