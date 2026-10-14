@@ -130,3 +130,5 @@ dev/three-demo/_p/
 dev/ppt/out/Deck-用户版-*.pptx
 dev/ppt/out/Deck-改字前-*.pptx
 dev/ppt/out/_img_snapshot_before.json
+
+*.exe.bak_*

@@ -1,0 +1,4 @@
+chore(repo): 摘掉合并时被带回来的备份 exe（AIpet-Murasame.exe.bak_1604）
+
+远端 main 上仍有这个 3.8MB 的旧备份 exe，`git merge` 时被带回我们的树里。
+它已被 .gitignore 的 `*.exe.bak_*` 覆盖，本次再从 git 摘掉（**硬盘文件保留**）。
