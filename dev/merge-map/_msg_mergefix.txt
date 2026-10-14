@@ -1,0 +1,17 @@
+fix(merge): 保留我们对 focusInEvent 的写法 —— 合并时被自动采用成他们的旧写法
+
+## 现象
+`git merge -X ours origin/main` 后自检由 389 掉到 388：
+`test_bugfix_0930b.py` 的「focusInEvent 走的是默认路径（没传 stop_voice=True）」失败。
+
+## 原因
+`classes/murasame_class.py::focusInEvent` 这处**不是冲突区**，被自动合并采用了他们的版本：
+```
+他们    ：self.pause_all_ai(stop_voice=False)
+我们    ：self.pause_all_ai()        ← 早先**故意**改的（默认即 stop_voice=False，语义更直白）
+```
+依据我们自己的 `dev/scripts/commit_stopvoice.py`：那次是刻意把
+`pause_all_ai(stop_voice=False)` 改成 `pause_all_ai()`，并且**测试就是查这个形状**。
+
+## 本次
+改回我们的写法 + 加注释说明为什么，自检回到 389 全绿后再推 main。
