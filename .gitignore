@@ -125,3 +125,8 @@ dev/three-demo/_p/
 
 # Office / WPS 打开文件时生成的临时锁文件（波浪号加美元符开头）
 ~\$*
+
+# PPT deck 的临时/备份副本（体积大，不入库；Deck-文字版.pptx 是有用的回退点，保留）
+dev/ppt/out/Deck-用户版-*.pptx
+dev/ppt/out/Deck-改字前-*.pptx
+dev/ppt/out/_img_snapshot_before.json
