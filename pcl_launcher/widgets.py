@@ -302,10 +302,13 @@ class PCLSettingsPanel(QWidget):
             self._refresh_vision_status()
         except Exception:
             pass
-        self._add_text_input("vision_service_url", "本地视觉服务地址",
-                             "http://127.0.0.1:28460/describe")
-        self._add_text_input("vision_local_model_dir", "本地视觉模型目录",
-                             r"D:\下载\AI桌宠\vision\Qwen2-VL-2B-Instruct")
+        # ⚠ 2026-10-14（主人："本地视觉默认不使用，那两项没有的话默认为空"）：
+        #   这里原来给的是示例默认值（http://127.0.0.1:28460/describe 与
+        #   D:\下载\AI桌宠\vision\Qwen2-VL-2B-Instruct）。但既定决策是
+        #   「本地视觉：不使用，仅保留接口」，而且那个目录在主人机器上**根本不存在**
+        #   —— 界面上显示一个不存在的路径会让人以为装过模型。改成**空**。
+        self._add_text_input("vision_service_url", "本地视觉服务地址", "")
+        self._add_text_input("vision_local_model_dir", "本地视觉模型目录", "")
 
         self._section("长文本输出", "")
         # 长文本总开关同时门禁长语音服务（F5-TTS）—— 长语音不再单独设开关
@@ -349,7 +352,7 @@ class PCLSettingsPanel(QWidget):
         self._add_model_combo(
             "vision_model_name", "视觉识别模型名",
             ["deepseek-flash",
-             "qwen3-vl-plus", "qwen3-vl-flash", "qwen-vl-max", "qwen-vl-plus"],
+             "qwen3-vl-plus"],
             "deepseek-flash",
             hint="可编辑：QQ识图/摄像头/微信识图统一使用\n"
                  "（DeepSeek 现在对话与看图是同一个模型；旧 deepseek-v4-flash-vision-exp 已下线）"
@@ -880,17 +883,18 @@ class PCLSettingsPanel(QWidget):
             self._set_slider("live2d_enabled", cfg.get("live2d_enabled", "false"))
             self._set_slider("quiet_mode", cfg.get("quiet_mode", "false"))
             self._set_slider("vision_source", str(cfg.get("vision_source") or "cloud"))
+            # ⚠ 2026-10-14：默认值从"一个不存在的示例路径"改成空串
+            #   （本地视觉既定不使用，界面上别显示一个机器上根本没有的目录）
             self._set_if("vision_local_model_dir",
-                         cfg.get("vision_local_model_dir",
-                                 r"D:\下载\AI桌宠\vision\Qwen2-VL-2B-Instruct"))
+                         cfg.get("vision_local_model_dir", ""))
             self._set_if("vision_service_url",
-                         (cfg.get("local_api") or {}).get(
-                             "vision", "http://127.0.0.1:28460/describe"))
+                         (cfg.get("local_api") or {}).get("vision", ""))
             self._set_slider("force_gpu_check", cfg.get("force_gpu_check", "false"))
             self._set_slider("longtext_enabled", cfg.get("longtext_enabled", "true"))
             self._set_slider("longtext_model", cfg.get("longtext_model", "deepseek"))
             self._set_if("longtext_model_name", cfg.get("longtext_model_name", "deepseek-flash"))
-            self._set_if("vision_model_name", cfg.get("vision_model_name", "deepseek-flash"))
+            # 视觉模型默认名：qwen3-vl-plus（旧名 qwen-vl-plus / qwen-vl-max 已下线）
+            self._set_if("vision_model_name", cfg.get("vision_model_name", "qwen3-vl-plus"))
             # ★ 上游那套「自接本地视觉」的键不并（见上面 _build 里的说明）
             self._set_slider("reasoning_level", cfg.get("reasoning_level", "off"))
             self._set_if("qq_owner_id", cfg.get("qq_owner_id", ""))
