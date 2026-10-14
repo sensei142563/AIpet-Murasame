@@ -1,11 +1,13 @@
 # AIpet - 丛雨AI桌宠
 
-# 本项目仅供学习交流使用，各角色立绘/模型/语音版权归其原始权利人所有（详见下方「特别感谢」）
-# 本项目严格禁止用于任何商业用途
+# 各角色立绘/模型/语音版权归其原始权利人或制作者所有（详见「特别感谢」与 COPYRIGHT.md）
+# 源代码按 AGPL-3.0 发布；第三方角色、模型、语音与其他素材须分别遵守其权利人的授权条件（见 COPYRIGHT.md）
 
 ## 📖 项目简介
 
-一个基于 AI 的多角色桌面宠物引擎（一个引擎 + N 个角色包），随附丛雨（《千恋＊万花》）与诺瓦（《星空列车与白的旅行》）两个示范角色。本项目参考了原项目 [LemonQu-GIT/MurasamePet](https://github.com/LemonQu-GIT/MurasamePet?tab=readme-ov-file)，进行部分重写和新加功能，并根据 GPL-3.0 许可证要求进行开源。
+一个基于 AI 的多角色桌面宠物引擎（一个引擎 + N 个角色包），随附丛雨（《千恋＊万花》）与诺瓦（《星空列车与白的旅行》）两个示范角色。
+
+> **本仓库是 [kuxiaowo/AIpet-Murasame](https://github.com/kuxiaowo/AIpet-Murasame) 的修改版本**（该项目的更早上游为 [LemonQu-GIT/MurasamePet](https://github.com/LemonQu-GIT/MurasamePet)）。本项目在其基础上进行部分重写并新增功能，按 **GNU Affero General Public License v3.0（AGPL-3.0）** 分发——许可证全文见 [`LICENSE`](LICENSE)，来源、修改者与修改日期见 [`COPYRIGHT.md`](COPYRIGHT.md)。
 
 ### 🙏 特别感谢
 
@@ -13,6 +15,7 @@
 - **原项目地址**：
   - GitHub：[LemonQu-GIT/MurasamePet](https://github.com/LemonQu-GIT/MurasamePet)
   - ModelScope：[Murasame](https://modelscope.cn/models/LemonQu/Murasame) / [Murasame_SoVITS](https://modelscope.cn/models/LemonQu/Murasame_SoVITS)
+- **直接上游**：[kuxiaowo/AIpet-Murasame](https://github.com/kuxiaowo/AIpet-Murasame) — **本仓库基于该项目修改**（`download.py`、`tool/stt.py` 等文件沿用其历史版本；修改者、修改日期与主要修改内容见 [`COPYRIGHT.md`](COPYRIGHT.md)）
 - **@吴基岩BedrockWu** — 设备与训练支持（device & training support）
 
 角色素材来源：
@@ -28,7 +31,7 @@
 - 长文本语音合成：[F5-TTS](https://github.com/SWivid/F5-TTS)（中文，流式逐句）
 - 语音识别：[faster-whisper](https://github.com/SYSTRAN/faster-whisper)
 - 对话模型：Qwen（云端）/ DeepSeek（云端）/ 本地 Ollama（模型名与推理等级可配置）
-- 视觉识别：qwen3-vl-plus（默认，可换 deepseek-v4-flash-vision-exp 等；屏幕、摄像头）
+- 视觉识别：deepseek-flash（默认，与对话同一个模型；也可换 qwen3-vl-plus 等；屏幕、摄像头）
 - 人脸识别：ArcFace ONNX（insightface）
 - GUI：PyQt5 + Live2D（live2d-py）
 
@@ -59,6 +62,8 @@
 | 🐾 桌面桌宠 | `启动桌宠.bat` | 即本机上的 AI 少女（对话/立绘/Live2D/摸头） |
 | 💬 QQ 聊天 | `启动QQ.bat` | 用 QQ 小号聊天，**桌宠不开也能用** |
 | 💬 微信聊天 | `启动微信.bat` | 用微信 ClawBot 通道聊天 |
+| 🖥 图形启动器（PCL） | `AIpet-Murasame.exe`（绿色版） | 多角色切换 / 设置 / 记忆 / 人脸管理，绿色版自带 |
+| 🖥 图形启动器（源码版） | `启动启动器.bat` | 同样的启动器，源码版用这个 bat；会自动用项目自带的 `runtime\venv` 解释器 |
 
 > 绿色版首次启动会自动生成空白 `config.json`（隐私考虑），填好你的 API Key 再用。
 
@@ -744,7 +749,15 @@ runtime/venv/bin/python tests/run_all.py
 - **F5-TTS**（长文本中文）：模型已内置在 `F5-TTS_Models/`，含 `F5TTS_v1_Base` 权重 + `vocos-mel-24khz` 声码器。
 
 #### 6. 一键启动
+- **绿色版**：双击 `AIpet-Murasame.exe`（图形启动器），或双击 `启动桌宠.bat` 直接开桌宠。
+- **源码版**：双击 **`启动启动器.bat`**（图形启动器）、`启动桌宠.bat`（桌宠）、
+  `启动QQ.bat`（QQ）、`启动微信.bat`（微信）。
+  也可以在项目根目录敲：
 ```bash
+# 依赖装在 runtime\venv 里（install.bat 建的），所以用它的解释器：
+runtime\venv\Scripts\python.exe run_launcher.py
+
+# 直接用系统 Python 也行：run_launcher.py 会自己换到 runtime\venv 重新启动
 python run_launcher.py
 ```
 
@@ -762,7 +775,7 @@ python run_launcher.py
 | 是什么 | 打包好的完整目录：启动器 EXE + 桌宠源码 + 语音模型，解压即用 | 完整源代码，环境自己装 |
 | 去哪下 | 仓库 **Releases** 页下载（分卷压缩，合并解压，见下方说明） | 仓库首页 **Code → Download ZIP**，或 `git clone https://github.com/sensei142563/AIpet-Murasame.git` |
 | 首次使用 | 解压 → 双击 `install.bat` → 填 `config.json` 的 API Key | 解压 → 双击 `install.bat` → 填 `config.json` 的 API Key |
-| 日常使用 | 双击 `启动桌宠.bat`（桌宠）/ `启动QQ.bat`（QQ） | 同左，或 `python run_launcher.py` |
+| 日常使用 | 双击 `AIpet-Murasame.exe` 启动器，或双击 `启动桌宠.bat`（桌宠）/ `启动QQ.bat`（QQ）/ `启动微信.bat`（微信） | 双击 `启动启动器.bat`（启动器）/ `启动桌宠.bat` / `启动QQ.bat` / `启动微信.bat`；想改代码/调试也可 `python run_launcher.py`（会自己换到项目解释器） |
 | 适合谁 | 想直接玩、不想折腾环境的人 | 想改代码、做新角色包、二次开发的人 |
 
 两个版本功能完全一致，差别只在「环境是否已打包」。绿色版**不含你的 config.json**（API Key 隐私），首次运行会自动生成空白配置，自己填好即可。
@@ -774,21 +787,46 @@ python run_launcher.py
 
 ### 准备 NapCat
 
-1. 下载 NapCat Releases 的 **`NapCat.Shell.Windows.OneKey.zip`**：https://github.com/NapNeko/NapCatQQ/releases
+> ⚠️ **版本已锁定：NapCat `v4.18.28` + QQ `9.9.35-52892`。请不要更新**
+> （要换版本先看下面那段升级说明；上游新版没人验证过，本项目只在这个组合上验证过）。
+> 详细说明与锚文件见项目根目录 `NAPCAT_VERSION.txt`。
+> **尤其不要在 NapCat WebUI 里点「更新」**——那会把钉住的版本换成 latest。
+> 每次「启动 QQ」时程序会自检一次版本，对不上会在窗口里提示（只是提醒，不拦你启动）。
+
+> 📌 **2026-09-24 说明**：QQ 自动升级到了 `9.9.35-52892`，而旧版 NapCat `4.18.14`
+> 的支持表只到 `9.9.32-50969` → 会报「PacketBackend 不支持当前QQ版本架构」（WS 能连，
+> 但消息处理不可用）。因此 NapCat 升到 `4.18.28`（支持表含 `9.9.35-52892`，官方口径是
+> QQ build 40768 及以上）。**建议同时关掉 QQ 的自动更新**，否则过几天又会被顶上去。
+
+1. 下载 NapCat Releases 的 **`NapCat.Shell.Windows.OneKey.zip`**（**固定用这个 tag，不要用 latest**）：https://github.com/NapNeko/NapCatQQ/releases/tag/v4.18.28
 2. 解压后放置到项目根目录 `NapCat.Shell.Windows.OneKey/`
-3. **下载 `NapCat.Shell.zip`**（运行时本体），解压后放入 `NapCat.Shell.Windows.OneKey/NapCat/`
-4. **下载 QQ Windows 版安装程序**（如 `QQ_9.9.33_x64.exe`），放入 `NapCat.Shell.Windows.OneKey/`
+3. **下载同一 tag 下的 `NapCat.Shell.zip`**（运行时本体），解压后放入 `NapCat.Shell.Windows.OneKey/NapCat/`
+   （升级时**只替换内容不同的文件**，务必保留 `NapCat/config/`、`cache/`、`logs/`、`guild1.db`
+   —— 账号、onebot11 网络配置、WebUI 端口与 token 都在里面）
+4. **下载 QQ Windows 版安装程序**（用 `9.9.35-52892`，或任何 **≤ 9.9.35-52892** 且 build ≥ 40768 的版本；版本太高 NapCat 会报「不支持当前QQ版本架构」），放入 `NapCat.Shell.Windows.OneKey/`
 5. 运行 `NapCat.Shell.Windows.OneKey/bootmain/napcat.bat` 首次自动解压（若 404 则手动用 7z 解压 QQ 安装包到 `bootmain/`，QQ.exe 需在 `bootmain/QQ.exe`）
 6. 运行 **`NapCat.Shell.Windows.OneKey/start_napcat.bat`**（专用启动脚本，无需注册表）→ 弹出二维码 → 手机 QQ 扫码登录小号
 7. 确认控制台出现 `WebSocket服务: 127.0.0.1:3001 已启动`
 
+> 💡 **用绿色版/安装包的可以直接跳过 1~5 步**：包里已经带好锁定版本的 NapCat，别自己再下一份覆盖它。
+
 ### 启动 QQ 聊天
 
-- **方式一（PCL）**：`config.json` 中 `qq_enabled="true"` → 启动器出现「💬 启动 QQ AIpet」按钮
-- **方式二（命令行）**：
+- **方式一（推荐）**：双击 **`启动QQ.bat`**（绿色版/源码版都行）。
+- **方式二（PCL，最省事）**：双击 `AIpet-Murasame.exe` 启动器 → 点「💬 启动 QQ AIpet」。
+  这个按钮会**自动帮你把 NapCat 一起拉起来**（用 `NapCat.Shell.Windows.OneKey/NapCat/launcher-user.bat`，
+  它会按注册表里装的 QQ 启动）并等待就绪：首次使用请在弹出来的 NapCat 窗口里用手机 QQ 扫码，
+  扫完不用再点第二次 —— QQ 桥接本身会自动重连，NapCat 一就绪就会连上。
+  就绪过程中状态栏会依次显示「已拉起 NapCat…」→「正在等待扫码登录…」→「NapCat 已就绪」。
+  同一条工具栏上的「🔑 NapCat WebUI」也会先确保 NapCat 在跑，再打开带 token 的管理面板。
+  > ⚠️ 为什么用 `launcher-user.bat`（注册表 QQ）而不是 `start_napcat.bat`：后者用的是随包的
+  > 绿色 QQ（9.9.33-51802），和你自己装的 QQ 是两套环境；用注册表里那套能保证
+  > NapCat 打进的是你平时登录的那个 QQ。详见根目录 `NAPCAT_VERSION.txt`。
+- **方式三（命令行，源码调试用）**：
   ```bash
   python run_qq.py
   ```
+  （这种方式**不会**自动拉起 NapCat；它只会等 NapCat 就绪后自动连上。）
 
 ### 使用说明
 
@@ -802,16 +840,17 @@ python run_launcher.py
 
 **多角色**：QQ 服务的是 PCL 里选中的**活动角色**——人设、表情包、语音、记忆都来自该角色包；切换角色后需重启 QQ 生效。
 
-> ### 🔧 QQ 连不上 / 连上就断？先查这 3 步（新手高频）
+> ### 🔧 QQ 连不上 / 连上就断？先查这 4 步（新手高频）
 > 1. **NapCat 必须先启动并扫码**：运行 `NapCat.Shell.Windows.OneKey\start_napcat.bat`，用**小号**手机 QQ 扫弹窗二维码，等控制台出现 `WebSocket服务: 127.0.0.1:3001 已启动`。**没看到这行就别启动 QQ**，否则必然 `Connection refused` / `积极拒绝`。
 > 2. **端口必须 3001**：`config.json` 的 `qq_napcat_ws` 默认 `ws://127.0.0.1:3001`，**不要改**。NapCat 的 onebot 正向 WS 服务默认就在这里；改了要同时改 NapCat 的 `NapCat\config\onebot11_<QQ号>.json`。
 > 3. **本程序会自动重试 + 自动重连**：即便启动时 NapCat 还没就绪，`run_qq.py` 也会**等待就绪再连**，且断开后**每 5~30 秒自动重连**（不再一断就退出）。如果你把 NapCat 补启动起来，QQ 窗口会自动恢复连接，无需重启。
+> 4. **NapCat 在线但 bot 连不上？（onebot 配置被重置）**：如果 NapCat 自己能收 QQ 消息、但 QQ bot 窗口一直报连不上 3001——极可能是 NapCat 的 `NapCat\config\onebot11_<QQ号>.json` 被重置，`network.websocketServers` 变成空数组（NapCat 异常退出或 WebUI 操作可能重置此文件）。NapCat 虽在线却不提供 WS 端口。解决：打开该 json，确认 `websocketServers` 里有正向 WS 段（`enable:true, host:"127.0.0.1", port:3001`），没有就补回（可对照 `.bak` 备份），然后重启 NapCat。程序日志此时也会给出这条指引。
 
 > ### 🔇 语音没声音？
 > 语音消息走 **F5-TTS**（端口 9881）。若日志出现 `F5-TTS 服务未运行...将自动跳过`，说明服务没起来：
 > - 确认项目里 `F5-TTS_Models/F5TTS_v1_Base` 与 `vocos-mel-24khz` 都存在（绿色版已内置，源码版需自备）
 > - `qq_send_voice="true"` 才会触发语音；服务就绪时会自动拉起
-> - 首次合成模型加载约 10-45 秒，静音属正常；一直无声可就运行 `restart_longtext.bat`（或删掉 `data/qq_f5tts.pid` 后重启）
+> - 首次合成模型加载约 10-45 秒，静音属正常；一直无声可就运行 `重启长语音服务.bat`（或删掉 `data/qq_f5tts.pid` 后重启）
 
 **离线消息补拉（默认开启）**：`qq_offline_enable` 默认 `"true"`，启动时自动补回离线期间的消息：
 - 窗口 = 上次启动时间往前推 **24 小时**（隔一天再开也能补回；首次运行只补最近 10 分钟防刷历史）
@@ -910,7 +949,7 @@ python run_launcher.py
 - **Exit** — 退出
 
 ### PCL 启动器
-运行 `python run_launcher.py` 打开图形化启动器。功能与多角色操作见上方教程**第 4 节**；启动桌宠后底部会出现功能按钮：按住说话、屏幕识别、摄像头识别、Live2D 切换、长文本模式。
+双击 **`AIpet-Murasame.exe`**（绿色版自带；源码版双击 `启动启动器.bat`，或 `python run_launcher.py`）打开图形化启动器。功能与多角色操作见上方教程**第 4 节**；启动桌宠后底部会出现功能按钮：按住说话、屏幕识别、摄像头识别、Live2D 切换、长文本模式。
 
 ---
 ## 💬 常见问题（安装/环境类）
@@ -927,7 +966,7 @@ python run_launcher.py
 > **解决**：更新显卡驱动，确保 CUDA 与 PyTorch 匹配。
 
 ### F5-TTS 长文本不发声
-> **解决**：确认 `longtext_enabled="true"`，F5-TTS 服务在 9881 端口运行（`restart_longtext.bat` 可一键重启）。模型首次加载约 10-30 秒。
+> **解决**：确认 `longtext_enabled="true"`，F5-TTS 服务在 9881 端口运行（`重启长语音服务.bat` 可一键重启）。模型首次加载约 10-30 秒。
 
 ### SoVITS 响应慢
 > **解决**：下载与显卡对应的版本——50 系列用专用版，40 系及以下用通用版。
@@ -1116,7 +1155,7 @@ python debug_live2d.py --pet noir      # 或 murasame / arona / hiyori
 
 | 特性 | 短文本模式（默认） | 长文本模式（Alt 切换） |
 |------|-------------------|----------------------|
-| 对话模型 | qwen-plus / deepseek-v4-flash（模型名可配，`short_model_name`） | 流式（模型名可配，`longtext_model` + `longtext_model_name`） |
+| 对话模型 | qwen-plus / deepseek-flash（模型名可配，`short_model_name`） | 流式（模型名可配，`longtext_model` + `longtext_model_name`） |
 | TTS 引擎 | GPT-SoVITS（日语，音色克隆） | F5-TTS（中文，流式逐句） |
 | TTS 服务端口 | 9880 | 9881 |
 | 输出特点 | 短（≤3句），立绘/情感/翻译并行 | 长（不限字数），标点切句逐句合成播放 |
@@ -1173,7 +1212,7 @@ Qwen 流式 token（后台 QThread）
         # 在这里按相同格式添加你发现读错的词
    })
    ```
-4. 保存文件，重启 `restart_longtext.bat` 生效（F5-TTS 服务重建时加载词典）
+4. 保存文件，重启 `重启长语音服务.bat` 生效（F5-TTS 服务重建时加载词典）
 
 > 拼音数字代表声调：1=一声，2=二声，3=三声，4=四声，5=轻声。
 > 例："王" = `[["wang2"]]`，"重" 单独 = `[["zhong4"]]`（重量）。
@@ -1184,7 +1223,7 @@ Qwen 流式 token（后台 QThread）
 > - **短文本日语语音（GPT-SoVITS）**：替换 `pets/<id>/voices/short/<情绪>/` 里的 `ref.wav/mp3`，并把 `asr.txt` 改成该音频的准确文本；**音频 3~10 秒**
 > - **长文本中文语音（F5-TTS）**：替换 `pets/<id>/voices/long/` 的 wav，并在 pet.json 填 `long_ref_audio` + `long_ref_text`；F5-TTS 是零样本音色克隆，3~5 秒清晰音频即可
 > - 丛雨未配置角色包内长语音时会用全局兜底 `reference_voices/long_chinese/953244.wav`
-> - 改完重启桌宠（或 `restart_longtext.bat` 重建 F5-TTS）生效
+> - 改完重启桌宠（或 `重启长语音服务.bat` 重建 F5-TTS）生效
 
 ---
 
@@ -1308,7 +1347,7 @@ main.py (PyQt5 主窗口 + FastAPI 28565 + 快捷键监听 + 托盘)
 ## 👤 人脸识别使用指南
 
 ### 注册人脸
-1. 运行 `python run_launcher.py` 打开 PCL 启动器
+1. 双击 **`AIpet-Murasame.exe`** 打开 PCL 启动器（绿色版自带；源码版双击 `启动启动器.bat`，或 `python run_launcher.py`）
 2. 点击导航栏 **"人脸"** 标签
 3. 点击 **"+ 添加主人照片"**，选择你的正脸照片（推荐多角度：正面/侧面/低头/仰头）
 4. 点击 **"+ 添加其他人"**，输入姓名和关系，选择对方的正脸照片
@@ -1346,7 +1385,10 @@ main.py (PyQt5 主窗口 + FastAPI 28565 + 快捷键监听 + 托盘)
   "user_name": "你的名字",
   "model_type": "qwen",
   "tts_type": "local",
-  "force_gpu_check": "false",
+  "voice_synthesis_enable": "true",
+  "short_tts_gpu": "true",
+  "longtts_gpu": "true",
+  "gpu_accel": "true",
   "screen_type": "false",
   "voice_trigger": "false",
   "stt_model": "large-v3",
@@ -1361,10 +1403,7 @@ main.py (PyQt5 主窗口 + FastAPI 28565 + 快捷键监听 + 托盘)
   "camera_id": 0,
   "face_recognition_enabled": "false",
   "longtext_enabled": "true",
-  "longtext_tts_type": "f5tts",
   "longtext_max_history_turns": 12,
-  "longtext_ref_voice": "reference_voices/long_chinese/953244.wav",
-  "longtext_ref_text": "能和老师在一起，我真的，好高兴！",
   "longtext_model": "deepseek",
   "qq_owner_id": "你的大号QQ号",
   "qq_enabled": "false",
@@ -1384,7 +1423,8 @@ main.py (PyQt5 主窗口 + FastAPI 28565 + 快捷键监听 + 托盘)
 | 配置项 | 说明 |
 |--------|------|
 | `model_type` | 短文本对话族：`qwen`（推荐）/ `deepseek` / `local`（本地 Ollama） |
-| `short_model_name` | 短文本模型名（默认 `qwen-plus`；`deepseek` 族默认 `deepseek-v4-flash`） |
+| `gpu_accel` | 显卡加速**总开关**（`"true"` 默认开）：开启时检测 NVIDIA 显卡 + CUDA 版本，并安装匹配的 CUDA 版 PyTorch；**不是 N 卡或没装 CUDA 会自动回退 CPU**。关闭则直接用 CPU 并跳过整套显卡检测。它与下面的 `short_tts_gpu` / `longtts_gpu` 是「总开关 × 各自开关」的关系——两个都为开，那个语音功能才走 GPU |
+| `short_model_name` | 短文本模型名（默认 `qwen-plus`；`deepseek` 族默认 `deepseek-flash`） |
 | `longtext_model` | 长文本对话族：`qwen` / `deepseek`（默认） |
 | `longtext_model_name` | 长文本模型名（默认 `deepseek-v4-flash`；`qwen` 族默认 `qwen-plus`） |
 | `vision_model_name` | 视觉识别模型名（默认 `qwen3-vl-plus`，QQ识图/摄像头/微信识图统一使用） |
@@ -1399,14 +1439,14 @@ main.py (PyQt5 主窗口 + FastAPI 28565 + 快捷键监听 + 托盘)
 | `vision_idle_unload` | **（仅本地视觉）** 空闲多少秒把本地视觉模型移出显存（默认 `300`；`0`=不让位，会跟语音合成抢显存） |
 | `reasoning_level` | 推理等级：`off`（默认，最省 token）/ `low` / `high` / `max`。DeepSeek 四档完整支持；Qwen3 系仅开关两档；不支持的模型自动忽略 |
 | `tts_type` | `local`（GPT-SoVITS）/ `cloud`（云端 TTS） |
-| `longtext_enabled` | 长文本模式总开关（`"true"` 启用） |
-| `longtext_tts_type` | 长文本 TTS 引擎（当前仅 `f5tts`） |
-| `longtext_ref_voice` | F5-TTS 参考音频（音色克隆，3-5 秒最佳） |
-| `longtext_ref_text` | 参考音频对应文本 |
+| `voice_synthesis_enable` | **短语音（日语 GPT-SoVITS）开关**，`"true"` 默认开。关掉后只出文字，回复明显更快 |
+| `short_tts_gpu` | 短语音是否用 NVIDIA 显卡合成（`"true"` 默认开）。整合包没装 CUDA 时会自动回退 CPU |
+| `longtts_gpu` | 长语音是否用 NVIDIA 显卡合成（`"true"` 默认开）。检测不到 CUDA 会自动回退 CPU。**长语音本身没有独立开关**，它跟着 `longtext_enabled` 走 |
+| `longtext_enabled` | 长文本模式总开关（`"true"` 默认开）。**同时门禁长语音**：关掉后长文本对话与 F5-TTS 长语音服务都不会启用 |
 | `qq_owner_id` | 主人 QQ 号（大号私聊共享记忆，且 `/clear` 指令仅大号可用） |
 | `qq_enabled` | QQ 功能总开关（PCL 显示「启动 QQ AIpet」按钮） |
 | `qq_napcat_ws` | NapCat WebSocket 地址（默认 `ws://127.0.0.1:3001`） |
-| `qq_napcat_http` | NapCat HTTP API 地址（默认 `http://127.0.0.1:6099`） |
+| `qq_napcat_http` | NapCat **WebUI 面板**地址（默认 `http://127.0.0.1:6099`）。⚠️ 它不是 OneBot 接口口——QQ 消息全走 `qq_napcat_ws`(3001)，这个值只在 NapCat 自己的 `webui.json` 读不到时给「NapCat WebUI」按钮当兜底 |
 | `qq_send_sticker` | QQ 回复是否附带表情包 gif |
 | `qq_send_voice` | QQ 回复是否附带 F5-TTS 语音（需 9881 服务运行） |
 | `qq_vision_enabled` | QQ 私聊图片识别（收到图片用视觉模型识别并回应，模型见 `vision_model_name`） |
@@ -1420,6 +1460,12 @@ main.py (PyQt5 主窗口 + FastAPI 28565 + 快捷键监听 + 托盘)
 | `live2d_enabled` | Live2D 模式开关（需 pip install live2d-py） |
 
 > 关闭人脸识别后注册信息不会清除，重新开启即可恢复。
+
+> 📎 **长语音的参考音频是「按角色」配置的**，不再有全局配置键：写在
+> `pets/<角色>/pet.json` 的 `voices.long_ref_audio` / `long_ref_text`
+> （用启动器「角色向导 → 语音」填写，3-5 秒最佳）。
+> 历史文档里的 `longtext_ref_voice` / `longtext_ref_text` / `longtext_tts_type`
+> 三个全局键**没有任何代码读取**，已删除以免误导。
 
 ---
 > ⚠ **本机环境约定：不用虚拟环境** —— 项目跑在**全局 Python 3.10** 上，
@@ -1452,7 +1498,7 @@ main.py (PyQt5 主窗口 + FastAPI 28565 + 快捷键监听 + 托盘)
 | `data/qq_processed_ids.json` | QQ 已处理消息 ID（防重复回复） |
 | `NapCat.Shell.Windows.OneKey/` | QQ 机器人运行环境（NapCat） |
 | `runtime/venv/` | 项目本地虚拟环境（`install.bat` 自动创建） |
-| `restart_longtext.bat` | 一键重启 F5-TTS 语音服务（改了音色/词典后用它） |
+| `重启长语音服务.bat` | 一键重启 F5-TTS 语音服务（改了音色/词典后用它） |
 
 ---
 ## 🌟 解锁全部功能清单
@@ -1473,6 +1519,13 @@ main.py (PyQt5 主窗口 + FastAPI 28565 + 快捷键监听 + 托盘)
 | 👁 QQ 图片识别 | 用 Qwen Key（支持视觉） | `qq_vision_enabled="true"` |
 | 💬 微信聊天 | 微信开启 ClawBot 插件 + 扫码登录 | `wechat_enabled="true"` |
 
+> **🔌 插件默认是关的**：随包自带的 8 个插件（自主学习 / 空闲自动离线 / 人脸识别 /
+> Galgame 好感度 / 活泼模式 / 点歌 / 网络用语查询 / 时间同步守护）**默认全部停用**，
+> 需要用哪个就到启动器 **插件** 页打开——这样装了不会自己开始联网学习或读摄像头。
+> 「自主学习」开启后会联网搜索，并把群里的图片/视频/链接/群聊记录存到本机
+> `data/qq_learnstore.json`（仅本机、有上限、可随时关）；「时间同步守护」会注册一个
+> SYSTEM 计划任务每 3 分钟校时（仅在你点它的启用按钮后才注册）。
+
 ---
 ## 🤖 本地模型（可选）
 
@@ -1490,8 +1543,11 @@ ollama pull qwen3:14b
 ## 🔓 开源说明
 
 ### 开源协议
-本项目采用 **GPL-3.0** 许可证，参考了 [LemonQu-GIT/MurasamePet](https://github.com/LemonQu-GIT/MurasamePet)。
-仓库随附角色：丛雨（版权归 **YuzuSoft**）与诺瓦（模型/语音来源见「特别感谢」）；各角色素材版权归其原始权利人所有，仅限学习交流，**禁止商业用途**。
+本项目采用 **GNU Affero General Public License v3.0（AGPL-3.0）** 许可证（全文见 [`LICENSE`](LICENSE)）。
+
+本仓库是 [kuxiaowo/AIpet-Murasame](https://github.com/kuxiaowo/AIpet-Murasame) 的**修改版本**，其更早上游为 [LemonQu-GIT/MurasamePet](https://github.com/LemonQu-GIT/MurasamePet)。依据 AGPL-3.0 第 5 条，修改情况（修改者、修改日期、主要修改内容与所基于的上游版本）已在 [`COPYRIGHT.md`](COPYRIGHT.md) 中醒目声明，上游版权与许可证声明一并保留。
+
+仓库中的丛雨、夏目、诺瓦及其立绘、Live2D 模型、语音等素材的权利归各自原始权利人或制作者。**AGPL-3.0 源代码允许商业使用，但不授予第三方素材的使用或再分发权利**；具体来源、许可和待核对事项见 [`COPYRIGHT.md`](COPYRIGHT.md) 与 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
 
 ### 使用前提
 - 需自备 **DeepSeek / Qwen API Key**（填入本地 `config.json`，无需提交）
@@ -1501,7 +1557,7 @@ ollama pull qwen3:14b
 
 ### ⚠️ 风险披露
 - **QQ（NapCat/OneBot）与微信（ClawBot/iLink）均为平台非官方自动化通道**，账号存在被平台限制/封禁的风险（代码内已内置反刷限流与 token 过期处理，但平台策略随时可能调整）。请使用小号，勿用于营销/群发等违规用途。
-- 本项目仅供学习交流，**禁止商业用途**；因使用本项目导致的任何账号风险与损失由使用者自行承担。
+- 因使用本项目导致的任何账号风险与损失由使用者自行承担。第三方素材的使用、修改、再分发及商业用途须符合各自权利人的授权条件；学习交流用途不自动等于获得授权。
 
 ---
 ## 🆕 最新版本
@@ -1536,10 +1592,10 @@ ollama pull qwen3:14b
 
 ### V1.14 变更
 
-- **🎛 模型可配置化**：短文本 / 长文本 / 视觉识别三条链路的模型名独立可配（PCL 设置页可编辑下拉框，或直接改 `config.json` 的 `short_model_name` / `longtext_model_name` / `vision_model_name`）；默认值已迁移到当前主线模型——长文本默认 `deepseek-v4-flash`（`deepseek-chat` 已停用）、短文本 `qwen-plus`、视觉 `qwen3-vl-plus`，并支持 `deepseek-v4-pro` / `qwen3.7-plus` / `deepseek-v4-flash-vision-exp` 等同族切换
+- **🎛 模型可配置化**：短文本 / 长文本 / 视觉识别三条链路的模型名独立可配（PCL 设置页可编辑下拉框，或直接改 `config.json` 的 `short_model_name` / `longtext_model_name` / `vision_model_name`）；默认值已对齐当前主线模型——**DeepSeek 只剩 `deepseek-flash` 一个**（对话与看图同一个模型），所以长文本默认 `deepseek-flash`、短文本默认 `qwen-plus`；Qwen 侧仍可选 `qwen3.7-plus` / `qwen3-vl-plus` 等
 - **🧠 推理等级**：新增全局 `reasoning_level`（`off` / `low` / `high` / `max`，默认 `off` 最省 token）。DeepSeek 完整支持四档（off=关思考，其余映射官方 `reasoning_effort`）；Qwen3 系支持开关两档（off=关思考）；不支持的模型（如 qwen-plus、视觉模型）自动不传参数，避免报错
 - **🔧 顺手修复**：常开摄像头/摄像头识别不再使用已停服的 `qwen-vl-plus`（统一走 `vision_model_name`）；桌面长文本模型的 API Key 跟随配置（之前固定用千问 Key）；`/status` 显示实际模型名，`/switch` 切换族时同步切换模型名
-- **⚠️ 迁移提醒**：`deepseek-chat` / `deepseek-reasoner` 官方已于 2026-07-24 停用，请勿再手动填这两个旧模型名
+- **⚠️ 迁移提醒（2026-09-24 更新）**：`deepseek-chat` / `deepseek-reasoner`（官方 2026-07-24 停用）以及 `deepseek-v4-flash` / `deepseek-v4-pro` / `deepseek-v4-flash-vision-exp`（其后下线）都不要再填了 —— DeepSeek 现在统一用 `deepseek-flash`，而且**对话与看图是同一个模型**（不再有单独的 vision-exp）
 
 **V1.13** — 微信 ClawBot 接入 + 一批体验修复
 
@@ -1560,11 +1616,11 @@ ollama pull qwen3:14b
 - **🐛 PCL 桌宠列表修复**：绿色版 exe 内角色列表/提示词/Live2D 下拉为空、源码版多显示本地角色的问题已修复
 - **📖 文档**：新增「绿色版 vs 开源版」下载使用指南；措辞更友好
 
-**V1.12** — 开源发布（GPL-3.0）：仓库与绿色版随附「丛雨 + 诺瓦」两个示范角色
+**V1.12** — 开源发布（AGPL-3.0）：仓库与绿色版随附「丛雨 + 诺瓦」两个示范角色
 
 ### V1.12 变更
 
-- **📦 开源**：项目以 GPL-3.0 发布；公开仓库为全新单次提交，不含任何隐私数据（config / data / 人脸 / 记忆均已 .gitignore 且从未进入历史）
+- **📦 开源**：项目以 AGPL-3.0 发布；公开仓库为全新单次提交，不含任何隐私数据（config / data / 人脸 / 记忆均已 .gitignore 且从未进入历史）
 - **🐾 示范角色**：仓库/绿色版随附丛雨 + 诺瓦两个示范角色
 - **🙏 致谢**：补充各角色模型与语音素材来源（见「特别感谢」）
 

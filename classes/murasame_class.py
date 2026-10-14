@@ -1206,7 +1206,7 @@ class Murasame(QLabel):
         # 输入时暂停自动行为，但勿扰模式下保持静默
         # stop_voice=False：不掐断正在念的句子（点她/点对话框/系统切焦点都会触发本事件）
         if not self.is_dnd_enabled():
-            self.pause_all_ai()
+            self.pause_all_ai(stop_voice=False)
         super().focusInEvent(event)
 
     def focusOutEvent(self, event):
