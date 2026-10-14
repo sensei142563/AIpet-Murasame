@@ -1,0 +1,43 @@
+fix(launcher): 首页写死的白字（section_title 硬编码 #e6eaf2）—— 浅色主题下整行看不见
+
+## 主人报的问题
+"3.首页有一些字被写死成白色（大概）"
+
+## 定位过程（这次没靠猜）
+1. 先排除了主题数据：对比 `senrenbanka_copy`（沫子的日常）与 `senrenbanka`（千恋万花·樱华）
+   的 `colors` 块 —— **完全相同**，只有 background 不同（video / image）⇒ 不是主题问题；
+2. 又核对了 `SF()`（面颜色）：它是**主题感知**的，有壁纸时用 `Color6`（千恋万花系 = #f5e2dc 浅粉）
+   + 0.82~0.96 高不透明度 ⇒ 所以卡片是**浅粉近实心**，与主人截图一致；
+3. **不再读代码绕圈，直接把启动器打开截了一张图**（`launch_app` 非激活启动 + 窗口截图）⇒
+   一眼看到：**正文/卡片/导航都清晰**，唯独三个「小节标题」是白的，
+   只剩左边那根 accent 竖条可见 —— 与主人"有一些字"的措辞完全吻合。
+
+## 真凶
+`pcl_launcher/silicon_ui.py` 的 `section_title()`：
+```python
+lbl.setStyleSheet(f"color: #e6eaf2; ...")      # ✗ 写死浅灰白
+```
+深色主题（Silicon）没问题；换到浅色主题（千恋万花 / 沫子的日常，Color8=#fdf6ee）就是
+**白字压在浅粉卡片上** ⇒ 整行看不见。
+
+## 修法
+跟随主题正文色 `Color1`（浅色主题=#4a3527 深棕，深色主题=亮色），取不到再退回明暗判断
+（本文件里已有 `_is_dark_theme()` 与同样写法的先例）。
+
+## 顺手
+「模型状态」里的「控制台查看」原先是 Qt 默认蓝（浅色主题上很突兀）。
+Qt 富文本的 `<a>` 用**调色板 Link 角色**上色、不认 style 里的 color ⇒
+改为显式把 `QPalette.Link / LinkVisited` 设成我们算好的主题色。
+
+## 目视验收（关键）
+改前/改后各截了一张启动器窗口图：
+```
+改前 dev/ppt/out/launcher-live.png  ⇒ 三个小节标题只剩竖条，字看不见 ✗
+改后 dev/ppt/out/launcher-fixed.png ⇒ 三个小节标题全部清晰可见 ✓
+                                      两个预载按钮在第二行不再被裁 ✓
+                                      「控制台查看」为深棕主题色 ✓
+```
+（启动器我是**非激活启动**的，不会抢主人的焦点；现已留在屏幕上供主人查看。）
+
+## 验证
+`py_compile pcl_launcher/silicon_ui.py pcl_launcher/silicon_window.py` OK；全量自检见下。

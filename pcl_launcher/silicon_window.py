@@ -982,13 +982,17 @@ class HomePage(QWidget):
             if "NapCat WebUI" in text:
                 self.btn_webui = b      # 拉起 NapCat 时要改它的文案/置灰（不能让局部变量带走）
             tr.addWidget(b)
-        # ★ 2026-10-14：两个「预载」按钮挪到这里 —— 它们本就是"提前把服务热起来"的工具，
-        #   放在「快捷工具」里比挤在顶部合理。（主人："首页的两个预加载模型的模块删了，
-        #   丑丑的，或者换个地方，放在下面几个板块。"）
-        for _pb in (self.btn_preload, self.btn_vpreload):
-            tr.addWidget(_pb)
         tr.addStretch()
         tl.addLayout(tr)
+        # ★ 2026-10-14：两个「预载」按钮放在**第二行** —— 它们本就是"提前把服务热起来"的工具，
+        #   放在「快捷工具」里比挤在顶部合理（主人要求挪走）。
+        #   ⚠ 但**别和上面 6 个挤在同一行**：一行 8 个按钮 + 角色名后缀会被窗口裁掉，
+        #     主人截图里就已经出现「…服务（丛雨△」被切掉的情况（2026-10-14）。
+        tr2 = QHBoxLayout()
+        for _pb in (self.btn_preload, self.btn_vpreload):
+            tr2.addWidget(_pb)
+        tr2.addStretch()
+        tl.addLayout(tr2)
         # ── 剧情模式（Galgame）入口（合并保留）：程序目录里真有 story/ 与 剧情素材 才显示，
         #   正式版不含这两个目录 → 自动隐藏，免得点了报错 ──
         try:
@@ -1207,6 +1211,17 @@ class HomePage(QWidget):
                 #   颜色显式传给链接，免得 Qt 富文本把主题色覆盖成默认蓝。
                 bal_lbl.setText(balance_link_html(str(bal), str(model), color))
                 _u = console_url_for_model(str(model))
+                # ★ 2026-10-14：Qt 富文本里的 <a> 用**调色板的 Link 角色**上色，
+                #   不认 style 里的 color ⇒ 浅色主题下会变成突兀的默认蓝。
+                #   这里显式把 Link 颜色设成我们算好的主题色。
+                try:
+                    from PyQt5.QtGui import QPalette as _QP, QColor as _QC
+                    _pal = bal_lbl.palette()
+                    _pal.setColor(_QP.Link, _QC(color))
+                    _pal.setColor(_QP.LinkVisited, _QC(color))
+                    bal_lbl.setPalette(_pal)
+                except Exception:
+                    pass
                 if _u:
                     bal_lbl.setToolTip("点击打开控制台（余额 / 用量在那里看）：\n%s" % _u)
                 else:

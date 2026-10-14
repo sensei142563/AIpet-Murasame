@@ -310,8 +310,18 @@ def card_qss(surface="rgba(255,255,255,0.045)", border="#39405a", radius=None) -
 
 def section_title(text: str, accent="#4c8dff") -> QLabel:
     """区块标题：左侧强调色竖条 + 标题文字"""
+    # ★ 2026-10-14 修（主人："首页有一些字被写死成白色"）：
+    #   这里原来把标题色**写死**成 #e6eaf2（浅灰白）—— 在深色主题上没问题，
+    #   但换到浅色主题（千恋万花·樱华 / 沫子的日常，Color8=#fdf6ee）就是
+    #   **白字叠在浅粉卡片上**，整行看不见（只剩左边那根 accent 竖条）。
+    #   改成跟随主题正文色 Color1（浅色主题=深棕，深色主题=亮色）；取不到再退回明暗判断。
+    try:
+        from .colors import Color1 as _C1
+        _title_color = _C1.name()
+    except Exception:
+        _title_color = "#e6eaf2" if _is_dark_theme() else "#2b3245"
     lbl = QLabel(f"<span style='color:{accent};'>▍</span> {text}")
-    lbl.setStyleSheet(f"color: #e6eaf2; font-family: '{M.font}';"
+    lbl.setStyleSheet(f"color: {_title_color}; font-family: '{M.font}';"
                       f" font-size: 15px; font-weight: bold; padding: 2px 0;")
     return lbl
 

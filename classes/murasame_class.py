@@ -2921,10 +2921,11 @@ class Murasame(QLabel):
                     #   会把队列堆到 6 条，她一直在"回排队的消息"，看起来就像没在好好玩）。
                     #   同一类系统提示只留最新的一条；主人的话永远保留。
                     _t = str(text or "")
-                    _kind = _t[:_14]
+                    _kind = _t[:14]          # ★ 2026-10-14 修：原为 [:_14]（打字错误，
+                    #   Python 把 _14 当变量名 → NameError → 整段队列去重被 except 吞掉）
                     if role != "user" and _q:
                         for _i in range(len(_q) - 1, -1, -1):
-                            if str(_q[_i][0])[:_14] == _kind:
+                            if str(_q[_i][0])[:14] == _kind:      # ★ 同上：[:14]
                                 _q.pop(_i)
                                 print("[桌宠] 🧹 队列里同类的系统提示已合并（只留最新一条）")
                     if len(_q) < 8:
@@ -2950,8 +2951,30 @@ class Murasame(QLabel):
         try:
             if role == "user" and not t and not getattr(self, "_screen_look_busy", False):
                 from tool.screen_intent import needs_screen_look
-                if needs_screen_look(text):
+                # ★★ 2026-10-14 修「看屏幕无限刷屏」：这道闸原来只有 _screen_look_busy，
+                #    而那个标记在 finally 里就复位了 —— 于是「看屏幕 → 没拿到内容 →
+                #    把主人原话重新送回来」会**再次命中** needs_screen_look，形成自我循环，
+                #    日志里就是那条「👀 主人让我看屏幕」永无止境地刷（主人 2026-10-14 实测）。
+                #    这里补两道：
+                #      闸1 跳过标记：回退重答时打标，这一句不再触发看屏幕；
+                #      闸2 冷却：距上次看屏幕太近就不再重复看（画面没变，看了也白看）。
+                _now = time.time()
+                _skip_once = getattr(self, "_screen_look_skip_once", False)
+                _last = float(getattr(self, "_screen_look_last", 0) or 0)
+                _cd = float(os.environ.get("AIPET_SCREEN_LOOK_COOLDOWN", "20") or 20)
+                _broken_until = float(getattr(self, "_screen_look_broken_until", 0) or 0)
+                if _skip_once:
+                    self._screen_look_skip_once = False
+                    print("[桌宠] ⏭ 这句刚看过屏幕（回退重答），不再重复抓屏")
+                elif _now < _broken_until:
+                    print("[桌宠] ⏭ 视觉模型当前不可用（已熔断 %d 秒）→ 直接正常回答"
+                          % int(_broken_until - _now))
+                elif _last and (_now - _last) < _cd:
+                    print("[桌宠] ⏭ 距上次看屏幕仅 %.1f 秒（冷却 %d 秒）→ 不重复抓屏"
+                          % (_now - _last, int(_cd)))
+                elif needs_screen_look(text):
                     self._screen_look_busy = True
+                    self._screen_look_last = _now
                     print("[桌宠] 👀 主人让我看屏幕 → 当场抓屏识别")
                     self.show_text("正在观看屏幕……", typing=False)
                     import threading as _th
@@ -3135,9 +3158,27 @@ class Murasame(QLabel):
             # 主人正在等 → 用快速档（896px：编码约 6~8 秒，比 1280px 快一倍多）
             desc = describe_image(tmp_name, max_side=vision_fast_size(), max_new=vision_fast_tokens())
             if not str(desc or "").strip():
-                print("[桌宠] ⚠ 视觉识别没返回内容 → 退回普通回答")
+                # ★ 2026-10-14：视觉模型返回空**几乎都是模型名/权限问题**（实测阿里云返回
+                #   403 Access denied 或 404 Model not exist，例如 qwen-vl-plus 未开通）。
+                #   这时候"把主人原话再送回去重答"会**再次命中看屏幕** → 无限循环刷屏。
+                #   所以：打上"这句跳过看屏幕"的标记，并连续失败到阈值就熔断一会儿，
+                #   同时明确告诉主人真正的原因（而不是让她一遍遍地说看不到）。
+                self._screen_look_skip_once = True
+                _fn = int(getattr(self, "_screen_look_fail_n", 0) or 0) + 1
+                self._screen_look_fail_n = _fn
+                if _fn >= 3:
+                    self._screen_look_broken_until = time.time() + 600
+                    self._screen_look_fail_n = 0
+                    print("[桌宠] ⛔ 视觉模型连续 %d 次返回空 → 暂停看屏幕 10 分钟。\n"
+                          "        多半是**模型没开通/名字不对**：请到阿里云百炼控制台确认\n"
+                          "        vision_model_name（当前配置见 config.json）已开通，"
+                          "或换一个可用的视觉模型名。" % _fn)
+                print("[桌宠] ⚠ 视觉识别没返回内容（第 %d 次）→ 退回普通回答（这句不再重复抓屏）"
+                      % _fn)
                 self._request_dialog.emit(user_text, "user", False)
                 return
+            self._screen_look_fail_n = 0          # 成功一次 → 失败计数清零
+            self._screen_look_skip_once = True    # 带着描述重答时也别再看一次
             prompt = build_screen_prompt(desc, user_text, getattr(self, "pet_name", "桌宠"))
             print(f"[桌宠] 👀 屏幕识别完成（{len(str(desc))} 字）→ 带着描述回答主人")
             self._request_dialog.emit(prompt, "user", False)
